@@ -1,5 +1,4 @@
-//! S-01-F — IPv6 VIP rejected at the action-shim as `DispatchOutcome::Failed`
-//! with a logged failure event, BEFORE the dataplane is ever called
+//! S-01-F — IPv6 VIP rejected at the action-shim with a logged failure event, BEFORE the dataplane is ever called
 //! (udp-service-support US-01; ADR-0060 D1a; criterion 6).
 //!
 //! Scenario SSOT:
@@ -16,11 +15,16 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+use tracing::subscriber::set_default;
+use tracing::{Event, Subscriber};
+use tracing_subscriber::layer::{Context, SubscriberExt};
+use tracing_subscriber::registry::LookupSpan;
+use tracing_subscriber::{Layer, Registry};
 
-use overdrive_control_plane::action_shim::dataplane_update_service::{self, DispatchOutcome};
+use overdrive_control_plane::action_shim::dataplane_update_service;
 use overdrive_core::dataplane::ServiceFrontend;
 use overdrive_core::dataplane::fingerprint::fingerprint;
 use overdrive_core::id::{ContentHash, CorrelationKey, ServiceId, ServiceVip, SpiffeId};
@@ -32,6 +36,37 @@ use overdrive_core::traits::dataplane::{
 use overdrive_testing::placement;
 
 placement!(host_pure);
+
+#[derive(Clone, Default)]
+struct CapturedEvents {
+    inner: Arc<Mutex<Vec<String>>>,
+}
+
+impl CapturedEvents {
+    fn entries(&self) -> Vec<String> {
+        self.inner.lock().expect("captured events mutex").clone()
+    }
+}
+
+struct Fields<'a>(&'a mut String);
+
+impl tracing::field::Visit for Fields<'_> {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        use std::fmt::Write;
+        write!(self.0, " {}={:?}", field.name(), value).expect("write to String");
+    }
+}
+
+impl<S> Layer<S> for CapturedEvents
+where
+    S: Subscriber + for<'a> LookupSpan<'a>,
+{
+    fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
+        let mut line = String::from(event.metadata().name());
+        event.record(&mut Fields(&mut line));
+        self.inner.lock().expect("captured events mutex").push(line);
+    }
+}
 
 /// A dataplane that panics if `update_service` is ever called. The
 /// operator-visible IPv6 rejection MUST short-circuit before reaching
@@ -85,11 +120,20 @@ async fn ipv6_vip_rejected_at_action_shim_before_the_dataplane_is_reached() {
 
     let dataplane: Arc<dyn Dataplane> = Arc::new(PanicOnUpdateService);
 
-    // The panicking mock proves the dataplane is never reached.
-    let outcome = dataplane_update_service::dispatch(&action, dataplane.as_ref()).await;
+    let captured = CapturedEvents::default();
+    let _guard = set_default(Registry::default().with(captured.clone()));
 
-    assert!(
-        matches!(outcome, DispatchOutcome::Failed),
-        "S-01-F: an IPv6 VIP must produce DispatchOutcome::Failed, got {outcome:?}"
+    // The panicking mock proves the dataplane is never reached.
+    dataplane_update_service::dispatch(&action, dataplane.as_ref()).await;
+
+    let failures: Vec<String> = captured
+        .entries()
+        .into_iter()
+        .filter(|e| e.starts_with("dataplane.update_service.failed"))
+        .collect();
+    assert_eq!(
+        failures.len(),
+        1,
+        "S-01-F: an IPv6 VIP must emit one dataplane.update_service.failed event: {failures:?}"
     );
 }

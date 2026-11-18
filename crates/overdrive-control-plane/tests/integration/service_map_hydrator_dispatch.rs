@@ -8,9 +8,9 @@
 //! `Arc<SimDataplane>`. Pins each branch:
 //!
 //! - `Ok(())` from `Dataplane::update_service`
-//!     → `DispatchOutcome::Completed`, no event.
+//!     → no event.
 //! - `Err(DataplaneError::*)`
-//!     → `DispatchOutcome::Failed` and one `dataplane.update_service.failed`
+//!     → one `dataplane.update_service.failed`
 //!       event carrying the service id, the backend-set fingerprint and
 //!       `Display::to_string(&err)`.
 //!
@@ -29,7 +29,7 @@ use tracing_subscriber::layer::{Context, SubscriberExt};
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::{Layer, Registry};
 
-use overdrive_control_plane::action_shim::dataplane_update_service::{self, DispatchOutcome};
+use overdrive_control_plane::action_shim::dataplane_update_service;
 use overdrive_core::dataplane::fingerprint::fingerprint;
 use overdrive_core::id::{ContentHash, CorrelationKey, ServiceId, ServiceVip, SpiffeId};
 use overdrive_core::reconcilers::Action;
@@ -132,9 +132,8 @@ async fn dispatch_completes_without_an_event_on_dataplane_ok() {
     let captured = CapturedEvents::default();
     let _guard = set_default(Registry::default().with(captured.clone()));
 
-    let outcome = dataplane_update_service::dispatch(&action, dataplane.as_ref()).await;
+    dataplane_update_service::dispatch(&action, dataplane.as_ref()).await;
 
-    assert_eq!(outcome, DispatchOutcome::Completed);
     let failures: Vec<String> = captured
         .entries()
         .into_iter()
@@ -151,9 +150,8 @@ async fn dispatch_logs_one_failure_event_on_dataplane_err() {
     let captured = CapturedEvents::default();
     let _guard = set_default(Registry::default().with(captured.clone()));
 
-    let outcome = dataplane_update_service::dispatch(&action, dataplane.as_ref()).await;
+    dataplane_update_service::dispatch(&action, dataplane.as_ref()).await;
 
-    assert_eq!(outcome, DispatchOutcome::Failed);
     let failures: Vec<String> = captured
         .entries()
         .into_iter()
@@ -176,7 +174,7 @@ async fn dispatch_logs_one_failure_event_on_dataplane_err() {
 
 /// Regression: an IPv6 VIP must NOT silently fall through to
 /// `Dataplane::update_service(0.0.0.0, ...)`. The dispatch must
-/// short-circuit with `DispatchOutcome::Failed` and a failure event whose
+/// short-circuit with a failure event whose
 /// `reason` names the unsupported address family, and never call the
 /// dataplane at all.
 #[overdrive_test(guest = "cgroup-default")]
@@ -208,9 +206,8 @@ async fn dispatch_rejects_ipv6_vip_with_a_failure_event() {
     let captured = CapturedEvents::default();
     let _guard = set_default(Registry::default().with(captured.clone()));
 
-    let outcome = dataplane_update_service::dispatch(&action, dataplane.as_ref()).await;
+    dataplane_update_service::dispatch(&action, dataplane.as_ref()).await;
 
-    assert_eq!(outcome, DispatchOutcome::Failed, "IPv6 VIP must produce Failed");
     assert!(
         dataplane.service_vip_keys().is_empty(),
         "the dataplane must not have been programmed for an IPv6 VIP"

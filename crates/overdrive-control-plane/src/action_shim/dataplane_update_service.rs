@@ -1,6 +1,6 @@
 //! Action shim for `Action::DataplaneUpdateService` per
 //! `docs/feature/phase-2-xdp-service-map/design/architecture.md`
-//! §§ 7, 9, 12 + ADR-0042.
+//! §§ 7, 9 + ADR-0042.
 //!
 //! Dispatch invokes [`Dataplane::update_service`]. The hydrator
 //! reconciler learns whether the update landed by reading the
@@ -15,25 +15,13 @@
 //! terminal claim has a single typed source" invariant. A
 //! `Dataplane::update_service` `Err`, or an IPv6 VIP refused at the
 //! operator-visible `ServiceFrontend::new` seam, emits
-//! `dataplane.update_service.failed` and dispatch returns
-//! [`DispatchOutcome::Failed`]. The hydrator's retry follows from the
-//! programmed-map diff and is unchanged by the outcome.
+//! `dataplane.update_service.failed`. The hydrator's retry follows from
+//! the programmed-map diff.
 
 use overdrive_core::dataplane::ServiceFrontend;
 use overdrive_core::dataplane::fingerprint::fingerprint;
 use overdrive_core::reconcilers::Action;
 use overdrive_core::traits::dataplane::Dataplane;
-
-/// Outcome of a single `Action::DataplaneUpdateService` dispatch.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum DispatchOutcome {
-    /// `Dataplane::update_service` returned `Ok(())`.
-    Completed,
-    /// `Dataplane::update_service` returned `Err(_)`, or the VIP was
-    /// refused before the dataplane was reached; one
-    /// `dataplane.update_service.failed` event was emitted.
-    Failed,
-}
 
 /// Dispatch one `Action::DataplaneUpdateService`. Calls
 /// [`Dataplane::update_service`] and emits one structured
@@ -45,7 +33,7 @@ pub enum DispatchOutcome {
 /// Panics if `action` is not [`Action::DataplaneUpdateService`].
 /// The action shim's match arm is the sole caller; passing the wrong
 /// variant is a programmer error.
-pub async fn dispatch(action: &Action, dataplane: &dyn Dataplane) -> DispatchOutcome {
+pub async fn dispatch(action: &Action, dataplane: &dyn Dataplane) {
     let Action::DataplaneUpdateService { service_id, vip, port, proto, backends, correlation: _ } =
         action
     else {
@@ -71,12 +59,12 @@ pub async fn dispatch(action: &Action, dataplane: &dyn Dataplane) -> DispatchOut
                 fingerprint = fp,
                 reason = %refusal,
             );
-            return DispatchOutcome::Failed;
+            return;
         }
     };
 
     match dataplane.update_service(frontend, backends.clone()).await {
-        Ok(()) => DispatchOutcome::Completed,
+        Ok(()) => {}
         Err(err) => {
             tracing::warn!(
                 name: "dataplane.update_service.failed",
@@ -84,7 +72,6 @@ pub async fn dispatch(action: &Action, dataplane: &dyn Dataplane) -> DispatchOut
                 fingerprint = fp,
                 reason = %err,
             );
-            DispatchOutcome::Failed
         }
     }
 }

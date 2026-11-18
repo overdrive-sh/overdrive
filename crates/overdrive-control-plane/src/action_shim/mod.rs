@@ -2828,7 +2828,7 @@ async fn dispatch_single(
         // NOT surface as `ShimError`. The hydrator re-derives retry
         // from the programmed service map.
         action @ Action::DataplaneUpdateService { .. } => {
-            let _outcome = dataplane_update_service::dispatch(&action, dataplane).await;
+            dataplane_update_service::dispatch(&action, dataplane).await;
             Ok(())
         }
         // service-vip-allocator step 03-02 — real dispatch arm per
