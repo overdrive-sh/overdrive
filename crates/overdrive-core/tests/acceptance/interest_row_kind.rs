@@ -253,7 +253,7 @@ fn kind_projects_each_variant_to_a_distinct_kind() {
 /// CONTRACT_SHAPE: pure-function.
 #[test]
 fn kind_table_covers_every_variant() {
-    assert_eq!(kind_table().len(), 8, "the kind table must keep its 8 rows",);
+    assert_eq!(kind_table().len(), 8, "the kind table must keep its 8 rows");
 }
 
 // ---------------------------------------------------------------------------

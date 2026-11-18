@@ -91,7 +91,11 @@ fn mesh_backend() -> Backend {
 }
 
 fn v6_backend() -> Backend {
-    backend_at(SocketAddr::new(IpAddr::V6(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 7)), 8080), 1, true)
+    backend_at(
+        SocketAddr::new(IpAddr::V6(Ipv6Addr::new(0xfd00, 0, 0, 0, 0, 0, 0, 7)), 8080),
+        1,
+        true,
+    )
 }
 
 fn desired_of(backends: Vec<Backend>) -> ServiceDesired {
@@ -266,7 +270,11 @@ fn dispatch_for_an_empty_survivor_set_whose_slot_is_still_programmed() {
             reconcile_once(desired, actual, &ServiceMapHydratorView::default(), &make_tick(0));
 
         assert_eq!(actions.len(), 1, "{label}: an empty survivor set must purge the slot");
-        assert_eq!(update_payloads(&actions), vec![&Vec::<Backend>::new()], "{label}: empty payload");
+        assert_eq!(
+            update_payloads(&actions),
+            vec![&Vec::<Backend>::new()],
+            "{label}: empty payload"
+        );
         assert_eq!(
             next_view.retries.get(&s_id).and_then(|m| m.last_attempted_fingerprint),
             Some(fingerprint(&vip, &[])),
@@ -304,10 +312,9 @@ fn dispatch_when_a_weight_or_health_change_is_the_only_difference_in_the_desired
     // The desired side changes while the dataplane still carries the old set.
     let addr = make_backend().addr;
     let old = vec![backend_at(addr, 1, true)];
-    for (label, new) in [
-        ("weight", vec![backend_at(addr, 2, true)]),
-        ("health", vec![backend_at(addr, 1, false)]),
-    ] {
+    for (label, new) in
+        [("weight", vec![backend_at(addr, 2, true)]), ("health", vec![backend_at(addr, 1, false)])]
+    {
         let s_id = make_service_id(1);
         let desired = BTreeMap::from([(s_id, desired_of(new))]);
         let actual = BTreeMap::from([(s_id, programmed(&old))]);
@@ -326,19 +333,16 @@ fn an_ipv6_survivor_is_never_in_place() {
     // the hydrator must not treat it as converged.
     let v6_only = vec![v6_backend()];
     let mixed = vec![make_backend(), v6_backend()];
-    for (label, backends) in [("an IPv6 backend alone", v6_only), ("an IPv4 and an IPv6 backend", mixed)]
+    for (label, backends) in
+        [("an IPv6 backend alone", v6_only), ("an IPv4 and an IPv6 backend", mixed)]
     {
         for entry in [None, Some(programmed(&backends))] {
             let s_id = make_service_id(1);
             let desired = BTreeMap::from([(s_id, desired_of(backends.clone()))]);
             let actual: BTreeMap<_, _> = entry.map(|fp| (s_id, fp)).into_iter().collect();
 
-            let (actions, next_view) = reconcile_once(
-                desired,
-                actual,
-                &ServiceMapHydratorView::default(),
-                &make_tick(0),
-            );
+            let (actions, next_view) =
+                reconcile_once(desired, actual, &ServiceMapHydratorView::default(), &make_tick(0));
 
             assert_eq!(
                 actions.len(),
@@ -455,7 +459,11 @@ fn a_changed_desired_set_dispatches_at_once_even_inside_a_backoff_window() {
         assert_eq!(actions.len(), 1, "{label}: a changed desired set ignores the backoff window");
         let retry = next_view.retries.get(&s_id).expect("retry memory");
         assert_eq!(retry.attempts, 2, "{label}: the dispatch is charged");
-        assert_eq!(retry.last_attempted_fingerprint, Some(programmed(&[make_backend()])), "{label}");
+        assert_eq!(
+            retry.last_attempted_fingerprint,
+            Some(programmed(&[make_backend()])),
+            "{label}"
+        );
         assert_eq!(retry.last_failure_seen_at, secs(100), "{label}: the window restarts at now");
     }
 }
@@ -472,16 +480,15 @@ fn next_evaluation_at_ranges_only_over_future_deadlines_of_services_not_in_place
     };
     let (s1, s2, s3, s4) =
         (make_service_id(1), make_service_id(2), make_service_id(3), make_service_id(4));
-    let desired =
-        BTreeMap::from([s1, s2, s3, s4].map(|id| (id, make_desired_svc())));
+    let desired = BTreeMap::from([s1, s2, s3, s4].map(|id| (id, make_desired_svc())));
     // s4 is the only service in place.
     let actual = BTreeMap::from([(s4, programmed(&[make_backend()]))]);
     let next_view = ServiceMapHydratorView {
         retries: BTreeMap::from([
-            (s1, entry(now)),                                    // deadline now + b
-            (s2, entry(now.saturating_sub(b).saturating_sub(Duration::from_secs(1)))),       // deadline already past
-            (s3, entry(now.saturating_sub(b / 2))),                            // deadline now + b/2: the earliest
-            (s4, entry(now.saturating_sub(b) + Duration::from_millis(1))),     // would be earliest, but in place
+            (s1, entry(now)), // deadline now + b
+            (s2, entry(now.saturating_sub(b).saturating_sub(Duration::from_secs(1)))), // deadline already past
+            (s3, entry(now.saturating_sub(b / 2))), // deadline now + b/2: the earliest
+            (s4, entry(now.saturating_sub(b) + Duration::from_millis(1))), // would be earliest, but in place
         ]),
     };
 
@@ -500,12 +507,7 @@ fn next_evaluation_at_is_none_when_no_service_is_waiting_on_a_backoff() {
 
     // No retry entry at all.
     assert_eq!(
-        next_wake(
-            desired.clone(),
-            BTreeMap::new(),
-            &ServiceMapHydratorView::default(),
-            &tick
-        ),
+        next_wake(desired.clone(), BTreeMap::new(), &ServiceMapHydratorView::default(), &tick),
         None,
         "nothing is waiting"
     );
@@ -522,7 +524,12 @@ fn next_evaluation_at_is_none_when_no_service_is_waiting_on_a_backoff() {
         )]),
     };
     assert_eq!(
-        next_wake(desired.clone(), BTreeMap::from([(s_id, programmed(&[make_backend()]))]), &view, &tick),
+        next_wake(
+            desired.clone(),
+            BTreeMap::from([(s_id, programmed(&[make_backend()]))]),
+            &view,
+            &tick
+        ),
         None,
         "an in-place service has no retry deadline"
     );
@@ -540,8 +547,7 @@ fn next_evaluation_at_is_none_when_no_service_is_waiting_on_a_backoff() {
 
 #[test]
 fn an_in_place_observation_removes_the_retry_entry() {
-    let (settled, all_mesh, waiting) =
-        (make_service_id(1), make_service_id(2), make_service_id(3));
+    let (settled, all_mesh, waiting) = (make_service_id(1), make_service_id(2), make_service_id(3));
     let desired = BTreeMap::from([
         (settled, make_desired_svc()),
         (all_mesh, desired_of(vec![mesh_backend()])),
@@ -565,7 +571,10 @@ fn an_in_place_observation_removes_the_retry_entry() {
 
     let (actions, next_view) = reconcile_once(desired, actual, &view, &make_tick(100));
 
-    assert!(actions.is_empty(), "the waiting service is inside its window; the others are in place");
+    assert!(
+        actions.is_empty(),
+        "the waiting service is inside its window; the others are in place"
+    );
     assert!(!next_view.retries.contains_key(&settled), "equal fingerprint clears the entry");
     assert!(!next_view.retries.contains_key(&all_mesh), "an empty purge in place clears the entry");
     assert_eq!(
@@ -712,12 +721,8 @@ fn iteration_order_is_btreemap_deterministic() {
     desired.insert(s2, make_desired_svc());
     desired.insert(s1, make_desired_svc());
 
-    let (actions, _) = reconcile_once(
-        desired,
-        BTreeMap::new(),
-        &ServiceMapHydratorView::default(),
-        &make_tick(0),
-    );
+    let (actions, _) =
+        reconcile_once(desired, BTreeMap::new(), &ServiceMapHydratorView::default(), &make_tick(0));
     assert_eq!(actions.len(), 2);
     let ids: Vec<ServiceId> = actions
         .iter()
