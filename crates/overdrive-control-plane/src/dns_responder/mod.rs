@@ -129,10 +129,6 @@ impl GuestDns for DnsResponder {
 }
 
 /// Receives the service time of every datagram the responder handles.
-///
-/// RED scaffold (DISTILL): the trait, [`QueryOutcome`] and [`NoQueryObserver`] exist
-/// with their pinned shapes; the responder does not yet call `observe`.
-// SCAFFOLD: true
 pub trait QueryObserver: Send + Sync {
     /// Called once per datagram the responder handles, on the serving thread.
     /// `service_time` runs from the instant the receive returned to the instant

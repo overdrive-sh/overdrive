@@ -68,6 +68,9 @@ use overdrive_core::traits::observation_store::ObservationStore;
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use overdrive_core::id::NameAnswer;
+
+use super::QueryOutcome;
 use super::answer::answer_for;
 use super::frontend_addr_allocator::FrontendAddrAllocator;
 use super::name_index::NameIndex;
@@ -208,8 +211,7 @@ pub struct DnsResponder {
     /// blocking loop exits promptly rather than leaking an uncancellable
     /// syscall.
     stop: Arc<AtomicBool>,
-    /// Receives the per-datagram service time (DDD-12). Scaffold: not yet called.
-    #[allow(dead_code, reason = "DISTILL scaffold: the serve loop calls the observer in DELIVER")]
+    /// Receives the outcome and service time of every datagram (DDD-12).
     observer: Arc<dyn super::QueryObserver>,
 }
 
@@ -420,7 +422,13 @@ impl DnsResponder {
                 }
             };
             let Some((datagram, peer, spec_dst)) = received else { continue };
-            let Some(reply) = self.answer_datagram(&datagram) else { continue };
+            // Service time starts when the receive returned (DDD-12), on the injected clock.
+            let received_at = self.clock.now();
+            let Some((reply, outcome)) = self.answer_datagram(&datagram) else {
+                self.observer
+                    .observe(QueryOutcome::Dropped, self.clock.now().duration_since(received_at));
+                continue;
+            };
             // Source-pin the reply to the queried gateway via ipi_spec_dst.
             let pktinfo = spec_dst.map(|ip| libc::in_pktinfo {
                 ipi_ifindex: 0,
@@ -440,6 +448,7 @@ impl DnsResponder {
                     "DNS responder reply sendmsg failed"
                 );
             }
+            self.observer.observe(outcome, self.clock.now().duration_since(received_at));
         }
     }
 
@@ -447,10 +456,17 @@ impl DnsResponder {
     /// (or `None` when the datagram is not a decodable mesh query — a malformed
     /// or non-mesh query is silently dropped, never answered with a fabricated
     /// addr). The SOA SERIAL is read from the injected clock (`unix_now`).
-    fn answer_datagram(&self, datagram: &[u8]) -> Option<Vec<u8>> {
+    fn answer_datagram(&self, datagram: &[u8]) -> Option<(Vec<u8>, QueryOutcome)> {
         let query = wire::decode(datagram).ok()?;
         let answer = answer_for(&query.name, query.qtype, &self.name_index);
-        Some(wire::encode(query.id, &query.name, query.qtype, &answer, self.clock.unix_now()))
+        let outcome = match answer {
+            NameAnswer::Records(_) => QueryOutcome::Answered,
+            NameAnswer::NoData => QueryOutcome::NoData,
+            NameAnswer::NxDomain => QueryOutcome::NameError,
+        };
+        let reply =
+            wire::encode(query.id, &query.name, query.qtype, &answer, self.clock.unix_now());
+        Some((reply, outcome))
     }
 }
 

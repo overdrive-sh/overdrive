@@ -169,7 +169,6 @@ async fn exchange(
 /// Trace: DDD-12; US-BENCH-07 AC (a). Fault stimulus: a non-query datagram.
 #[overdrive_test(guest = "cgroup-default", profile = "normal-gate")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[should_panic(expected = "the observer must be told the outcome of every datagram")]
 async fn the_responder_reports_the_outcome_of_every_datagram_to_its_observer() {
     let recorder = Arc::new(Recorder::default());
     let replies = exchange(
@@ -208,7 +207,6 @@ async fn the_responder_reports_the_outcome_of_every_datagram_to_its_observer() {
 /// Trace: DDD-12 ("service_time runs from the receive to the send, on the injected `Clock`").
 #[overdrive_test(guest = "cgroup-default", profile = "normal-gate")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[should_panic(expected = "every handled datagram reports a service time")]
 async fn every_observed_service_time_is_measured_on_the_injected_clock() {
     let recorder = Arc::new(Recorder::default());
     exchange(
