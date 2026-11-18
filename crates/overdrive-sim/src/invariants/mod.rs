@@ -416,7 +416,7 @@ pub enum Invariant {
     /// `crates/overdrive-dataplane/tests/integration/sanity_mixed_batch.rs`.
     SanityChecksFireBeforeServiceMap,
 
-    /// SCAFFOLD: true — phase-2-xdp-service-map DISTILL per ADR-0042
+    /// phase-2-xdp-service-map per ADR-0042
     /// + architecture.md § 8 *ESR pair*. Eventual: from a cold start
     /// (nothing programmed) for each of three fixed service shapes
     /// (remote-only, all-mesh, mixed mesh + remote), repeated reconcile
@@ -424,8 +424,6 @@ pub enum Invariant {
     /// to the desired survivor-set fingerprint. The invariant does not
     /// sweep arbitrary `service_backends` rows or starting BPF map
     /// state, and fabricates no `Completed` receipt.
-    /// The evaluator body panics with a `RED scaffold` message until
-    /// DELIVER ships the body per Slice 08 / S-2.2-26.
     HydratorEventuallyConverges,
 
     /// SCAFFOLD: true — phase-2-xdp-service-map DISTILL per ADR-0042

@@ -336,7 +336,7 @@ pub trait Reconciler: Send + Sync {
     /// The runtime calls this only when [`Self::reconcile`] emitted no
     /// non-`Noop` action. Returning `Some` asks the broker to retain the
     /// evaluation until that strictly-future wall-clock instant; `None`
-    /// leaves external event and periodic-relist discovery as the only wake
+    /// leaves external event and the resync pass as the only wake
     /// sources. The hook has no clock, I/O, View mutation, hydration or
     /// dispatch authority.
     fn next_evaluation_at(
@@ -855,4 +855,3 @@ pub enum TargetResourceError {
         raw: String,
     },
 }
-

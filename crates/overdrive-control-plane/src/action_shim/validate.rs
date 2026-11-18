@@ -23,9 +23,7 @@
 //! The unit of conflict is the owned `(route, key-tuple)`, not the
 //! shared parent VIP — the same granularity Kubernetes Server-Side
 //! Apply uses (conflict = collision on an owned field, never
-//! co-residence on the object) and Cilium uses (socket-LB
-//! `cgroup connect4` and the XDP/tc datapath are complementary,
-//! "transparent" surfaces for one ClusterIP). See ADR-0053 revision
+//! co-residence on the object). See ADR-0053 revision
 //! 2026-06-03 ("dispatch-boundary conflict granularity is
 //! `(route, key-tuple)`") and
 //! `docs/research/reconcilers/dispatch-boundary-validation-and-attempt-budget-backoff.md`.

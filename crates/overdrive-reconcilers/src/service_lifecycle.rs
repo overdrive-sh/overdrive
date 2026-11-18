@@ -21,16 +21,6 @@
 //! for ergonomics — callers under `service_lifecycle::*` get the
 //! same surface they had before the cycle-breaking relocation.
 
-#![allow(dead_code)]
-#![allow(
-    clippy::doc_markdown,
-    clippy::doc_lazy_continuation,
-    clippy::too_long_first_doc_paragraph,
-    clippy::module_name_repetitions,
-    clippy::struct_field_names,
-    reason = "DISTILL RED scaffold; behavioural expansion in subsequent slices"
-)]
-
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 

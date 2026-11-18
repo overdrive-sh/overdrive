@@ -160,7 +160,7 @@ test-group = 'trybuild'
 #     the XDP and the mtls tests via `EbpfLoader::load_file`),
 #   * the `/sys/fs/bpf/overdrive/` bpffs pin namespace (the per-test pin dir
 #     isolates only the SERVICE_MAP pin, NOT the by-name program/map surface),
-#   * the by-name `cgroup_connect4` / `cgroup_connect4_mtls` programs and the
+#   * the by-name `cgroup_connect4_gateway` / `cgroup_connect4_mtls` programs and the
 #     `MTLS_REDIRECT_DEST` map (observed system-wide via `bpftool`),
 #   * the per-allocation cgroup hierarchy under
 #     `/sys/fs/cgroup/overdrive.slice/workloads.slice/alloc-<job>-<n>.scope`,
@@ -1024,7 +1024,7 @@ default-filter = '!(binary(compile_pass) | binary(compile_fail))'
 # inherited `host-kernel-shared` group is what keeps the unmutated baseline
 # from running the shared-resource Tier-3 tests concurrently and colliding
 # on process-global kernel state (the bpffs-pinned `MTLS_REDIRECT_DEST`
-# map, the by-name `cgroup_connect4` program, the per-alloc cgroup
+# map, the by-name `cgroup_connect4_gateway` / `cgroup_connect4_mtls` programs, the per-alloc cgroup
 # hierarchy, the shared `target/bpf/overdrive_bpf.o` + veth/FIB/ARP state)
 # — the 0.09s "MTLS_REDIRECT_DEST must show the entry after
 # program_redirect" failure that previously aborted the whole mutation run

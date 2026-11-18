@@ -78,14 +78,6 @@
 //! Every named run of `wake_conf` is pinned with `#[quint_test]`; `#[quint_run]`
 //! replays randomized traces. Lane: `integration-tests`, `cargo xtask metal run --`.
 //!
-//! Pending status: the owner's driving port and pinned accessor exist as inert
-//! scaffolds (`pending_keys` returns an empty list, `resync_reconciler` submits
-//! nothing). Each test keeps the executable replay and is marked
-//! `#[should_panic(expected = "the pending queue the broker reports is empty where the model's is not")]`:
-//! the first step where the model `pending` is non-empty disagrees with the scaffold's
-//! empty `pending`. quint-connect's own message ("State invariant failed") is generic, so
-//! `WakeState`'s `PartialEq` panics with the specific text only for that mismatch.
-//! The marker comes off with the step that lands the accessor and the pass.
 
 #![allow(
     clippy::expect_used,
@@ -953,37 +945,11 @@ impl Driver for EvaluationWakeDriver {
 
 /// The compared variables: `pending` (keys in admission order) and the broker's
 /// cumulative `dispatched` / `cancelled` counters.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 struct WakeState {
     pending: Vec<String>,
     dispatched: u64,
     cancelled: u64,
-}
-
-/// `quint-connect` compares `spec != driver` and reports every difference as the same
-/// generic "State invariant failed". The pending tests need their RED to name one reason,
-/// so equality classifies the one mismatch the inert scaffold produces: the counters agree
-/// and the broker's `pending` is empty where the model's is not. That case panics with a
-/// message naming the scaffold; any other difference is an ordinary mismatch, so a counter
-/// divergence, a driver fault or a world fault does not match the pending markers' `expected`.
-impl PartialEq for WakeState {
-    fn eq(&self, driver: &Self) -> bool {
-        if self.pending == driver.pending
-            && self.dispatched == driver.dispatched
-            && self.cancelled == driver.cancelled
-        {
-            return true;
-        }
-        let counters_agree =
-            self.dispatched == driver.dispatched && self.cancelled == driver.cancelled;
-        assert!(
-            !(counters_agree && driver.pending.is_empty() && !self.pending.is_empty()),
-            "the pending queue the broker reports is empty where the model's is not \
-             (today BrokerDrain::pending_keys is the inert scaffold); model pending {:?}",
-            self.pending
-        );
-        false
-    }
 }
 
 impl State<EvaluationWakeDriver> for WakeState {
@@ -1032,9 +998,7 @@ impl<'de> Deserialize<'de> for WakeState {
 
 // ---------------------------------------------------------------- named runs
 // One `#[quint_test]` per named run of `wake_conf` (README "Named runs";
-// checks.toml), then randomized traces. Each is pending its semantic RED: the
-// scaffold `pending_keys` / `resync_reconciler` leave `pending` empty where the
-// model's is not. CONTRACT_SHAPE: bounded-change.
+// checks.toml), then randomized traces. CONTRACT_SHAPE: bounded-change.
 
 /// Happy path: an edge wake alone converges the key; the confirming requeue is a Noop.
 #[quint_test(

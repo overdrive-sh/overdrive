@@ -960,7 +960,7 @@ impl ServerConfig {
             dataplane: Some(dataplane_config::DataplaneConfig::single_node_veth()),
             // `None` means the production default (`/sys/fs/bpf/overdrive`).
             dataplane_pin_dir: None,
-            // ADR-0053 § 7: `None` means the production default
+            // `None` means the production default
             // (`/sys/fs/cgroup/overdrive.slice`).
             dataplane_cgroup_attach_path: None,
             vsock_ports: overdrive_core::guest_transport::NodeVsockPortConfig::default(),

@@ -89,8 +89,8 @@
 //!
 //! D24a extends the headless reverse index with a service-VIP projection:
 //! TCP lookups use the `(VIP, listener.port)` key from each
-//! `service_backends` row, while UDP remains on the kernel-side ADR-0053
-//! `connect4` rewrite path.
+//! `service_backends` row. UDP never reaches `resolve`: the guest-flow owner
+//! refuses a guest UDP datagram to a VIP `Policy` first (ADR-0298).
 //!
 //! ## relist-on-`Lagged` — WIRED via `subscribe_all_events` (C4 / D-TME-11
 //! ## refinement, option 2; this step closes F4)

@@ -757,12 +757,6 @@ impl SimObservationStore {
     /// has no other effect. Once the queue is drained, subsequent reads
     /// proceed normally; production is unaffected (the queue is empty on the
     /// non-test path).
-    ///
-    /// Enables the deterministic boot-LIST-error → periodic-relist-recovery
-    /// interest-router AT (S-266-23, ADR-0084 § Amendment 2026-08-23): a single
-    /// queued failure makes the router's boot LIST fail exactly once, so a test
-    /// can observe the clock-injected periodic relist recover on the next
-    /// snapshot read.
     pub fn inject_alloc_status_rows_failure(&self, error: ObservationStoreError) {
         self.inner.pending_alloc_status_rows_failures.lock().push_back(error);
     }

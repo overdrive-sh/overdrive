@@ -314,7 +314,7 @@ fn measure_dataplane(
                 baseline.program,
             )
         })?;
-        // ADR-0053 § 1 added the cgroup_sock_addr program type; the
+        // The gateway's `cgroup_connect4_gateway` is a cgroup_sock_addr program; the
         // verified-insn read is identical across program types (it's
         // a `ProgramInfo::verified_instruction_count` query against
         // a loaded program). Dispatch on the program section name —

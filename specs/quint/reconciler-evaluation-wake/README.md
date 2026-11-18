@@ -64,7 +64,7 @@ world change takes the allocation out of Running while no SVID is held, and when
 `k4` world change or a landed `k1` start. An intent alone makes only `k1` managed (D-18): service-lifecycle manages a Service once it has an
 allocation row or an assigned VIP, the hydrator once an assigned VIP exists.
 So `has(k3)` arises from a `k3`, `k4` or `k2` world change or from a landed `k1` start, never from a `k1` world change.
-`managed_targets` is still a DISTILL scaffold in the tree; the rule is the user ruling (`conformance-driver.md` "World construction").
+`managed_targets` is implemented per D-1a/D-18/D-21; the rule is the user ruling (`conformance-driver.md` "World construction").
 
 ### What each key needs, and what a world change does
 

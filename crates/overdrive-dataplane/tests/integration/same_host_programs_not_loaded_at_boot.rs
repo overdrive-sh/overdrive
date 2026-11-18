@@ -12,9 +12,6 @@
 //! program and map names truncate at 15 characters, so the deleted programs
 //! cannot be told from the gateway's by name; the attachment list by attach
 //! type can (one `connect4`, no `sendmsg4`, no `recvmsg4`).
-//!
-//! Pending: the boot still attaches the three programs and creates the two
-//! maps, so the body fails at its first assertion until the deletion lands.
 
 #![cfg(target_os = "linux")]
 #![allow(

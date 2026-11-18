@@ -18,7 +18,7 @@
 //! |---|---|
 //! | `init` | a fresh composition boots; one lease is provisioned, its guest's session opened, and activated |
 //! | `GuestReady(s)` (starts association `i`) | seam queues its one 1240 stream with its `DatagramStream` request for the slot's destination; the owner admits and reads it; its local-delivery route check is held |
-//! | `HostPair(i)` | the seam answers the held route check `Unicast`: the owner connects H, checks its kernel peer, attaches `V_h`–H in datagram mode and sends `Paired` |
+//! | `HostPair(i)` | the seam answers the held route check `Unicast`: the owner connects H, attaches `V_h`–H in datagram mode and sends `Paired` |
 //! | `HostRefuse(i)` | the destination's route class is scripted `Local` and the held check answered: the owner refuses `HostInternal`, `V_h` closed |
 //! | `HostAbortAssoc(i)` | seam: H reports `EPERM` (the D26 rule): the pair aborts `SocketError` and the owner ends the association (`DestinationUnreachable`) |
 //! | `HostRecvEnd(i)` | the guest's end reaches the host: its `Abort { flow }` on the session for an association the host has not paired, the close of the association's vsock (`0x3`, the guest's slot release or its `Abort` of a paired one) otherwise |

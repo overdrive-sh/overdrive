@@ -1649,7 +1649,7 @@ impl VersionedEnvelope for ServiceBackendRowEnvelope {
 /// the crate-class layering (core depends only on the trait surface).
 /// This enum is the minimal core-side representation the observation
 /// row needs to record *which two routes* a genuine same-slot conflict
-/// spanned. It is pure data: two unit variants, no behaviour.
+/// spanned. It is pure data: a single unit variant, no behaviour.
 #[derive(
     Clone,
     Copy,
@@ -1706,11 +1706,9 @@ pub struct ReconcileConflictRowV1 {
     /// together name the single slot the two writes collided on.
     pub proto: Proto,
     /// Route the FIRST emitted conflicting write took. After ADR-0053
-    /// revision 2026-06-03 the only surviving conflict class is
-    /// same-route same-slot, so `first_route == second_route` today;
-    /// both are recorded as OBSERVED INPUTS (not a derived
-    /// classification) so a future cross-class conflict can populate
-    /// them distinctly without a schema change.
+    /// revision 2026-06-03 the only conflict class is same-route
+    /// same-slot, so `first_route == second_route`; both are recorded
+    /// as OBSERVED INPUTS, not a derived classification.
     pub first_route: ConflictRoute,
     /// Route the SECOND (conflicting) emitted write took.
     pub second_route: ConflictRoute,

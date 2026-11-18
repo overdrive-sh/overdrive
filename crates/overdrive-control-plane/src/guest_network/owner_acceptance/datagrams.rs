@@ -1,11 +1,11 @@
 //! Host datagram associations (EVMOD-DGRAM, ADR-0201; D10, #310, D24,
 //! D26-PINS F-4): R5-7 owner projection, R5-27 host half, the `gateway:53`
-//! exemption, the VIP rewrite by `connect4`, framing errors and the U-5
+//! exemption, the service-VIP `Policy` refusal (ADR-0298), framing errors and the U-5
 //! discard of unknown flow ids.
 //!
 //! Design: `feature-delta.md` § *Per-kind total orders* → "Datagram
 //! association" (host steps 3–4: one 1240 stream with its `DatagramStream`
-//! request, UDP socket H connected, the kernel-peer check, then attach
+//! request, UDP socket H connected, then attach
 //! `V_h`–H `Datagram { udp: B }` and `Paired`); § *[REF] vsock data path* →
 //! "Datagram mode" and "Failure projection" (any `SocketError` on H's half
 //! ends the association `DestinationUnreachable`; a bad frame

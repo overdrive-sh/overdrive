@@ -244,17 +244,17 @@ pub const fn classify_backend_address(
 }
 
 /// The Phase 2 hydrator reconciler. Activates J-PLAT-004 (per
-/// ADR-0042). Watches `service_backends` and `service_hydration_results`
-/// observation rows; emits one `Action::DataplaneUpdateService` per
-/// service whose backend-set fingerprint has drifted from the
-/// confirmed-applied fingerprint.
+/// ADR-0042). Reads the desired backend set from the `service_backends`
+/// observation rows and the programmed fingerprint (`actual`) through
+/// `ProgrammedServiceView`; emits one `Action::DataplaneUpdateService` per
+/// service whose survivor-set fingerprint differs from the programmed one.
 pub struct ServiceMapHydrator {
     name: ReconcilerName,
     /// Per-host Path-A workload subnet (`WORKLOAD_SUBNET_BASE`,
     /// `10.99.0.0/16`). A backend whose V4 address is a member of this
     /// subnet is a Path-A/mesh backend: it is gated out of the
     /// load-balancer path (no `DataplaneUpdateService`) because nft-TPROXY owns its delivery
-    /// (D-GATE / D-GATE-PRED; reconciles ADR-0053 ↔ ADR-0071). The
+    /// (D-GATE / D-GATE-PRED). The
     /// SSOT is the provisioner's `WORKLOAD_SUBNET_BASE` const — the
     /// production wiring crate passes it; core takes the generic
     /// `Ipv4Net` value (core MUST NOT depend on the wiring crate).
@@ -373,11 +373,7 @@ impl Reconciler for ServiceMapHydrator {
             let programmed = actual.actual.get(service_id).copied();
             let placed = in_place(&remote_survivors, survivor_fingerprint, programmed);
             let need_dispatch = !placed
-                && pacing_allows(
-                    view.retries.get(service_id),
-                    survivor_fingerprint,
-                    tick.now_unix,
-                );
+                && pacing_allows(view.retries.get(service_id), survivor_fingerprint, tick.now_unix);
 
             if need_dispatch {
                 let target_str = format!("service-map-hydrator/{service_id}");
