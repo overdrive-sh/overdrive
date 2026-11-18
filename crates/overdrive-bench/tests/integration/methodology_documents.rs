@@ -8,7 +8,8 @@ fn benchmarks_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../benchmarks")
 }
 
-/// The methodology document states its version (1) and each topic #287 requires:
+/// The methodology document covers each topic #287 requires (its stated version is pinned to
+/// the runner's constant by a unit test in `record.rs`):
 /// runner isolation, host eligibility, clock boundaries, cold and warm handling,
 /// the sample and percentile method, the raw-result format and failure accounting.
 /// CONTRACT_SHAPE: pure-function (document text in, verdict out).
@@ -18,10 +19,6 @@ fn the_methodology_document_states_its_version_and_every_required_topic() {
     let text = std::fs::read_to_string(&path)
         .unwrap_or_else(|_| panic!("benchmarks/methodology.md must exist at {}", path.display()))
         .to_lowercase();
-    assert!(
-        text.contains("methodology version 1") || text.contains("methodology version: 1"),
-        "the document must state methodology version 1"
-    );
     for topic in [
         "runner isolation",
         "host eligibility",

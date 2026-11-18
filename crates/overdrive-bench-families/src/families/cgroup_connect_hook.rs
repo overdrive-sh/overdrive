@@ -13,6 +13,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::thread::JoinHandle;
 
+use aya::maps::loaded_maps;
 use aya::programs::loaded_programs;
 use overdrive_bench::{Replicate, ReplicateFailure};
 use overdrive_dataplane::EbpfDataplane;
@@ -22,6 +23,9 @@ const WARMUP_CONNECTS: u32 = 500;
 const TIMED_CONNECTS: u32 = 5_000;
 /// The kernel truncates both connect programs' names to this (`BPF_OBJ_NAME_LEN` - 1).
 const CONNECT_PROGRAM_NAME: &str = "cgroup_connect4";
+/// `GATEWAY_CONNECT_INTENT_MAP`, which only the gateway connect program references, as the
+/// kernel stores its name (truncated to `BPF_OBJ_NAME_LEN` - 1).
+const GATEWAY_INTENT_MAP_NAME: &str = "GATEWAY_CONNECT";
 const CLIENT_IFACE: &str = "ovbch0";
 const BACKEND_IFACE: &str = "ovbcp0";
 const SERVICE_ONLY: &str = "service-only";
@@ -223,7 +227,7 @@ struct Fixture {
     dataplane: Option<EbpfDataplane>,
     _listener: Listener,
     _veth: Veth,
-    pin: PathBuf,
+    _pin: PinDir,
     _cgroup: Cgroup,
 }
 
@@ -232,14 +236,12 @@ impl Fixture {
         let sequence = FIXTURE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
         let tag = format!("{}-{sequence}", std::process::id());
         let cgroup = Cgroup::enter(&tag)?;
-        let pin = PathBuf::from(format!("/sys/fs/bpf/ovbench-connect-{tag}"));
-        std::fs::create_dir_all(&pin)
-            .map_err(|error| fail(&format!("creating pin directory {}: {error}", pin.display())))?;
+        let pin = PinDir::create(PathBuf::from(format!("/sys/fs/bpf/ovbench-connect-{tag}")))?;
         let veth = Veth::create(rep)?;
         let listener = Listener::start()?;
         let programs_before = program_ids();
         let dataplane =
-            EbpfDataplane::new_with_pin_dir(CLIENT_IFACE, BACKEND_IFACE, &pin, cgroup.path())
+            EbpfDataplane::new_with_pin_dir(CLIENT_IFACE, BACKEND_IFACE, pin.path(), cgroup.path())
                 .map_err(|error| fail(&format!("loading the dataplane: {error}")))?;
         Ok(Self {
             addr: listener.addr,
@@ -247,26 +249,43 @@ impl Fixture {
             dataplane: Some(dataplane),
             _listener: listener,
             _veth: veth,
-            pin,
+            _pin: pin,
             _cgroup: cgroup,
         })
     }
 
     /// The service and gateway connect programs: the two programs loaded by this fixture's
-    /// dataplane under the connect program name; the gateway loads second, so it has the
-    /// higher id.
+    /// dataplane under the connect program name. The gateway is the one that references the
+    /// gateway intent map; the other is the service program. Any other shape fails the
+    /// replicate, so the detach never lands on a program picked by load order.
     fn connect_programs(&self) -> Result<(u32, u32), ReplicateFailure> {
-        let mut loaded: Vec<u32> = loaded_programs()
+        let gateway_maps: std::collections::BTreeSet<u32> = loaded_maps()
             .filter_map(Result::ok)
-            .filter(|program| !self.programs_before.contains(&program.id()))
-            .filter(|program| program.name_as_str() == Some(CONNECT_PROGRAM_NAME))
-            .map(|program| program.id())
+            .filter(|map| map.name_as_str() == Some(GATEWAY_INTENT_MAP_NAME))
+            .map(|map| map.id())
             .collect();
-        loaded.sort_unstable();
-        match loaded.as_slice() {
-            [service, gateway] => Ok((*service, *gateway)),
+        let mut candidates = Vec::with_capacity(2);
+        for program in loaded_programs().filter_map(Result::ok) {
+            if self.programs_before.contains(&program.id())
+                || program.name_as_str() != Some(CONNECT_PROGRAM_NAME)
+            {
+                continue;
+            }
+            let map_ids = program
+                .map_ids()
+                .map_err(|error| {
+                    fail(&format!("reading the maps of program {}: {error}", program.id()))
+                })?
+                .unwrap_or_default();
+            let is_gateway = map_ids.iter().any(|id| gateway_maps.contains(id));
+            candidates.push((program.id(), is_gateway));
+        }
+        match candidates.as_slice() {
+            [(service, false), (gateway, true)] | [(gateway, true), (service, false)] => {
+                Ok((*service, *gateway))
+            }
             other => Err(fail(&format!(
-                "expected the service and gateway connect programs, found {other:?}"
+                "expected one service connect program and one gateway connect program (the one referencing {GATEWAY_INTENT_MAP_NAME}*), found {other:?}"
             ))),
         }
     }
@@ -295,9 +314,32 @@ impl Fixture {
 
 impl Drop for Fixture {
     fn drop(&mut self) {
-        // The dataplane's links go first; the veth, then the cgroup, follow as fields drop.
+        // The dataplane's links go first; the listener, the veth, the pin directory and the
+        // cgroup follow as fields drop.
         drop(self.dataplane.take());
-        let _ = std::fs::remove_dir_all(&self.pin);
+    }
+}
+
+/// The bpffs pin directory of one replicate; removed on drop, so a later fallible build step
+/// does not leak it.
+struct PinDir(PathBuf);
+
+impl PinDir {
+    fn create(path: PathBuf) -> Result<Self, ReplicateFailure> {
+        std::fs::create_dir_all(&path).map_err(|error| {
+            fail(&format!("creating pin directory {}: {error}", path.display()))
+        })?;
+        Ok(Self(path))
+    }
+
+    fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for PinDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
     }
 }
 
@@ -343,7 +385,11 @@ struct Veth;
 
 impl Veth {
     fn create(rep: &mut Replicate) -> Result<Self, ReplicateFailure> {
-        let _ = std::process::Command::new("ip").args(["link", "del", CLIENT_IFACE]).output();
+        // A pair a crashed earlier run left behind is removed; a clean host has none, and a
+        // failed removal fails the replicate.
+        if Path::new("/sys/class/net").join(CLIENT_IFACE).exists() {
+            rep.exec("ip", &["link", "del", CLIENT_IFACE])?;
+        }
         rep.exec(
             "ip",
             &["link", "add", CLIENT_IFACE, "type", "veth", "peer", "name", BACKEND_IFACE],
@@ -357,6 +403,7 @@ impl Veth {
 
 impl Drop for Veth {
     fn drop(&mut self) {
+        // subprocess-ok: teardown of this replicate's own veth pair; `Drop` has no replicate handle for `exec`, and a failed removal is caught by the next replicate's stale-pair check
         let _ = std::process::Command::new("ip").args(["link", "del", CLIENT_IFACE]).output();
     }
 }
