@@ -19,7 +19,7 @@ The two synchronous pump constructors take a required thread name, and each
 outbound pump thread is created with a name that carries its role:
 `mtls-out-fwd` for the forward pump and `mtls-out-ret` for the return pump (each
 under the 15-byte limit of a thread name). Every other caller of those
-constructors (unit tests) passes its own distinct name, and the inbound
+constructors (the boot probe and unit tests) passes its own distinct name, and the inbound
 `spawn_async` pump is unchanged. A thread-spawn failure surfaces as the existing
 `MtlsEnforcementError::Io` for that connection. The exact signature is in the
 feature delta (DDD-14). The benchmark sums per-thread user and

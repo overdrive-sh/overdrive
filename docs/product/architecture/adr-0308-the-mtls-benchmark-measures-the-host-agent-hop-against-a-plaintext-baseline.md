@@ -10,7 +10,7 @@ The mTLS family compares a plaintext baseline with the composed mTLS path in bot
 directions (handshake, first byte, sustained throughput, tail latency, CPU, memory,
 sockets). Production exposes no success-path timing on the path. The existing rigs
 compose the real components in process: the worker egress rig (real enforcement,
-real intercept, a rustls mesh peer on a veth) and the inbound relay rig (real
+real intercept, a rustls mesh peer on loopback) and the inbound relay rig (real
 enforcement over a loopback leg C, with the guest side as an in-memory
 `GuestStreamDial`). The egress dialer is plaintext by design (CLAUDE.md, East-west
 mTLS tests).
