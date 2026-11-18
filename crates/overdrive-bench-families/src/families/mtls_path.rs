@@ -75,6 +75,10 @@ use socket2::{Domain, SockAddr, Socket, Type};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, DuplexStream};
 use tokio::runtime::Runtime;
 
+mod cost;
+
+use cost::{Snapshot, host_ratios, open_sockets, pump_split, resident_bytes};
+
 const BASELINE: &str = "plaintext-baseline";
 const COMPOSED: &str = "composed-mtls";
 
@@ -83,6 +87,19 @@ const HANDSHAKE: &str = "handshake_ns";
 const FIRST_BYTE: &str = "first_byte_ns";
 const THROUGHPUT: &str = "throughput_bytes_per_second";
 const TAIL: &str = "tail_latency_ns";
+const HOST_CPU_USER: &str = "host_cpu_user_ratio";
+const HOST_CPU_SYSTEM: &str = "host_cpu_system_ratio";
+const HOST_CPU_IRQ: &str = "host_cpu_irq_ratio";
+const HOST_CPU_SOFTIRQ: &str = "host_cpu_softirq_ratio";
+const MEMORY: &str = "memory_bytes";
+const SOCKETS: &str = "socket_count";
+const CONCURRENCY: &str = "connection_concurrency";
+const FORWARD_CPU: &str = "forward_userspace_cpu_ratio";
+const RETURN_CPU: &str = "return_splice_cpu_ratio";
+const INGRESS_PUMP_REASON: &str = "asynchronous relay on shared runtime threads";
+const BASELINE_PUMP_REASON: &str = "the plaintext baseline arm has no mTLS pump threads, so there is no forward or return work to split";
+/// The sustained window drives one connection, so one connection is open while it is sampled.
+const SUSTAINED_CONNECTIONS: f64 = 1.0;
 const HANDSHAKE_BASELINE_REASON: &str =
     "the plaintext baseline arm has no mTLS enforcement, so there is no handshake to time";
 
@@ -138,6 +155,15 @@ const GUEST_BACKEND: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::new(100, 95, 0, 
     metric(name = "first_byte_ns", unit = ns, table = "first-byte", series),
     metric(name = "throughput_bytes_per_second", unit = bytes_per_second, table = "throughput"),
     metric(name = "tail_latency_ns", unit = ns, table = "tail-latency", series),
+    metric(name = "host_cpu_user_ratio", unit = ratio, table = "host-cpu"),
+    metric(name = "host_cpu_system_ratio", unit = ratio, table = "host-cpu"),
+    metric(name = "host_cpu_irq_ratio", unit = ratio, table = "host-cpu"),
+    metric(name = "host_cpu_softirq_ratio", unit = ratio, table = "host-cpu"),
+    metric(name = "memory_bytes", unit = bytes, table = "memory"),
+    metric(name = "socket_count", unit = count, table = "sockets"),
+    metric(name = "connection_concurrency", unit = count, table = "sockets"),
+    metric(name = "forward_userspace_cpu_ratio", unit = ratio, table = "pump-cpu"),
+    metric(name = "return_splice_cpu_ratio", unit = ratio, table = "pump-cpu"),
     smoke(guest = "cgroup-default"),
 )]
 fn mtls_hop(rep: &mut Replicate) -> Result<(), ReplicateFailure> {
@@ -173,6 +199,32 @@ fn note_shape(rep: &mut Replicate) {
     rep.note("request_bytes", &REQUEST_LEN.to_string());
     rep.note("reply_bytes", &REPLY.len().to_string());
     rep.note("fixture_thread_prefix", THREAD_PREFIX);
+    rep.note(
+        "cpu_scope",
+        "whole host: the aggregate cpu line of /proc/stat over every CPU and every process \
+         (interrupt and kernel-worker time is charged outside any benchmark cgroup); each \
+         host_cpu_*_ratio is the class's tick delta over the delta of all CPU time, idle \
+         included, across the throughput window; user includes nice",
+    );
+    rep.note(
+        "resource_scope",
+        "memory_bytes is this process's VmRSS and socket_count its open socket descriptors, \
+         both sampled at the end of the throughput window with its connection still open; \
+         connection_concurrency is the connections the client holds open in that window",
+    );
+    rep.note(
+        "pump_cpu_scope",
+        "egress composed-mtls: forward_userspace_cpu_ratio and return_splice_cpu_ratio are the \
+         mtls-out-fwd and mtls-out-ret threads' share of the CPU the process's threads accrued \
+         over the throughput window, leaving out the family's own threads (fixture_thread_prefix); \
+         the window carries the 256 MiB request one way, so the return pump is the light one",
+    );
+    rep.note(
+        "pump_cpu_resolution",
+        "per-thread CPU is read from /proc/self/task/*/stat in 10 ms ticks, so the lighter pump \
+         can read below one tick and the heavy-to-light ratio (pump_heavy_to_light_lower_bound) \
+         is a lower bound",
+    );
     rep.note(
         "ingress_handshake_scope",
         "handshake_ns on ingress starts when the enforcement accepts the connection, so it \
@@ -294,11 +346,52 @@ fn drive<P: Path>(rep: &mut Replicate, path: &P, composed: bool) -> Result<(), R
     // The enforcement buffers at most `max_prearm_bytes` of plaintext until its TLS leg is
     // armed, so the bulk frame follows one small exchange that proves the leg is up.
     session.small_exchange(&frame).map_err(measured("establishing the bulk connection"))?;
+    let before =
+        Snapshot::take().map_err(measured("sampling resource use before the bulk window"))?;
     let started = rep.clock().now();
     session.bulk(BULK_BYTES).map_err(measured("bulk transfer"))?;
     let elapsed = rep.clock().now().duration_since(started);
+    let after =
+        Snapshot::take().map_err(measured("sampling resource use after the bulk window"))?;
+    let resident = resident_bytes().map_err(measured("sampling resident memory"))?;
+    let sockets = open_sockets().map_err(measured("counting open sockets"))?;
     session.finish().map_err(measured("closing the bulk connection"))?;
-    rep.record(THROUGHPUT, BULK_BYTES as f64 / elapsed.as_secs_f64())
+    rep.record(THROUGHPUT, BULK_BYTES as f64 / elapsed.as_secs_f64())?;
+    record_cost(rep, composed, &before, &after)?;
+    rep.record(MEMORY, resident as f64)?;
+    rep.record(SOCKETS, sockets as f64)?;
+    rep.record(CONCURRENCY, SUSTAINED_CONNECTIONS)
+}
+
+/// The whole-host CPU split of the sustained window, and the forward and return pump split
+/// where the profile and arm have pumps to split.
+fn record_cost(
+    rep: &mut Replicate,
+    composed: bool,
+    before: &Snapshot,
+    after: &Snapshot,
+) -> Result<(), ReplicateFailure> {
+    let host = host_ratios(before, after).map_err(measured("whole-host CPU of the window"))?;
+    rep.record(HOST_CPU_USER, host.user)?;
+    rep.record(HOST_CPU_SYSTEM, host.system)?;
+    rep.record(HOST_CPU_IRQ, host.irq)?;
+    rep.record(HOST_CPU_SOFTIRQ, host.softirq)?;
+    let reason = match (rep.profile() == "egress", composed) {
+        (true, true) => {
+            let split = pump_split(before, after, THREAD_PREFIX)
+                .map_err(measured("forward and return CPU of the window"))?;
+            rep.note(
+                "pump_heavy_to_light_lower_bound",
+                &split.heavy_to_light_lower_bound.to_string(),
+            );
+            rep.record(FORWARD_CPU, split.forward)?;
+            return rep.record(RETURN_CPU, split.ret);
+        }
+        (true, false) => BASELINE_PUMP_REASON,
+        (false, _) => INGRESS_PUMP_REASON,
+    };
+    rep.record_absent(FORWARD_CPU, reason)?;
+    rep.record_absent(RETURN_CPU, reason)
 }
 
 // ============================================================================
