@@ -91,7 +91,8 @@ report are committed; the record is the evidence and the report is derived from 
 
 A failed replicate, a failed metric and an absent metric are recorded and counted; none is
 dropped or zero-filled. A declared metric a replicate never recorded is one failure
-`not recorded`. A failed replicate does not stop the run; failures and the count of absent
+`not recorded`. A series metric that was partly measured keeps both: its measured values feed
+the statistics and each failure is recorded and counted. A failed replicate does not stop the run; failures and the count of absent
 entries appear in each report table. A run that finishes with failed replicates still exits 0;
 the failures are in the report, not the status. Refusals exit 78, usage errors 64 and internal
 errors (including a failed statistics enable) 70.

@@ -95,6 +95,12 @@ pub fn failure_entry(reason: &str) -> Value {
     json!({ "values": [], "histogram": null, "failures": [reason], "absent": null })
 }
 
+/// A series metric entry that was partly measured: raw `values` together with the `failures` of the
+/// contributions that failed (DDD-6 "Partly measured series").
+pub fn partly_measured_entry(values: &[f64], failures: &[&str]) -> Value {
+    json!({ "values": values, "histogram": null, "failures": failures, "absent": null })
+}
+
 /// A metric entry that was absent, with its reason.
 pub fn absent_entry(reason: &str) -> Value {
     json!({ "values": [], "histogram": null, "failures": [], "absent": reason })
@@ -143,6 +149,14 @@ pub fn histogram_entry(values: &[f64]) -> Value {
         "histogram": { "count": values.len(), "min": min, "max": max, "buckets": pairs },
         "failures": [], "absent": null
     })
+}
+
+/// A series metric entry partly measured above the raw limit: `values` stored as the DDD-5 histogram,
+/// together with the `failures` of the contributions that failed.
+pub fn partly_measured_histogram_entry(values: &[f64], failures: &[&str]) -> Value {
+    let mut entry = histogram_entry(values);
+    entry["failures"] = json!(failures);
+    entry
 }
 
 /// The exact R-7 percentile (`q` in 0..=1) of `values`: linear interpolation between closest ranks.

@@ -908,50 +908,71 @@ fn stage_outcome(trace: &Trace, cycle: &Cycle) -> StageOutcome {
     outcome.try_into().unwrap_or_else(|_| unreachable!("one stage per stage metric"))
 }
 
-/// Records each metric of the replicate: the measured values as a series, or, when any
-/// workload's stage failed, each failure; a metric no workload reached is absent. A metric
-/// holds exactly one of values, failures or an absence (DDD-6), so a replicate whose workloads
-/// disagree on a stage records that stage's failures and the other workloads' values of that
-/// stage are not stored.
+/// What one metric of a replicate records: the measured values and the failed contributions
+/// together (a partly measured series, DDD-6), or an absence when no workload reached it.
+#[derive(Debug, PartialEq)]
+enum Recording {
+    Measured { values: Vec<f64>, failures: Vec<String> },
+    Absent(String),
+}
+
+/// The recording of one stage metric from every workload's outcome of that stage: each
+/// workload's measured value and each failure are kept, and the stage is absent only when no
+/// workload reached it.
+fn stage_recording(stages: &[&Stage]) -> Recording {
+    let mut values = Vec::with_capacity(stages.len());
+    let mut failures = Vec::new();
+    let mut absent = None;
+    for stage in stages {
+        match stage {
+            Stage::Measured(value) => values.push(*value),
+            Stage::Failed(reason) => failures.push(reason.clone()),
+            Stage::Absent(reason) => {
+                absent.get_or_insert(reason);
+            }
+        }
+    }
+    if values.is_empty() && failures.is_empty() {
+        let reason = absent.map_or("no workload reached this stage", String::as_str);
+        return Recording::Absent(reason.to_owned());
+    }
+    Recording::Measured { values, failures }
+}
+
+/// The recording of the guest's own shutdown duration: the values of the workloads that report
+/// it, and an absence only when none does.
+fn guest_recording(cycles: &[CycleOutcome]) -> Recording {
+    let values: Vec<f64> =
+        cycles.iter().filter_map(|cycle| cycle.guest_shutdown.as_ref().ok().copied()).collect();
+    if values.is_empty() {
+        let reason = cycles.iter().find_map(|cycle| cycle.guest_shutdown.as_ref().err());
+        let reason = reason.map_or("no workload reached the guest shutdown", String::as_str);
+        return Recording::Absent(reason.to_owned());
+    }
+    Recording::Measured { values, failures: Vec::new() }
+}
+
+fn apply(rep: &mut Replicate, metric: &str, recording: &Recording) -> Result<(), ReplicateFailure> {
+    match recording {
+        Recording::Absent(reason) => rep.record_absent(metric, reason),
+        Recording::Measured { values, failures } => {
+            if !values.is_empty() {
+                rep.record_series(metric, values)?;
+            }
+            failures.iter().try_for_each(|reason| rep.record_failure(metric, reason))
+        }
+    }
+}
+
+/// Records each metric of the replicate: every workload's measured value as a series and each
+/// failed workload's reason as a failure on the same metric, so a stage that fails for one
+/// workload keeps the values the others measured; a metric no workload reached is absent.
 fn record_cycles(rep: &mut Replicate, cycles: &[CycleOutcome]) -> Result<(), ReplicateFailure> {
     for (index, metric) in STAGE_METRICS.iter().enumerate() {
         let stages: Vec<&Stage> = cycles.iter().map(|cycle| &cycle.stages[index]).collect();
-        let failures: Vec<&String> = stages
-            .iter()
-            .filter_map(|stage| if let Stage::Failed(reason) = stage { Some(reason) } else { None })
-            .collect();
-        if !failures.is_empty() {
-            for reason in failures {
-                rep.record_failure(metric, reason)?;
-            }
-            continue;
-        }
-        let values: Vec<f64> = stages
-            .iter()
-            .filter_map(
-                |stage| if let Stage::Measured(value) = stage { Some(*value) } else { None },
-            )
-            .collect();
-        if values.is_empty() {
-            let reason = stages.iter().find_map(|stage| {
-                if let Stage::Absent(reason) = stage { Some(reason.as_str()) } else { None }
-            });
-            rep.record_absent(metric, reason.unwrap_or("no workload reached this stage"))?;
-        } else {
-            rep.record_series(metric, &values)?;
-        }
+        apply(rep, metric, &stage_recording(&stages))?;
     }
-    let guest: Vec<f64> =
-        cycles.iter().filter_map(|cycle| cycle.guest_shutdown.as_ref().ok().copied()).collect();
-    if guest.is_empty() {
-        let reason = cycles.iter().find_map(|cycle| cycle.guest_shutdown.as_ref().err());
-        rep.record_absent(
-            GUEST_SHUTDOWN_METRIC,
-            reason.map_or("no workload reached the guest shutdown", String::as_str),
-        )
-    } else {
-        rep.record_series(GUEST_SHUTDOWN_METRIC, &guest)
-    }
+    apply(rep, GUEST_SHUTDOWN_METRIC, &guest_recording(cycles))
 }
 
 #[cfg(test)]
@@ -1252,5 +1273,66 @@ mod tests {
             let expected: Vec<Option<f64>> = at.expected().into_iter().map(Some).collect();
             assert_eq!(measured(&outcome), expected, "workload {workload}");
         }
+    }
+
+    #[test]
+    fn a_stage_one_workload_fails_keeps_the_values_the_others_measured() {
+        let stages = [
+            Stage::Measured(10.0),
+            Stage::Failed("workload 1 stage failed".to_owned()),
+            Stage::Measured(30.0),
+            Stage::Measured(40.0),
+        ];
+        let refs: Vec<&Stage> = stages.iter().collect();
+        assert_eq!(
+            stage_recording(&refs),
+            Recording::Measured {
+                values: vec![10.0, 30.0, 40.0],
+                failures: vec!["workload 1 stage failed".to_owned()],
+            }
+        );
+    }
+
+    #[test]
+    fn a_stage_is_absent_only_when_no_workload_reached_it() {
+        let skipped = [Stage::Absent("an earlier stage did not complete".to_owned())];
+        let refs: Vec<&Stage> = skipped.iter().collect();
+        assert_eq!(
+            stage_recording(&refs),
+            Recording::Absent("an earlier stage did not complete".to_owned())
+        );
+        let mixed =
+            [Stage::Absent("an earlier stage did not complete".to_owned()), Stage::Measured(5.0)];
+        let refs: Vec<&Stage> = mixed.iter().collect();
+        assert_eq!(
+            stage_recording(&refs),
+            Recording::Measured { values: vec![5.0], failures: Vec::new() },
+            "a workload that reached the stage keeps its value beside one that did not"
+        );
+        let only_failed = [Stage::Failed("never happened".to_owned())];
+        let refs: Vec<&Stage> = only_failed.iter().collect();
+        assert_eq!(
+            stage_recording(&refs),
+            Recording::Measured { values: Vec::new(), failures: vec!["never happened".to_owned()] }
+        );
+        assert_eq!(
+            stage_recording(&[]),
+            Recording::Absent("no workload reached this stage".to_owned())
+        );
+    }
+
+    #[test]
+    fn the_guest_shutdown_keeps_the_values_of_the_workloads_that_report_it() {
+        let cycle = |guest_shutdown| CycleOutcome {
+            stages: std::array::from_fn(|_| Stage::Absent("unused".to_owned())),
+            guest_shutdown,
+        };
+        let some = [cycle(Ok(11.0)), cycle(Err("not observed".to_owned())), cycle(Ok(13.0))];
+        assert_eq!(
+            guest_recording(&some),
+            Recording::Measured { values: vec![11.0, 13.0], failures: Vec::new() }
+        );
+        let none = [cycle(Err("not observed".to_owned()))];
+        assert_eq!(guest_recording(&none), Recording::Absent("not observed".to_owned()));
     }
 }

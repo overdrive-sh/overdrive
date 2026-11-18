@@ -759,6 +759,128 @@ fn only_ok_replicates_feed_the_statistics() {
     );
 }
 
+/// A series metric entry of an `ok` replicate that holds measured values and failures together (a
+/// partly measured series) feeds its values into the pooled percentiles exactly as an entry without
+/// failures does; the arm's `replicates` counts the replicate, its `failures` counts it once however many
+/// reasons it holds, and `## Failures` lists one line per reason in call order. DDD-6 "Partly measured
+/// series", DDD-5 failure accounting. Fault stimulus: one workload's stage failed (two reasons in the first
+/// replicate, one in the second) while the others measured; a third replicate measured cleanly.
+/// CONTRACT_SHAPE: pure-function (record in, report out).
+#[test]
+fn a_partly_measured_series_pools_its_values_and_is_counted_in_replicates_and_failures() {
+    let all: Vec<f64> = (1..=15).map(f64::from).collect();
+    let mut lines = one_arm_series_record(partly_measured_entry(
+        &all[0..5],
+        &["workload 2 never reached the stable row", "workload 3 never reached the stable row"],
+    ));
+    lines.insert(
+        3,
+        replicate(
+            1,
+            0,
+            "lifecycle",
+            "arm",
+            json!({ "m": partly_measured_entry(&all[5..10], &["workload 1 was never reaped"]) }),
+        ),
+    );
+    lines
+        .insert(4, replicate(2, 0, "lifecycle", "arm", json!({ "m": values_entry(&all[10..15]) })));
+    recount(&mut lines);
+    let report = report_of(&lines);
+    let row = series_row(section(&report, "Table: t"), "m", "lifecycle");
+    for (cell, q, name) in [(2, 0.5, "p50"), (3, 0.9, "p90"), (4, 0.95, "p95"), (5, 0.99, "p99")] {
+        let value = number(&row[cell], name);
+        assert!(
+            (value - r7(&all, q)).abs() < 1e-9,
+            "{name} must pool the values of the partly measured entries with the clean one: {value} != {}",
+            r7(&all, q)
+        );
+    }
+    assert_eq!(
+        &row[6..],
+        ["15", "3", "2"],
+        "values (all fifteen), replicates (the partly measured entries count) and failures (one per replicate, not per reason)"
+    );
+    assert_eq!(header(&report, "replicates ok"), "3", "a partly measured replicate stays ok");
+    assert_eq!(header(&report, "replicates failed"), "0");
+    let failures: Vec<&str> =
+        section(&report, "Failures").lines().filter(|l| l.starts_with('-')).collect();
+    assert_eq!(
+        failures,
+        [
+            "- profile default block 0 position 0 arm lifecycle metric m: workload 2 never reached the stable row",
+            "- profile default block 0 position 0 arm lifecycle metric m: workload 3 never reached the stable row",
+            "- profile default block 1 position 0 arm lifecycle metric m: workload 1 was never reaped",
+        ],
+        "one line per failure reason, in replicate then call order"
+    );
+}
+
+/// A partly measured entry whose values are stored as a histogram pools through the histogram and
+/// counts its failure like a raw one. DDD-5, DDD-6 "Partly measured series". Boundary: 2,000 values (above
+/// the raw limit) with one failure alongside.
+/// CONTRACT_SHAPE: pure-function (record in, report out).
+#[test]
+fn a_partly_measured_histogram_entry_pools_through_the_histogram_and_counts_its_failure() {
+    let series: Vec<f64> = (1..=2000).map(f64::from).collect();
+    let report = report_of(&one_arm_series_record(partly_measured_histogram_entry(
+        &series,
+        &["workload 4 never reached the stable row"],
+    )));
+    let row = series_row(section(&report, "Table: t"), "m", "lifecycle");
+    for (cell, q, name) in [(2, 0.5, "p50"), (3, 0.9, "p90"), (4, 0.95, "p95"), (5, 0.99, "p99")] {
+        let value = number(&row[cell], name);
+        let expected = histogram_percentile(&series, q);
+        assert!(
+            (value - expected).abs() < 1e-9,
+            "{name} must be the pinned histogram percentile of the stored values: {value} != {expected}"
+        );
+    }
+    assert_eq!(&row[6..], ["2000", "1", "1"], "values, replicates and failures");
+    assert!(
+        section(&report, "Failures").contains(
+            "- profile default block 0 position 0 arm lifecycle metric m: workload 4 never reached the stable row"
+        ),
+        "the failure alongside the histogram is listed: {report}"
+    );
+}
+
+/// A partly measured replicate stays `ok`: it counts toward the nine-replicate minimum, its replicate median
+/// feeds the delta, and the report counts it in `replicates` and in `failures`. Boundary: the alternative
+/// arm has exactly nine `ok` replicates, one of them partly measured; were it counted failed the arm would
+/// read `insufficient replicates`. DDD-5, DDD-6 "Partly measured series".
+/// CONTRACT_SHAPE: pure-function (record in, report out).
+#[test]
+fn a_partly_measured_replicate_counts_toward_the_nine_replicate_minimum_and_feeds_the_delta() {
+    let mut lines = two_arm(&tight(), &shifted(&tight(), 500.0), &tight());
+    lines[0]["declaration"] = declaration(&["ref", "alt"], &[metric_decl("m", "ns", "t", true)]);
+    for line in lines.iter_mut().filter(|line| line["t"] == "replicate") {
+        let value = line["metrics"]["m"]["values"][0].as_f64().expect("a scalar value");
+        line["metrics"] = json!({ "m": values_entry(&[value, value + 2.0]) });
+    }
+    // Block 0, position 1: the alternative arm's first replicate lost one contribution.
+    set_metrics(
+        &mut lines,
+        3,
+        json!({ "m": partly_measured_entry(&[1500.0, 1502.0], &["workload 3 never reached the stable row"]) }),
+    );
+    let report = report_of(&lines);
+    let table = section(&report, "Table: t");
+    assert_eq!(
+        &series_row(table, "m", "alt")[6..],
+        ["18", "9", "1"],
+        "all nine replicates hold values (two each) and the partly measured one is counted as a failure too"
+    );
+    let row = comparison_row(table, "m", "alt");
+    assert_eq!(
+        [row[2].as_str(), row[7].as_str()],
+        ["500", "distinguishable"],
+        "the delta of the nine replicate medians (1505 against 1005) is reported, not `insufficient replicates`: {row:?}"
+    );
+    assert_eq!(header(&report, "replicates ok"), "27");
+    assert_eq!(header(&report, "replicates failed"), "0");
+}
+
 /// The report is a pure function of the record: rendering twice gives identical bytes and
 /// never modifies the record. ADR-0301 (nothing derived is stored).
 /// CONTRACT_SHAPE: unbounded-preservation (the record file is unchanged).

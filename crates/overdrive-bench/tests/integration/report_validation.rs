@@ -205,9 +205,9 @@ fn a_host_value_in_none_of_the_three_forms_is_refused() {
     }
 }
 
-/// An `ok` replicate's metric entry holds exactly one of non-empty `values`, a non-null `histogram`,
-/// a non-empty `failures` or a non-null `absent`; a scalar metric's entry holds at most one value and
-/// never a histogram. One case each. DDD-6 (the metric entry rule).
+/// An `ok` replicate's scalar metric entry holds at most one value and never a histogram, and
+/// never a value together with failures. One case each; the series rule is in the tests below.
+/// DDD-6 (the metric entry rule).
 /// CONTRACT_SHAPE: pure-function (record in, verdict out).
 #[test]
 fn a_metric_entry_that_does_not_hold_exactly_one_thing_is_refused() {
@@ -230,6 +230,130 @@ fn a_metric_entry_that_does_not_hold_exactly_one_thing_is_refused() {
         assert!(
             !ok && code == Some(65) && stderr.contains(&format!("{INVALID}4: ")),
             "a metric entry of the wrong shape must be refused at line 4 ({what}): status {code:?}: {stderr}"
+        );
+    }
+}
+
+/// A series metric entry of an `ok` replicate may hold measured values (raw, or a histogram above 1,000)
+/// together with failures: a partly measured series. DDD-6 "Partly measured series". Cases: raw values with one
+/// failure, raw values with two reasons, a histogram with one failure; the validator and the writer ship together.
+/// CONTRACT_SHAPE: pure-function (record in, verdict out).
+#[test]
+fn a_series_entry_holding_measured_values_together_with_failures_validates() {
+    let series: Vec<f64> = (1..=2000).map(f64::from).collect();
+    let d = dir();
+    for (name, entry) in [
+        ("values-and-a-failure", partly_measured_entry(&[1.0, 2.0, 3.0], &["workload 3 failed"])),
+        (
+            "values-and-two-failures",
+            partly_measured_entry(&[1.0, 2.0], &["workload 2 failed", "workload 3 failed"]),
+        ),
+        (
+            "histogram-and-a-failure",
+            partly_measured_histogram_entry(&series, &["workload 3 failed"]),
+        ),
+    ] {
+        let (ok, stderr, code) =
+            validate(&write(d.path(), &format!("{name}.jsonl"), &one_arm_series_record(entry)));
+        assert!(
+            ok,
+            "a partly measured series entry must validate ({name}): status {code:?}: {stderr}"
+        );
+    }
+}
+
+/// A scalar metric entry of an `ok` replicate is never partly measured: it holds exactly one of a value,
+/// failures or absent, and the refusal names the metric and says so. One case per way to break the rule:
+/// a value with failures, a value with an absence, failures with an absence, and nothing. DDD-6 validator
+/// message "a scalar metric entry must hold exactly one of a value, failures or absent".
+/// CONTRACT_SHAPE: pure-function (record in, verdict out).
+#[test]
+fn a_scalar_entry_that_does_not_hold_exactly_one_of_a_value_failures_or_absent_is_refused() {
+    let message =
+        "metric `m`: a scalar metric entry must hold exactly one of a value, failures or absent";
+    for (entry, why) in [
+        (partly_measured_entry(&[1.0], &["x"]), "a scalar entry holding a value and a failure"),
+        (
+            json!({ "values": [1.0], "histogram": null, "failures": [], "absent": "no source" }),
+            "a scalar entry holding a value and an absence",
+        ),
+        (
+            json!({ "values": [], "histogram": null, "failures": ["x"], "absent": "no source" }),
+            "a scalar entry holding failures and an absence",
+        ),
+        (
+            json!({ "values": [], "histogram": null, "failures": [], "absent": null }),
+            "a scalar entry holding nothing",
+        ),
+    ] {
+        let mut lines = valid();
+        set_metrics(&mut lines, 3, json!({ "m": entry }));
+        refused(&lines, 4, message, why);
+    }
+}
+
+/// A series metric entry of an `ok` replicate holds measured values, failures, both, or an absence alone:
+/// an absence with values, a histogram or failures is refused, and so is an entry holding nothing, each
+/// naming the metric with the pinned message "a series metric entry must hold measured values, failures,
+/// both, or absent alone". One case per combination.
+/// CONTRACT_SHAPE: pure-function (record in, verdict out).
+#[test]
+fn a_series_entry_combining_an_absence_with_anything_or_holding_nothing_is_refused() {
+    let message = "metric `m`: a series metric entry must hold measured values, failures, both, or absent alone";
+    let series: Vec<f64> = (1..=2000).map(f64::from).collect();
+    let mut histogram_and_absence = histogram_entry(&series);
+    histogram_and_absence["absent"] = json!("no source");
+    for (entry, why) in [
+        (
+            json!({ "values": [1.0], "histogram": null, "failures": [], "absent": "no source" }),
+            "a series entry holding values and an absence",
+        ),
+        (
+            json!({ "values": [], "histogram": null, "failures": ["x"], "absent": "no source" }),
+            "a series entry holding failures and an absence",
+        ),
+        (
+            json!({ "values": [1.0], "histogram": null, "failures": ["x"], "absent": "no source" }),
+            "a series entry holding values, failures and an absence",
+        ),
+        (histogram_and_absence, "a series entry holding a histogram and an absence"),
+        (
+            json!({ "values": [], "histogram": null, "failures": [], "absent": null }),
+            "a series entry holding nothing",
+        ),
+    ] {
+        refused(&one_arm_series_record(entry), 3, message, why);
+    }
+}
+
+/// Every record the repository retains validates: the records under `benchmarks/results` and under
+/// `spike-scratch/pig-connect-cost/results`. The widened entry rule only accepts more, so none of them may
+/// be refused; a record holding a partly measured entry is not among them. K3, K5; DDD-6 ("schema stays 1").
+/// CONTRACT_SHAPE: pure-function (record in, verdict out); GREEN guard against a validator that tightens a rule.
+#[test]
+fn every_retained_record_still_validates() {
+    fn records(dir: &std::path::Path, found: &mut Vec<std::path::PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for entry in entries.map(|entry| entry.expect("read a results entry")) {
+            let path = entry.path();
+            if path.is_dir() {
+                records(&path, found);
+            } else if path.file_name().is_some_and(|name| name == "record.jsonl") {
+                found.push(path);
+            }
+        }
+    }
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let mut found = Vec::new();
+    records(&root.join("benchmarks/results"), &mut found);
+    records(&root.join("spike-scratch/pig-connect-cost/results"), &mut found);
+    assert!(!found.is_empty(), "the repository retains records under benchmarks/results");
+    for path in found {
+        let (ok, stderr, code) = validate(&path);
+        assert!(
+            ok,
+            "the retained record {} must still validate: status {code:?}: {stderr}",
+            path.display()
         );
     }
 }

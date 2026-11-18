@@ -402,7 +402,8 @@ pub(crate) enum Outcome {
     Failed,
 }
 
-/// One metric of one replicate: exactly one of raw values, a histogram, failures or an absence.
+/// One metric of one replicate: one of raw values, a histogram, failures or an absence; a series
+/// metric may hold measured values (or a histogram) together with failures.
 #[derive(Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct MetricEntry {
@@ -477,17 +478,22 @@ impl MetricEntry {
         if !series && self.values.len() > 1 {
             return Some("a scalar metric holds at most one value".to_owned());
         }
-        let held = [
-            !self.values.is_empty(),
-            self.histogram.is_some(),
-            !self.failures.is_empty(),
-            self.absent.is_some(),
-        ]
-        .into_iter()
-        .filter(|held| *held)
-        .count();
-        (exactly_one && held != 1).then(|| {
-            "an entry must hold exactly one of values, histogram, failures or absent".to_owned()
+        if !exactly_one {
+            return None;
+        }
+        let measured = !self.values.is_empty() || self.histogram.is_some();
+        let failed = !self.failures.is_empty();
+        let absent = self.absent.is_some();
+        if series {
+            // Measured values, failures or both (a partly measured series), or an absence alone.
+            return (absent == (measured || failed)).then(|| {
+                "a series metric entry must hold measured values, failures, both, or absent alone"
+                    .to_owned()
+            });
+        }
+        let held = [measured, failed, absent].into_iter().filter(|held| *held).count();
+        (held != 1).then(|| {
+            "a scalar metric entry must hold exactly one of a value, failures or absent".to_owned()
         })
     }
 }

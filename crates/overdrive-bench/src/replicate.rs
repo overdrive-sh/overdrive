@@ -77,6 +77,11 @@ enum Entry {
     Scalar(f64),
     Series(Vec<f64>),
     Failures(Vec<String>),
+    /// A series metric some contributions of which were measured and others failed.
+    PartlyMeasured {
+        values: Vec<f64>,
+        failures: Vec<String>,
+    },
     Absent(String),
 }
 
@@ -86,6 +91,8 @@ impl Entry {
             Self::Scalar(value) => storable(*value).map(MetricEntry::scalar),
             Self::Series(values) => MetricEntry::from_series(values),
             Self::Failures(reasons) => Ok(MetricEntry::failures(reasons.clone())),
+            Self::PartlyMeasured { values, failures } => MetricEntry::from_series(values)
+                .map(|measured| MetricEntry { failures: failures.clone(), ..measured }),
             Self::Absent(reason) => Ok(MetricEntry::absent(reason)),
         }
     }
@@ -165,8 +172,8 @@ impl Replicate {
         self.set_once(metric, Entry::Scalar(value))
     }
 
-    /// A `series` metric. May be called more than once; the values accumulate. A scalar
-    /// metric is a failure.
+    /// A `series` metric. May be called more than once; the values accumulate, whether or not
+    /// the metric already holds failures. A scalar metric is a failure.
     pub fn record_series(&mut self, metric: &str, values: &[f64]) -> Result<(), ReplicateFailure> {
         self.require_shape(metric, true)?;
         for value in values {
@@ -177,15 +184,25 @@ impl Replicate {
                 self.entries.insert(metric.to_owned(), Entry::Series(values.to_vec()));
                 Ok(())
             }
-            Some(Entry::Series(held)) => {
+            Some(Entry::Series(held) | Entry::PartlyMeasured { values: held, .. }) => {
                 held.extend_from_slice(values);
+                Ok(())
+            }
+            Some(entry @ Entry::Failures(_)) => {
+                let Entry::Failures(failures) = std::mem::replace(entry, Entry::Series(Vec::new()))
+                else {
+                    unreachable!("the arm matched a failures entry");
+                };
+                *entry = Entry::PartlyMeasured { values: values.to_vec(), failures };
                 Ok(())
             }
             Some(_) => Err(already_holds(metric)),
         }
     }
 
-    /// The metric could not be measured in this replicate, for `reason`.
+    /// The metric could not be measured in this replicate, for `reason`. On a `series` metric
+    /// the failure and the values recorded with `record_series` are kept together, in either
+    /// order (a partly measured series); a scalar metric holding a value is a failure.
     pub fn record_failure(&mut self, metric: &str, reason: &str) -> Result<(), ReplicateFailure> {
         self.require_declared(metric)?;
         match self.entries.get_mut(metric) {
@@ -193,8 +210,16 @@ impl Replicate {
                 self.entries.insert(metric.to_owned(), Entry::Failures(vec![reason.to_owned()]));
                 Ok(())
             }
-            Some(Entry::Failures(held)) => {
+            Some(Entry::Failures(held) | Entry::PartlyMeasured { failures: held, .. }) => {
                 held.push(reason.to_owned());
+                Ok(())
+            }
+            Some(entry @ Entry::Series(_)) => {
+                let Entry::Series(values) = std::mem::replace(entry, Entry::Failures(Vec::new()))
+                else {
+                    unreachable!("the arm matched a series entry");
+                };
+                *entry = Entry::PartlyMeasured { values, failures: vec![reason.to_owned()] };
                 Ok(())
             }
             Some(_) => Err(already_holds(metric)),
@@ -447,6 +472,183 @@ mod tests {
         assert!(replicate.record_absent("stream", "no statistics").is_ok());
         assert!(replicate.record_absent("stream", "again").is_err());
         assert!(replicate.record_series("stream", &[1.0]).is_err());
+    }
+
+    /// The record's form of `metric` once the replicate is finished; the replicate itself stays ok.
+    fn stored(replicate: Replicate, metric: &str) -> MetricEntry {
+        let mut finished = replicate.finish();
+        assert!(
+            finished.failure.is_none(),
+            "a partly measured series leaves the replicate ok: {:?}",
+            finished.failure
+        );
+        finished
+            .metrics
+            .remove(metric)
+            .unwrap_or_else(|| panic!("the declared metric `{metric}` is in the record's form"))
+    }
+
+    fn held(values: &[f64], failures: &[&str]) -> MetricEntry {
+        MetricEntry {
+            values: values.to_vec(),
+            histogram: None,
+            failures: failures.iter().map(|reason| (*reason).to_owned()).collect(),
+            absent: None,
+        }
+    }
+
+    #[test]
+    fn a_failure_after_a_series_leaves_the_metric_holding_both() {
+        let mut replicate = replicate();
+        assert!(replicate.record_series("stream", &[1.0, 2.0, 3.0]).is_ok());
+        assert!(
+            replicate.record_failure("stream", "the fourth workload failed").is_ok(),
+            "a failure recorded after a series on the same series metric must be accepted"
+        );
+        assert_eq!(
+            stored(replicate, "stream"),
+            held(&[1.0, 2.0, 3.0], &["the fourth workload failed"])
+        );
+    }
+
+    #[test]
+    fn a_series_after_a_failure_leaves_the_metric_holding_both() {
+        let mut replicate = replicate();
+        assert!(replicate.record_failure("stream", "the first workload failed").is_ok());
+        assert!(
+            replicate.record_series("stream", &[2.0, 3.0, 4.0]).is_ok(),
+            "a series recorded after a failure on the same series metric must be accepted"
+        );
+        assert_eq!(
+            stored(replicate, "stream"),
+            held(&[2.0, 3.0, 4.0], &["the first workload failed"])
+        );
+    }
+
+    /// Every sequence of up to four `record_series` / `record_failure` calls on one series metric is
+    /// accepted, and the stored entry holds every value and every reason in call order.
+    #[test]
+    fn a_series_metric_accepts_series_and_failures_in_every_order_and_keeps_all_of_them() {
+        for length in 1_u32..=4 {
+            for pattern in 0..(1_u32 << length) {
+                let mut replicate = replicate();
+                let (mut values, mut failures) = (Vec::new(), Vec::new());
+                for call in 0..length {
+                    let accepted = if (pattern >> call) & 1 == 0 {
+                        let value = f64::from(call) + 1.0;
+                        values.push(value);
+                        replicate.record_series("stream", &[value]).is_ok()
+                    } else {
+                        let reason = format!("failure {call}");
+                        let accepted = replicate.record_failure("stream", &reason).is_ok();
+                        failures.push(reason);
+                        accepted
+                    };
+                    assert!(
+                        accepted,
+                        "every order of series and failure calls on one series metric is accepted (call {call} of pattern {pattern:#b}, length {length})"
+                    );
+                }
+                let reasons: Vec<&str> = failures.iter().map(String::as_str).collect();
+                assert_eq!(stored(replicate, "stream"), held(&values, &reasons));
+            }
+        }
+    }
+
+    #[test]
+    fn a_scalar_metric_never_holds_a_value_and_a_failure() {
+        let mut after_value = replicate();
+        assert!(after_value.record("scalar", 1.5).is_ok());
+        assert!(after_value.record_failure("scalar", "late").is_err());
+        assert_eq!(stored(after_value, "scalar"), held(&[1.5], &[]));
+        let mut before_value = replicate();
+        assert!(before_value.record_failure("scalar", "early").is_ok());
+        assert!(before_value.record("scalar", 1.5).is_err());
+        assert_eq!(stored(before_value, "scalar"), held(&[], &["early"]));
+    }
+
+    #[test]
+    fn an_absence_excludes_values_and_failures_and_is_excluded_by_them() {
+        for (metric, before) in [("scalar", 0), ("stream", 0), ("scalar", 1), ("stream", 1)] {
+            let mut replicate = replicate();
+            if before == 0 {
+                assert!(replicate.record_failure(metric, "failed").is_ok());
+            } else if metric == "scalar" {
+                assert!(replicate.record(metric, 1.0).is_ok());
+            } else {
+                assert!(replicate.record_series(metric, &[1.0]).is_ok());
+            }
+            assert!(
+                replicate.record_absent(metric, "does not apply").is_err(),
+                "an absence on `{metric}` that already holds values or failures is a failure"
+            );
+        }
+        let mut absent = replicate();
+        assert!(absent.record_absent("stream", "no statistics").is_ok());
+        assert!(absent.record_series("stream", &[1.0]).is_err());
+        assert!(absent.record_failure("stream", "failed").is_err());
+        assert!(absent.record_absent("stream", "again").is_err());
+        let entry = stored(absent, "stream");
+        assert_eq!(
+            (entry.values.is_empty(), entry.failures.is_empty(), entry.absent.as_deref()),
+            (true, true, Some("no statistics")),
+            "the refused calls leave the absence alone"
+        );
+    }
+
+    #[test]
+    fn an_absence_is_refused_on_a_series_metric_holding_both_values_and_failures() {
+        let mut replicate = replicate();
+        assert!(replicate.record_series("stream", &[1.0]).is_ok());
+        assert!(
+            replicate.record_failure("stream", "failed").is_ok(),
+            "a failure recorded after a series on the same series metric must be accepted"
+        );
+        assert!(replicate.record_absent("stream", "does not apply").is_err());
+        assert_eq!(stored(replicate, "stream"), held(&[1.0], &["failed"]));
+    }
+
+    #[test]
+    fn a_series_above_the_raw_limit_is_a_histogram_with_the_failures_alongside() {
+        let above: Vec<f64> = (1..=1001).map(f64::from).collect();
+        let at_limit: Vec<f64> = (1..=1000).map(f64::from).collect();
+        // The limit itself stays raw; one value more is a histogram; the values of two calls add up.
+        for (what, first, second, histogram_count) in [
+            ("1,000 values", &at_limit[..], &[][..], None),
+            ("1,001 values", &above[..], &[][..], Some(1001)),
+            ("600 and 600 values", &above[..600], &above[..600], Some(1200)),
+        ] {
+            let mut series_first = replicate();
+            assert!(series_first.record_series("stream", first).is_ok());
+            assert!(
+                series_first.record_failure("stream", "workload 4 failed").is_ok(),
+                "a failure recorded beside a series above the raw limit must be accepted ({what}, series first)"
+            );
+            if !second.is_empty() {
+                assert!(series_first.record_series("stream", second).is_ok());
+            }
+            let mut failure_first = replicate();
+            assert!(failure_first.record_failure("stream", "workload 4 failed").is_ok());
+            assert!(
+                failure_first.record_series("stream", first).is_ok(),
+                "a failure recorded beside a series above the raw limit must be accepted ({what}, failure first)"
+            );
+            if !second.is_empty() {
+                assert!(failure_first.record_series("stream", second).is_ok());
+            }
+            for replicate in [series_first, failure_first] {
+                let entry = stored(replicate, "stream");
+                assert_eq!(entry.failures, ["workload 4 failed"], "{what}");
+                assert_eq!(entry.absent, None, "{what}");
+                if let Some(count) = histogram_count {
+                    assert!(entry.values.is_empty(), "{what}: the values are in the histogram");
+                    assert_eq!(entry.histogram.map(|h| h.count), Some(count), "{what}");
+                } else {
+                    assert_eq!(entry.values.len(), 1000, "{what}: the limit is stored raw");
+                    assert!(entry.histogram.is_none(), "{what}");
+                }
+            }
+        }
     }
 
     #[test]
