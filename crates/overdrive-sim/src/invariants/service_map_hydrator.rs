@@ -461,7 +461,7 @@ mod retry_budget_proptest {
     use overdrive_core::id::{ServiceId, ServiceVip, SpiffeId};
     use overdrive_core::reconcilers::{Action, Reconciler, TickContext};
     use overdrive_core::traits::dataplane::Backend;
-        use overdrive_core::wall_clock::UnixInstant;
+    use overdrive_core::wall_clock::UnixInstant;
     use overdrive_reconcilers::{
         RetryMemory, ServiceDesired, ServiceMapHydrator, ServiceMapHydratorState,
         ServiceMapHydratorView, backoff_for_attempt,

@@ -297,6 +297,22 @@ impl ServiceMapHydrator {
             .collect()
     }
 
+    /// The survivor set the dataplane is driven to program, its fingerprint, and
+    /// whether the programmed fingerprint already places it. Pure over its
+    /// inputs; shared by `reconcile` and `next_evaluation_at` so both judge
+    /// "in place" identically.
+    fn survivor_placement(
+        &self,
+        desired_svc: &ServiceDesired,
+        programmed: Option<BackendSetFingerprint>,
+    ) -> (Vec<Backend>, BackendSetFingerprint, bool) {
+        let survivors = self.remote_survivors(desired_svc);
+        let survivor_fingerprint =
+            overdrive_core::dataplane::fingerprint::fingerprint(&desired_svc.vip, &survivors);
+        let placed = in_place(&survivors, survivor_fingerprint, programmed);
+        (survivors, survivor_fingerprint, placed)
+    }
+
     /// The Path-A/mesh workload subnet the gate compares backends
     /// against.
     #[must_use]
@@ -358,20 +374,13 @@ impl Reconciler for ServiceMapHydrator {
         let mut next_view = view.clone();
 
         for (service_id, desired_svc) in &desired.desired {
-            let remote_survivors = self.remote_survivors(desired_svc);
-
-            // The fingerprint of the set the dataplane is driven to program:
+            // The fingerprint is of the set the dataplane is driven to program:
             // byte-identical to what the dataplane writes back
             // (`fingerprint(vip, action.backends)`) because the emitted action
             // carries exactly `remote_survivors`. Recomputed every tick from
             // inputs, NEVER persisted.
-            let survivor_fingerprint = overdrive_core::dataplane::fingerprint::fingerprint(
-                &desired_svc.vip,
-                &remote_survivors,
-            );
-
-            let programmed = actual.actual.get(service_id).copied();
-            let placed = in_place(&remote_survivors, survivor_fingerprint, programmed);
+            let (remote_survivors, survivor_fingerprint, placed) =
+                self.survivor_placement(desired_svc, actual.actual.get(service_id).copied());
             let need_dispatch = !placed
                 && pacing_allows(view.retries.get(service_id), survivor_fingerprint, tick.now_unix);
 
@@ -429,16 +438,8 @@ impl Reconciler for ServiceMapHydrator {
             .iter()
             .filter(|(service_id, _)| {
                 desired.desired.get(service_id).is_some_and(|desired_svc| {
-                    let survivors = self.remote_survivors(desired_svc);
-                    let survivor_fingerprint = overdrive_core::dataplane::fingerprint::fingerprint(
-                        &desired_svc.vip,
-                        &survivors,
-                    );
-                    !in_place(
-                        &survivors,
-                        survivor_fingerprint,
-                        actual.actual.get(service_id).copied(),
-                    )
+                    let programmed = actual.actual.get(service_id).copied();
+                    !self.survivor_placement(desired_svc, programmed).2
                 })
             })
             .map(|(_, retry)| retry.last_failure_seen_at + backoff_for_attempt(retry.attempts))

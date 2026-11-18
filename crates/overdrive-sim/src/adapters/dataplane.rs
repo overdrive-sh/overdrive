@@ -71,12 +71,6 @@ struct ServiceState {
     /// second install evicted the first. Guarded by
     /// `tests/sim_dataplane_forward_frontend_scoped.rs`.
     services: BTreeMap<(Ipv4Addr, u16, Proto), Vec<Backend>>,
-    /// Fingerprint of the slice (in the order given) the last successful
-    /// non-empty `update_service` applied for each frontend; dropped on an
-    /// empty update. Written in the same critical section as `services`, so
-    /// it is the table's own record, not a separate receipt. Keyed like
-    /// `services`.
-    fingerprints: BTreeMap<(Ipv4Addr, u16, Proto), BackendSetFingerprint>,
     /// Reverse-path: `(backend_ip, backend_port, proto) → original
     /// VIP`. The egress reverse-NAT path uses this to rewrite the
     /// source 5-tuple of a backend response packet back to the VIP
@@ -99,7 +93,6 @@ impl ServiceState {
     const fn new() -> Self {
         Self {
             services: BTreeMap::new(),
-            fingerprints: BTreeMap::new(),
             reverse_nat: BTreeMap::new(),
             backend_memo: BTreeMap::new(),
             next_backend_id: 1,
@@ -336,10 +329,12 @@ impl Default for SimDataplane {
 /// ICMP / SCTP are GH #155 / future-phase deferrals. `update_service`
 /// refuses a set containing an IPv6 backend before calling this, so the
 /// IPv6 arm is unreachable from it.
-const fn reverse_nat_key_for(backend: &Backend, proto: Proto) -> Option<BackendKey> {
+fn reverse_nat_key_for(backend: &Backend, proto: Proto) -> BackendKey {
     match backend.addr.ip() {
-        std::net::IpAddr::V4(v4) => Some(BackendKey::new(v4, backend.addr.port(), proto)),
-        std::net::IpAddr::V6(_) => None,
+        std::net::IpAddr::V4(v4) => BackendKey::new(v4, backend.addr.port(), proto),
+        std::net::IpAddr::V6(_) => {
+            unreachable!("update_service refuses an IPv6 backend before deriving reverse-NAT keys")
+        }
     }
 }
 
@@ -356,7 +351,12 @@ impl ProgrammedServiceView for SimDataplane {
         frontend: &ServiceFrontend,
     ) -> Result<Option<BackendSetFingerprint>, DataplaneError> {
         let key = (frontend.vip_v4(), frontend.port().get(), frontend.proto());
-        Ok(self.state.lock().fingerprints.get(&key).copied())
+        Ok(self
+            .state
+            .lock()
+            .services
+            .get(&key)
+            .map(|backends| fingerprint(&frontend.vip(), backends)))
     }
 }
 
@@ -433,9 +433,7 @@ impl Dataplane for SimDataplane {
         // R-59: a reverse-NAT key another Service's VIP already owns is
         // rejected before anything is minted or written.
         for backend in &backends {
-            let Some(key) = reverse_nat_key_for(backend, proto) else {
-                continue;
-            };
+            let key = reverse_nat_key_for(backend, proto);
             if let Some(owner) = state.reverse_nat.get(&key).filter(|owner| **owner != vip) {
                 return Err(DataplaneError::ReverseNatConflict {
                     key,
@@ -465,13 +463,13 @@ impl Dataplane for SimDataplane {
         let prior_keys: std::collections::BTreeSet<BackendKey> = state
             .services
             .get(&(vip, port, proto))
-            .map(|prior| prior.iter().filter_map(|b| reverse_nat_key_for(b, proto)).collect())
+            .map(|prior| prior.iter().map(|b| reverse_nat_key_for(b, proto)).collect())
             .unwrap_or_default();
 
         // Compute new reverse-NAT keys for the incoming backend set,
         // under the declared proto only.
         let new_keys: std::collections::BTreeSet<BackendKey> =
-            backends.iter().filter_map(|b| reverse_nat_key_for(b, proto)).collect();
+            backends.iter().map(|b| reverse_nat_key_for(b, proto)).collect();
 
         // Install the new reverse-NAT entries for the incoming
         // backend set. Each `(backend_ip, backend_port, proto)` →
@@ -488,9 +486,7 @@ impl Dataplane for SimDataplane {
         // key for this frontend on empty-backend updates.
         if backends.is_empty() {
             state.services.remove(&(vip, port, proto));
-            state.fingerprints.remove(&(vip, port, proto));
         } else {
-            state.fingerprints.insert((vip, port, proto), fingerprint(&frontend.vip(), &backends));
             state.services.insert((vip, port, proto), backends);
         }
 
