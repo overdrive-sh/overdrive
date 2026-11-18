@@ -721,4 +721,42 @@ mod retry_eligibility_contract {
         assert_eq!(broker.next_eligible_at(&active), None);
         assert_eq!(broker.next_eligible_at(&BTreeSet::new()), Some(wall(1_000)));
     }
+
+    /// CONTRACT_SHAPE: pure-function.
+    #[test]
+    fn pending_keys_reports_first_pending_order_and_keeps_a_resubmitted_keys_slot() {
+        let base = Instant::now();
+        let mut broker = EvaluationBroker::new();
+        // Submission order is the reverse of key (lexicographic) order, so a
+        // listing sorted by key rather than by admission sequence fails.
+        let first = evaluation("svid", "workload/zeta");
+        let second = evaluation("svid", "workload/mid");
+        let third = evaluation("svid", "workload/alpha");
+        broker.submit(first.clone(), base, EvaluationEligibility::NotBefore(wall(5_000)));
+        broker.submit(second.clone(), base, EvaluationEligibility::Immediate);
+        broker.submit(third.clone(), base, EvaluationEligibility::Immediate);
+        // Resubmit the first key, deferred further: it keeps its slot.
+        broker.submit(
+            first.clone(),
+            base + Duration::from_millis(10),
+            EvaluationEligibility::NotBefore(wall(6_000)),
+        );
+
+        let key = |e: &Evaluation| (e.reconciler.clone(), e.target.clone());
+        let expected = vec![key(&first), key(&second), key(&third)];
+
+        let counters_before = broker.counters();
+        assert_eq!(broker.pending_keys(), expected, "resubmit keeps slot; deferred key is listed");
+        assert_eq!(broker.pending_keys(), expected, "listing is repeatable");
+        assert_eq!(broker.counters(), counters_before, "listing does not mutate the broker");
+
+        let admitted = broker.drain_pending(8, &BTreeSet::new(), base, wall(0));
+        let admitted_keys: Vec<_> = admitted.iter().map(|(e, _)| key(e)).collect();
+        assert_eq!(
+            admitted_keys,
+            expected[1..].to_vec(),
+            "eligible keys are admitted in the order pending_keys reported"
+        );
+        assert_eq!(broker.pending_keys(), vec![key(&first)], "only the deferred key remains");
+    }
 }
