@@ -625,11 +625,10 @@ pub enum ServiceHydrationStatus {
 /// architecture.md § 7 *Failure surface* and § 12 *Schema*.
 ///
 /// Written by the action shim on dispatch completion (`Completed`
-/// or `Failed`). The hydrator reconciler (Slice 08-02) reads this
-/// row via [`ObservationStore::service_hydration_results_rows`]
-/// projected into `actual` and either advances on
-/// `Completed { fingerprint == desired.fingerprint }` or, on
-/// `Failed`, applies its retry-budget policy from the typed View.
+/// or `Failed`). It is a receipt of the last dispatch, not the
+/// resource: the hydrator reconciler does not read it. Its `actual`
+/// is the fingerprint read back from the programmed service map
+/// through `ProgrammedServiceView` (ADR-0299).
 ///
 /// LWW key is `(service_id, fingerprint)` — content-hashed, so two
 /// writes for the same `(service_id, fingerprint)` are strictly
