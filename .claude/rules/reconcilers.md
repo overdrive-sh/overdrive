@@ -121,10 +121,13 @@ be woken by another reconciler handing it work
 (`Action::EnqueueEvaluation`) or by the runtime's `has_work`
 self-re-enqueue, and declare *neither* hook — the producer-push path
 ADR-0084 deliberately keeps (migrating those enqueues to `interests()` is
-deferred to GH #271). `ServiceMapHydrator` is the live example: it
-converges on the `service_backends` rows it reads back (row-backed by
-hydration, per ADR-0079) yet declares empty `interests()` and is woken by
-the bridge's `EnqueueEvaluation`. So the discipline below keys on *where a
+deferred to GH #271). `ServiceMapHydrator` is the live example:
+its desired comes from the `service_backends` rows and its actual is the
+fingerprint read back from the programmed service map through
+`ProgrammedServiceView`, so it hydrates `actual` from the host. It declares
+empty `interests()` and is woken by `ServiceLifecycle`'s
+`EnqueueEvaluation` beside its backend-row write. So the discipline below
+keys on *where a
 reconciler hydrates `actual`*, not on whether `interests()` is empty.
 
 **An edge-woken reconciler needs a level-triggered backstop — edge-only
@@ -434,12 +437,13 @@ never delivered. `a_late_probe_result_after_supersession_is_never_delivered`
   "idempotent converge-on-boot").
 - **Full reconcilers (Bar 2):** `WorkloadLifecycle`,
   `ServiceMapHydrator`, `ServiceLifecycle`
-  (`crates/overdrive-core/src/reconcilers/`,
-  `crates/overdrive-core/src/service_lifecycle.rs`). **`ServiceMapHydrator`
+  (`crates/overdrive-reconcilers/src/workload_lifecycle.rs`,
+  `service_map_hydrator.rs`, `service_lifecycle.rs`). **`ServiceMapHydrator`
   is the reference shape** — its `State` carries `desired` AND an `actual`
-  that is the resource it manages (`ServiceHydrationStatus`), with
+  that is the resource it manages (the fingerprint of the backend set the
+  dataplane has programmed, read through `ProgrammedServiceView`), with
   `RetryMemory` sitting *beside* that real diff rather than standing in
-  for it (`service_map_hydrator.rs:143-157`).
+  for it.
 - **A `Reconciler` impl that did NOT converge — the fingerprint
   anti-pattern above, worked end to end.** `BackendDiscoveryBridge`
   (`crates/overdrive-core/src/reconcilers/backend_discovery_bridge.rs`).
@@ -516,10 +520,11 @@ never delivered. `a_late_probe_result_after_supersession_is_never_delivered`
   (`crates/overdrive-reconcilers/src/vm_reclamation.rs`) is the
   **host-backed** reconciler: empty `interests()`, hydrates `actual` live
   from the host, and its single `node/<local-node-id>` managed target is
-  re-evaluated by the 30 s resync pass, its only trigger. The four
-  **row-backed** consumers — `workload-lifecycle`,
-  `backend-discovery-bridge`, `service-lifecycle`, `svid-lifecycle` — each
-  declare `interests() → &[ObservationRowKind::AllocStatus]`; the interest
+  re-evaluated by the 30 s resync pass, its only trigger. The
+  **row-backed** consumers — `workload-lifecycle`, `service-lifecycle`,
+  `svid-lifecycle` — each declare `interests()` over
+  `ObservationRowKind::AllocStatus` (`service-lifecycle` also over
+  `ProbeResult`); the interest
   router (`spawn_interest_router`,
   `crates/overdrive-control-plane/src/lib.rs`) fans out their wakeups on
   every accepted `alloc_status` change, and the pass is their backstop too.
@@ -529,8 +534,9 @@ never delivered. `a_late_probe_result_after_supersession_is_never_delivered`
   no-wildcard discriminant the router keys on).
 - **A reconciler owns its hydration (ADR-0086 / ADR-0087).** The
   `Reconciler` contract — the trait, `HydrationContext`, `HydrateError`,
-  and the four narrow read-port traits (`ListenerFacts`, `ServiceVipView`,
-  `WorkflowLiveSet`, `HeldSvidView`) — is core SSOT
+  and the seven narrow read-port traits (`ListenerFacts`, `ServiceVipView`,
+  `WorkflowLiveSet`, `HeldSvidView`, `GuestAttachmentView`,
+  `GatewayIdentityView`, `ProgrammedServiceView`) — is core SSOT
   (`crates/overdrive-core/`); the eight reconciler impls, the three
   dispatch enums, and the impls' impure async `hydrate_desired` /
   `hydrate_actual` bodies live in `overdrive-reconcilers`
@@ -542,7 +548,7 @@ never delivered. `a_late_probe_result_after_supersession_is_never_delivered`
   ADR-0087 (single restart authority — the precursor) dissolved the one
   cross-reconciler read (`ServiceLifecycle`'s reach into
   `WorkloadLifecycle`'s restart budget) at its root rather than porting it
-  behind a fifth read-port, so no `RestartBudgetView` exists — the
+  behind another read-port, so no `RestartBudgetView` exists — the
   § "Single restart authority" discipline above is realised in the port
   set, not merely documented.
 - **Deferred Bar-2 promotions (tracked):** veth → first-class network
@@ -584,7 +590,7 @@ never delivered. `a_late_probe_result_after_supersession_is_never_delivered`
   ADR-0079 (converge only on rows you author — the no-busy-loop rule's
   read-it-back exception).
 - ADR-0086 (reconcilers own their hydration — the `hydrate_*` methods,
-  `HydrationContext`, the four read-ports, the `overdrive-reconcilers`
+  `HydrationContext`, the seven read-ports, the `overdrive-reconcilers`
   contract-in-core / impls-in-adapter split; supersedes ADR-0036 in part
   for the intent + observation half), ADR-0087 (single restart authority —
   the precursor that dissolved the cross-reconciler restart-budget read).

@@ -1015,19 +1015,21 @@ unchanged.
 Every fact is read through a `HydrationContext<'_>` — a borrow-bundle the
 runtime builds once per tick and passes to `hydrate_*`. It carries the
 already-core stores and registry (`IntentStore`, `ObservationStore`,
-`DriverRegistry`, `VmHostState`), the four narrow read-ports
-(`ListenerFacts`, `ServiceVipView`, `WorkflowLiveSet`, `HeldSvidView`),
+`DriverRegistry`, `VmHostState`), the seven narrow read-ports
+(`ListenerFacts`, `ServiceVipView`, `WorkflowLiveSet`, `HeldSvidView`,
+`GuestAttachmentView`, `GatewayIdentityView`, `ProgrammedServiceView`),
 and plain data (`node_id`, `host_ipv4`, `intent_redb_path`). A `hydrate_*`
 body reads only through the bundle — never a concrete `AppState` field —
 so every hydration input is a port the DST harness substitutes with a
 `Sim*` impl. A read failure surfaces as `HydrateError`
-(`IntentRead` / `ObservationRead` / `IntentDecode` / `TargetShape`): an
+(`IntentRead` / `ObservationRead` / `IntentDecode` / `TargetShape` /
+`DataplaneRead` / `RunningAllocationWithoutWorkloadAddr`): an
 undecodable intent REFUSES (intent is the SSOT, ADR-0048 §3). A hydrate
 error ends that evaluation with no View write and no dispatch; the runtime
 logs it and the next resync pass re-evaluates the target.
 
 Contract in core, impl in the adapter crate. The `Reconciler` trait, the
-four read-port traits, `HydrationContext`, and `HydrateError` are
+seven read-port traits, `HydrationContext`, and `HydrateError` are
 `overdrive-core`; the reconciler impls and their `hydrate_*` bodies are
 `overdrive-reconcilers` (`crate_class = "adapter-host"`), depending only
 DOWN on core — the same ports-in-core / adapters-out split the platform
@@ -1169,9 +1171,9 @@ runtime loop remains the sole broker drainer.
 
 This is a single-cut greenfield migration: the four `exit_observer`
 producer submits that used to name their downstream consumers are
-deleted, and the four consumers (`workload-lifecycle`,
-`backend-discovery-bridge`, `service-lifecycle`, `svid-lifecycle`) each
-declare `interests() → &[ObservationRowKind::AllocStatus]`. The
+deleted, and the consumers (`workload-lifecycle`, `service-lifecycle`,
+`svid-lifecycle`) each declare `interests()` over
+`ObservationRowKind::AllocStatus` (`service-lifecycle` also `ProbeResult`). The
 exit-observer keeps writing the `AllocStatusRow`; it stops naming
 consumers. `ObservationRowKind` + `ObservationRow::kind()` are a
 read-only projection beside `ObservationRow` — the persisted row is not
@@ -1585,7 +1587,7 @@ landing boundary.
 
 Every rkyv-persisted type at a redb (or other durable storage)
 boundary. Today: `AllocStatusRow`, `NodeHealthRow`,
-`ServiceHydrationResultRow`, `ServiceBackendRow`, `Job`. Future
+`ServiceBackendRow`, `Job`. Future
 rkyv-persisted types (compiled policy verdicts, revoked-cert lists,
 …) follow the same pattern.
 
