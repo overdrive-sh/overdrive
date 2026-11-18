@@ -27,6 +27,7 @@ integration-tests = []
 async-trait.workspace    = true
 aya.workspace            = true
 futures.workspace        = true
+hickory-proto.workspace  = true
 libc.workspace           = true
 overdrive-bench          = { path = "../overdrive-bench" }
 overdrive-cli            = { path = "../overdrive-cli" }

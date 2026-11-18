@@ -2313,6 +2313,7 @@ dependencies = [
  "async-trait",
  "aya",
  "futures",
+ "hickory-proto",
  "libc",
  "overdrive-bench",
  "overdrive-cli",
