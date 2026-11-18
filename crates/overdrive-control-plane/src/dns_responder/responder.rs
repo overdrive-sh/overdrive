@@ -56,6 +56,7 @@ use std::collections::BTreeSet;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::os::fd::{AsRawFd, OwnedFd};
 use std::sync::Arc;
+use std::time::Instant;
 
 use nix::sys::socket::sockopt::{Ipv4PacketInfo, ReceiveTimeout, ReuseAddr};
 use nix::sys::socket::{
@@ -388,7 +389,7 @@ impl DnsResponder {
             // ends before `buf` is re-read: copy out the datagram bytes, the
             // peer, and the ipi_spec_dst. `None` on a timeout/interrupt (loop)
             // or a fatal recv error (return).
-            let received: Option<(Vec<u8>, SockaddrIn, Option<Ipv4Addr>)> = {
+            let received: Option<(Vec<u8>, SockaddrIn, Option<Ipv4Addr>, Instant)> = {
                 let mut iov = [std::io::IoSliceMut::new(&mut buf)];
                 match recvmsg::<SockaddrIn>(
                     fd.as_raw_fd(),
@@ -397,6 +398,10 @@ impl DnsResponder {
                     MsgFlags::MSG_CMSG_CLOEXEC,
                 ) {
                     Ok(recvd) => {
+                        // Service time starts the instant the receive returned
+                        // (DDD-12), on the injected clock, before the cmsg parse
+                        // and datagram copy.
+                        let received_at = self.clock.now();
                         let Some(peer) = recvd.address else { continue };
                         let bytes = recvd.bytes;
                         // The dst addr the query was addressed to (ipi_spec_dst)
@@ -412,7 +417,7 @@ impl DnsResponder {
                                 _ => None,
                             })
                         });
-                        Some((iov[0][..bytes].to_vec(), peer, spec_dst))
+                        Some((iov[0][..bytes].to_vec(), peer, spec_dst, received_at))
                     }
                     // SO_RCVTIMEO fired (no datagram this window) or an interrupt:
                     // loop back to re-check the stop flag and re-block.
@@ -421,9 +426,7 @@ impl DnsResponder {
                     Err(_) => return,
                 }
             };
-            let Some((datagram, peer, spec_dst)) = received else { continue };
-            // Service time starts when the receive returned (DDD-12), on the injected clock.
-            let received_at = self.clock.now();
+            let Some((datagram, peer, spec_dst, received_at)) = received else { continue };
             let Some((reply, outcome)) = self.answer_datagram(&datagram) else {
                 self.observer
                     .observe(QueryOutcome::Dropped, self.clock.now().duration_since(received_at));

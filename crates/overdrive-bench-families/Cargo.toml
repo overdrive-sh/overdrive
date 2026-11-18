@@ -38,6 +38,7 @@ overdrive-host           = { path = "../overdrive-host" }
 overdrive-sim            = { path = "../overdrive-sim" }
 overdrive-testing        = { path = "../overdrive-testing" }
 overdrive-testing-macros = { path = "../overdrive-testing-macros" }
+parking_lot.workspace    = true
 tempfile.workspace       = true
 tokio.workspace          = true
 tracing.workspace        = true

@@ -2324,6 +2324,7 @@ dependencies = [
  "overdrive-sim",
  "overdrive-testing",
  "overdrive-testing-macros",
+ "parking_lot",
  "tempfile",
  "tokio",
  "tracing",

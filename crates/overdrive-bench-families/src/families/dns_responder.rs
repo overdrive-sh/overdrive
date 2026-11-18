@@ -12,9 +12,9 @@
 
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, UdpSocket};
 use std::os::fd::AsRawFd;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
-use std::sync::{Arc, Barrier, Mutex, PoisonError};
+use std::sync::{Arc, Barrier};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
@@ -35,6 +35,7 @@ use overdrive_host::SystemClock;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_testing::netns::NetNs;
 use overdrive_testing_macros::overdrive_bench;
+use parking_lot::Mutex;
 
 /// Queries sent one by one before the timed schedule, so the responder and the sockets are
 /// warm when the first scheduled query arrives.
@@ -47,13 +48,14 @@ const NS_PER_SECOND: u64 = 1_000_000_000;
 /// The address the queries are sent to inside the namespace; the responder's wildcard
 /// socket receives it and source-pins the reply to it.
 const DNS_DESTINATION: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 2), 53);
+/// The DNS id of the warm-up queries; no scheduled query of a profile reaches it.
+const WARMUP_ID: u16 = 0xffff;
 /// The resolvable names the unknown-name profile does not query.
 const UNKNOWN_NAME_COUNT: u32 = 100;
 const SERVICE_SUFFIX: &str = "svc.overdrive.local";
 const CLIENT_LATENCY: &str = "client_latency_ns";
 const CLIENT_THROUGHPUT: &str = "client_throughput_qps";
 const RESOLVER_SERVICE: &str = "resolver_service_ns";
-const ID_SPACE: u32 = 65_536;
 const RECEIVE_POLL: Duration = Duration::from_millis(20);
 const RESPONDER_STOP_BOUND: Duration = Duration::from_secs(5);
 
@@ -95,8 +97,8 @@ fn dns_query_latency(rep: &mut Replicate) -> Result<(), ReplicateFailure> {
     let netns = NetNs::create(&format!("ovbdns-{}-{sequence}", std::process::id()))
         .map_err(|error| fail(&format!("creating the network namespace: {error}")))?;
     let recorder = Arc::new(Recorder::default());
-    let responder = Responder::start(&netns.name, shape.seeded_names(), &recorder)?;
-    let templates = Arc::new(shape.query_templates()?);
+    let responder = Responder::start(&netns.name, shape.names, &recorder)?;
+    let templates = shape.query_templates()?;
     let outcome = run_clients(&netns.name, shape, &templates, &recorder);
     responder.stop()?;
     let clients = outcome?;
@@ -167,11 +169,6 @@ impl Shape {
         Some(Self { kind, names, clients, qps, seconds: 5 })
     }
 
-    /// The names the responder's table is seeded with.
-    const fn seeded_names(self) -> u32 {
-        self.names
-    }
-
     const fn total_queries(self) -> u32 {
         self.qps * self.seconds
     }
@@ -229,13 +226,13 @@ struct Recorder {
 
 impl Recorder {
     fn take(&self) -> Vec<(QueryOutcome, Duration)> {
-        std::mem::take(&mut *self.seen.lock().unwrap_or_else(PoisonError::into_inner))
+        std::mem::take(&mut *self.seen.lock())
     }
 }
 
 impl QueryObserver for Recorder {
     fn observe(&self, outcome: QueryOutcome, service_time: Duration) {
-        self.seen.lock().unwrap_or_else(PoisonError::into_inner).push((outcome, service_time));
+        self.seen.lock().push((outcome, service_time));
     }
 }
 
@@ -347,6 +344,7 @@ async fn build_responder(names: u32, observer: Arc<Recorder>) -> Result<Arc<DnsR
     let node = NodeId::new("local").map_err(|error| format!("node id: {error}"))?;
     let store = Arc::new(SimObservationStore::single_peer(node.clone(), 0));
     let frontend = FrontendAddrAllocator::new();
+    let alloc = AllocationId::new("alloc-1").map_err(|error| format!("allocation id: {error}"))?;
     for index in 0..names {
         let label = workload_label(index);
         let mesh_name = MeshServiceName::new(&format!("{label}.{SERVICE_SUFFIX}"))
@@ -354,8 +352,6 @@ async fn build_responder(names: u32, observer: Arc<Recorder>) -> Result<Arc<DnsR
         frontend.assign(&mesh_name).map_err(|error| format!("assigning `{label}`: {error}"))?;
         let workload =
             WorkloadId::new(&label).map_err(|error| format!("workload id `{label}`: {error}"))?;
-        let alloc =
-            AllocationId::new("alloc-1").map_err(|error| format!("allocation id: {error}"))?;
         let service_id = ServiceId::new(u64::from(index) + 1)
             .map_err(|error| format!("service id {index}: {error}"))?;
         let backend = Backend {
@@ -394,40 +390,61 @@ struct ClientOutcome {
     due: u64,
     /// Nanoseconds from the client's start to its last correct reply.
     last_reply_ns: u64,
+    /// Queries the operating system refused to send.
+    send_errors: u64,
+    /// The length in bytes of the first correct reply.
+    reply_bytes: Option<usize>,
 }
 
 /// Runs every client socket through the schedule and returns their outcomes.
 fn run_clients(
     netns: &str,
     shape: Shape,
-    templates: &Arc<Vec<Vec<u8>>>,
+    templates: &[Vec<u8>],
     recorder: &Recorder,
 ) -> Result<Vec<ClientOutcome>, ReplicateFailure> {
-    let ready = Arc::new(Barrier::new(shape.clients as usize + 1));
-    let mut threads = Vec::with_capacity(shape.clients as usize);
-    for index in 0..shape.clients {
-        let netns = netns.to_owned();
-        let templates = Arc::clone(templates);
-        let ready = Arc::clone(&ready);
-        let thread = std::thread::Builder::new()
-            .name(format!("dns-client-{index}"))
-            .spawn(move || run_client(&netns, index, shape, &templates, &ready))
-            .map_err(|error| fail(&format!("spawning a client thread: {error}")))?;
-        threads.push(thread);
-    }
-    // Every client is bound and warm: the warm-up datagrams are not part of the measurement.
-    ready.wait();
-    drop(recorder.take());
-    let mut outcomes = Vec::with_capacity(threads.len());
-    let mut failures = Vec::new();
-    for thread in threads {
-        match thread.join() {
-            Ok(Ok(outcome)) => outcomes.push(outcome),
-            Ok(Err(reason)) => failures.push(reason),
-            Err(_) => failures.push("a client thread panicked".to_owned()),
+    let ready = Barrier::new(shape.clients as usize + 1);
+    std::thread::scope(|scope| {
+        let mut threads = Vec::with_capacity(shape.clients as usize);
+        for index in 0..shape.clients {
+            let ready = &ready;
+            let thread = std::thread::Builder::new()
+                .name(format!("dns-client-{index}"))
+                .spawn_scoped(scope, move || run_client(netns, index, shape, templates, ready))
+                .map_err(|error| fail(&format!("spawning a client thread: {error}")));
+            match thread {
+                Ok(thread) => threads.push(thread),
+                Err(failure) => {
+                    // Release the clients already waiting so the scope can end.
+                    release_unspawned(ready, shape.clients as usize + 1 - threads.len());
+                    return Err(failure);
+                }
+            }
         }
-    }
-    if failures.is_empty() { Ok(outcomes) } else { Err(fail(&failures.join("; "))) }
+        // Every client is bound and warm: the warm-up datagrams are not part of the measurement.
+        ready.wait();
+        drop(recorder.take());
+        let mut outcomes = Vec::with_capacity(threads.len());
+        let mut failures = Vec::new();
+        for thread in threads {
+            match thread.join() {
+                Ok(Ok(outcome)) => outcomes.push(outcome),
+                Ok(Err(reason)) => failures.push(reason),
+                Err(_) => failures.push("a client thread panicked".to_owned()),
+            }
+        }
+        if failures.is_empty() { Ok(outcomes) } else { Err(fail(&failures.join("; "))) }
+    })
+}
+
+/// Waits at the barrier on behalf of the parties that were never spawned.
+fn release_unspawned(ready: &Barrier, missing: usize) {
+    std::thread::scope(|scope| {
+        for _ in 1..missing {
+            scope.spawn(|| ready.wait());
+        }
+        ready.wait();
+    });
 }
 
 fn run_client(
@@ -442,13 +459,12 @@ fn run_client(
     ready.wait();
     let socket = prepared?;
     let base = HostClock.now();
-    let sending_done = AtomicBool::new(false);
     std::thread::scope(|scope| {
-        let receiver = scope.spawn(|| receive_replies(&socket, index, shape, base, &sending_done));
-        let sent = send_schedule(&socket, index, shape, templates, base);
-        sending_done.store(true, Ordering::Release);
-        let outcome = receiver.join().map_err(|_| "a client receiver panicked".to_owned())?;
-        sent.map(|()| outcome)
+        let receiver = scope.spawn(|| receive_replies(&socket, index, shape, base));
+        let send_errors = send_schedule(&socket, index, shape, templates, base);
+        let mut outcome = receiver.join().map_err(|_| "a client receiver panicked".to_owned())?;
+        outcome.send_errors = send_errors;
+        Ok(outcome)
     })
 }
 
@@ -465,7 +481,7 @@ fn prepare_client(netns: &str, templates: &[Vec<u8>]) -> Result<UdpSocket, Strin
     for warmup in 0..WARMUP_QUERIES {
         let template = &templates[warmup as usize % templates.len()];
         let mut query = template.clone();
-        set_id(&mut query, 0xffff);
+        set_id(&mut query, WARMUP_ID);
         socket
             .send_to(&query, DNS_DESTINATION)
             .map_err(|error| format!("sending a warm-up query: {error}"))?;
@@ -485,8 +501,7 @@ fn set_id(query: &mut [u8], id: u16) {
 
 /// The number of queries client `index` is due to send.
 const fn queries_due(shape: Shape, index: u32) -> u32 {
-    let total = shape.total_queries();
-    if index >= total { 0 } else { (total - index).div_ceil(shape.clients) }
+    (shape.total_queries() - index).div_ceil(shape.clients)
 }
 
 /// The scheduled send time of the `sequence`th query of client `index`, from the client's
@@ -507,11 +522,11 @@ fn send_schedule(
     shape: Shape,
     templates: &[Vec<u8>],
     base: HostInstant,
-) -> Result<(), String> {
+) -> u64 {
     let due = queries_due(shape, index);
-    if due > ID_SPACE {
-        return Err(format!("client {index} is due {due} queries, more than the DNS id space"));
-    }
+    // A scheduled id must stay clear of the warm-up id (the profiles stay far below it).
+    debug_assert!(due <= u32::from(WARMUP_ID), "client {index} is due {due} queries");
+    let mut send_errors = 0_u64;
     let mut query = Vec::with_capacity(512);
     for sequence in 0..due {
         let target = scheduled_ns(shape, index, sequence);
@@ -520,11 +535,14 @@ fn send_schedule(
         let template = &templates[usize::try_from(position).unwrap_or_default() % templates.len()];
         query.clear();
         query.extend_from_slice(template);
-        set_id(&mut query, u16::try_from(sequence).unwrap_or(u16::MAX));
-        // A query that cannot be sent is never answered: the receiver counts it a timeout.
-        let _ = socket.send_to(&query, DNS_DESTINATION);
+        set_id(&mut query, u16::try_from(sequence).unwrap_or(WARMUP_ID));
+        // A query that cannot be sent is never answered: the receiver counts it a timeout, and
+        // the count of refused sends tells that apart from a responder that did not answer.
+        if socket.send_to(&query, DNS_DESTINATION).is_err() {
+            send_errors += 1;
+        }
     }
-    Ok(())
+    send_errors
 }
 
 /// Waits until `target` nanoseconds after `base`: sleeping while far, spinning when near.
@@ -548,18 +566,16 @@ fn receive_replies(
     index: u32,
     shape: Shape,
     base: HostInstant,
-    sending_done: &AtomicBool,
 ) -> ClientOutcome {
     let due = queries_due(shape, index);
-    let last_scheduled = if due == 0 { 0 } else { scheduled_ns(shape, index, due - 1) };
+    let last_scheduled = scheduled_ns(shape, index, due - 1);
     let give_up_at = last_scheduled + u64::try_from(REPLY_TIMEOUT.as_nanos()).unwrap_or(u64::MAX);
     let mut answered = vec![false; due as usize];
     let mut accounted = 0_u32;
     let mut outcome = ClientOutcome { due: u64::from(due), ..ClientOutcome::default() };
     let mut buffer = [0_u8; 1500];
     loop {
-        let finished = sending_done.load(Ordering::Acquire);
-        if finished && (accounted == due || elapsed_ns(base) > give_up_at) {
+        if accounted == due || elapsed_ns(base) > give_up_at {
             return outcome;
         }
         let Ok((length, _)) = socket.recv_from(&mut buffer) else { continue };
@@ -586,6 +602,7 @@ fn receive_replies(
             )]
             outcome.latencies.push(latency as f64);
             outcome.last_reply_ns = outcome.last_reply_ns.max(received_at);
+            outcome.reply_bytes.get_or_insert(length);
         }
     }
 }
@@ -604,9 +621,14 @@ fn record_client_view(
         latencies.extend_from_slice(&client.latencies);
     }
     let answered = latencies.len() as u64;
+    let send_errors: u64 = clients.iter().map(|client| client.send_errors).sum();
+    if let Some(bytes) = clients.iter().find_map(|client| client.reply_bytes) {
+        rep.note("reply_bytes", &bytes.to_string());
+    }
     if answered == 0 {
         return Err(ReplicateFailure::measurement(&format!(
-            "no query of {due} was answered correctly within {} ms of its scheduled send time",
+            "no query of {due} was answered correctly within {} ms of its scheduled send time \
+             ({send_errors} sends were refused by the client's operating system)",
             REPLY_TIMEOUT.as_millis()
         )));
     }
@@ -615,7 +637,7 @@ fn record_client_view(
         rep.record_failure(
             CLIENT_LATENCY,
             &format!(
-                "{} of {due} queries were not answered correctly within {} ms of their scheduled send time",
+                "{} of {due} queries were not answered correctly within {} ms of their scheduled send time ({send_errors} sends were refused by the client's operating system)",
                 due - answered,
                 REPLY_TIMEOUT.as_millis()
             ),
@@ -635,10 +657,6 @@ fn record_client_view(
 /// Records the responder's own service time of every datagram it answered.
 fn record_resolver_view(rep: &mut Replicate, recorder: &Recorder) -> Result<(), ReplicateFailure> {
     let seen = recorder.take();
-    let dropped = seen.iter().filter(|(outcome, _)| *outcome == QueryOutcome::Dropped).count();
-    if dropped > 0 {
-        rep.note("responder_dropped_datagrams", &dropped.to_string());
-    }
     #[allow(
         clippy::cast_precision_loss,
         reason = "a service time in nanoseconds is far below 2^52"
