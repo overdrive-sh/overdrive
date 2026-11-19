@@ -156,6 +156,9 @@ pub const FLOOD_WRITTEN_PREFIX: &str = "flood: written=";
 pub const LISTENING_PREFIX: &str = "listen: listening port=";
 /// The console line `bind` prints for each spec it bound, followed by the spec.
 pub const BOUND_PREFIX: &str = "bind: bound ";
+/// The console line the scripted init prints once it has sent EXIT, before it idles instead
+/// of powering off (a guest that delivers EXIT and never ends its VMM).
+pub const SCRIPTED_INIT_EXIT_LINE: &str = "overdrive-guest-peer: scripted init: beacon tx EXIT";
 /// Prefix of the line `listen` prints when one connection's read side ends:
 /// `listen: conn=<n> hello=<yes|no> terminal=<event>`, `n` counting accepts
 /// from 1, the event rendered by [`TerminalEvent`]'s `Display`.

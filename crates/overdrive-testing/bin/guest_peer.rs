@@ -42,6 +42,12 @@ fn main() {
 fn main() {
     // SAFETY: `getpid` has no preconditions.
     if unsafe { libc::getpid() } == 1 {
+        // The peer staged at the production init's path is the scripted init of a guest that
+        // delivers EXIT and never powers off; any other PID 1 is the module-loading peer.
+        let argv0 = std::env::args().next();
+        if argv0.as_deref() == Some(overdrive_testing::guest_kit::OVERDRIVE_INIT_GUEST_PATH) {
+            linux::pid1::run_scripted_init();
+        }
         linux::pid1::run();
     } else {
         std::process::exit(linux::app::run(&std::env::args().skip(1).collect::<Vec<_>>()));
@@ -1449,6 +1455,73 @@ mod linux {
                 if (&control).write_all(format!("{reply}\n").as_bytes()).is_err() {
                     power_off();
                 }
+            }
+        }
+
+        /// PID 1 of a guest whose production init is replaced by this peer (the image stages the
+        /// peer at [`OVERDRIVE_INIT_GUEST_PATH`], test support only). It plays the guest half of
+        /// the node beacon as `overdrive-init` does: READY, the operator command from EXEC run
+        /// with the console as its stdio, EXIT with its status. Then it does **not** power off:
+        /// the VMM keeps running past EXIT, the state a host must bound and end.
+        pub(crate) fn run_scripted_init() -> ! {
+            match scripted_init() {
+                Ok(never) => match never {},
+                Err(detail) => {
+                    eprintln!("overdrive-guest-peer: scripted init: {detail}");
+                    power_off()
+                }
+            }
+        }
+
+        fn transport_field(cmdline: &str, key: &str) -> Option<String> {
+            let token = cmdline
+                .split_whitespace()
+                .find_map(|parameter| parameter.strip_prefix("overdrive.transport="))?;
+            token.split(',').find_map(|field| field.strip_prefix(key)).map(str::to_owned)
+        }
+
+        fn scripted_init() -> Result<std::convert::Infallible, String> {
+            let cmdline =
+                std::fs::read_to_string("/proc/cmdline").map_err(|e| format!("cmdline: {e}"))?;
+            let port: u32 = transport_field(&cmdline, "beacon=")
+                .and_then(|port| port.parse().ok())
+                .ok_or("no beacon= in the transport token")?;
+            let launch =
+                transport_field(&cmdline, "launch=").ok_or("no launch= in the transport token")?;
+            let conn =
+                VsockStream::connect_retrying(VMADDR_CID_HOST, port, Duration::from_secs(30))
+                    .map_err(|e| format!("dialling the beacon on {port}: {e}"))?;
+            (&conn)
+                .write_all(format!("READY pid=1 port={port} launch={launch}\n").as_bytes())
+                .map_err(|e| format!("writing READY: {e}"))?;
+            let mut line = Vec::new();
+            let mut byte = [0_u8; 1];
+            while byte[0] != b'\n' {
+                match (&conn).read(&mut byte) {
+                    Ok(1) => line.push(byte[0]),
+                    Ok(_) => return Err("the beacon closed before EXEC".to_owned()),
+                    Err(e) => return Err(format!("reading EXEC: {e}")),
+                }
+            }
+            let argv = match String::from_utf8_lossy(&line)
+                .trim_end()
+                .parse::<overdrive_core::vm::beacon::BeaconMessage>()
+            {
+                Ok(overdrive_core::vm::beacon::BeaconMessage::Exec { argv }) => argv,
+                other => return Err(format!("expected EXEC, got {other:?}")),
+            };
+            let (command, operands) = argv.split_first().ok_or("EXEC carried no command")?;
+            let status = Command::new(command)
+                .args(operands)
+                .status()
+                .map_err(|e| format!("running {command}: {e}"))?;
+            let code = status.code().unwrap_or(128);
+            (&conn)
+                .write_all(format!("EXIT {code}\n").as_bytes())
+                .map_err(|e| format!("writing EXIT: {e}"))?;
+            eprintln!("{}", overdrive_testing::guest_app::SCRIPTED_INIT_EXIT_LINE);
+            loop {
+                thread::sleep(Duration::from_secs(3600));
             }
         }
 

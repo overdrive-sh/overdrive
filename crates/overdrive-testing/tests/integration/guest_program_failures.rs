@@ -11,7 +11,10 @@
 //! with the kit's own surface: an image that refuses before READY, a guest program that never
 //! ends (`overdrive-guest-peer bind 0 ..`), and a watcher thread that finds the VMM through
 //! `vhost_vsock_holders` and stops or kills it. The watcher reads the guest console file the
-//! kit writes (`console.log` under the VMM runtime root) to time the fault.
+//! kit writes (`console.log` under the VMM runtime root) to time the fault. The one fault made
+//! inside the guest is a PID 1 that delivers EXIT and never powers off: the image stages the
+//! kit's scripted peer at the production init's path (`GuestImageSpec::extra`), and the peer
+//! (`bin/guest_peer.rs`, `run_scripted_init`) plays READY, EXEC and EXIT and then idles.
 //!
 //! **Oracles.** The outcome (`exit`), the console (it holds the kernel banner, the program's
 //! own `bind: bound` line), the VMM (no `/dev/vhost-vsock` holder and no
@@ -20,8 +23,7 @@
 //!
 //! **Not covered here (reasoned, see the DISTILL record).** A READY that arrives after the
 //! bound cannot reach the host half: the bound ends the guest and kills the VMM, so the stalled
-//! guest case is the whole of it. A VMM that outlives its guest's EXIT cannot be produced
-//! deterministically from outside the function: stopping the VMM also stops the guest's EXIT.
+//! guest case is the whole of it.
 //!
 //! Lane: `cargo xtask metal run -- cargo nextest run -p overdrive-testing --features
 //! integration-tests,kvm-tests`. Each case runs in its own `cgroup-default` `nested-launch`
@@ -37,9 +39,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use overdrive_testing::guest_app::{GUEST_PEER_GUEST_PATH, subcommand};
+use overdrive_testing::guest_app::{GUEST_PEER_GUEST_PATH, SCRIPTED_INIT_EXIT_LINE, subcommand};
 use overdrive_testing::guest_kit::cid_bands::GUEST_BENCHMARK;
-use overdrive_testing::guest_kit::{GuestImageSpec, GuestKit, WorkDir, vhost_vsock_holders};
+use overdrive_testing::guest_kit::{
+    GuestFile, GuestImageSpec, GuestKit, OVERDRIVE_INIT_GUEST_PATH, WorkDir, vhost_vsock_holders,
+};
 use overdrive_testing::guest_lane::{ProgramRun, READY_BOUND, run_in_guest_program};
 use overdrive_testing::overdrive_test;
 use overdrive_testing::vm_fixture::default_staging_root;
@@ -208,6 +212,19 @@ impl Case {
         )
         .expect("the failure is after the VMM exists, so the call itself returns a run");
         (run, watch.finish())
+    }
+
+    /// The benchmark image with the kit's scripted peer in place of the production init: it
+    /// plays the beacon, runs the operator command, sends EXIT and then never powers off.
+    fn spec_whose_guest_never_powers_off(&self) -> GuestImageSpec {
+        GuestImageSpec {
+            extra: vec![GuestFile {
+                host: self.kit.peer_bin.clone(),
+                guest: PathBuf::from(OVERDRIVE_INIT_GUEST_PATH),
+                with_shared_libraries: false,
+            }],
+            ..GuestImageSpec::benchmark()
+        }
     }
 
     /// The VMM the watcher saw has exited and been reaped.
@@ -415,4 +432,38 @@ fn a_program_that_exits_within_the_bound_reports_its_exit_keeps_its_console_and_
     );
     Case::assert_vmm_reaped(&seen, "the clean run");
     case.assert_cid_reusable(11, "a clean run");
+}
+
+/// A VMM that outlives its guest's EXIT is a failed run that keeps its console and ends the
+/// VMM: the guest runs its program, delivers EXIT and does not power off, so the post-EXIT wait
+/// finds the VMM still running; the call ends it, and `exit` is the `Err`, not the program's 0.
+/// With a bound the contract does not pin for the post-EXIT wait, the case takes that wait
+/// whole (the in-guest lane's equivalent wait is 30 s).
+/// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch")]
+#[test]
+#[should_panic(expected = "a VMM that outlives its guest's EXIT must not report an exit status")]
+fn a_vmm_that_outlives_its_guests_exit_is_a_failed_run_that_keeps_its_console_and_is_ended() {
+    let case = Case::new("outlives-exit");
+    let spec = case.spec_whose_guest_never_powers_off();
+    let (run, seen) = case.run(&spec, &program_that_exits_cleanly(), 10, LONG_BOUND, Fault::None);
+
+    assert!(
+        run.exit.is_err(),
+        "a VMM that outlives its guest's EXIT must not report an exit status, got {:?}; console:\n{}",
+        run.exit,
+        run.console
+    );
+    assert!(
+        run.console.contains(PROGRAM_RUNNING),
+        "the console is retained with what the program wrote; console:\n{}",
+        run.console
+    );
+    assert!(
+        run.console.contains(SCRIPTED_INIT_EXIT_LINE),
+        "the console shows the guest delivered EXIT before the run ended; console:\n{}",
+        run.console
+    );
+    Case::assert_vmm_reaped(&seen, "the guest that delivered EXIT and never powered off");
+    case.assert_cid_reusable(10, "a VMM that outlived its guest's EXIT");
 }
