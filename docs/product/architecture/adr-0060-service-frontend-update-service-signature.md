@@ -15,6 +15,12 @@ mirrored at `docs/product/architecture/brief.md` § 46 — see *Supersession*
 below. That decision was never landed on the trait; this ADR records the
 true shipped from-state (option C) and the chosen to-state.
 
+**Amendment 2026-11-19.** The operator-visible IPv6 rejection at the action shim
+(`ServiceFrontend::new`, before the dataplane is called) no longer writes a
+`ServiceHydrationStatus::Failed` row: that row was removed. The shim emits a
+`dataplane.update_service.failed` log event with the refusal as `reason`. The rejection site and
+its position before the dataplane call are unchanged.
+
 ## Context
 
 GitHub issue #163: `REVERSE_NAT_MAP` lockstep populates only TCP entries;

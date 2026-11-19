@@ -38,6 +38,11 @@ derived state", § "Check-and-act must be atomic", § "Errors".
 
 ---
 
+**Amendment 2026-11-19 — `ServiceHydrationResultRow` is deleted.** Sites 6 and 7 of § D2
+(`action_shim/dataplane_update_service.rs`) no longer exist: the row, its
+`service_hydration_results_rows` lookup and its LWW helper were removed, so the set of
+tick-derived row types loses that row. The rule is unchanged for the rows that remain.
+
 ## Context
 
 ### The defect

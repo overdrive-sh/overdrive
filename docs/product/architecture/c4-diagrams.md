@@ -461,8 +461,8 @@ C4Component
 
   Container_Boundary(ctrl, "overdrive-control-plane (adapter-host)") {
     Component(hydrator, "ServiceMapHydrator", "Reconciler impl (NEW — ADR-0042)", "sync `reconcile`; per-target keying on ServiceId; View persists RetryMemory inputs (attempts, last_failure_seen_at) NOT deadlines per development.md")
-    Component(hydrate, "AnyReconciler::hydrate_desired/_actual", "async fn (ADR-0036)", "hydrate_desired reads `service_backends` rows; hydrate_actual reads `service_hydration_results` rows (NEW table)")
-    Component(svc_shim, "action_shim::service_hydration::dispatch", "async fn (NEW — ADR-0042)", "Consumes Action::DataplaneUpdateService; calls Dataplane::update_service; writes Completed/Failed row to service_hydration_results")
+    Component(hydrate, "AnyReconciler::hydrate_desired/_actual", "async fn (ADR-0036)", "hydrate_desired reads `service_backends` rows; hydrate_actual reads the programmed-map fingerprint through ProgrammedServiceView (ADR-0299)")
+    Component(svc_shim, "action_shim::dataplane_update_service::dispatch", "async fn (ADR-0042)", "Consumes Action::DataplaneUpdateService; calls Dataplane::update_service; on failure logs dataplane.update_service.failed; writes no row")
   }
 
   Container_Boundary(dataplane, "overdrive-dataplane (adapter-host)") {
@@ -486,16 +486,15 @@ C4Component
   Container(core, "overdrive-core::reconciler", "Reconciler trait (ADR-0035); AnyReconciler/AnyState extended with ServiceMapHydrator variant; Action enum extended with DataplaneUpdateService variant (NEW)")
   Container(core_id, "overdrive-core::id + overdrive-core::dataplane", "Newtypes: ServiceVip, ServiceId, BackendId (NEW); MaglevTableSize, DropClass (NEW dataplane/ module)")
   Container(intent, "IntentStore (LocalIntentStore)", "redb-backed; service-related intent keys")
-  Container(obs, "ObservationStore (LocalObservationStore)", "redb-backed; service_backends rows + NEW service_hydration_results table")
+  Container(obs, "ObservationStore (LocalObservationStore)", "redb-backed; service_backends rows")
   Container(view_redb, "ViewStore redb file", "<data_dir>/reconcilers/memory.redb; service-map-hydrator table; CBOR blob via ciborium")
   System_Ext(kernel, "Linux kernel BPF subsystem", "bpf(2) syscalls; XDP hook on iface; TC egress qdisc; HASH_OF_MAPS atomic outer-fd replace")
 
-  Rel(hydrate, obs, "Reads service_backends rows; reads service_hydration_results rows (NEW table)")
+  Rel(hydrate, obs, "Reads service_backends rows")
   Rel(hydrator, core, "Implements Reconciler trait against; emits Action::DataplaneUpdateService (NEW variant)")
   Rel(hydrator, core_id, "Uses ServiceVip / ServiceId / BackendId / MaglevTableSize / DropClass newtypes")
   Rel(hydrator, view_redb, "Runtime persists ServiceMapHydratorView (RetryMemory inputs) via RedbViewStore (ADR-0035)")
   Rel(svc_shim, ebpf_dp, "Calls update_service(service_id, vip, backends) on Arc<dyn Dataplane>")
-  Rel(svc_shim, obs, "Writes service_hydration_results row {Completed | Failed} after dataplane call returns")
 
   Rel(ebpf_dp, loader, "Owns aya::Bpf loader; attaches XDP + TC programs")
   Rel(ebpf_dp, swap, "Calls atomic HASH_OF_MAPS swap on backend-set change")
@@ -519,10 +518,12 @@ C4Component
 
 The diagram makes three architectural properties visually explicit:
 
-1. **Hydrator → Action → shim → Dataplane → ObservationStore → next
-   tick** — the convergence loop closes via the new
-   `service_hydration_results` table, NOT via deriving `actual`
-   from the last-emitted action (Drift 2 fix per ADR-0042).
+1. **Hydrator → Action → shim → Dataplane → programmed map → next
+   tick** — the convergence loop closes by reading the programmed
+   service map back through `ProgrammedServiceView` (ADR-0299), NOT
+   via deriving `actual` from the last-emitted action. A failed
+   dispatch is a `dataplane.update_service.failed` log event; there
+   is no result row.
 2. **Three keyed maps, three typed handles, three different keys**
    — `(ServiceVip, u16 port)` for SERVICE_MAP, `ServiceId` for
    MAGLEV_MAP, `BackendId` for BACKEND_MAP (Drift 3 correction per
@@ -862,11 +863,11 @@ C4Container
   Person(operator, "Platform Engineer (Ana)", "Submits a udp Service; verifies VIP-source reverse path")
 
   Container(cli, "overdrive-cli", "Rust binary", "Unchanged — submits Service spec with a udp Listener (shipped #164)")
-  Container(ctrl, "overdrive-control-plane", "Rust crate", "EXTENDED — action-shim builds ServiceFrontend::new (IPv6-reject site, operator-visible Failed row); ServiceMapHydrator desired projection + Action gain the protocol dimension")
+  Container(ctrl, "overdrive-control-plane", "Rust crate", "EXTENDED — action-shim builds ServiceFrontend::new (IPv6-reject site, logs dataplane.update_service.failed); ServiceMapHydrator desired projection + Action gain the protocol dimension")
   Container(core, "overdrive-core", "Rust crate", "EXTENDED — NEW ServiceFrontend newtype (dataplane/service_frontend.rs); Dataplane::update_service(frontend, backends); Action::DataplaneUpdateService + ServiceDesired gain proto")
   Container(dp, "overdrive-dataplane", "adapter-host (Ebpf)", "EXTENDED — EbpfDataplane::update_service Step 4b installs REVERSE_NAT entries per frontend.proto (US-02)")
   Container(sim, "overdrive-sim", "adapter-sim", "EXTENDED — reverse_nat_keys_for narrows [Tcp,Udp]→frontend.proto; ReverseNatLockstep asserts the per-proto set (Tier 1)")
-  ContainerDb(obs, "LocalObservationStore (redb)", "ObservationStore", "Unchanged shape — service_backends (desired source) + service_hydration_results (Completed/Failed)")
+  ContainerDb(obs, "LocalObservationStore (redb)", "ObservationStore", "service_backends (desired source)")
   System_Ext(kernel, "Linux kernel (BPF)", "REVERSE_NAT_MAP keyed BackendKey{ip,port,proto}")
 
   Rel(operator, cli, "overdrive job submit dns-resolver.toml (udp/5353)")
@@ -876,7 +877,7 @@ C4Container
   Rel(ctrl, dp, "update_service(frontend, backends) [production]")
   Rel(ctrl, sim, "update_service(frontend, backends) [tests/DST]")
   Rel(dp, kernel, "Installs REVERSE_NAT (backend_ip, port, frontend.proto) → vip_v4")
-  Rel(ctrl, obs, "Writes service_hydration_results (Completed | Failed{Ipv6Unsupported})")
+  Rel(ctrl, ctrl, "Logs dataplane.update_service.failed for an IPv6 VIP or a failed update")
 ```
 
 ### C4 Level 3 — `update_service` call-path fan-out (the 8-site blast radius)

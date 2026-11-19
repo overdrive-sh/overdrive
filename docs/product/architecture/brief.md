@@ -2641,10 +2641,10 @@ every row.
 > `apply_public_certified_key_status_lww` (`:1426`),
 > `apply_gateway_application_status_lww` (`:1457`),
 > `apply_node_health_lww` (`:1491`), `apply_service_backends_lww`
-> (`:1529`), `apply_probe_result_lww` (`:1568`) and
-> `apply_service_hydration_lww` (`:1593`). There is no reconcile-conflict
+> (`:1529`), `apply_probe_result_lww` (`:1568`). There is no reconcile-conflict
 > row: the same-slot conflict it recorded was unreachable in production
-> and is deleted (§ "Reconciler convergence guarantees extension"). A row that does not dominate
+> and is deleted (§ "Reconciler convergence guarantees extension"), and
+> there is no service-hydration result row (§ 48). A row that does not dominate
 > is **discarded**, and `ObservationStore::write` still returns
 > `Ok(())` — so no caller can distinguish a dropped write from a
 > successful one. That comparison is what silently dropped writes in the
@@ -3879,7 +3879,7 @@ Rules to enforce:
 | 0038 | eBPF crate layout (`overdrive-bpf` + `overdrive-dataplane`) + `xtask bpf-build` + `build.rs` shim build pipeline (Phase 2.1) | Accepted |
 | 0040 | SERVICE_MAP three-map split (SERVICE_MAP / BACKEND_MAP / MAGLEV_MAP) + HASH_OF_MAPS atomic-swap primitive; checksum helper = `bpf_l3_csum_replace`/`bpf_l4_csum_replace`; sanity prologue = shared `#[inline(always)]` Rust helper; HASH_OF_MAPS inner-map size = 256; `DropClass` slots = 6 (Phase 2.2) | Accepted |
 | 0041 | Weighted Maglev consistent hashing (M=16_381 default, prime, M ≥ 100·N) + REVERSE_NAT_MAP shape + endianness lockstep contract (wire = network-order; map storage = host-order; conversion site `crates/overdrive-bpf/src/shared/sanity.rs`) + TC-egress for `tc_reverse_nat` (Phase 2.2) | Accepted |
-| 0042 | `ServiceMapHydrator` reconciler + new `Action::DataplaneUpdateService` variant + new `service_hydration_results` ObservationStore table; failure surface is observation, NOT `TerminalCondition` (preserves ADR-0037); ESR pair `HydratorEventuallyConverges` + `HydratorIdempotentSteadyState` (Phase 2.2; closes J-PLAT-004) | Accepted |
+| 0042 | `ServiceMapHydrator` reconciler + new `Action::DataplaneUpdateService` variant (the `service_hydration_results` row it introduced was removed 2026-11-19: a failed dispatch is a `dataplane.update_service.failed` log event, NOT `TerminalCondition`, preserving ADR-0037); ESR pair `HydratorEventuallyConverges` + `HydratorIdempotentSteadyState` (Phase 2.2; closes J-PLAT-004) | Accepted |
 | 0043 | XDP L4LB three-iface transit test topology (`client-ns ↔ lb-ns ↔ backend-ns`) — `lb-ns` carries the routing host that `XDP_TX` returned frames need to reach the backend network; restores production XDP L4LB shape in netns form (Phase 2.2) | Accepted |
 | 0044 | XDP per-CPU LRU conntrack table — Phase 2.16 design lockpoint. **SUPERSEDED 2026-05-07** — empirically falsified; the conntrack-shaped fix this ADR proposed is unnecessary. The actual S-2.2-17 root cause was the sanity prologue's `claimed_pkt_len > packet_len` check firing spuriously on forwarded skbs at TC egress. Fix lives in ADR-0040 § Revision 2026-05-07 (Q3 amendment — sanity prologue is ingress-only). See ADR-0044 § Falsification for the diagnostic trail. GH #154 remains open with its original flow-affinity-across-rotations scope, no longer urgency-attached to Phase 2.2. | Superseded |
 | 0048 | rkyv versioned envelopes at redb persistence boundaries; intent refuses unreadable SSOT while ordinary observation reads log + skip. **2026-08-31 allocation-lifecycle amendment:** the sole compound AllocStatus writer atomically self-heals a malformed/unknown-future prior current row and appends a typed `Unreadable` predecessor occurrence; `Absent` means no bytes existed, and no generic current-only writer remains. | Accepted (amended 2026-08-31) |
@@ -4452,8 +4452,8 @@ from the Phase 1 first-workload extension.
 **Source:** `docs/feature/phase-2-xdp-service-map/design/architecture.md`
 **ADRs:** ADR-0040 (three-map split + HASH_OF_MAPS), ADR-0041
 (weighted Maglev + REVERSE_NAT + endianness lockstep), ADR-0042
-(`ServiceMapHydrator` reconciler + `Action::DataplaneUpdateService`
-+ `service_hydration_results` table).
+(`ServiceMapHydrator` reconciler + `Action::DataplaneUpdateService`;
+ADR-0042's `service_hydration_results` table no longer exists, § 48).
 **Date:** 2026-05-05.
 
 This section extends §1–§43 with the application-architecture
@@ -4558,28 +4558,28 @@ conversion site is the single `#[inline(always)]` helper at
 proptest gate the contract. Closes the Eclipse-review remediation
 note.
 
-### 48. New ObservationStore table — `service_hydration_results`
+### 48. No hydration result row — the programmed map is the record
 
-Schema:
+The `ServiceMapHydrator` writes no observation row and the
+`ObservationStore` has no service-hydration table. ADR-0042 introduced a
+`service_hydration_results` row (`ServiceHydrationResultRow`,
+`ServiceHydrationStatus`); it was removed 2026-11-19 because nothing read it
+(the hydrator's `actual` is the programmed-map fingerprint, below) and the
+observation store holds last-write-wins current state, so a row could not
+record that a failure occurred.
 
-| Column | Type | Notes |
-|---|---|---|
-| `service_id` | `ServiceId` (u64) | PK |
-| `fingerprint` | `BackendSetFingerprint` (u64) | Content-hash of `(vip, backends)` per `development.md` § Hashing requires deterministic serialization (rkyv-archived). |
-| `status` | tagged enum: `Completed` / `Failed` | `ServiceHydrationStatus`. There is no `Pending` variant: no writer produced it. |
-| `applied_at` / `failed_at` | `UnixInstant` | Tagged-enum payload. |
-| `reason` | `String` | `Failed`-variant only. |
-| `lamport_counter` / `writer_node_id` | `LogicalTimestamp`, per ObservationStore convention | **Load-bearing in Phase 1, not merely forward-compat** (corrected 2026-08-01). `apply_service_hydration_lww` (`crates/overdrive-store-local/src/observation_backend.rs:1593`) discards an incoming row that does not dominate the row stored at `(service_id, fingerprint)`. Also forward-compat with Phase 2 Corrosion gossip. Counter derivation per ADR-0077 (§ 6). |
+**The dispatch failure surface is a log event.** The action shim's
+`Action::DataplaneUpdateService` executor
+(`crates/overdrive-control-plane/src/action_shim/dataplane_update_service.rs`)
+calls `Dataplane::update_service` and returns nothing. When the update does not
+land — a `DataplaneError`, or an IPv6 VIP refused by `ServiceFrontend::new` —
+it emits one structured `tracing::warn!` event,
+`dataplane.update_service.failed`, carrying `service_id`, `fingerprint` and
+`reason`. It is not a `TerminalCondition` (ADR-0037). The hydrator learns
+nothing from the dispatch; it retries from the programmed-map diff on its
+backoff, with the deadline returned through `next_evaluation_at` (D-3).
 
-**Migration:** additive-only (no `ALTER TABLE ADD COLUMN NULL`
-against existing tables). **Single-writer in Phase 2.2** — only
-the action shim's `dataplane_update_service` module writes. Trait surface
-adds typed row helpers
-`service_hydration_results_rows(service_id)` /
-`write_service_hydration_result(row)` matching the existing
-`alloc_status_rows` / `node_health_rows` precedent.
-
-**The row is the executor's receipt, not the hydrator's `actual`** (ADR-0299,
+**The hydrator's `actual` is the programmed map** (ADR-0299,
 D-20, superseding in part ADR-0042 § 3). The hydrator's `actual` is the
 fingerprint of the backend set the dataplane has programmed, read from the
 service map itself through the read-only `ProgrammedServiceView` port on the
@@ -4591,8 +4591,7 @@ dataplane's apply-commit guard. The hydrator emits
 `Action::DataplaneUpdateService` when the programmed fingerprint differs from
 the desired survivor-set fingerprint and its retry pacing allows it. A reboot,
 a restart of `serve`, or a lost map therefore reads as unprogrammed and
-converges through the resync pass, where a `Completed` receipt over the desired
-fingerprint would have read as converged. The write port and the read port are
+converges through the resync pass. The write port and the read port are
 built from one concrete dataplane instance, so a view over a different
 instance from the one the shim writes through is not constructible. A
 programmed service whose backend row is gone has no desired state and is not
@@ -4614,7 +4613,8 @@ crates/overdrive-reconcilers/src/service_map_hydrator.rs
 
 The action-shim wrapper for `Action::DataplaneUpdateService` is
 `crates/overdrive-control-plane/src/action_shim/dataplane_update_service.rs`.
-It calls `Dataplane::update_service` and writes the receipt row.
+It calls `Dataplane::update_service` and, on failure, logs
+`dataplane.update_service.failed`; it writes no row.
 
 Per-target keying = `ServiceId`. The View persists `RetryMemory` inputs
 (`attempts`, `last_failure_seen_at`, `last_attempted_fingerprint`)
@@ -4659,8 +4659,7 @@ To DEVOPS — required CI checks gain:
   (`HydratorEventuallyConverges`, `HydratorIdempotentSteadyState`).
 
 External integrations in Phase 2.2: **none**. The eBPF subsystem is
-kernel-bound, not external. The new `service_hydration_results`
-ObservationStore table is internal. Contract testing posture
+kernel-bound, not external. Contract testing posture
 unchanged.
 
 ### 53. Phase 2.2 dataplane shape — pivot to `bpf_redirect_neigh` (2026-05-07)
@@ -4700,7 +4699,7 @@ additive at the architecture-brief layer:
   is the single `#[inline(always)]` helper in
   `crates/overdrive-bpf/src/shared/sanity.rs`. Both XDP programs go
   through the same helper.
-- **§§ 48–49 — `service_hydration_results` table + `ServiceMapHydrator`
+- **§§ 48–49 — hydration failure surface + `ServiceMapHydrator`
   reconciler.** Unchanged. The reconciler writes into the same
   three SERVICE-class maps via the same typed handles; the dataplane
   shape pivot is below the `Dataplane::update_service` trait
@@ -6747,8 +6746,8 @@ async fn update_service(
 wire, not persisted). Its embedded `ServiceVip` is **IPv4-guaranteed by
 construction** via a fallible `ServiceFrontend::new(vip, port, proto)` that
 validates at the action-shim — the existing operator-visible IPv6-rejection
-site (`action_shim/dataplane_update_service.rs:160`,
-`ServiceHydrationStatus::Failed`). Adapters narrow `IpAddr → Ipv4Addr`
+site (`action_shim/dataplane_update_service.rs`, which logs
+`dataplane.update_service.failed`). Adapters narrow `IpAddr → Ipv4Addr`
 infallibly via `vip_v4()`. Contract: after `Ok(())`, the adapter's
 REVERSE_NAT set **for `frontend.proto`** equals the keys derived from
 `backends`; other protos of the same VIP are untouched; empty `backends`
@@ -11496,8 +11495,8 @@ subsystem and the hydration boundary (see `c4-diagrams.md`, L3).
   datagram clause and startup check.
 - [ADR-0299](adr-0299-the-service-map-hydrator-reads-the-programmed-service-map.md):
   the `ServiceMapHydrator`'s `actual` is the programmed-service fingerprint read through
-  `ProgrammedServiceView` (D-20); the `service_hydration_results` row is the executor's
-  receipt only. Supersedes in part ADR-0042 § 3.
+  `ProgrammedServiceView` (D-20); there is no hydration result row, and a failed dispatch is
+  logged as `dataplane.update_service.failed`. Supersedes in part ADR-0042 § 3.
 - The action-shim validator keeps one same-slot rule, the reclaim rule
   (`ConflictingAllocationReclaim`: `ReclaimAllocationNetwork` beside another action naming
   the same allocation). The same-slot conflict between two `DataplaneUpdateService` actions

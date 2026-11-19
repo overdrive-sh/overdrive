@@ -11,6 +11,16 @@ Supersedes in part [ADR-0042](adr-0042-service-map-hydrator-reconciler.md): § 3
 that the hydrator's `actual` is the `service_hydration_results` row. The rest of ADR-0042
 stands, including the table and the executor that writes it.
 
+**Amendment 2026-11-19 — the result row no longer exists.** The "executor's receipt for
+operators" in the Decision section was removed: the `service_hydration_results` row, its
+types and its store table are deleted, and so is the executor's write of it. Nothing read the
+row, and the observation store keeps last-write-wins current state, so the row could not
+record that a failure occurred. The `DataplaneUpdateService` executor calls
+`Dataplane::update_service`, returns nothing, and on failure emits one structured
+`tracing::warn!` event `dataplane.update_service.failed` (`service_id`, `fingerprint`,
+`reason`). The hydrator's `actual` and its retry from the programmed-map diff are unchanged.
+The Decision, Alternatives and Consequences text below is the original and is not rewritten.
+
 ## Context
 
 The `ServiceMapHydrator` emits `DataplaneUpdateService`. It decides whether that effect is

@@ -248,6 +248,11 @@ consumers still do **not** override `resync_schedule` — and correctly so.
   (relist re-arms ≤ once/period; submits coalesce; no busy-loop) — the router
   analogue of S-266-19.
 
+**Amendment 2026-11-19.** `ObservationRowKind::ServiceHydration` and
+`ObservationRow::ServiceHydration` no longer exist: the `service_hydration_results` row was
+removed. The `ObservationRowKind` listing in § 2 therefore has one fewer variant; the total,
+no-wildcard `kind()` projection is unchanged in shape.
+
 ## Context
 
 `spawn_convergence_loop` (`crates/overdrive-control-plane/src/lib.rs:2427`) drives
