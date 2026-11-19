@@ -34,8 +34,8 @@
 )]
 
 use std::net::Ipv4Addr;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -67,6 +67,10 @@ use overdrive_sim::adapters::view_store::SimViewStore;
 use overdrive_sim::adapters::{SimDataplaneComposer, SimGuestDnsFactory};
 use overdrive_testing::overdrive_test;
 use tempfile::TempDir;
+use tracing::Subscriber;
+use tracing_subscriber::Layer;
+use tracing_subscriber::layer::{Context, SubscriberExt};
+use tracing_subscriber::registry::LookupSpan;
 
 use super::workload_lifecycle::wait::advance_and_settle;
 
@@ -89,6 +93,38 @@ const HYDRATOR_RETRY_BOUND: Duration = Duration::from_secs(10);
 /// Ticks that carry the hydrator from a published backend row to its first
 /// (failed) update, well inside its backoff.
 const UPDATE_ATTEMPT_TICKS: usize = 3;
+
+/// The event the action shim emits once per failed service-map update.
+const UPDATE_FAILED_EVENT: &str = "dataplane.update_service.failed";
+
+/// Appends the name of every tracing event this process emits.
+#[derive(Clone, Default)]
+struct EventNames(Arc<Mutex<Vec<String>>>);
+
+impl<S> Layer<S> for EventNames
+where
+    S: Subscriber + for<'a> LookupSpan<'a>,
+{
+    fn on_event(&self, event: &tracing::Event<'_>, _ctx: Context<'_, S>) {
+        self.0.lock().expect("event names mutex").push(event.metadata().name().to_owned());
+    }
+}
+
+/// How many `dataplane.update_service.failed` events this process has emitted.
+/// The collector is the process's one global subscriber, installed on first
+/// use (call it before boot): the failure is logged from spawned tasks on other
+/// threads, which a thread-local default would miss. Each nextest test is its
+/// own process, so the count is this test's.
+fn failed_update_events() -> usize {
+    static EVENTS: OnceLock<EventNames> = OnceLock::new();
+    let names = EVENTS.get_or_init(|| {
+        let names = EventNames::default();
+        tracing::subscriber::set_global_default(tracing_subscriber::registry().with(names.clone()))
+            .expect("the event collector is this test process's one global subscriber");
+        names
+    });
+    names.0.lock().expect("event names mutex").iter().filter(|n| *n == UPDATE_FAILED_EVENT).count()
+}
 
 fn client_trusting(ca_pem: &str) -> reqwest::Client {
     let cert = reqwest::Certificate::from_pem(ca_pem.as_bytes()).expect("parse CA PEM");
@@ -626,7 +662,8 @@ async fn a_service_whose_view_write_failed_is_running_and_in_the_service_map_on_
 /// CONTRACT_SHAPE: bounded-change.
 ///
 /// Given `checkout` is a Service whose first service-map update fails
-///  And the hydrator recorded the failure and the next tick fell inside its backoff
+///  And the hydrator attempted that update (one failed-update event) and the next
+///    tick fell inside its backoff
 /// When the backoff elapses and no backend row is written
 /// Then the service map is programmed with the Service's backend.
 #[overdrive_test(guest = "cgroup-default")]
@@ -634,6 +671,8 @@ async fn a_service_whose_view_write_failed_is_running_and_in_the_service_map_on_
 async fn a_service_whose_dataplane_update_failed_is_retried_after_its_backoff_without_a_row_write()
 {
     let dir = TempDir::new().expect("tempdir");
+    // Install the event collector before boot so no failure event is missed.
+    assert_eq!(failed_update_events(), 0, "precondition: no failed update before the deploy");
     let node = Node::boot(&dir, Ports::with_observation()).await;
 
     // GIVEN the first service-map update fails and the Service is deployed.
@@ -657,6 +696,11 @@ async fn a_service_whose_dataplane_update_failed_is_retried_after_its_backoff_wi
     for _ in 0..UPDATE_ATTEMPT_TICKS {
         advance_and_settle(&node.clock, TICK).await;
     }
+    assert_eq!(
+        failed_update_events(),
+        1,
+        "precondition: the scripted failure was consumed by exactly one real update attempt"
+    );
     assert!(
         node.ports.dataplane.service_vip_keys().is_empty(),
         "precondition: the failed update left the service map unprogrammed"
@@ -675,6 +719,11 @@ async fn a_service_whose_dataplane_update_failed_is_retried_after_its_backoff_wi
             .is_some_and(|backends| !backends.is_empty())),
         "the service map was not programmed after the hydrator's backoff elapsed following a \
          failed update (service {service_id:?})"
+    );
+    assert_eq!(
+        failed_update_events(),
+        1,
+        "the retry after the backoff must succeed: no further failed-update event"
     );
     let rows_after_retry = node.obs().all_service_backends_rows().await.expect("read rows");
     assert_eq!(
