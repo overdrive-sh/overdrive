@@ -231,10 +231,7 @@ impl HostValue {
     }
 }
 
-// SCAFFOLD: true. The guest benchmark vocabulary (DDD-4, DDD-7): the shapes are the pinned
-// interface contract; `FromStr` and the serde impls of `GuestMemoryMib` are inert (every text
-// is refused, serialising writes a fixed wrong value, every JSON value is refused), so each
-// test reaches its own assertion; DELIVER replaces them.
+// The guest benchmark vocabulary (DDD-4, DDD-7).
 
 /// The guest's view of a run: what a replicate reports through
 /// [`Replicate::report_guest_view`](crate::Replicate::report_guest_view).
@@ -287,8 +284,13 @@ impl std::fmt::Display for GuestMemoryMib {
 impl std::str::FromStr for GuestMemoryMib {
     type Err = GuestMemoryMibError;
 
-    fn from_str(_text: &str) -> std::result::Result<Self, Self::Err> {
-        Err(GuestMemoryMibError)
+    fn from_str(text: &str) -> std::result::Result<Self, Self::Err> {
+        // Decimal digits only: `u32::from_str` would also accept a leading `+`.
+        if text.is_empty() || !text.bytes().all(|byte| byte.is_ascii_digit()) {
+            return Err(GuestMemoryMibError);
+        }
+        let mib: u32 = text.parse().map_err(|_| GuestMemoryMibError)?;
+        std::num::NonZeroU32::new(mib).map(Self).ok_or(GuestMemoryMibError)
     }
 }
 
@@ -297,13 +299,16 @@ impl Serialize for GuestMemoryMib {
         &self,
         serializer: S,
     ) -> std::result::Result<S::Ok, S::Error> {
-        serializer.serialize_u32(0)
+        serializer.serialize_u32(self.0.get())
     }
 }
 
 impl<'de> Deserialize<'de> for GuestMemoryMib {
-    fn deserialize<D: Deserializer<'de>>(_deserializer: D) -> std::result::Result<Self, D::Error> {
-        Err(D::Error::custom("RED scaffold: GuestMemoryMib::deserialize is not implemented"))
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+        let mib = u32::deserialize(deserializer)?;
+        std::num::NonZeroU32::new(mib)
+            .map(Self)
+            .ok_or_else(|| D::Error::custom("memory_mib must be a positive integer, not 0"))
     }
 }
 
@@ -1068,7 +1073,6 @@ mod tests {
 
         /// Text round trip: `Display` then `FromStr` returns the size.
         #[test]
-        #[should_panic(expected = "the text of a size must parse back to the size")]
         fn a_guest_memory_size_round_trips_through_its_text(size in guest_memory()) {
             let text = size.to_string();
             prop_assert_eq!(
@@ -1080,7 +1084,6 @@ mod tests {
 
         /// Record round trip: the JSON integer is the same digits as `Display`, and it reads back.
         #[test]
-        #[should_panic(expected = "the record carries the size as the JSON integer of its digits")]
         fn a_guest_memory_size_round_trips_through_the_json_integer_the_record_carries(
             size in guest_memory(),
         ) {
@@ -1098,7 +1101,6 @@ mod tests {
     /// Text that is not decimal digits, or is zero, or overflows `u32`, is refused with a typed
     /// error; each case is one named sad path (the boundary 0 and `u32::MAX + 1` are listed).
     #[test]
-    #[should_panic(expected = "the largest count parses")]
     fn text_that_is_not_a_positive_decimal_count_is_refused() {
         // Control first: a refusal table is vacuous against a parser that refuses everything.
         assert_eq!(
@@ -1114,7 +1116,6 @@ mod tests {
     /// Deserialising zero, a negative number, a fraction or a string is refused, and the refusal
     /// of zero names `memory_mib`.
     #[test]
-    #[should_panic(expected = "a positive JSON integer deserialises to its size")]
     fn a_json_value_that_is_not_a_positive_integer_is_refused_naming_the_field() {
         // Control first: a refusal table is vacuous against a deserialiser that refuses everything.
         assert_eq!(
