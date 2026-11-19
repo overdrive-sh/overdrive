@@ -1,4 +1,4 @@
-//! Slice 02 AC2 (`reconciler-convergence-guarantees`, ADR-0297) — after the
+//! Slice 02 AC2 (`reconciler-convergence-guarantees`, ADR-0322) — after the
 //! same-host local-backend path is deleted, the boot loads and attaches none of
 //! its three cgroup socket programs and creates none of its two maps; only the
 //! public-ingress gateway's `connect4` program stays attached.

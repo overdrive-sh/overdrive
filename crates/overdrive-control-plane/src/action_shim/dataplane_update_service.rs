@@ -4,7 +4,7 @@
 //!
 //! Dispatch invokes [`Dataplane::update_service`]. The hydrator
 //! reconciler learns whether the update landed by reading the
-//! programmed service map back (ADR-0299), so dispatch records no
+//! programmed service map back (ADR-0324), so dispatch records no
 //! outcome row; a failed update is logged as one structured event.
 //!
 //! # Failure surface

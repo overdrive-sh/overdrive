@@ -53,7 +53,7 @@ Accepted ADR records remain unchanged.
 
 | Section | Owner | Status |
 |---|---|---|
-| System Architecture | Titan | **single-node dataplane interface wiring (2026-06-02, ADR-0061 Accepted); extended — Cloud Hypervisor VM driver: host-process failure domain, per-allocation host state, and the VM substrate probe (2026-08-10, GH #42; revised 2026-08-11 after adversarial review — VM reclamation is a `Reconciler` (`reconcilers.md` Bar 2) per user ruling, and one restore-path memory citation withdrawn); reconciler-framework improvements — event-interest declaration (Piece B, interests-only) (2026-08-22, GH #266, ADR-0084; RN-2 = B-2 ratified, warm reflector-`Store` deferred to #270); every reconciler declares managed targets and the runtime's 30 s resync pass re-evaluates them (GH #351, ADR-0296, supersedes in part ADR-0084's `resync_schedule`)** |
+| System Architecture | Titan | **single-node dataplane interface wiring (2026-06-02, ADR-0061 Accepted); extended — Cloud Hypervisor VM driver: host-process failure domain, per-allocation host state, and the VM substrate probe (2026-08-10, GH #42; revised 2026-08-11 after adversarial review — VM reclamation is a `Reconciler` (`reconcilers.md` Bar 2) per user ruling, and one restore-path memory citation withdrawn); reconciler-framework improvements — event-interest declaration (Piece B, interests-only) (2026-08-22, GH #266, ADR-0084; RN-2 = B-2 ratified, warm reflector-`Store` deferred to #270); every reconciler declares managed targets and the runtime's 30 s resync pass re-evaluates them (GH #351, ADR-0321, supersedes in part ADR-0084's `resync_schedule`)** |
 | Domain Model | Hera | **VM workloads — the ending taxonomy (three classes, not two), restart-budget vs restart-count accounting, and the driver/kind axis (2026-08-11, GH #42). No new bounded context, no new aggregate; revised 2026-08-11 after adversarial review — the Bar-2 ruling falsified "no new `Action` variant", so DD-5 now specifies two (`ReclaimAllocation`, `DiscardStrandedArtifacts`), and DD-1(b) rules SD-1's two regimes one Ending Class with a precondition plus one non-ending concept (Artifact Disposal, DD-4). DD-1 / DD-1(b) / DD-1(b.i) minted as [ADR-0081](adr-0081-three-ending-classes-platform-reclamation-and-artifact-disposal.md) (2026-08-11, deferral H-1) — the platform-wide decision record; this section remains the full rationale and evidence base. Extended for GH #295: the vsock microVM attachment (ADR-0145–0162, 0164–0167, 0169, 0172–0174, 0177, 0180, 0182–0187 and 0190–0192) creates no new bounded context, aggregate, repository, event model, or lifecycle meaning; leases, flows, control sessions and quiescence holds remain transient technical state under the existing Workload Orchestration, Transparent mTLS Enforcement, Workload Identity and Guest Runtime boundaries.** |
 | Application Architecture | Morgan (this doc) | **extended — Phase 2.2 XDP service map (2026-05-05); pivot to `bpf_redirect_neigh` datapath (2026-05-07, GH #159, ADR-0045); `ServiceFrontend` on `update_service` for per-proto reverse-NAT (2026-06-02, GH #163, ADR-0060); built-in CA `Ca` port trait + 3-tier hierarchy (2026-06-05, GH #28, ADR-0063); transparent-mTLS enrollment Path A — per-workload netns+veth + nft-TPROXY both directions + `MtlsResolve` port (2026-06-16, GH #236, ADR-0071, amends ADR-0069); Cloud Hypervisor VM driver — `Vmm` port + `VmConfig` anti-corruption value, `DriverRegistry` (executes ADR-0022's deferred migration), per-driver `AllocationSpec` payload, and the DD-1 reclamation binding (2026-08-11, GH #42, ADR-0082 + ADR-0083); revised 2026-08-11 after adversarial review — reclamation reshaped into the `VmReclamation` **`Reconciler`** (§ 105a) with a new `VmHostState` port per the user's Bar-2 ruling, the graceful-shutdown evidence claim relabelled, the C-1…C-7 slice corrections landed, and ADR-0082's "unrepresentable" headers downgraded to what the body delivers; Service-kind VM HTTP/TCP health — registration-time guest target projection + parser driver-union V3 with VM Exec rejection to GH #280 (2026-09-06, GH #257, ADR-0090/0091; accepted after independent review); corrective driver-neutral physical allocation identity plus non-gating exact-old cleanup (2026-09-13, GH #284, user-ratified ADR-0105/0106/0108/0109 and P-105-1…P-105-7; ADR-0107 withdrawn; final review `CHANGES_REQUESTED`, bounded F-03…F-06 remediated under two-cycle cap, user disposition required); vsock microVM attachment application composition (GH #295; ADR-0145–0162, 0164–0167, 0169, 0172–0174, 0177, 0180, 0182–0187 and 0190–0192): the guest-flow owner in control-plane implements the core `GuestStreamDial` port, the host forwarder is a dataplane driven port, and leg-S and the VM probe runner dial VM ports through the owner** |
 
@@ -366,7 +366,7 @@ reconciler that *already* ticked — so the second driver's cadence is a mechani
 this design must supply, not something Bar 2 grants for free. A fixed 30 s
 interval on the injected `Clock` (hence DST-controllable, not wall-clock), now
 driven by the runtime's resync pass over the reconciler's managed target
-(ADR-0296), is pinned in § 105a and **ratified by the user
+(ADR-0321), is pinned in § 105a and **ratified by the user
 on 2026-08-11**; it is not operator-tunable and no knob is promised. It is
 deliberately **not restated here** — § 105a is the single site — but recorded so
 a later reader does not find a ticking reconciler with no stated wake source.
@@ -864,9 +864,9 @@ this entry resolves.
 `docs/feature/reconciler-framework-improvements/feature-delta.md` (the event-interest
 half, ADR-0084) and
 `docs/feature/reconciler-convergence-guarantees/feature-delta.md` (the resync pass,
-ADR-0296).
+ADR-0321).
 
-**The resync pass (ADR-0296, D-1a/D-1b/D-1c).** A **level-triggered safety net beside
+**The resync pass (ADR-0321, D-1a/D-1b/D-1c).** A **level-triggered safety net beside
 the edge-triggered broker** (K8s controller-runtime `SyncPeriod`; kube-rs
 `Action::requeue_after`). Edge-only is fragile — one dropped observation-store change
 is a permanent divergence — so the periodic pass is the backstop for every reconciler,
@@ -942,7 +942,7 @@ cache-served ⟺ event-woken, resync as backstop) or declares none (⟺ host-bac
 (Empty `interests()` does not by itself prove host-backed: a reconciler can also be
 woken by `Action::EnqueueEvaluation`, as `ServiceMapHydrator` is.)
 `vm-reclamation` is the host-backed, resync-only consumer of this partition: it
-declares its single `node/<local-node-id>` managed target (ADR-0296), the 30 s resync
+declares its single `node/<local-node-id>` managed target (ADR-0321), the 30 s resync
 pass is its only trigger, and it hydrates `actual` live from the host. The row-backed
 reconcilers declare `interests()` and are event-woken, with the pass as their backstop
 too. The Bar-2 veth/XDP promotions (#197/#199) remain the next host-state candidates.
@@ -965,7 +965,7 @@ Piece B **interests-only** — the declarative interest fan-out over the existin
 `subscribe_all_events` (List-then-Watch with relist on `Lagged`), replacing the four
 scattered `exit_observer` producer submits (ADR-0084) — plus the resync pass above.
 RN-1's per-reconciler `Option<ResyncSchedule{period, scope}>` was replaced by the
-required `managed_targets` and the single global pass (ADR-0296, supersedes in part
+required `managed_targets` and the single global pass (ADR-0321, supersedes in part
 ADR-0084); the interest router has no periodic relist. Reconcilers own their
 hydration (ADR-0086, which supersedes ADR-0036 in part).
 
@@ -1186,7 +1186,7 @@ the guest gateway (ADR-0174).
 (ADR-0153, ADR-0164); non-mesh destinations are kernel-forwarded directly
 (ADR-0162); guest TCP to a VIP is mesh-resolved (ADR-0164 D24a); guest UDP
 to a VIP is unsupported until
-[#310](https://github.com/overdrive-sh/overdrive/issues/310) (ADR-0298
+[#310](https://github.com/overdrive-sh/overdrive/issues/310) (ADR-0323
 supersedes ADR-0164's datagram clause and its owner-cgroup startup check).
 Host-internal destinations are refused
 `HostInternal`, checked by the owner and enforced by a constant output rule
@@ -1247,7 +1247,7 @@ connection-pump scaling ([#300](https://github.com/overdrive-sh/overdrive/issues
 [ADR-0161](adr-0161-vendored-cloud-hypervisor-fork-is-built-pinned-and-provisioned-as-a-checksummed-release.md),
 [ADR-0162](adr-0162-non-mesh-guest-egress-is-kernel-forwarded-to-its-destination.md),
 [ADR-0164](adr-0164-guest-vip-tcp-resolves-as-mesh-and-datagrams-use-the-connect4-rewrite.md)
-(TCP-as-mesh decision D24a stands; its datagram clause and startup check are superseded by ADR-0298),
+(TCP-as-mesh decision D24a stands; its datagram clause and startup check are superseded by ADR-0323),
 [ADR-0166](adr-0166-flow-control-messages-travel-on-a-dedicated-per-vm-control-session.md),
 [ADR-0167](adr-0167-guest-flows-to-host-internal-destinations-are-refused.md),
 [ADR-0169](adr-0169-forwarding-quiescence-is-a-counted-move-only-hold.md),
@@ -3581,7 +3581,7 @@ flowchart LR
 
 ### 35a. Canonical-workload-address inbound TPROXY production install (#241, ADR-0071)
 
-> **ADR-0297:** the same-host local-backend path of ADR-0053
+> **ADR-0322:** the same-host local-backend path of ADR-0053
 > (`cgroup_connect4_service`, `LOCAL_BACKEND_MAP`, `REVERSE_LOCAL_MAP`) does
 > not exist: no production path produces a local backend. Delivery to a mesh
 > backend is owned by nft-TPROXY and `MtlsResolve` alone.
@@ -3940,7 +3940,7 @@ alternatives: **ADR-0072**; `docs/feature/dial-by-name-responder/feature-delta.m
 > returned WORKS.** The user ratified shifting the answered address from a
 > *volatile per-instance backend addr* (the headless-v1 contract described below)
 > to a **stable per-`<job>` frontend addr** while the already-live dataplane
-> (nft-TPROXY + per-connection `MtlsResolve`, ADR-0071; ADR-0053 since superseded by ADR-0297) owns backend
+> (nft-TPROXY + per-connection `MtlsResolve`, ADR-0071; ADR-0053 since superseded by ADR-0322) owns backend
 > churn — the **ClusterIP split**. DNS answers a stable address; the dataplane
 > translates frontend → current live backend and enforces SPIFFE mTLS. This
 > **supersedes the "headless / answer-the-backend-addr / NO VIP" contract below**
@@ -4579,7 +4579,7 @@ it emits one structured `tracing::warn!` event,
 nothing from the dispatch; it retries from the programmed-map diff on its
 backoff, with the deadline returned through `next_evaluation_at` (D-3).
 
-**The hydrator's `actual` is the programmed map** (ADR-0299,
+**The hydrator's `actual` is the programmed map** (ADR-0324,
 D-20, superseding in part ADR-0042 § 3). The hydrator's `actual` is the
 fingerprint of the backend set the dataplane has programmed, read from the
 service map itself through the read-only `ProgrammedServiceView` port on the
@@ -4621,7 +4621,7 @@ Per-target keying = `ServiceId`. The View persists `RetryMemory` inputs
 NOT a `next_attempt_at` deadline (per `development.md` § Persist
 inputs, not derived state). The View decides only when to act again, never
 whether the effect is in place (that is read from `actual`); the deadline is
-recomputed every tick and returned through `next_evaluation_at` (ADR-0296).
+recomputed every tick and returned through `next_evaluation_at` (ADR-0321).
 
 ESR pair (locked names): `HydratorEventuallyConverges`,
 `HydratorIdempotentSteadyState` — both live in
@@ -6809,7 +6809,7 @@ ip/port only).
 
 ---
 
-## Same-host service delivery and guest UDP to a VIP (ADR-0297, ADR-0298)
+## Same-host service delivery and guest UDP to a VIP (ADR-0322, ADR-0323)
 
 There is no same-host local-backend path. The `cgroup/connect4`,
 `cgroup/sendmsg4` and `cgroup/recvmsg4` service programs
@@ -6817,7 +6817,7 @@ There is no same-host local-backend path. The `cgroup/connect4`,
 `cgroup_recvmsg4_service`), the `LOCAL_BACKEND_MAP` and `REVERSE_LOCAL_MAP`
 kernel maps, `register_local_backend` / `deregister_local_backend`, the
 `Register`/`DeregisterLocalBackend` actions and the hydrator's local-backend
-classifier do not exist (ADR-0297, superseding ADR-0053). No production path
+classifier do not exist (ADR-0322, superseding ADR-0053). No production path
 produced a local backend: a VM workload's backend is a mesh address delivered
 by nft-TPROXY and `MtlsResolve`, and every other backend is programmed into the
 XDP service maps. The only `cgroup/connect4` program is the gateway's
@@ -6826,7 +6826,7 @@ unaffected. `crates/overdrive-dataplane/tests/integration/same_host_programs_not
 pins that the removed programs are not loaded at boot.
 
 A guest's UDP datagram to a service VIP is refused with `FlowRefusal::Policy`
-(ADR-0298, superseding ADR-0164's datagram clause and startup check). Guest TCP
+(ADR-0323, superseding ADR-0164's datagram clause and startup check). Guest TCP
 to a VIP resolves as mesh. UDP service delivery to VM workloads is
 [GH #310](https://github.com/overdrive-sh/overdrive/issues/310)'s work.
 
@@ -8513,7 +8513,7 @@ crafter must not add public surface beyond what the feature-delta names.
 |---|---|---|---|---|
 | 1 | `IdentityRead` port (`overdrive-core/src/traits/identity_read.rs`) | The agent must read the held SVID + trust bundle to drive the handshake | **REUSE AS-IS** | The port already exposes `svid_for` + `current_bundle` with the exact owned-clone, no-issue, no-mutate contract #26 needs. #26 is a pure reader; no signature change. |
 | 2 | `SvidMaterial` / `TrustBundle` (`overdrive-core`, ADR-0063) | The material presented in the rustls handshake + peer verification anchor | **REUSE AS-IS** | Cert + leaf key + bundle are exactly what rustls `ClientConfig`/`ServerConfig` consume. No change. |
-| 3 | `cgroup_connect4_service` program (`overdrive-bpf/src/programs/cgroup_connect4_service.rs`; removed by ADR-0297, 2026-11-15) | Transparent destination rewrite (workload `connect()` → agent leg, OUTBOUND); attach-boundary precedent for the F5 intercept exemption | **EXTEND** | The connect4-rewrite shape is proven for the outbound intercept (`findings-userspace-relay.md` Unknown 1). Add a transparent-mTLS variant (rewrite to the agent listener) rather than reimplementing the rewrite mechanism. The INBOUND intercept (F3) is the mirror — `nft`-TPROXY + `IP_TRANSPARENT` (proven in `findings-inbound-intercept.md` §1), a net-new program family in `overdrive-bpf`/`overdrive-dataplane` (orig-dst via `getsockname`, NOT `SO_ORIGINAL_DST`). |
+| 3 | `cgroup_connect4_service` program (`overdrive-bpf/src/programs/cgroup_connect4_service.rs`; removed by ADR-0322, 2026-11-15) | Transparent destination rewrite (workload `connect()` → agent leg, OUTBOUND); attach-boundary precedent for the F5 intercept exemption | **EXTEND** | The connect4-rewrite shape is proven for the outbound intercept (`findings-userspace-relay.md` Unknown 1). Add a transparent-mTLS variant (rewrite to the agent listener) rather than reimplementing the rewrite mechanism. The INBOUND intercept (F3) is the mirror — `nft`-TPROXY + `IP_TRANSPARENT` (proven in `findings-inbound-intercept.md` §1), a net-new program family in `overdrive-bpf`/`overdrive-dataplane` (orig-dst via `getsockname`, NOT `SO_ORIGINAL_DST`). |
 | 4 | `Dataplane` port (`overdrive-core/src/traits/dataplane.rs`) | Kernel-side enforcement boundary | **DO-NOT-REUSE (CREATE-NEW port)** | Models map writes, NOT per-connection socket ops. The proxy's intercept/handshake-drive/kTLS-arm/splice-pump lifecycle does not fit; forcing it conflates contracts (ADR-0069 Decision). CREATE-NEW `MtlsEnforcement`. |
 | 5 | `overdrive-bpf` crate (maps, XDP/cgroup programs, `pinning = ByName` discipline) | Home for the new sockops / `sk_skb` verdict / cgroup_connect4-mtls programs | **EXTEND** | The crate is the BPF home; reuse the build pipeline (`xtask bpf-build`, ADR-0038) and the bpffs-pin discipline. Add programs; no new BPF crate. NOTE: sockops/sk_skb/sockmap/ringbuf are net-new program *types* here (no prior sockops in tree) — the programs are CREATE-NEW *within* the EXTENDED crate. aya-ebpf 0.1.1 has no `#[sk_skb]` macro → hand-roll via `#[link_section]` (proven in the spikes). |
 | 6 | `overdrive-worker` crate (node-agent: ExecDriver, cgroup mgr, probe-runner) | Home for the per-connection mTLS proxy agent | **EXTEND** | The node-agent already owns host-side per-workload lifecycle (drivers, cgroups, probes). The mTLS proxy agent is another node-agent responsibility; add a module, not a crate. |
@@ -9744,7 +9744,7 @@ That is a *property* of the ratified decision, not an open question — an opera
 knob would be a new decision, taken elsewhere, and nothing in this design carries
 a forward pointer to one.
 
-**Driving mechanism (ADR-0296, GH #351): the runtime's resync pass.** The 30 s
+**Driving mechanism (ADR-0321, GH #351): the runtime's resync pass.** The 30 s
 value and the not-tunable property above are unchanged. `VmReclamation` declares no
 cadence of its own: it declares its managed target through the required
 `managed_targets` (its single `node/<local-node-id>` target, always), and the
@@ -9785,7 +9785,7 @@ such: a node-scoped sweep cadence is precisely what
 [#197](https://github.com/overdrive-sh/overdrive/issues/197)'s shared
 host/node-infrastructure reconciler model will need for #198 / #199 / #234 too.
 Per SD-1 this design does **not** found that abstraction on its own. The
-generalisation is the runtime's resync pass (ADR-0296): every reconciler declares
+generalisation is the runtime's resync pass (ADR-0321): every reconciler declares
 managed targets and the pass re-evaluates them, with `vm-reclamation` as its
 host-backed consumer; see the driving-mechanism paragraph above. § *System
 Architecture* carries a one-sentence pointer to the same fact and **defers to
@@ -10264,7 +10264,7 @@ while a Bar-2 reconciler needs both.
 | 28 | **`action_shim::dispatch`** (`action_shim/mod.rs:852`) | the shim's driver parameter | **EXTEND** | `driver: &dyn Driver` → `drivers: &DriverRegistry`. **Pinned**, because leaving the one function that *is* the `[G1]` pass/fail bar unpinned while pinning three others was an inconsistency |
 | 29 | **`MtlsInterceptWorker::start_alloc`** (`mtls_intercept_worker.rs:472-497`, fired `action_shim/mod.rs:1425`, `:1643`) | per-alloc mesh enrollment | **EXTEND (gate)** | Its docstring's stated predicate — `DriverType::Exec`, *"unconditionally true on the worker's exec lifecycle path"* — is falsified by a second driver. Fail-closed install, so ungated a VM alloc is either killed or given a silent false confidentiality claim. Gated on `Exec`; GH #222 is the removal condition |
 | 30 | `provision_and_inject_netns` (`action_shim/mod.rs:906`) | per-alloc netns | **REUSE UNCHANGED** | Deliberately **not** driver-gated. A VM alloc still gets a netns slot; an empty netns is stronger confinement, and ADR-0082 § D6 makes `config.netns == None` a supported case for the mTLS-uncomposed boot rather than a VM-specific one |
-| 31 | `spawn_convergence_loop` (`lib.rs:2427-2477`) + `EvaluationBroker` (`eval_broker.rs:59`, `submit` at `:85`) | waking reconcilers | **EXTEND — re-verdicted at iteration 3** | Two obligations, and the first was the only one the Bar-1 draft had. **(a) The wake after a row write:** `execute_reclaim_allocation` submits the **four** evaluations the exit observer submits per exit — `workload_lifecycle` (`worker/exit_observer.rs:234`), `backend_discovery_bridge` (`:254`), `service_lifecycle` (`:295`) and **`svid_lifecycle` (`:318-320`)**; without the fourth, `DropSvid` never fires and **the node keeps the dead allocation's leaf private key** (`svid_lifecycle.rs:316-317`, `:506-513` — ADR-0067 O2). **(b) NEW, and Bar 2 does not supply it for free: `vm-reclamation` must be re-evaluated every 30 s.** The broker is purely event-driven and `has_work` only *re*-enqueues a reconciler that already ticked, so a wake must come from elsewhere. It is supplied by the runtime's resync pass (ADR-0296): `VmReclamation` declares its single `node/<local-node-id>` target through the required `managed_targets`, and the boot-anchored 30 s pass re-evaluates it. The same pass is the backstop the host-state reconcilers of [#197](https://github.com/overdrive-sh/overdrive/issues/197) (#198 / #199 / #234) use — see § 105a.8 for the three rejected alternatives the ratified cadence was chosen against |
+| 31 | `spawn_convergence_loop` (`lib.rs:2427-2477`) + `EvaluationBroker` (`eval_broker.rs:59`, `submit` at `:85`) | waking reconcilers | **EXTEND — re-verdicted at iteration 3** | Two obligations, and the first was the only one the Bar-1 draft had. **(a) The wake after a row write:** `execute_reclaim_allocation` submits the **four** evaluations the exit observer submits per exit — `workload_lifecycle` (`worker/exit_observer.rs:234`), `backend_discovery_bridge` (`:254`), `service_lifecycle` (`:295`) and **`svid_lifecycle` (`:318-320`)**; without the fourth, `DropSvid` never fires and **the node keeps the dead allocation's leaf private key** (`svid_lifecycle.rs:316-317`, `:506-513` — ADR-0067 O2). **(b) NEW, and Bar 2 does not supply it for free: `vm-reclamation` must be re-evaluated every 30 s.** The broker is purely event-driven and `has_work` only *re*-enqueues a reconciler that already ticked, so a wake must come from elsewhere. It is supplied by the runtime's resync pass (ADR-0321): `VmReclamation` declares its single `node/<local-node-id>` target through the required `managed_targets`, and the boot-anchored 30 s pass re-evaluates it. The same pass is the backstop the host-state reconcilers of [#197](https://github.com/overdrive-sh/overdrive/issues/197) (#198 / #199 / #234) use — see § 105a.8 for the three rejected alternatives the ratified cadence was chosen against |
 | 32 | **`ServerHandle`** (`lib.rs:1020`, `:1135-1136`, `:2290`) | observer-task ownership and shutdown | **EXTEND** | *Added at review iteration 2.* Scalar `JoinHandle` + one token; a per-driver observer loop needs `Vec<JoinHandle>`, cancel-once-then-await-all, and a **cloned** token. Detaching (not aborting) on drop is what makes the naive loop a teardown hang rather than a tidy-up nit |
 | 33 | **`Reconciler` trait + `AnyReconciler` / `AnyState` / `AnyReconcilerView` / `AnyViewMap` + the four dispatch matches** (`reconcilers/mod.rs:279-326`, `:798`, `:334`, `:930`, `:859`; `reconciler_runtime.rs:76`, `:274`, `:1734`, `:2678`) | the reconciler primitive | **EXTEND** | *Added at iteration 3 (Bar-2 ruling).* `VmReclamation` is the eighth registrant. Enumerated in § 105a.9 so the five-enum / four-match cost is not discovered mid-slice; all compiler-enforced |
 | 34 | **`BackendDiscoveryBridgeView` / ADR-0079's field-less View** (`backend_discovery_bridge.rs:256`) | View shape | **REUSE (pattern)** | The precedent SD-1's pin 2 names. `VmReclamationView` is field-less for the same reason and takes the same `#[expect(clippy::zero_sized_map_values, …)]` on its bulk-load arm. Retry falls out of `has_work`, not a View field |
@@ -10820,12 +10820,12 @@ private interfaces, registration, readback and handoffs are pinned in
 `adr-0101-service-backend-health-observed-convergence.md`; see
 `docs/feature/service-kind-vm-workloads/design/backend-eligibility-convergence-ruling.md`.
 
-**Local direct-VIP withdrawal (ADR-0101 revision 4, BE10): removed by ADR-0297.**
+**Local direct-VIP withdrawal (ADR-0101 revision 4, BE10): removed by ADR-0322.**
 The amendment selected `DeregisterLocalBackend` for an unhealthy local backend.
 The local-backend path it acted on does not exist, so there is no local map
 and no local withdrawal action: an unhealthy backend leaves the programmed
 service through the hydrator's single path, `DataplaneUpdateService` over the
-survivor set, judged against the programmed fingerprint (ADR-0299).
+survivor set, judged against the programmed fingerprint (ADR-0324).
 
 Independent [DESIGN iteration 3](../../feature/service-kind-vm-workloads/design/review-adr-0101.md#iteration-3--focused-re-review-of-r0101-3)
 and [consolidated DESIGN+DISTILL iteration 2](../../feature/service-kind-vm-workloads/distill/review-adr-0101-design-distill.md#iteration-2--focused-re-review-of-cd-0101-0102)
@@ -11240,7 +11240,7 @@ verified on native metal kernel 7.0 by
 The dataplane adapter prepares each gateway upstream socket in the `serve`
 task (mark `0x1`, `127.0.0.1` bind per ADR-0190, cookie registered as a
 `(cookie, ServiceKey)` intent). A separate `cgroup/connect4` selection program
-(ruling P-10 / R-1; the gateway's own program, with no other `cgroup/connect4` service program beside it after ADR-0297) selects
+(ruling P-10 / R-1; the gateway's own program, with no other `cgroup/connect4` service program beside it after ADR-0322) selects
 through the Maglev inner map, rewrites the
 destination and records `Selected(BackendId)` or `NoBackend`. The dial leaves
 via table 100, is TPROXY-diverted to leg-C, which terminates mTLS, arms kTLS
@@ -11472,28 +11472,29 @@ poll of `listeners[0]` passes. On acceptance it supersedes the operative
 
 Contract: [feature delta](../../feature/service-allocation-readiness-and-ending/feature-delta.md).
 
-## Reconciler convergence guarantees extension (GH #351; ADR-0296 to ADR-0299)
+## Reconciler convergence guarantees extension (GH #351; ADR-0321 to ADR-0324)
 
-Application Architecture addendum. Implemented; the ADRs' own status lines read
-Proposed until independent design review completes. See the
+Application Architecture addendum. Implemented; the ADRs are Accepted (renumbered
+2026-11-19 from 0296-0299 to 0321-0324 to clear a collision with the native-benchmark-program
+ADRs). See the
 [feature delta](../../feature/reconciler-convergence-guarantees/feature-delta.md).
 Topology (L1, L2) is unchanged; the change is inside the control-plane convergence
 subsystem and the hydration boundary (see `c4-diagrams.md`, L3).
 
-- [ADR-0296](adr-0296-every-reconciler-declares-its-managed-targets-and-the-runtime-re-evaluates-them-each-period.md):
+- [ADR-0321](adr-0321-every-reconciler-declares-its-managed-targets-and-the-runtime-re-evaluates-them-each-period.md):
   every reconciler declares its managed targets through the required `managed_targets`;
   the runtime's boot-anchored 30 s resync pass re-evaluates them (D-1a/D-1b/D-1c).
   Supersedes in part ADR-0084: `resync_schedule`, `ResyncSchedule`, `ResyncScope`, the
   cadence table and the router's periodic relist do not exist. `interests()`, the
   List-then-Watch router and its `Lagged` relist remain as the edge wake;
   `next_evaluation_at` is the precise retry deadline (D-3).
-- [ADR-0297](adr-0297-the-same-host-local-backend-path-is-removed.md):
+- [ADR-0322](adr-0322-the-same-host-local-backend-path-is-removed.md):
   the same-host local-backend path (ADR-0053) does not exist; it had no production
   producer. Supersedes ADR-0053.
-- [ADR-0298](adr-0298-guest-udp-to-a-service-vip-is-refused-until-gh-310.md):
+- [ADR-0323](adr-0323-guest-udp-to-a-service-vip-is-refused-until-gh-310.md):
   guest UDP to a service VIP is refused `Policy` until GH #310. Supersedes ADR-0164's
   datagram clause and startup check.
-- [ADR-0299](adr-0299-the-service-map-hydrator-reads-the-programmed-service-map.md):
+- [ADR-0324](adr-0324-the-service-map-hydrator-reads-the-programmed-service-map.md):
   the `ServiceMapHydrator`'s `actual` is the programmed-service fingerprint read through
   `ProgrammedServiceView` (D-20); there is no hydration result row, and a failed dispatch is
   logged as `dataplane.update_service.failed`. Supersedes in part ADR-0042 § 3.
@@ -11512,8 +11513,8 @@ subsystem and the hydration boundary (see `c4-diagrams.md`, L3).
 
 | Date | Change |
 |---|---|
-| 2026-11-15 | **reconciler-convergence-guarantees: ADR-0297 (the same-host local-backend path is removed, supersedes ADR-0053) and ADR-0298 (guest UDP to a VIP is refused until #310, supersedes ADR-0164's datagram clause).** Both status Proposed; the user approved the decisions (D-9, D-10, D-11). — Morgan. |
-| 2026-11-13 | **reconciler-convergence-guarantees DESIGN proposals (ADR-0296, status Proposed).** User approved D-1 to D-8 on 2026-11-13; independent design review pending. — Morgan. |
+| 2026-11-15 | **reconciler-convergence-guarantees: ADR-0322 (the same-host local-backend path is removed, supersedes ADR-0053) and ADR-0323 (guest UDP to a VIP is refused until #310, supersedes ADR-0164's datagram clause).** Both status Proposed; the user approved the decisions (D-9, D-10, D-11). — Morgan. |
+| 2026-11-13 | **reconciler-convergence-guarantees DESIGN proposals (ADR-0321, status Proposed).** User approved D-1 to D-8 on 2026-11-13; independent design review pending. — Morgan. |
 | 2026-11-09 | **service-allocation-readiness-and-ending full DESIGN review iteration 4 APPROVED:** D13-S1/D17-S1 exact signatures user-approved (“rest is fine”); historical D16-S1 migration withdrawn under the user's explicit greenfield byte waiver. D16-G1 rebaselines only the five affected current envelopes in place, with no historical read promise; this is the bounded direct consequence of the waiver. D15 exit-0 remains `BackoffExhausted` under D6/P-5. ADR-0268–0272 are accepted; DISTILL and roadmap independent reviews remain pending before DELIVER. — Independent reviewer. |
 | 2026-11-09 | **service-allocation-readiness-and-ending: exact D11-E1, D14-A1 and D14-E2 contract amendments user-approved** (“Approve all three exact contracts”). Bounded technical review iteration 2 approved the shapes; the full independent D1–D17 DESIGN review remains pending. ADR-0263 and ADR-0269 link the authoritative feature-delta interface and error mappings. — Morgan. |
 | 2026-11-04 | **service-allocation-readiness-and-ending: round-4 rulings P1, A1, A3 accepted ("proceed with recommendations").** P1: the startup stop gate's attempts threshold comes from the startup descriptor (`max_attempts` for `Tcp`/`Http`, 1 for `GuestListeners`); `ServiceAllocFact.max_attempts` becomes `startup_attempts_required`; guest-listener rows carry honest streaks; explicit probes unchanged (ADR-0269). A1: the board entry is removed at close; "frozen at the end of the wait" is the host reader's rule (ADR-0268). A3: a host-input projection module of `guest_report` is the conformance target. Remaining: `quint-modeler` run (M-3, M-6), review round 4. — Morgan. |

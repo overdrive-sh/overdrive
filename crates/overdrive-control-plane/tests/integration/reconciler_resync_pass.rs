@@ -1,7 +1,7 @@
 //! Slice 01 acceptance — a deploy recovers by itself after a transient hydrate
 //! error, a View-write error or a failed dataplane update, because the runtime
 //! re-evaluates every managed target of every reconciler each period
-//! (feature `reconciler-convergence-guarantees`; ADR-0296 decisions 2 and 3;
+//! (feature `reconciler-convergence-guarantees`; ADR-0321 decisions 2 and 3;
 //! feature delta D-1, D-3).
 //!
 //! The production composition `run_server_with_obs_and_driver(..)` over the

@@ -1,10 +1,10 @@
 # Slice 02 — delete-same-host-local-backend-path
 
-Decisions: D-9 (ADR-0297), D-10 and D-11 (ADR-0298), D-13 (persisted route tag). Persona: Ana. Job: J-OPS-003. Order: first in DELIVER (it depends on nothing).
+Decisions: D-9 (ADR-0322), D-10 and D-11 (ADR-0323), D-13 (persisted route tag). Persona: Ana. Job: J-OPS-003. Order: first in DELIVER (it depends on nothing).
 
 ## Goal
 
-The ADR-0053 same-host local-backend path is deleted. It has no production producer (ADR-0297), so
+The ADR-0053 same-host local-backend path is deleted. It has no production producer (ADR-0322), so
 its latch (`last_applied_local_fingerprint`) goes with it. The remote service path and the public
 ingress gateway are unchanged.
 
@@ -87,7 +87,7 @@ the AC5 grep.
 - `overdrive-sim/src/invariants/service_map_hydrator.rs` and `invariants/mod.rs`: remove the local-arm
   handling and the `reply_source_rewrite_lockstep` registration; the remote-path hydrator invariants stay.
 
-### ADR-0164 datagram clause and startup check (D-10, ADR-0298)
+### ADR-0164 datagram clause and startup check (D-10, ADR-0323)
 
 - The owner's cgroup-placement startup check, in `overdrive-control-plane`: the
   `OwnerCgroupPlacement` error and the startup probe branch that raises it (`guest_network.rs`), the
@@ -98,7 +98,7 @@ the AC5 grep.
   the VIP branch that skips the route-type check and sends through an unmarked socket, the VIP term of
   the egress-mark decision (it reduces to the `gateway:53` exemption alone), and the kernel-peer check
   after the connect, which only caught a `connect4` rewrite into the guest prefix, so it is redundant
-  with the static destination policy once nothing rewrites (ADR-0298 records why no remaining program
+  with the static destination policy once nothing rewrites (ADR-0323 records why no remaining program
   can rewrite an owner socket), with the `GuestFlowIo::peer_addr` port method and its impls if no other
   caller exists. `OwnerRuntime.vip_range` and its constructor parameter STAY: the refusal below reads
   them. The ports' `vip_range` stays too: the boot overlap check and the TCP VIP branch (D24a) read it.
@@ -107,7 +107,7 @@ the AC5 grep.
 - Stale comments to correct, not delete: the UDP-skips-VIP-branch wording in
   `mtls_resolve_adapter.rs`. UDP still skips that arm; the reason is no longer a `connect4` rewrite.
 
-### The one added behaviour (D-11, ADR-0298)
+### The one added behaviour (D-11, ADR-0323)
 
 A guest UDP datagram whose destination is in the configured VIP ranges is refused with the existing
 `FlowRefusal::Policy` before any host socket is created or connected, until GH #310 delivers guest UDP
@@ -135,7 +135,7 @@ coverage must not be lost with the deleted probes: a failed gateway attach still
 
 The owner's placement check is not part of this dependency. It only reads the owner's cgroup path
 and returns an error; it opens, attaches and probes nothing, and the gateway's attach does not consult
-it (ADR-0298).
+it (ADR-0323).
 
 ## Acceptance criteria
 
@@ -165,7 +165,7 @@ it (ADR-0298).
 
 ## Evidence (not coverage)
 
-Metal observation of the never-working datagram clause: ADR-0298 § Context. It covers no property;
+Metal observation of the never-working datagram clause: ADR-0323 § Context. It covers no property;
 the deleted tests are not replaced by it.
 
 ## Dependencies
@@ -195,5 +195,5 @@ behaviour of the paths that are reached (AC1), not by exercising the removed pat
   `Service connect4` container), and the journeys
   `docs/product/journeys/reach-an-unconnected-udp-service.yaml` and `submit-a-udp-service.yaml`
   (they describe the unconnected-UDP path through `sendmsg4` / `recvmsg4`). Accepted ADRs are
-  immutable and are not edited; ADR-0297 lists the ones that mention the path and supersedes it.
+  immutable and are not edited; ADR-0322 lists the ones that mention the path and supersedes it.
 - Website: `website/content/blog/what-is-ebpf.mdx` mentions the path (2 hits); review at FINALIZE.

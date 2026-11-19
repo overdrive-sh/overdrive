@@ -1,6 +1,6 @@
 //! Host datagram associations (EVMOD-DGRAM, ADR-0201; D10, #310, D24,
 //! D26-PINS F-4): R5-7 owner projection, R5-27 host half, the `gateway:53`
-//! exemption, the service-VIP `Policy` refusal (ADR-0298), framing errors and the U-5
+//! exemption, the service-VIP `Policy` refusal (ADR-0323), framing errors and the U-5
 //! discard of unknown flow ids.
 //!
 //! Design: `feature-delta.md` § *Per-kind total orders* → "Datagram
@@ -159,7 +159,7 @@ async fn dns_to_the_gateway_pairs_and_other_prefix_addresses_are_policy() {
 }
 
 /// Outcome anchor: OUT-RCG-GUEST-UDP-TO-VIP-REFUSED
-/// D-11 (ADR-0298), slice 02 AC7 — guest UDP to a VIP is unsupported until
+/// D-11 (ADR-0323), slice 02 AC7 — guest UDP to a VIP is unsupported until
 /// GH #310: a datagram association whose destination lies in the configured
 /// VIP range is refused `Policy` before the route-type check, before any host
 /// socket is made, connected or sent on. A destination outside the range keeps

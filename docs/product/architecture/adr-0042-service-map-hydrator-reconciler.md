@@ -16,7 +16,7 @@ endianness lockstep).
 § 3's executor write, § 4's table (`ServiceHydrationResultRow`,
 `ServiceHydrationStatus`, its envelope and row kind) and the
 observation-based failure surface no longer exist. Nothing read the row once
-ADR-0299 made the hydrator's `actual` the programmed-map fingerprint, and the
+ADR-0324 made the hydrator's `actual` the programmed-map fingerprint, and the
 observation store keeps last-write-wins current state, so a row could not
 record that a failure occurred. The executor now calls
 `Dataplane::update_service` and returns nothing; on failure it emits one
@@ -24,7 +24,7 @@ structured `tracing::warn!` event, `dataplane.update_service.failed`
 (`service_id`, `fingerprint`, `reason`). The failure surface is still not a
 `TerminalCondition` (ADR-0037). The hydrator retries from the programmed-map
 diff on its backoff, with the deadline returned through `next_evaluation_at`
-(ADR-0296). The decision text below is the original and is not rewritten.
+(ADR-0321). The decision text below is the original and is not rewritten.
 
 ## Context
 

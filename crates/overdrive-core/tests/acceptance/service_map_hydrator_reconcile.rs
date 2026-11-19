@@ -1,6 +1,6 @@
 //! Acceptance tests for `ServiceMapHydrator::reconcile` and
 //! `ServiceMapHydrator::next_evaluation_at` (architecture.md § 8, ADR-0042,
-//! ADR-0299, feature-delta D-3 and D-20).
+//! ADR-0324, feature-delta D-3 and D-20).
 //!
 //! The hydrator's `actual` is the resource it manages: per service, the
 //! fingerprint of the backend set the dataplane has programmed

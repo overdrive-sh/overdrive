@@ -1,11 +1,13 @@
-# ADR-0299 — The service-map hydrator reads the programmed service map
+# ADR-0324 — The service-map hydrator reads the programmed service map
 
 ## Status
 
-Proposed. 2026-11-17. Author: Morgan (`nw-solution-architect`), DESIGN wave, APPLICATION
-layer, feature `reconciler-convergence-guarantees`. The user approved the direction and the
-read mechanism on 2026-11-17 (feature delta D-20, option (a), and the fingerprint read). The
-ADR stays `Proposed` until independent design review completes.
+Accepted. 2026-11-19 (originally drafted 2026-11-17 as ADR-0299, renumbered because the
+number collided with the native-benchmark-program ADRs). Author: Morgan
+(`nw-solution-architect`), DESIGN wave, APPLICATION layer, feature
+`reconciler-convergence-guarantees`. The user approved the direction and the read mechanism
+on 2026-11-17 (feature delta D-20, option (a), and the fingerprint read), and the decision
+is implemented on main.
 
 Supersedes in part [ADR-0042](adr-0042-service-map-hydrator-reconciler.md): § 3's statement
 that the hydrator's `actual` is the `service_hydration_results` row. The rest of ADR-0042
@@ -31,7 +33,7 @@ After a node reboot, or a restart of `serve` (which recreates the pinned `SERVIC
 result rows persist in redb and the kernel maps are empty. A `Completed` row over the
 desired fingerprint reads as converged, so the hydrator emits nothing and the service is
 never reprogrammed. The same happens if the map is lost while the process runs. The resync
-pass of ADR-0296 re-evaluates the target every period and changes nothing, because the
+pass of ADR-0321 re-evaluates the target every period and changes nothing, because the
 evaluation reads the same receipt. The hydrator property of the feature's DISTILL work
 found this in the reboot world.
 
@@ -152,4 +154,4 @@ Negative and bounds:
   acceptance.
 
 Links: [feature delta](../../feature/reconciler-convergence-guarantees/feature-delta.md)
-(D-20, D-21, V-6), ADR-0042, ADR-0086, ADR-0296, GH #211.
+(D-20, D-21, V-6), ADR-0042, ADR-0086, ADR-0321, GH #211.

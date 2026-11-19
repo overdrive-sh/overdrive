@@ -2,7 +2,7 @@
 
 ## Status
 
-Superseded by [ADR-0297](adr-0297-the-same-host-local-backend-path-is-removed.md)
+Superseded by [ADR-0322](adr-0322-the-same-host-local-backend-path-is-removed.md)
 (2026-11-15): the path has no production producer and is removed. Originally Accepted
 (2026-05-23). Drafted 2026-05-22 by Morgan. Implementation
 landed across commits cd5b1644 → 6d62afe6 (closes #175, walking-

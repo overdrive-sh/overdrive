@@ -1,6 +1,6 @@
 # Quint specification: reconciler evaluation wake (reconciler-convergence-guarantees)
 
-Model-checked specification of decision D-1 (ADR-0296: every reconciler declares its managed targets; the runtime
+Model-checked specification of decision D-1 (ADR-0321: every reconciler declares its managed targets; the runtime
 re-evaluates all of them each period; no local requeue on a hydrate or persist error) and D-3
 (`ServiceMapHydrator::next_evaluation_at`). `.claude/rules/design.md` § "Concurrent protocols carry a model-checked
 Quint specification"; oracle for the DISTILL `quint-connect` driver (`.claude/rules/testing.md` § "Quint conformance").
@@ -148,7 +148,7 @@ pending key collapses and counts in `cancelled` whether or not the key is needy 
 | `ProgressByPass` | temporal, `wake_full` | D-1: every needy key is evaluated to convergence again after any error outcome, dropped wake or crash | `wake_noPass` (D-1) |
 | `RetentionSchedulesBackedOffKey` | invariant, `wake_retention` (faults: the dataplane fails, a dispatch fails) | D-3 (and svid-lifecycle's existing retention, D11): a key inside its backoff window is always scheduled (in flight or retained), so its retry needs neither a row write nor a pass | `wake_noRetention` (D-3) |
 
-Hazards (one per decision): `wake_noPass` removes the pass (dropped wakes disabled, so the wedge is the one ADR-0296
+Hazards (one per decision): `wake_noPass` removes the pass (dropped wakes disabled, so the wedge is the one ADR-0321
 names: an error outcome ends the evaluation and nothing re-submits the key); `wake_noRetention` makes
 the hydrator's `next_evaluation_at` return `None` (the pre-D-3 hydrator: the in-window Noop is not requeued and the key is
 unscheduled). svid-lifecycle's retention is existing behaviour and is not switched off.

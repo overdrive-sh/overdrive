@@ -1,5 +1,5 @@
 //! `ProgrammedServiceView::programmed_fingerprint` contract on `SimDataplane`
-//! (D-20, ADR-0299; DISTILL obligation 2). One test per rustdoc clause of the
+//! (D-20, ADR-0324; DISTILL obligation 2). One test per rustdoc clause of the
 //! port. The host adapter is covered by the host/sim equivalence test in
 //! `crates/overdrive-dataplane/tests/integration/programmed_service_view_equivalence.rs`.
 //!

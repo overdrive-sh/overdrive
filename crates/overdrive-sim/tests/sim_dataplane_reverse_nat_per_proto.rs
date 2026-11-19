@@ -201,7 +201,7 @@ async fn issue_163_tcp_only_for_udp_service_is_caught() {
 /// backend set that contains an IPv6 backend with `LoadFailed`, before any
 /// write. No `REVERSE_NAT` key is added (none for the IPv6 backend, none for
 /// the IPv4 backend sent with it) and the service's prior state is unchanged
-/// (D-20, ADR-0299; the host adapter already refuses).
+/// (D-20, ADR-0324; the host adapter already refuses).
 ///
 /// Pending until DELIVER changes the Sim to refuse: today it accepts the set
 /// and installs the IPv4 backend's key.

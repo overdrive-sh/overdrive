@@ -1,5 +1,5 @@
 //! Host/Sim `ProgrammedServiceView` equivalence and the restart case (D-20,
-//! ADR-0299; DISTILL obligation 3). Tier 3.
+//! ADR-0324; DISTILL obligation 3). Tier 3.
 //!
 //! `EbpfDataplane` (the real `SERVICE_MAP` outer slot, its inner map, and the
 //! fingerprint in inner slots 16,381 and 16,382) and `SimDataplane` are driven

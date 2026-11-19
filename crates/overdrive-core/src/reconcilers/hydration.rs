@@ -80,7 +80,7 @@ pub struct HydrationContext<'a> {
     /// serve supplies the canonical empty view (epoch one, no subject, no
     /// current facts).
     pub gateway_identity: &'a dyn GatewayIdentityView,
-    /// The programmed service map read port (D-20, ADR-0299).
+    /// The programmed service map read port (D-20, ADR-0324).
     pub programmed_services: &'a dyn ProgrammedServiceView,
     /// The local node id (plain data).
     pub node_id: &'a NodeId,
@@ -127,7 +127,7 @@ pub enum HydrateError {
     /// variant (per `.claude/rules/development.md` § "Errors").
     #[error("invalid target resource: {0}")]
     TargetShape(String),
-    /// A read of the programmed service map failed (D-20, ADR-0299): the
+    /// A read of the programmed service map failed (D-20, ADR-0324): the
     /// `Display` of the `DataplaneError` the read returned.
     #[error("programmed service map read failed: {0}")]
     DataplaneRead(String),

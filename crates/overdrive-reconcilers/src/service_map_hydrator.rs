@@ -487,7 +487,7 @@ impl Reconciler for ServiceMapHydrator {
 
     /// Hydrate the `actual` map: the fingerprint of the backend set the
     /// dataplane has programmed per service, read through
-    /// `ProgrammedServiceView` (ADR-0299). The target's frontend is re-projected
+    /// `ProgrammedServiceView` (ADR-0324). The target's frontend is re-projected
     /// exactly as `hydrate_desired` does (the `service_backends` row plus its
     /// listener fact through [`project_service_desired`]); a service whose
     /// frontend cannot be projected, or whose VIP is not IPv4, has nothing

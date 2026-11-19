@@ -20,7 +20,7 @@ Verdict: **APPROVED after fixes** (the blocking findings below were fixed in the
 - Slot and spike numbers (5.41 ms, 107 us, 4.7 us / 6.3 us, 5.84 s, 112 ms, 6.2 ms, 6 of 16, 1,735 / 2,734 / 994, about 17% of a core): match `spike/findings-programmed-service-map-read.md`. Two extra slots are 16,381 and 16,382, inner capacity 16,383.
 - Pass cost (337/265, 1,537/1,225, 3,037/2,425; 15.2% vs 15.5%; AMD EPYC 8024P, 16 threads, Linux 7.0.0-38): match feature-delta V-3 and `host.txt`. The pass is not above baseline at any N.
 - Model: 14 of 14 checks matched, `ProgressByPass` 9,777.6 s (163 min), hazards 14.2 and 14.3 s, `MAXF = 2`, `MAXD = 2`, ten named runs and ten `#[quint_test]` plus `#[quint_run]` in the driver.
-- UDP 8 of 8 refused no reply: ADR-0298 and #310. Guest-flow refusal is the `FlowRefusal::Policy` path.
+- UDP 8 of 8 refused no reply: ADR-0323 and #310. Guest-flow refusal is the `FlowRefusal::Policy` path.
 - Issues, all open and in scope: #356 (period), #357 (deploy latency), #270 (scan cost), #275 (host edge wakes), #310 (guest UDP to VIP), #155 (IPv6, cited in `guest-networking.mdx`), #360 (redb).
 
 ## Decision story and style

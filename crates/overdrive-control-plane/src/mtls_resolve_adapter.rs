@@ -90,7 +90,7 @@
 //! D24a extends the headless reverse index with a service-VIP projection:
 //! TCP lookups use the `(VIP, listener.port)` key from each
 //! `service_backends` row. UDP never reaches `resolve`: the guest-flow owner
-//! refuses a guest UDP datagram to a VIP `Policy` first (ADR-0298).
+//! refuses a guest UDP datagram to a VIP `Policy` first (ADR-0323).
 //!
 //! ## relist-on-`Lagged` — WIRED via `subscribe_all_events` (C4 / D-TME-11
 //! ## refinement, option 2; this step closes F4)
@@ -146,7 +146,7 @@
 //!    maps to the same service selection as a frontend; an unmatched address
 //!    inside the configured VIP range is [`MeshUnreachable`]. UDP skips this
 //!    branch: a guest UDP datagram to a VIP never reaches `resolve` — the
-//!    guest-flow owner refuses it `Policy` first (ADR-0298).
+//!    guest-flow owner refuses it `Policy` first (ADR-0323).
 //! 3. **`by_frontend` MISS, `orig_dst.ip() ∈ 10.98.0.0/16`** —
 //!    fail-closed-on-frontend-subnet-miss (Finding-3): a mesh dial that is early
 //!    (race) OR to a withdrawn `<workload>` → [`MeshUnreachable`] (refuse, NO
@@ -558,7 +558,7 @@ impl BackendIndex {
     ///    to the same service selection as a frontend; an unmatched address
     ///    in the configured VIP range is `MeshUnreachable`. UDP skips this
     ///    branch: the guest-flow owner refuses a guest UDP datagram to a VIP
-    ///    `Policy` before it reaches `resolve` (ADR-0298).
+    ///    `Policy` before it reaches `resolve` (ADR-0323).
     /// 3. **`by_frontend` MISS, but `orig_dst.ip() ∈ 10.98.0.0/16`** —
     ///    fail-closed-on-frontend-subnet-miss (Finding-3): a mesh dial that is
     ///    early (race) OR to a withdrawn `<workload>`. → `MeshUnreachable` (refuse,
@@ -605,7 +605,7 @@ impl BackendIndex {
         // classified exactly like its frontend; an address in the configured
         // VIP range with no matching service fails closed. UDP deliberately
         // skips this branch: the guest-flow owner refuses a guest UDP datagram to a
-        // VIP `Policy` before it reaches `resolve` (ADR-0298).
+        // VIP `Policy` before it reaches `resolve` (ADR-0323).
         if proto == Proto::Tcp {
             if let Some(&service_id) = self.by_vip.get(&VipKey::new(orig_dst, Proto::Tcp)) {
                 return self

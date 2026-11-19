@@ -342,7 +342,7 @@ fn backend_octets() -> impl Strategy<Value = Vec<(u8, u8, u8)>> {
     })
 }
 
-/// Outcome anchor: OUT-RCG-HYDRATOR-READS-PROGRAMMED-MAP (D-20, ADR-0299).
+/// Outcome anchor: OUT-RCG-HYDRATOR-READS-PROGRAMMED-MAP (D-20, ADR-0324).
 /// A node whose dataplane map is empty is programmed by the hydrator's own
 /// tick: `hydrate_actual` reads `ProgrammedServiceView` over the instance the
 /// action shim writes through.

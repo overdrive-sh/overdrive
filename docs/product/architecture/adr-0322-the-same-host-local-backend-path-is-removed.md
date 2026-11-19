@@ -1,14 +1,16 @@
-# ADR-0297 — The same-host local-backend path is removed
+# ADR-0322 — The same-host local-backend path is removed
 
 ## Status
 
-Proposed. 2026-11-15. Author: Morgan (`nw-solution-architect`), DESIGN wave, APPLICATION
-layer, feature `reconciler-convergence-guarantees`. The user approved the decision on
-2026-11-15 (feature delta D-9). Independent design review is pending.
+Accepted. 2026-11-19 (originally drafted 2026-11-15 as ADR-0297, renumbered because the
+number collided with the native-benchmark-program ADRs). Author: Morgan
+(`nw-solution-architect`), DESIGN wave, APPLICATION layer, feature
+`reconciler-convergence-guarantees`. The user approved the decision on 2026-11-15 (feature
+delta D-9), and the decision is implemented on main.
 
 Supersedes [ADR-0053](adr-0053-same-host-backend-delivery-via-cgroup-sock-addr.md) in full.
 The consequence for ADR-0164's datagram clause is a separate decision:
-[ADR-0298](adr-0298-guest-udp-to-a-service-vip-is-refused-until-gh-310.md).
+[ADR-0323](adr-0323-guest-udp-to-a-service-vip-is-refused-until-gh-310.md).
 
 ## Context
 
@@ -82,7 +84,7 @@ Negative and bounds:
 
 - A host-side client that dials a Service VIP is not served by a rewrite. None exists today.
   A future one is designed on its own terms, from the then-current Service dataplane.
-- The ADR-0164 datagram clause depended on this rewrite and cannot stand; ADR-0298 records
+- The ADR-0164 datagram clause depended on this rewrite and cannot stand; ADR-0323 records
   what replaces it.
 - The `reconcile_conflict` observation row's route tag has a cgroup value that only the
   deleted actions could produce. Its fate is pinned in the feature delta (D-13).
@@ -98,4 +100,4 @@ Negative and bounds:
   commit (feature delta, slice 02).
 
 Links: [feature delta](../../feature/reconciler-convergence-guarantees/feature-delta.md)
-(D-9, slice 02), ADR-0053 (superseded), ADR-0298, ADR-0224, ADR-0276.
+(D-9, slice 02), ADR-0053 (superseded), ADR-0323, ADR-0224, ADR-0276.

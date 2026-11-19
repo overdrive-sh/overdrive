@@ -556,7 +556,7 @@ fn inject_tcp_syns(
     Ok(())
 }
 
-// ----- D-20 / ADR-0299: the two fingerprint slots XDP must never select -----
+// ----- D-20 / ADR-0324: the two fingerprint slots XDP must never select -----
 
 /// Distinct flows injected by the slot-selection test, one per source port
 /// `1024..1024 + SLOT_FLOWS`. The flow set is deterministic (fixed source IP,
@@ -567,7 +567,7 @@ const SLOT_FLOWS: u16 = 64_000;
 /// overflows and a missing frame is never a congestion drop.
 const SLOT_BATCH: u16 = 250;
 
-/// D-20, ADR-0299 (DISTILL obligation 3a): with the inner capacity at 16,383,
+/// D-20, ADR-0324 (DISTILL obligation 3a): with the inner capacity at 16,383,
 /// XDP still indexes the table modulo 16,381, so it never selects slots 16,381
 /// and 16,382, where the dataplane stores the applied set's fingerprint.
 ///

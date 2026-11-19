@@ -1,10 +1,10 @@
 //! [`ProgrammedServiceView`] — the read-port over the programmed service map
-//! (D-20, ADR-0299).
+//! (D-20, ADR-0324).
 //!
 //! `service-map-hydrator`'s `actual` is the resource it manages: the service
 //! map the dataplane has programmed. The port returns the fingerprint of the
 //! backend set the dataplane last applied for a frontend, not the backend set.
-//! The `Dataplane` trait carries no read operation (ADR-0299 rejects adding
+//! The `Dataplane` trait carries no read operation (ADR-0324 rejects adding
 //! one), so this is a separate read-only port, reached only through
 //! [`HydrationContext`](crate::reconcilers::HydrationContext).
 
@@ -14,7 +14,7 @@ use crate::dataplane::ServiceFrontend;
 use crate::dataplane::fingerprint::BackendSetFingerprint;
 use crate::traits::dataplane::DataplaneError;
 
-/// The read-port over the programmed service map (D-20, ADR-0299).
+/// The read-port over the programmed service map (D-20, ADR-0324).
 #[async_trait]
 pub trait ProgrammedServiceView: Send + Sync {
     /// The fingerprint of the backend set the dataplane last applied for

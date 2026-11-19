@@ -39,7 +39,7 @@ From US-01:
 
 ## Dependencies
 
-None. Interacts with #271 and #270 (cited). The wakeup-model change is ADR-0296 (D-1, approved).
+None. Interacts with #271 and #270 (cited). The wakeup-model change is ADR-0321 (D-1, approved).
 
 ## Effort
 

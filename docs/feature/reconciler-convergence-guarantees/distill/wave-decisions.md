@@ -24,7 +24,7 @@
 
 ## D-20 rulings
 
-Details within the approved D-20 (2026-11-17). The contracts are pinned in the feature delta (D-20) and ADR-0299.
+Details within the approved D-20 (2026-11-17). The contracts are pinned in the feature delta (D-20) and ADR-0324.
 
 - B-D20-1 (composition wiring). One value, `DataplanePorts`, built only from a single concrete `Arc<D>` where `D: Dataplane + ProgrammedServiceView`, carries both ports. `ComposedDataplane.dataplane` and `AppState.dataplane` are typed as it, `AppState::new` and `new_with_workflow_engine` take `impl Into<DataplanePorts>`, and `build_hydration_context` reads `programmed_services` from it; `InertProgrammedServices` is deleted. Construction sites: `AppState::new` 96 call sites in 85 files (unchanged through the `From` impl except the callers that hold a trait object, listed in the delta), `new_with_workflow_engine` 3, composer struct literals 4. The earlier "about 175" count is replaced by these.
 - B-D20-2 (IPv6 backend). `update_service` refuses a non-empty set containing an IPv6 backend with `LoadFailed`, before any write, as the first validation; the prior read is unchanged. The host already does; the sim and the trait rustdoc change. S-02-D (`sim_dataplane_reverse_nat_per_proto.rs`) is rewritten by the acceptance designer to assert the refusal, authored as a pending RED and activated by the DELIVER step that changes the sim. The scenario in `docs/scenarios/udp-service-support/test-scenarios.md` follows. Evidence and the full list are in the delta.

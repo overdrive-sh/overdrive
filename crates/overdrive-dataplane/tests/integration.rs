@@ -69,7 +69,7 @@ mod integration {
     /// udp-service-support US-05 / S-05-A..C (ADR-0060 Tier 3; K4) —
     /// multi-listener (TCP + UDP) forward+reverse e2e. RED scaffolds.
     mod multi_listener_tcp_udp_e2e;
-    /// reconciler-convergence-guarantees (D-20, ADR-0299) — `ProgrammedServiceView`
+    /// reconciler-convergence-guarantees (D-20, ADR-0324) — `ProgrammedServiceView`
     /// Host and Sim agree through the port over one `update_service` sequence, and a
     /// restarted host dataplane reads no frontend.
     mod programmed_service_view_equivalence;
@@ -91,7 +91,7 @@ mod integration {
     /// single-UDP-listener forward+reverse e2e (walking skeleton).
     /// RED scaffolds.
     mod reverse_nat_udp_e2e;
-    /// reconciler-convergence-guarantees Slice 02 AC2 (ADR-0297) — the boot
+    /// reconciler-convergence-guarantees Slice 02 AC2 (ADR-0322) — the boot
     /// attaches none of the deleted same-host cgroup socket programs.
     mod same_host_programs_not_loaded_at_boot;
     /// phase-2-xdp-service-map Slice 06 (US-06; S-2.2-22) —

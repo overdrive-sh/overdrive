@@ -242,7 +242,7 @@ Scenario: A backend set containing an IPv6 backend is refused and nothing is wri
   And the frontend's prior backends are unchanged
 ```
 The refusal is the first validation, before any write (GH #155 tracks IPv6
-support; D-20 of reconciler-convergence-guarantees, ADR-0299). An empty set is
+support; D-20 of reconciler-convergence-guarantees, ADR-0324). An empty set is
 still the withdraw. The host adapter already refuses.
 
 ### S-02-E — SCTP is rejected at the parse boundary (confirm #164 boundary) `@US-02` `@error` `@in-memory` Tier 1

@@ -1,11 +1,12 @@
-# ADR-0296 — Every reconciler declares its managed targets and the runtime re-evaluates them each period
+# ADR-0321 — Every reconciler declares its managed targets and the runtime re-evaluates them each period
 
 ## Status
 
-Proposed. 2026-11-13. Author: Morgan (`nw-solution-architect`), DESIGN wave, APPLICATION
-layer, feature `reconciler-convergence-guarantees`. The user approved decision D-1 of the
-feature delta on 2026-11-13. The ADR stays `Proposed` until independent design review
-completes.
+Accepted. 2026-11-19 (originally drafted 2026-11-13 as ADR-0296, renumbered because the
+number collided with the native-benchmark-program ADRs). Author: Morgan
+(`nw-solution-architect`), DESIGN wave, APPLICATION layer, feature
+`reconciler-convergence-guarantees`. The user approved decision D-1 of the feature delta on
+2026-11-13, and the decision is implemented on main.
 
 **Supersedes in part (proposed), ADR-0084:** the per-reconciler `resync_schedule`
 declaration (§1 Piece A, §4) and the interest router's periodic relist (Amendment
@@ -106,7 +107,7 @@ converges `actual` to `desired`, and it does not make a View-gated action re-emi
 model-checked statement, its abstraction and bound are in the feature delta
 (`Formal protocol model`, `Quality attributes`). No reconciler's View decides whether an
 effect is in place. A re-evaluation helps only when `actual` is read from the resource: the
-`service-map-hydrator` reads the programmed service map (ADR-0299), so a map lost to a
+`service-map-hydrator` reads the programmed service map (ADR-0324), so a map lost to a
 reboot or a restart is reprogrammed by the next pass. `service-lifecycle`'s probe-driven stop markers are pacing keyed to
 the probe row's `run_seq`: the pass re-evaluates the allocation and changes no verdict
 (feature delta D-6, which names the decisions behind each marker).
@@ -135,4 +136,4 @@ Negative and bounds:
   production today (empty registry); no dedicated wake is added for it.
 
 Links: [feature delta](../../feature/reconciler-convergence-guarantees/feature-delta.md)
-(interface contract D-1, `Formal protocol model`), ADR-0084, ADR-0086, ADR-0102, ADR-0273, ADR-0299, GH #275, GH #356.
+(interface contract D-1, `Formal protocol model`), ADR-0084, ADR-0086, ADR-0102, ADR-0273, ADR-0324, GH #275, GH #356.

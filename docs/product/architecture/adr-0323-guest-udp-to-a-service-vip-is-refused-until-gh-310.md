@@ -1,11 +1,13 @@
-# ADR-0298 — Guest UDP to a service VIP is refused until GH #310
+# ADR-0323 — Guest UDP to a service VIP is refused until GH #310
 
 ## Status
 
-Proposed. 2026-11-15. Author: Morgan (`nw-solution-architect`), DESIGN wave, APPLICATION
-layer, feature `reconciler-convergence-guarantees`. The user approved the supersession
-(feature delta D-10) and the refusal (D-11, option B) on 2026-11-15. Independent design
-review is pending.
+Accepted. 2026-11-19 (originally drafted 2026-11-15 as ADR-0298, renumbered because the
+number collided with the native-benchmark-program ADRs). Author: Morgan
+(`nw-solution-architect`), DESIGN wave, APPLICATION layer, feature
+`reconciler-convergence-guarantees`. The user approved the supersession (feature delta
+D-10) and the refusal (D-11, option B) on 2026-11-15, and the decision is implemented on
+main.
 
 Supersedes the datagram clause and the startup check of
 [ADR-0164](adr-0164-guest-vip-tcp-resolves-as-mesh-and-datagrams-use-the-connect4-rewrite.md).
@@ -19,7 +21,7 @@ adopted or reversed independently.
 
 ADR-0164 says guest datagrams to a service VIP use the ADR-0053 `connect4` rewrite on the
 guest-flow owner's connected host sockets, and its startup check refuses to start an owner
-whose cgroup is not at or below the `connect4` attach path. [ADR-0297](adr-0297-the-same-host-local-backend-path-is-removed.md)
+whose cgroup is not at or below the `connect4` attach path. [ADR-0322](adr-0322-the-same-host-local-backend-path-is-removed.md)
 removes the rewrite, so the clause has nothing to stand on.
 
 The clause never worked for a VM backend. Metal observation (Linux 7.0.0-38, commit
@@ -86,7 +88,7 @@ The exact behaviour is pinned in the
 | Option | Why it loses |
 |---|---|
 | Leave a guest UDP datagram to a VIP on the generic path (no refusal) | Per Context, the existing route check does not cover the VIP range: a datagram to a unicast-routed VIP is sent onto the host network, a silent timeout for the guest and a packet on the host network. The `Policy` refusal covers all VIP-range destinations and is an existing variant that adds no surface. |
-| Keep the clause and the startup check | The clause names a rewrite ADR-0297 removes, and it never worked for a VM backend. |
+| Keep the clause and the startup check | The clause names a rewrite ADR-0322 removes, and it never worked for a VM backend. |
 | Keep only the startup check | It guarded only the rewrite. `run_server` enrols the process into `overdrive.slice/control-plane.slice` before the check runs, so no production boot reached its refusal. |
 | Serve guest UDP to a VIP now | It needs kernel-resident forwarding (#310). Designing it here is outside this feature. |
 
@@ -103,7 +105,7 @@ Negative and bounds:
 
 - Guest UDP to a Service VIP is not served until #310.
 - The removed post-connect kernel-peer check also failed closed against any `connect4`
-  rewrite of an owner datagram socket into the guest prefix. After ADR-0297 no
+  rewrite of an owner datagram socket into the guest prefix. After ADR-0322 no
   `connect4` program rewrites an owner socket: `cgroup_connect4_gateway`, which stays
   attached at an ancestor cgroup, returns allow without touching the context for any socket
   not registered in its intent map (`cgroup_connect4_gateway.rs:58-60`), and the owner's
@@ -118,5 +120,5 @@ Negative and bounds:
   rewrite to be inside.
 
 Links: [feature delta](../../feature/reconciler-convergence-guarantees/feature-delta.md)
-(D-10, D-11, slice 02), ADR-0164 (datagram clause and startup check superseded), ADR-0297,
+(D-10, D-11, slice 02), ADR-0164 (datagram clause and startup check superseded), ADR-0322,
 GH #310, GH #358 (first VIP collides with a host address).
