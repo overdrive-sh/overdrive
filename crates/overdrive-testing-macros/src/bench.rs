@@ -28,7 +28,8 @@ const UNITS: [&str; 6] = ["ns", "bytes", "bytes_per_second", "qps", "ratio", "co
 const SERVICE_CLOCKS: [(&str, &str); 1] = [("injected_monotonic", "InjectedMonotonic")];
 
 /// The guest clock sources a declaration may name, with the `GuestClock` variant each emits.
-const GUEST_CLOCKS: [(&str, &str); 1] = [("init_elapsed_ms", "InitElapsedMs")];
+const GUEST_CLOCKS: [(&str, &str); 2] =
+    [("init_elapsed_ms", "InitElapsedMs"), ("guest_monotonic", "Monotonic")];
 
 /// The top-level keys, in the order the unknown-key message lists them.
 const KEYS: &str =

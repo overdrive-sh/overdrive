@@ -23,7 +23,6 @@ use serial_test::serial;
 #[overdrive_test(host_pure)]
 #[test]
 #[serial(trybuild)]
-#[should_panic(expected = "1 of 1 tests failed")]
 fn an_unregistered_substrate_fails_the_build_naming_it_and_the_registered_ones() {
     let cases = trybuild::TestCases::new();
     cases.compile_fail("tests/compile_fail/unknown_substrate.rs");
@@ -36,7 +35,6 @@ fn an_unregistered_substrate_fails_the_build_naming_it_and_the_registered_ones()
 #[overdrive_test(host_pure)]
 #[test]
 #[serial(trybuild)]
-#[should_panic(expected = "1 of 1 tests failed")]
 fn a_guest_benchmark_declaration_builds() {
     let cases = trybuild::TestCases::new();
     cases.pass("tests/compile_fail/guest_substrate_accepted.rs");
@@ -111,7 +109,6 @@ fn an_unknown_service_clock_source_fails_the_build_naming_the_set() {
 #[overdrive_test(host_pure)]
 #[test]
 #[serial(trybuild)]
-#[should_panic(expected = "1 of 1 tests failed")]
 fn an_unknown_guest_clock_source_fails_the_build_naming_the_set() {
     let cases = trybuild::TestCases::new();
     cases.compile_fail("tests/compile_fail/unknown_guest_clock_source.rs");

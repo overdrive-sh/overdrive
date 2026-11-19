@@ -10,11 +10,9 @@ use crate::{Error, Replicate, ReplicateFailure, Result};
 pub use linkme;
 
 /// The registered substrates (DDD-4): `native` is the exclusive Metal host with no
-/// namespace and no wrapper. The registry is closed; a guest substrate is not available.
-const SUBSTRATES: [&str; 1] = ["native"];
-
-/// The substrate identifier the attribute refuses with its own message.
-const GUEST: &str = "guest";
+/// namespace and no wrapper; `guest` is a kit guest the benchmark launches directly on the
+/// Metal host (ADR-0325). The registry is closed.
+const SUBSTRATES: [&str; 2] = ["native", "guest"];
 
 /// Every benchmark the linked crates declare; the macro adds one entry per declaration.
 #[linkme::distributed_slice]
@@ -74,6 +72,9 @@ pub enum GuestClock {
     /// A duration `overdrive-init` measured with `Instant::elapsed`, to the millisecond
     /// (`init_elapsed_ms`).
     InitElapsedMs,
+    /// A duration the guest program measured with `Instant` on the guest's `CLOCK_MONOTONIC`,
+    /// in whole nanoseconds (`guest_monotonic`).
+    Monotonic,
 }
 
 impl GuestClock {
@@ -82,6 +83,7 @@ impl GuestClock {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::InitElapsedMs => "CLOCK_MONOTONIC (overdrive-init Instant::elapsed, 1 ms)",
+            Self::Monotonic => "CLOCK_MONOTONIC (in-guest Instant, 1 ns)",
         }
     }
 }
@@ -209,18 +211,9 @@ impl<const LENGTH: usize> Buffer<LENGTH> {
     }
 }
 
-/// The four pieces of the refusal of `name`: the registry's message, with the substrate named.
-const fn refusal_pieces(name: &str) -> [&str; 4] {
-    if same(name, GUEST) {
-        [
-            "guest substrates are not available to benchmarks (substrate `guest`); the registered substrates are: ",
-            "",
-            "",
-            "",
-        ]
-    } else {
-        ["substrate `", name, "` is not registered; the registered substrates are: ", ""]
-    }
+/// The three pieces of the refusal of `name`: the registry's message, with the substrate named.
+const fn refusal_pieces(name: &str) -> [&str; 3] {
+    ["substrate `", name, "` is not registered; the registered substrates are: "]
 }
 
 /// The length of the refusal message of `name`.
@@ -307,7 +300,6 @@ mod tests {
     /// including a different case or a trailing space, is unregistered.
     /// `CONTRACT_SHAPE`: pure-function.
     #[test]
-    #[should_panic(expected = "guest must be a registered substrate")]
     fn native_and_guest_are_the_registered_substrates() {
         assert!(substrate_registered("native"));
         assert!(substrate_registered("guest"), "guest must be a registered substrate");
@@ -320,7 +312,6 @@ mod tests {
     /// registration order; there is no refusal of its own for `guest` any more.
     /// `CONTRACT_SHAPE`: pure-function.
     #[test]
-    #[should_panic(expected = "the registered substrates are: native, guest")]
     fn the_refusal_names_the_substrate_and_the_registered_ones() {
         const LENGTH: usize = substrate_refusal_length("guest_xyz");
         const BUILT: [u8; LENGTH] = substrate_refusal::<LENGTH>("guest_xyz");
