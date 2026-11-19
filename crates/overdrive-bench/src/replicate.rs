@@ -11,12 +11,18 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::histogram::{NotStorable, storable};
-use crate::record::{Command as LoggedCommand, MetricEntry};
+use crate::record::{Command as LoggedCommand, GuestView, MetricEntry};
 use crate::registry::BenchmarkDecl;
 use crate::{BpfStatsHold, Result};
 
 /// The profile name of a benchmark that declares none.
 const IMPLICIT_PROFILE: &str = "default";
+
+/// The substrate a benchmark declares to run in a kit guest.
+pub const GUEST_SUBSTRATE: &str = "guest";
+
+/// Why a guest-substrate replicate that returned `Ok` without a view is failed (M-1).
+const NO_GUEST_VIEW: &str = "the replicate reported no guest view";
 
 /// A failed replicate: the body's report that a fixture did not build or a measurement
 /// could not be taken. The runner counts it and continues.
@@ -105,6 +111,10 @@ pub struct Finished {
     pub(crate) commands: Vec<LoggedCommand>,
     /// Why the recording cannot be stored whole, when it cannot.
     pub(crate) failure: Option<String>,
+    /// The guest view the replicate reported (its first call), if any.
+    pub(crate) view: Option<GuestView>,
+    /// The console the replicate retained, if any.
+    pub(crate) console: Option<String>,
 }
 
 /// One `exec` of the replicate's command log.
@@ -127,6 +137,10 @@ pub struct Replicate {
     entries: BTreeMap<String, Entry>,
     notes: BTreeMap<String, String>,
     commands: Vec<Executed>,
+    /// Whether the benchmark declares the `guest` substrate.
+    guest: bool,
+    view: Option<GuestView>,
+    console: Option<String>,
 }
 
 impl Replicate {
@@ -145,6 +159,9 @@ impl Replicate {
             entries: BTreeMap::new(),
             notes: BTreeMap::new(),
             commands: Vec::new(),
+            guest: decl.substrate == GUEST_SUBSTRATE,
+            view: None,
+            console: None,
         }
     }
 
@@ -262,40 +279,33 @@ impl Replicate {
         Ok(String::from_utf8_lossy(&output.stdout).into_owned())
     }
 
-    /// Reports the guest view of this run (DDD-4).
-    ///
-    /// SCAFFOLD: true. Inert: it records nothing, so the runner writes no `guest_observed` line
-    /// until DELIVER implements it.
+    /// Reports the guest view of this run (DDD-4). The first call of a run fixes the run's view;
+    /// later calls return `Ok` and change nothing.
     ///
     /// # Errors
-    /// DELIVER: a `ReplicateFailure` when the benchmark does not declare the `guest` substrate.
-    #[allow(
-        clippy::needless_pass_by_value,
-        clippy::needless_pass_by_ref_mut,
-        clippy::unnecessary_wraps,
-        clippy::unused_self,
-        reason = "inert RED scaffold"
-    )]
-    pub fn report_guest_view(&mut self, view: crate::GuestView) -> Result<(), ReplicateFailure> {
-        let _ = view;
+    /// A `ReplicateFailure` when the benchmark does not declare the `guest` substrate.
+    pub fn report_guest_view(&mut self, view: GuestView) -> Result<(), ReplicateFailure> {
+        if !self.guest {
+            return Err(ReplicateFailure::fixture(
+                "a guest view was reported by a benchmark that does not declare the guest substrate",
+            ));
+        }
+        self.view.get_or_insert(view);
         Ok(())
     }
 
-    /// Writes `text` as this replicate's console beside the record (DDD-9).
-    ///
-    /// SCAFFOLD: true. Inert: it writes nothing until DELIVER implements it.
+    /// Retains `text` as this replicate's console beside the record (DDD-9). The runner writes it
+    /// create-new once the body returns, in every outcome.
     ///
     /// # Errors
-    /// DELIVER: a second call by the same replicate, or a write failure.
-    #[allow(
-        clippy::missing_const_for_fn,
-        clippy::needless_pass_by_ref_mut,
-        clippy::unnecessary_wraps,
-        clippy::unused_self,
-        reason = "inert RED scaffold"
-    )]
+    /// A `ReplicateFailure` on a second call by the same replicate.
     pub fn retain_console(&mut self, text: &str) -> Result<(), ReplicateFailure> {
-        let _ = text;
+        if self.console.is_some() {
+            return Err(ReplicateFailure::fixture(
+                "the replicate retained its console twice; a console is written once",
+            ));
+        }
+        self.console = Some(text.to_owned());
         Ok(())
     }
 
@@ -334,7 +344,17 @@ impl Replicate {
                 status: executed.status,
             })
             .collect();
-        Finished { metrics, notes: self.notes, commands, failure }
+        if self.guest && self.view.is_none() {
+            failure.get_or_insert_with(|| NO_GUEST_VIEW.to_owned());
+        }
+        Finished {
+            metrics,
+            notes: self.notes,
+            commands,
+            failure,
+            view: self.view,
+            console: self.console,
+        }
     }
 
     fn require_declared(&self, metric: &str) -> Result<bool, ReplicateFailure> {
@@ -820,9 +840,6 @@ mod tests {
     /// M-1 under smoke: a guest body that returns `Ok` without reporting a view fails the smoke
     /// run naming the benchmark and the pinned reason.
     #[test]
-    #[should_panic(
-        expected = "a guest body that returns Ok without a view must fail its smoke run"
-    )]
     fn smoke_fails_a_guest_body_that_returns_ok_without_reporting_a_view() {
         fn no_view(replicate: &mut Replicate) -> Result<(), ReplicateFailure> {
             replicate.retain_console("a console")?;
@@ -846,7 +863,6 @@ mod tests {
 
     /// A second `retain_console` in one replicate fails the replicate under smoke as in a real run.
     #[test]
-    #[should_panic(expected = "a second retain_console must fail its smoke run")]
     fn smoke_fails_a_guest_body_that_retains_its_console_twice() {
         fn twice(replicate: &mut Replicate) -> Result<(), ReplicateFailure> {
             replicate.report_guest_view(guest_view())?;
@@ -868,7 +884,6 @@ mod tests {
     /// The guest-substrate precondition under smoke: a native benchmark that reports a guest view
     /// fails its smoke run (the view of a benchmark that does not declare the guest substrate).
     #[test]
-    #[should_panic(expected = "a view reported by a native benchmark must fail its smoke run")]
     fn smoke_fails_a_native_body_that_reports_a_guest_view() {
         fn reports(replicate: &mut Replicate) -> Result<(), ReplicateFailure> {
             replicate.report_guest_view(guest_view())?;

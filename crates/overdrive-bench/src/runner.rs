@@ -23,12 +23,12 @@ use crate::args::Args;
 use crate::host::{HostProbe, HostReading, ProcSysProbe};
 use crate::marker::{self, MARKER_SETTING, Marker};
 use crate::record::{
-    BpfStatsMode, Canary, CanaryPhase, Clock, ClockSource, Declaration, EvidenceClass, Host, Line,
-    METHODOLOGY_VERSION, MetricDecl, Outcome, ProfileDecl, RecordWriter, ReferenceDecl,
-    ReplicateLine, RunFinished, RunRefused, RunStarted, SCHEMA_VERSION, Substrate, Unit,
+    BpfStatsMode, Canary, CanaryPhase, Clock, ClockSource, Declaration, EvidenceClass, GuestBlock, GuestObserved, GuestView, Host, Line,
+    METHODOLOGY_VERSION, MetricDecl, ObservedArtifacts, Outcome, ProfileDecl, RecordWriter,
+    ReferenceDecl, ReplicateLine, RunFinished, RunRefused, RunStarted, SCHEMA_VERSION, Substrate, Unit,
 };
 use crate::registry::{self, BenchmarkDecl};
-use crate::replicate::{HostClock, Replicate, ReplicateFailure};
+use crate::replicate::{GUEST_SUBSTRATE, HostClock, Replicate, ReplicateFailure};
 use crate::report::render;
 use crate::schedule::plan;
 use crate::stats_hold::{AyaStatsEnabler, BpfStatsHold, StatsEnabler, ineffective_program};
@@ -160,10 +160,6 @@ pub trait RecordSink {
     /// Write the derived report next to the record.
     fn write_report(&self, dir: &Path, text: &str) -> io::Result<()>;
     /// Write `bytes` at `dir`/`relative`, create-new, creating the parent directories (DDD-9).
-    #[allow(
-        dead_code,
-        reason = "SCAFFOLD: the runner calls it once DELIVER implements the console retention"
-    )]
     fn write_artifact(&self, dir: &Path, relative: &Path, bytes: &[u8]) -> io::Result<()>;
 }
 
@@ -191,9 +187,13 @@ impl RecordSink for FileSink {
         std::fs::write(dir.join(REPORT_FILE), text)
     }
 
-    // SCAFFOLD: true. Inert: writes nothing until DELIVER implements it.
-    fn write_artifact(&self, _dir: &Path, _relative: &Path, _bytes: &[u8]) -> io::Result<()> {
-        Ok(())
+    fn write_artifact(&self, dir: &Path, relative: &Path, bytes: &[u8]) -> io::Result<()> {
+        let path = dir.join(relative);
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(path)?;
+        file.write_all(bytes)
     }
 }
 
@@ -336,7 +336,8 @@ impl Runner<'_> {
         record.append(&Line::RunStarted(Box::new(start.line(mode))))?;
 
         self.canary_samples(&mut record, CanaryPhase::Start)?;
-        let counts = execute(decl, environment.seed, hold.as_ref(), &mut record)?;
+        let counts =
+            execute(decl, environment.seed, hold.as_ref(), &mut record, (self.sink, dir.as_path()))?;
         self.canary_samples(&mut record, CanaryPhase::End)?;
         record.append(&Line::RunFinished(RunFinished {
             finished: now(),
@@ -425,6 +426,10 @@ struct Start<'a> {
 }
 
 impl Start<'_> {
+    fn guest(&self) -> bool {
+        self.decl.substrate == GUEST_SUBSTRATE
+    }
+
     fn line(&self, bpf_stats: BpfStatsMode) -> RunStarted {
         RunStarted {
             schema: SCHEMA_VERSION,
@@ -436,7 +441,7 @@ impl Start<'_> {
                 Evidence::Maintained => EvidenceClass::Maintained,
                 Evidence::Spike => EvidenceClass::Spike,
             },
-            substrate: Substrate::Native,
+            substrate: if self.guest() { Substrate::Guest } else { Substrate::Native },
             commit: self.marker.commit.clone(),
             dirty: self.marker.dirty,
             debug_assertions: self.debug_assertions,
@@ -448,7 +453,7 @@ impl Start<'_> {
                 service: self.decl.service_clock,
                 guest: self.decl.guest_clock,
             },
-            guest: None,
+            guest: self.guest().then_some(GuestBlock),
             bpf_stats,
             declaration: declaration(self.decl),
         }
@@ -503,14 +508,21 @@ struct Counts {
     failed: u64,
 }
 
-/// Run every profile's schedule, appending one `replicate` line per run.
+/// Where a run's artifacts go: the sink and the result directory.
+type Artifacts<'a> = (&'a dyn RecordSink, &'a Path);
+
+/// Run every profile's schedule, appending one `replicate` line per run. The first view a
+/// replicate reports becomes the run's one `guest_observed` line, right before that replicate's
+/// line.
 fn execute(
     decl: &BenchmarkDecl,
     seed: u64,
     hold: Option<&Arc<BpfStatsHold>>,
     record: &mut RecordWriter<Box<dyn Write>>,
+    artifacts: Artifacts<'_>,
 ) -> Result<Counts> {
     let mut counts = Counts { ok: 0, failed: 0 };
+    let mut view_written = false;
     let profiles: Vec<&str> = if decl.profiles.is_empty() {
         vec![IMPLICIT_PROFILE]
     } else {
@@ -518,10 +530,14 @@ fn execute(
     };
     for (index, profile) in (0_u32..).zip(profiles) {
         for planned in plan(decl.arms, decl.replicates, index, seed) {
-            let line = run_one(decl, profile, &planned, hold);
+            let (line, view) = run_one(decl, profile, &planned, hold, artifacts);
             match line.outcome {
                 Outcome::Ok => counts.ok += 1,
                 Outcome::Failed => counts.failed += 1,
+            }
+            if let (false, Some(view)) = (view_written, view) {
+                view_written = true;
+                record.append(&Line::GuestObserved(observed(view)))?;
             }
             record.append(&Line::Replicate(Box::new(line)))?;
         }
@@ -529,13 +545,37 @@ fn execute(
     Ok(counts)
 }
 
-/// One replicate: a fresh handle, the body once, and what it recorded.
+/// The record's form of the view a replicate reported.
+fn observed(view: GuestView) -> GuestObserved {
+    GuestObserved {
+        vcpus: view.vcpus,
+        memory_mib: view.memory_mib,
+        kernel: view.kernel,
+        clocksource: view.clocksource,
+        artifacts: ObservedArtifacts {
+            overdrive_init: view.artifacts.overdrive_init,
+            overdrive_guest_peer: view.artifacts.overdrive_guest_peer,
+            ovd_fwd: view.artifacts.ovd_fwd,
+        },
+    }
+}
+
+/// The console's place under the result directory (DDD-9).
+fn console_path(profile: &str, planned: &crate::schedule::Planned) -> PathBuf {
+    Path::new("artifacts")
+        .join(profile)
+        .join(format!("{}-{}-{}", planned.block, planned.position, planned.arm))
+        .join("console.log")
+}
+
+/// One replicate: a fresh handle, the body once, and what it recorded; with the view it reported.
 fn run_one(
     decl: &BenchmarkDecl,
     profile: &str,
     planned: &crate::schedule::Planned,
     hold: Option<&Arc<BpfStatsHold>>,
-) -> ReplicateLine {
+    (sink, dir): Artifacts<'_>,
+) -> (ReplicateLine, Option<GuestView>) {
     if let Some(hold) = hold {
         // Reads of an earlier replicate are not this one's evidence of effectiveness.
         drop(hold.take_reads());
@@ -543,14 +583,19 @@ fn run_one(
     let mut replicate = Replicate::new(decl, &planned.arm, profile, hold.cloned());
     let body = (decl.run)(&mut replicate);
     let finished = replicate.finish();
+    let console_failure = finished.console.as_deref().and_then(|text| {
+        sink.write_artifact(dir, &console_path(profile, planned), text.as_bytes())
+            .err()
+            .map(|source| format!("the console could not be retained: {source}"))
+    });
     let ineffective = hold.and_then(|hold| ineffective_program(&hold.take_reads()));
     let failure = match body {
         Err(failure) => Some(failure.to_string()),
-        Ok(()) => finished.failure.or_else(|| {
+        Ok(()) => finished.failure.or(console_failure).or_else(|| {
             ineffective.map(|id| ReplicateFailure::stats_not_effective(id).to_string())
         }),
     };
-    ReplicateLine {
+    let line = ReplicateLine {
         profile: profile.to_owned(),
         arm: planned.arm.clone(),
         block: planned.block,
@@ -561,7 +606,8 @@ fn run_one(
         metrics: finished.metrics,
         notes: finished.notes,
         commands: finished.commands,
-    }
+    };
+    (line, finished.view)
 }
 
 fn now() -> String {
@@ -1200,7 +1246,6 @@ mod tests {
     /// static `guest` block and states substrate `guest`; the record validates.
     /// Boundary scenario (1): a conforming host and a prepared kit proceed to samples.
     #[test]
-    #[should_panic(expected = "run_started must state substrate guest")]
     fn the_first_reported_guest_view_is_written_once_before_that_replicates_line() {
         script(&[Step::Report("7.0.0-38-generic"); 9]);
         let (outcome, _dir) = run(&guest_decl(scripted), &Fixture::eligible());
@@ -1236,7 +1281,6 @@ mod tests {
     /// A later replicate's view is not compared and changes nothing: one line, the first view.
     /// The operator fixes the kernel, the artifacts and the shape (ADR-0328).
     #[test]
-    #[should_panic(expected = "exactly one guest_observed line")]
     fn a_later_guest_view_writes_no_second_line_and_changes_nothing() {
         let mut steps = [Step::Report("7.0.0-38-generic"); 9];
         steps[1] = Step::Report("6.1.0-another");
@@ -1258,7 +1302,6 @@ mod tests {
     /// reporting a view is failed by the runner, and the record still validates; with no replicate
     /// ever reporting there is no `guest_observed` line.
     #[test]
-    #[should_panic(expected = "reported no guest view")]
     fn a_guest_replicate_that_returns_ok_without_a_view_is_failed_and_the_record_still_validates() {
         script(&[Step::Silent; 9]);
         let (outcome, _dir) = run(&guest_decl(scripted), &Fixture::eligible());
@@ -1285,7 +1328,6 @@ mod tests {
     /// A view reported by a replicate that then fails stays the run's view; the replicate stays
     /// failed with its own reason (a failure after reporting is not "no view").
     #[test]
-    #[should_panic(expected = "exactly one guest_observed line")]
     fn a_view_reported_by_a_replicate_that_then_fails_stays_the_runs_view() {
         let mut steps = [Step::Report("6.1.0-another"); 9];
         steps[0] = Step::ReportThenFail("7.0.0-38-generic", "the in-guest program exited 3");
@@ -1313,7 +1355,6 @@ mod tests {
     /// counted, the run continues, and the `guest_observed` line is written right before the line
     /// of the first replicate that reports a view (after the failed one), preceding every `ok` line.
     #[test]
-    #[should_panic(expected = "right before the replicate that reported the view")]
     fn a_replicate_that_fails_before_reporting_is_counted_and_later_replicates_still_run() {
         let mut steps = [Step::Report("7.0.0-38-generic"); 9];
         steps[0] = Step::Fail("guest boot: no READY within 60s");
@@ -1345,7 +1386,6 @@ mod tests {
     /// guest boots; `run_started` still carries the static `guest` block, `run_refused` follows,
     /// no `guest_observed` line is written and the refused record validates.
     #[test]
-    #[should_panic(expected = "must carry the static guest block")]
     fn a_drifted_host_never_calls_a_guest_benchmarks_body_and_writes_no_view() {
         fn never_called(_: &mut Replicate) -> Result<(), ReplicateFailure> {
             panic!("a refused host must not call the family body");
@@ -1372,7 +1412,6 @@ mod tests {
     /// no `guest_observed` line, and a native replicate that tries to report a view is failed (a
     /// native record may not carry one).
     #[test]
-    #[should_panic(expected = "a native replicate that reports a guest view must fail")]
     fn a_native_benchmark_writes_no_guest_block_and_refuses_a_reported_view() {
         fn reports(replicate: &mut Replicate) -> Result<(), ReplicateFailure> {
             replicate.report_guest_view(view("7.0.0-38-generic"))?;
@@ -1423,7 +1462,6 @@ mod tests {
     /// DDD-9: every replicate's console is written, in every outcome, to
     /// `artifacts/<profile>/<block>-<position>-<arm>/console.log` under the result directory.
     #[test]
-    #[should_panic(expected = "console must be written as an artifact in every outcome")]
     fn a_replicates_console_is_retained_beside_the_record_in_every_outcome() {
         script(&[]);
         let (outcome, dir) = run(&guest_decl(retaining), &Fixture::eligible());
@@ -1454,7 +1492,6 @@ mod tests {
     /// A second `retain_console` by the same replicate fails it (create-new), and only the first
     /// console is written.
     #[test]
-    #[should_panic(expected = "second retain_console must fail the replicate")]
     fn retaining_a_console_twice_in_one_replicate_fails_it_and_keeps_the_first() {
         fn twice(replicate: &mut Replicate) -> Result<(), ReplicateFailure> {
             replicate.report_guest_view(view("7.0.0-38-generic"))?;
@@ -1477,7 +1514,6 @@ mod tests {
 
     /// A console write that fails (a full disk) fails the replicate; the run continues.
     #[test]
-    #[should_panic(expected = "a failed console write must fail the replicate")]
     fn a_console_write_that_fails_fails_the_replicate_and_the_run_continues() {
         fn retains(replicate: &mut Replicate) -> Result<(), ReplicateFailure> {
             replicate.report_guest_view(view("7.0.0-38-generic"))?;
@@ -1528,7 +1564,6 @@ mod tests {
     /// The directory-backed sink writes an artifact create-new, creating its parent directories;
     /// writing the same path again is `AlreadyExists` and leaves the first bytes.
     #[test]
-    #[should_panic(expected = "the file sink must write the artifact and its parents")]
     fn the_file_sink_writes_an_artifact_create_new_and_creates_its_parents() {
         let root = tempfile::tempdir().expect("tempdir");
         let dir = root.path().join("family").join(RUN_ID);
@@ -1573,7 +1608,6 @@ mod tests {
         /// every `ok` line; a replicate that returned `Ok` without a view is failed with the
         /// not-reported reason; the terminal line comes last.
         #[test]
-        #[should_panic(expected = "guest record ordering invariant violated")]
         fn the_guest_record_ordering_holds_for_every_script_of_replicates(
             steps in proptest::collection::vec(step_strategy(), 9),
         ) {
