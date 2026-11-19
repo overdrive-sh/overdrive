@@ -49,7 +49,7 @@ projection: `WriteServiceBackendRow` + `EnqueueEvaluation(k2)`, only with a VIP)
 | Key | Ordered effects of the action | What a `dispatchErr` hits | World after |
 |---|---|---|---|
 | `k1` | issue + hold SVID, `driver.start`, Running row (lifecycle write, `action_shim/mod.rs:2044`) | the Running row | workload torn down, SVID stays held (orphan, above) |
-| `k2` | `dataplane.update_service`, result row (generic write, `dataplane_update_service.rs`) | the result row | the dataplane IS programmed; `actual` is the programmed fingerprint (ADR-0299), so the set is in place: need cleared, `prog := rowNE`; Err, requeue Immediate |
+| `k2` | `dataplane.update_service` only; no observation row (`dataplane_update_service.rs`: a failed update is logged, the shim returns Ok) | nothing: no `dispatchErr` is offered for `k2`; its only failure is `dpFail` | n/a |
 | `k3` | `FinalizeFailed{Stable}` (lifecycle write, only if `stU`), `WriteServiceBackendRow` + `EnqueueEvaluation(k2)` (generic write, only if VIP and `rowD`) | no VIP: the Stable commit. VIP and `stU`: the Stable commit (it consumes the generic seam first), so the row lands. VIP and not `stU`: the row write | per effect landed; `need(k3) := stU' or rowD'` |
 | `k4` | `IssueSvid`: CA issue + audit write (generic), hold. `DropSvid`: no write (`issue_svid.rs` `dispatch_drop`) | `IssueSvid`: the audit write, nothing held, window. `DropSvid`: the injected failure is never consumed | `DropSvid` lands as in `ok` |
 
@@ -125,7 +125,7 @@ Per outcome of `Finish(k, o)`:
 | `ok`, `k` acts | submitted (the table above) | yes | Immediate |
 | `ok`, `k` not needy (Noop) | none | no | none (`has_action` false; `next_evaluation_at` is `None` for `k1`, `k3` here); a hydrator or svid-lifecycle Noop inside its window requeues NotBefore |
 | `dispatchErr`, `k` acts | submitted (dispatch isolates actions); `k3` only with a VIP | no | Immediate; a failed `k4` `IssueSvid` also enters `k4`'s window |
-| `dpFail` (hydrator) | none | no (result row) | Immediate |
+| `dpFail` (hydrator) | none | no (the failed update is only logged) | Immediate |
 | `hydrateErr`, `persistErr` (View changes), `Crash` | none (end before dispatch) | no | none |
 
 A handed-off or submitted key that is not needy is admitted (counted in `dispatched`) and evaluates to a Noop; a submit at an already
@@ -184,7 +184,7 @@ in the feature-delta, "Formal protocol model", "Pinned observable projections fo
 WK-1 to WK-8 are the `ASSUMPTIONS` block of `evaluation_wake.qnt`, each with its discharging item; the feature-delta
 carries the same table. WK-7 states the handoff edges, the landed consequences and the world needs in the tables above (which action emits which
 `EnqueueEvaluation`, in which order, what a landed start or publish leaves needy, that the svid evaluation after a `k1` start is a Noop
-because the start holds its own SVID, that `k3` publishes and hands off only with a VIP; and the partial-landing facts: a `k3` `dispatchErr` with a VIP and a Stable to commit still lands the row, a `k2` `dispatchErr` leaves the dataplane programmed, and a landed `k3` publish recomputes `need(k2)` from the published row against the programmed state, `service_map_hydrator.rs:552-562`; a landed `k3` publish also ends the hydrator's backoff window, because the published set differs from the attempted one and `pacing_allows` dispatches a changed set at once; discharged by the conformance replay with injected `dispatchErr` on `k2` and `k3`). WK-8 states the View-change facts (D9) and svid-lifecycle's window and retention (D11) above; both are discharged by the fidelity probe
+because the start holds its own SVID, that `k3` publishes and hands off only with a VIP; and the partial-landing facts: a `k3` `dispatchErr` with a VIP and a Stable to commit still lands the row, a landed `k3` publish recomputes `need(k2)` from the published row against the programmed state, `service_map_hydrator.rs:552-562`; a landed `k3` publish also ends the hydrator's backoff window, because the published set differs from the attempted one and `pacing_allows` dispatches a changed set at once; discharged by the conformance replay with injected `dispatchErr` on `k3`; `k2` has no `dispatchErr`, only `dpFail`). WK-8 states the View-change facts (D9) and svid-lifecycle's window and retention (D11) above; both are discharged by the fidelity probe
 and the quint-connect replay of the named runs against the real reconcilers. Not modelled: the held SVID set is volatile in a real
 process restart (svid-lifecycle's restart recovery re-issues), but the conformance `Crash` rebuilds the runtime only (WK-5).
 

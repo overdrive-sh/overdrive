@@ -95,7 +95,7 @@
  *                (no allocation row: has(k3) unchanged). A later landed start mints a fresh allocation id (the View's
  *                restart_counts reserves the failed one, workload_lifecycle.rs next_allocation_attempt), so the orphan stays held
  *                and needy until a landed k4 drop.
- *   dpFail       (hydrator only) a result row, no handoff.
+ *   dpFail       (hydrator only) the dataplane update failed; the shim logs dataplane.update_service.failed and returns Ok, no row, no handoff.
  * Backoff windows (D-3, D11). Two reconcilers have one: the hydrator (View RetryMemory) and svid-lifecycle (View IssueRetry). A
  * failed dataplane update enters the hydrator's window; a failed IssueSvid (dispatchErr on a Running, unheld allocation) enters
  * k4's window. An evaluation inside the window is a Noop; both reconcilers implement next_evaluation_at, so the in-window Noop
@@ -188,11 +188,11 @@
  *         was false, D6); that a k3 evaluation publishes a row and hands off to the hydrator only with a VIP (D5); that an
  *         allocation row makes service-lifecycle manage the target (D7); and that need(k1) and need(k4) exclude each other
  *         except through a held SVID to drop (D8). Discharged by: the fidelity probe (conformance-driver.md) and the quint-connect
- *         replay of the named runs against the real reconcilers. The k2/k3 partial-landing facts are part of WK-7: a k3 dispatchErr
+ *         replay of the named runs against the real reconcilers. The k3 partial-landing facts are part of WK-7: a k3 dispatchErr
  *         with a VIP and a Stable to commit still lands the row (the Stable commit is the first write to consume the armed
- *         seam, observation_store.rs write_alloc_lifecycle), a k2 dispatchErr leaves the dataplane programmed (ADR-0299), and a landed
- *         k3 publish recomputes need(k2) (cleared when the empty row is in place). Discharged by: the conformance replay with
- *         injected dispatchErr on k2 and k3 (quint_evaluation_wake.rs).
+ *         seam, observation_store.rs write_alloc_lifecycle), and a landed k3 publish recomputes need(k2) (cleared when the empty row
+ *         is in place). k2 has no dispatchErr: its dispatch writes no row (the shim only logs a failed update and returns Ok), so its
+ *         only failure is dpFail. Discharged by: the conformance replay with injected dispatchErr on k3 (quint_evaluation_wake.rs).
  *   WK-8  The View-change facts (D9, D11): which ticks change which View (persist_view's Eq-diff skip, service-lifecycle's
  *         observed / terminal_announced inserts, svid-lifecycle's IssueRetry bump on emit and its removal), that the IssueRetry is
  *         recorded when IssueSvid is emitted (so a failed issue leaves the key inside its window), and that svid-lifecycle's
@@ -383,7 +383,7 @@ module evaluation_wake {
     val allowed =
       if (o == "ok") true
       else if (o == "dpFail") (isH(k) and acts and canFault("dpFail"))
-      else if (o == "dispatchErr") (acts and canFault("dispatchErr"))
+      else if (o == "dispatchErr") (acts and k != "k2" and canFault("dispatchErr"))
       else if (o == "hydrateErr") (sn and canFault(o))
       else if (o == "persistErr") (acts and viewChanges and canFault(o))
       else false
@@ -393,9 +393,8 @@ module evaluation_wake {
     // per key, and the one a dispatchErr hits:
     //   k1  StartAllocation: [issue + hold the SVID (generic audit write), driver.start, Running row (lifecycle write)]; the lifecycle
     //       seam hits the Running row (action_shim/mod.rs:2044): the workload is torn down, the SVID stays held (orphan), nothing lands
-    //   k2  DataplaneUpdateService: [dataplane.update_service, result row (generic write)]; the generic seam hits the result row
-    //       (dataplane_update_service.rs): the dataplane IS programmed, and the hydrator's `actual` is the programmed fingerprint
-    //       (ADR-0299), so the set is in place: the world lands, the dispatch is an Err
+    //   k2  DataplaneUpdateService: [dataplane.update_service]; no observation row is written, and a failed update is only logged
+    //       (the shim returns Ok): its sole failure is dpFail, there is no dispatchErr for k2
     //   k3  [FinalizeFailed{Stable} (lifecycle write; only while Stable is uncommitted: stU), WriteServiceBackendRow (generic write) +
     //       EnqueueEvaluation(k2) (only with a VIP and a differing row: rowD)]; with a VIP the generic seam is armed and the Stable
     //       commit, the first write to consume it, takes the failure (observation_store.rs write_alloc_lifecycle): the row lands.
@@ -407,14 +406,14 @@ module evaluation_wake {
     val e2 = k == "k3" and vip and rowD
     val landE1 = e1 and acts and o == "ok"
     val landE2 = e2 and acts and (o == "ok" or (o == "dispatchErr" and stU))
-    val landK = k != "k3" and acts and (o == "ok" or (o == "dispatchErr" and (k == "k2" or (k == "k4" and not(running)))))
+    val landK = k != "k3" and acts and (o == "ok" or (o == "dispatchErr" and k == "k4" and not(running)))
     val lands = landK
     // a failed k1 start leaves the SVID it issued held, for an allocation that has no row (see the header)
     val orphan = o == "dispatchErr" and acts and k == "k1"
     val persisted = o == "ok" or o == "dispatchErr" or o == "dpFail"
     // an emitted action is dispatched on ok and on dispatchErr (dispatch isolates actions, so the EnqueueEvaluation actions
     // run although the mutating action failed); hydrateErr, persistErr and Crash end before dispatch: no handoff. dpFail is a
-    // result row, not a dispatch error, and only the hydrator (no handoff) produces it
+    // logged failure of the dataplane update (the shim returns Ok), not a dispatch error, and only the hydrator (no handoff) produces it
     val emits = acts and (o == "ok" or o == "dispatchErr")
     // the handoffs of the actions k emits: k1 hands off to k3 then k4 (k4's evaluation is a Noop after a start: D6); k3 hands
     // off to the hydrator only beside its backend-row write, which needs a VIP and a differing row (D5); k2 and k4 hand off nothing
