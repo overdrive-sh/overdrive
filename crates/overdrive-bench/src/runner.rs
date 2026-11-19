@@ -159,6 +159,12 @@ pub trait RecordSink {
     fn read_record(&self, dir: &Path) -> io::Result<String>;
     /// Write the derived report next to the record.
     fn write_report(&self, dir: &Path, text: &str) -> io::Result<()>;
+    /// Write `bytes` at `dir`/`relative`, create-new, creating the parent directories (DDD-9).
+    #[allow(
+        dead_code,
+        reason = "SCAFFOLD: the runner calls it once DELIVER implements the console retention"
+    )]
+    fn write_artifact(&self, dir: &Path, relative: &Path, bytes: &[u8]) -> io::Result<()>;
 }
 
 /// The result directory on disk.
@@ -183,6 +189,11 @@ impl RecordSink for FileSink {
 
     fn write_report(&self, dir: &Path, text: &str) -> io::Result<()> {
         std::fs::write(dir.join(REPORT_FILE), text)
+    }
+
+    // SCAFFOLD: true. Inert: writes nothing until DELIVER implements it.
+    fn write_artifact(&self, _dir: &Path, _relative: &Path, _bytes: &[u8]) -> io::Result<()> {
+        Ok(())
     }
 }
 
@@ -624,6 +635,10 @@ mod tests {
         created: RefCell<Vec<PathBuf>>,
         record: Arc<Mutex<Vec<u8>>>,
         report: RefCell<Option<String>>,
+        /// Every artifact written: the directory, the relative path and the bytes.
+        artifacts: RefCell<Vec<(PathBuf, PathBuf, Vec<u8>)>>,
+        /// Makes every artifact write fail (a full disk).
+        artifact_writes_fail: Cell<bool>,
     }
 
     impl MemorySink {
@@ -648,6 +663,14 @@ mod tests {
 
         fn write_report(&self, _dir: &Path, text: &str) -> io::Result<()> {
             *self.report.borrow_mut() = Some(text.to_owned());
+            Ok(())
+        }
+
+        fn write_artifact(&self, dir: &Path, relative: &Path, bytes: &[u8]) -> io::Result<()> {
+            if self.artifact_writes_fail.get() {
+                return Err(io::Error::other("disk full"));
+            }
+            self.artifacts.borrow_mut().push((dir.to_owned(), relative.to_owned(), bytes.to_vec()));
             Ok(())
         }
     }
@@ -820,7 +843,7 @@ mod tests {
             decl.service_clock = service;
             decl.guest_clock = guest;
             let (outcome, _dir) = run(&decl, &Fixture::eligible());
-            outcome.result.expect("the run finishes");
+            outcome.result.as_ref().expect("the run finishes");
             validate(&outcome.sink.record()).expect("the record validates");
             let clock = &outcome.sink.lines()[0]["clock"];
             assert_eq!(clock["host"], "CLOCK_MONOTONIC_RAW");
@@ -921,7 +944,7 @@ mod tests {
     fn a_declared_statistics_benchmark_holds_the_descriptor_and_says_so() {
         let decl = decl(&["a"], true);
         let (outcome, _dir) = run(&decl, &Fixture::eligible());
-        outcome.result.expect("the run finishes");
+        outcome.result.as_ref().expect("the run finishes");
         assert_eq!(outcome.sink.lines()[0]["bpf_stats"], "per_process");
     }
 
@@ -929,7 +952,7 @@ mod tests {
     fn a_failed_replicate_is_counted_and_the_run_continues() {
         let decl = decl(&["fine", "broken", "typo"], false);
         let (outcome, _dir) = run(&decl, &Fixture::eligible());
-        outcome.result.expect("the run finishes");
+        outcome.result.as_ref().expect("the run finishes");
         let lines = outcome.sink.lines();
         let failed: Vec<&serde_json::Value> =
             lines.iter().filter(|line| line["outcome"] == "failed").collect();
@@ -954,7 +977,7 @@ mod tests {
         let mut quiet = decl(&["a"], false);
         quiet.run = silent;
         let (outcome, _dir) = run(&quiet, &Fixture::eligible());
-        outcome.result.expect("the run finishes");
+        outcome.result.as_ref().expect("the run finishes");
         let replicate = &outcome.sink.lines()[2];
         assert_eq!(replicate["outcome"], "ok");
         assert_eq!(replicate["metrics"]["ns_per_op"]["failures"][0], "not recorded");
@@ -1041,5 +1064,571 @@ mod tests {
         assert_ne!(id, generated_run_id());
         assert!(!is_run_id("ABCDEF012345678901234567"));
         assert!(!is_run_id("abc"));
+    }
+
+    // ---- The guest substrate (guest-benchmark-substrate, DDD-2, DDD-4, DDD-7, DDD-9, G-1, G-2) ----
+    //
+    // The runner is driven with a benchmark declaration whose `substrate` is `"guest"` and whose
+    // body is scripted per replicate (the family's host half, replaced by a script): each
+    // replicate reports a view, fails before or after reporting, or returns `Ok` without a view.
+    // Evidence lane: unit (the runner's own ports, in-memory sink and canary). Layers 1-2: the
+    // ordering invariant is a proptest (Mandate 9). CONTRACT_SHAPE per test: bounded-change
+    // (the record the runner appends).
+
+    use std::num::{NonZeroU8, NonZeroU32};
+
+    use proptest::prelude::*;
+
+    use crate::{GuestArtifacts, GuestMemoryMib, GuestView, HostValue};
+
+    const GUEST_METRICS: [MetricDecl; 1] = [MetricDecl {
+        name: "forwarded_round_trip_ns",
+        unit: "ns",
+        table: "forwarded-path",
+        series: true,
+    }];
+
+    /// What one replicate of the scripted family body does.
+    #[derive(Clone, Copy, Debug)]
+    enum Step {
+        /// Reports a view with this guest kernel, then records its series.
+        Report(&'static str),
+        /// Reports a view with this guest kernel, then fails with this reason.
+        ReportThenFail(&'static str, &'static str),
+        /// Records its series and returns `Ok` without reporting a view.
+        Silent,
+        /// Fails with this reason before reporting a view.
+        Fail(&'static str),
+    }
+
+    thread_local! {
+        static SCRIPT: RefCell<Vec<Step>> = const { RefCell::new(Vec::new()) };
+        static NEXT: Cell<usize> = const { Cell::new(0) };
+    }
+
+    fn script(steps: &[Step]) {
+        SCRIPT.with(|script| *script.borrow_mut() = steps.to_vec());
+        NEXT.with(|next| next.set(0));
+    }
+
+    fn view(kernel: &str) -> GuestView {
+        GuestView {
+            vcpus: NonZeroU8::new(2).expect("two"),
+            memory_mib: GuestMemoryMib::new(NonZeroU32::new(512).expect("512")),
+            kernel: HostValue::Text(kernel.to_owned()),
+            clocksource: HostValue::Text("kvm-clock".to_owned()),
+            artifacts: GuestArtifacts {
+                overdrive_init: HostValue::Text("a".repeat(64)),
+                overdrive_guest_peer: HostValue::Text("b".repeat(64)),
+                ovd_fwd: HostValue::Text("c".repeat(64)),
+            },
+        }
+    }
+
+    fn view_json(kernel: &str) -> serde_json::Value {
+        serde_json::json!({
+            "t": "guest_observed", "vcpus": 2, "memory_mib": 512, "kernel": kernel,
+            "clocksource": "kvm-clock",
+            "artifacts": {
+                "overdrive_init": "a".repeat(64),
+                "overdrive_guest_peer": "b".repeat(64),
+                "ovd_fwd": "c".repeat(64)
+            }
+        })
+    }
+
+    /// The `guest` block of `run_started` for a guest benchmark (DDD-2).
+    fn guest_block() -> serde_json::Value {
+        let unseen = serde_json::json!({ "absent": "not visible from a guest" });
+        serde_json::json!({
+            "launch": "metal_host", "boot": "per_replicate", "vcpu_scheduling": "unpinned",
+            "settings": { "governor": unseen, "smt": unseen, "boost": unseen }
+        })
+    }
+
+    fn series_failure(reason: &str) -> ReplicateFailure {
+        ReplicateFailure::fixture(reason)
+    }
+
+    /// The scripted family body: the next step of the script, one per replicate in run order.
+    fn scripted(replicate: &mut Replicate) -> Result<(), ReplicateFailure> {
+        let index = NEXT.with(|next| {
+            let index = next.get();
+            next.set(index + 1);
+            index
+        });
+        let step = SCRIPT.with(|script| script.borrow()[index]);
+        let values = [100.0, 200.0, 300.0];
+        match step {
+            Step::Report(kernel) => {
+                replicate.report_guest_view(view(kernel))?;
+                replicate.record_series("forwarded_round_trip_ns", &values)
+            }
+            Step::ReportThenFail(kernel, reason) => {
+                replicate.report_guest_view(view(kernel))?;
+                Err(series_failure(reason))
+            }
+            Step::Silent => replicate.record_series("forwarded_round_trip_ns", &values),
+            Step::Fail(reason) => Err(series_failure(reason)),
+        }
+    }
+
+    fn guest_decl(run: fn(&mut Replicate) -> Result<(), ReplicateFailure>) -> BenchmarkDecl {
+        BenchmarkDecl {
+            family: "unit-family",
+            benchmark: "unit_bench",
+            substrate: "guest",
+            arms: &["forwarding"],
+            replicates: 9,
+            profiles: &[],
+            metrics: &GUEST_METRICS,
+            bpf_stats: false,
+            references: &[],
+            service_clock: None,
+            guest_clock: None,
+            run,
+        }
+    }
+
+    fn lines_of(outcome: &Outcome, kind: &str) -> Vec<serde_json::Value> {
+        outcome.sink.lines().into_iter().filter(|line| line["t"] == kind).collect()
+    }
+
+    /// The first replicate that reports a view makes the runner append one `guest_observed` line
+    /// right before that replicate's line, after the start canary; `run_started` carries the
+    /// static `guest` block and states substrate `guest`; the record validates.
+    /// Boundary scenario (1): a conforming host and a prepared kit proceed to samples.
+    #[test]
+    #[should_panic(expected = "run_started must state substrate guest")]
+    fn the_first_reported_guest_view_is_written_once_before_that_replicates_line() {
+        script(&[Step::Report("7.0.0-38-generic"); 9]);
+        let (outcome, _dir) = run(&guest_decl(scripted), &Fixture::eligible());
+        outcome.result.as_ref().expect("the run finishes");
+        let lines = outcome.sink.lines();
+        assert_eq!(
+            lines[0]["substrate"], "guest",
+            "run_started must state substrate guest for a guest benchmark"
+        );
+        assert_eq!(
+            lines[0]["guest"],
+            guest_block(),
+            "run_started must carry the static guest block"
+        );
+        assert_eq!(
+            (lines[1]["t"].as_str(), lines[1]["phase"].as_str()),
+            (Some("canary"), Some("start"))
+        );
+        assert_eq!(
+            lines[2],
+            view_json("7.0.0-38-generic"),
+            "the guest_observed line follows the start canary and holds the reported view"
+        );
+        assert_eq!(lines[3]["t"], "replicate", "the first replicate's line follows it");
+        assert_eq!(
+            lines_of(&outcome, "guest_observed").len(),
+            1,
+            "exactly one guest_observed line"
+        );
+        validate(&outcome.sink.record()).expect("the record validates");
+    }
+
+    /// A later replicate's view is not compared and changes nothing: one line, the first view.
+    /// The operator fixes the kernel, the artifacts and the shape (ADR-0328).
+    #[test]
+    #[should_panic(expected = "exactly one guest_observed line")]
+    fn a_later_guest_view_writes_no_second_line_and_changes_nothing() {
+        let mut steps = [Step::Report("7.0.0-38-generic"); 9];
+        steps[1] = Step::Report("6.1.0-another");
+        steps[4] = Step::Report("6.1.0-another");
+        script(&steps);
+        let (outcome, _dir) = run(&guest_decl(scripted), &Fixture::eligible());
+        outcome.result.as_ref().expect("the run finishes");
+        let observed = lines_of(&outcome, "guest_observed");
+        assert_eq!(observed.len(), 1, "exactly one guest_observed line, later views write none");
+        assert_eq!(observed[0], view_json("7.0.0-38-generic"), "the first reported view stays");
+        assert!(
+            lines_of(&outcome, "replicate").iter().all(|line| line["outcome"] == "ok"),
+            "a later, different view fails nothing"
+        );
+        validate(&outcome.sink.record()).expect("the record validates");
+    }
+
+    /// M-1 (boundary scenario 8): a guest-substrate replicate whose body returns `Ok` without
+    /// reporting a view is failed by the runner, and the record still validates; with no replicate
+    /// ever reporting there is no `guest_observed` line.
+    #[test]
+    #[should_panic(expected = "reported no guest view")]
+    fn a_guest_replicate_that_returns_ok_without_a_view_is_failed_and_the_record_still_validates() {
+        script(&[Step::Silent; 9]);
+        let (outcome, _dir) = run(&guest_decl(scripted), &Fixture::eligible());
+        outcome.result.as_ref().expect("the run finishes");
+        let replicates = lines_of(&outcome, "replicate");
+        assert_eq!(replicates.len(), 9);
+        for line in &replicates {
+            assert_eq!(
+                (line["outcome"].as_str(), line["failure"].as_str()),
+                (Some("failed"), Some("the replicate reported no guest view")),
+                "a guest replicate that returned Ok without a view must be failed with the reported no guest view reason"
+            );
+        }
+        assert!(lines_of(&outcome, "guest_observed").is_empty(), "no view, so no line");
+        let finished = outcome.sink.lines().pop().expect("last line");
+        assert_eq!(
+            (finished["replicates_ok"].as_u64(), finished["replicates_failed"].as_u64()),
+            (Some(0), Some(9))
+        );
+        validate(&outcome.sink.record())
+            .expect("a guest record whose replicates all failed validates");
+    }
+
+    /// A view reported by a replicate that then fails stays the run's view; the replicate stays
+    /// failed with its own reason (a failure after reporting is not "no view").
+    #[test]
+    #[should_panic(expected = "exactly one guest_observed line")]
+    fn a_view_reported_by_a_replicate_that_then_fails_stays_the_runs_view() {
+        let mut steps = [Step::Report("6.1.0-another"); 9];
+        steps[0] = Step::ReportThenFail("7.0.0-38-generic", "the in-guest program exited 3");
+        script(&steps);
+        let (outcome, _dir) = run(&guest_decl(scripted), &Fixture::eligible());
+        outcome.result.as_ref().expect("the run finishes");
+        let lines = outcome.sink.lines();
+        let observed = lines_of(&outcome, "guest_observed");
+        assert_eq!(observed.len(), 1, "exactly one guest_observed line");
+        assert_eq!(
+            observed[0],
+            view_json("7.0.0-38-generic"),
+            "the failed replicate's view is the run's view"
+        );
+        assert_eq!(lines[2]["t"], "guest_observed");
+        assert_eq!(
+            (lines[3]["outcome"].as_str(), lines[3]["failure"].as_str()),
+            (Some("failed"), Some("the in-guest program exited 3")),
+            "the replicate keeps its own failure"
+        );
+        validate(&outcome.sink.record()).expect("the record validates");
+    }
+
+    /// Boundary scenarios (2) and (5): a replicate whose guest never boots or dies is failed and
+    /// counted, the run continues, and the `guest_observed` line is written right before the line
+    /// of the first replicate that reports a view (after the failed one), preceding every `ok` line.
+    #[test]
+    #[should_panic(expected = "right before the replicate that reported the view")]
+    fn a_replicate_that_fails_before_reporting_is_counted_and_later_replicates_still_run() {
+        let mut steps = [Step::Report("7.0.0-38-generic"); 9];
+        steps[0] = Step::Fail("guest boot: no READY within 60s");
+        steps[5] = Step::Fail("guest run: no EXIT within the bound");
+        script(&steps);
+        let (outcome, _dir) = run(&guest_decl(scripted), &Fixture::eligible());
+        outcome.result.as_ref().expect("the run finishes");
+        let lines = outcome.sink.lines();
+        assert_eq!(
+            (lines[2]["t"].as_str(), lines[2]["failure"].as_str()),
+            (Some("replicate"), Some("guest boot: no READY within 60s"))
+        );
+        assert_eq!(
+            lines[3],
+            view_json("7.0.0-38-generic"),
+            "the guest_observed line comes right before the replicate that reported the view"
+        );
+        assert_eq!(lines[4]["outcome"], "ok");
+        let finished = lines.last().expect("last line");
+        assert_eq!(
+            (finished["replicates_ok"].as_u64(), finished["replicates_failed"].as_u64()),
+            (Some(7), Some(2)),
+            "both failures are counted and the other replicates ran"
+        );
+        validate(&outcome.sink.record()).expect("the record validates");
+    }
+
+    /// G-1 and boundary scenario (6): with a drifted host the family body is never called and no
+    /// guest boots; `run_started` still carries the static `guest` block, `run_refused` follows,
+    /// no `guest_observed` line is written and the refused record validates.
+    #[test]
+    #[should_panic(expected = "must carry the static guest block")]
+    fn a_drifted_host_never_calls_a_guest_benchmarks_body_and_writes_no_view() {
+        fn never_called(_: &mut Replicate) -> Result<(), ReplicateFailure> {
+            panic!("a refused host must not call the family body");
+        }
+        let (outcome, _dir) = run(
+            &guest_decl(never_called),
+            &Fixture::eligible().with("/sys/devices/system/cpu/smt/control", "off\n"),
+        );
+        assert!(matches!(&outcome.result, Err(Error::Refused { setting, .. }) if setting == "smt"));
+        let lines = outcome.sink.lines();
+        assert_eq!(lines.len(), 2, "run_started and run_refused only");
+        assert_eq!(
+            lines[0]["guest"],
+            guest_block(),
+            "a refused guest benchmark's run_started must carry the static guest block"
+        );
+        assert_eq!(lines[1]["t"], "run_refused");
+        assert!(lines_of(&outcome, "guest_observed").is_empty());
+        assert_eq!(outcome.canary_samples, 0);
+        validate(&outcome.sink.record()).expect("a refused guest record validates");
+    }
+
+    /// Feature disabled (boundary scenario 6): a native benchmark's record has no `guest` block and
+    /// no `guest_observed` line, and a native replicate that tries to report a view is failed (a
+    /// native record may not carry one).
+    #[test]
+    #[should_panic(expected = "a native replicate that reports a guest view must fail")]
+    fn a_native_benchmark_writes_no_guest_block_and_refuses_a_reported_view() {
+        fn reports(replicate: &mut Replicate) -> Result<(), ReplicateFailure> {
+            replicate.report_guest_view(view("7.0.0-38-generic"))?;
+            replicate.record_series("forwarded_round_trip_ns", &[100.0])
+        }
+        let mut decl = guest_decl(reports);
+        decl.substrate = "native";
+        let (outcome, _dir) = run(&decl, &Fixture::eligible());
+        outcome.result.as_ref().expect("the run finishes");
+        let lines = outcome.sink.lines();
+        assert!(lines[0].get("guest").is_none(), "a native run_started has no guest block");
+        assert_eq!(lines[0]["substrate"], "native");
+        assert!(lines_of(&outcome, "guest_observed").is_empty());
+        for line in lines_of(&outcome, "replicate") {
+            assert_eq!(
+                line["outcome"], "failed",
+                "a native replicate that reports a guest view must fail"
+            );
+        }
+        validate(&outcome.sink.record()).expect("the native record validates");
+    }
+
+    /// The relative path DDD-9 pins for a replicate's console.
+    fn console_path(line: &serde_json::Value) -> PathBuf {
+        PathBuf::from(format!(
+            "artifacts/{}/{}-{}-{}/console.log",
+            line["profile"].as_str().expect("profile"),
+            line["block"],
+            line["position"],
+            line["arm"].as_str().expect("arm"),
+        ))
+    }
+
+    fn retaining(replicate: &mut Replicate) -> Result<(), ReplicateFailure> {
+        let index = NEXT.with(|next| {
+            let index = next.get();
+            next.set(index + 1);
+            index
+        });
+        replicate.retain_console(&format!("console of replicate {index}"))?;
+        replicate.report_guest_view(view("7.0.0-38-generic"))?;
+        if index % 3 == 2 {
+            return Err(series_failure("guest run: the program exited 2"));
+        }
+        replicate.record_series("forwarded_round_trip_ns", &[100.0, 200.0, 300.0])
+    }
+
+    /// DDD-9: every replicate's console is written, in every outcome, to
+    /// `artifacts/<profile>/<block>-<position>-<arm>/console.log` under the result directory.
+    #[test]
+    #[should_panic(expected = "console must be written as an artifact in every outcome")]
+    fn a_replicates_console_is_retained_beside_the_record_in_every_outcome() {
+        script(&[]);
+        let (outcome, dir) = run(&guest_decl(retaining), &Fixture::eligible());
+        outcome.result.as_ref().expect("the run finishes");
+        let replicates = lines_of(&outcome, "replicate");
+        let written = outcome.sink.artifacts.borrow();
+        assert_eq!(
+            written.len(),
+            replicates.len(),
+            "every replicate's console must be written as an artifact in every outcome"
+        );
+        let result_dir = dir.path().join("benchmarks/results/unit-family").join(RUN_ID);
+        for (index, line) in replicates.iter().enumerate() {
+            let relative = console_path(line);
+            let found = written
+                .iter()
+                .find(|(_, path, _)| *path == relative)
+                .unwrap_or_else(|| panic!("no artifact at {}", relative.display()));
+            assert_eq!(found.0, result_dir, "artifacts are written under the result directory");
+            assert_eq!(found.2, format!("console of replicate {index}").into_bytes());
+        }
+        assert!(
+            replicates.iter().any(|line| line["outcome"] == "failed"),
+            "the failed replicates' consoles are among them"
+        );
+    }
+
+    /// A second `retain_console` by the same replicate fails it (create-new), and only the first
+    /// console is written.
+    #[test]
+    #[should_panic(expected = "second retain_console must fail the replicate")]
+    fn retaining_a_console_twice_in_one_replicate_fails_it_and_keeps_the_first() {
+        fn twice(replicate: &mut Replicate) -> Result<(), ReplicateFailure> {
+            replicate.report_guest_view(view("7.0.0-38-generic"))?;
+            replicate.retain_console("first")?;
+            replicate.retain_console("second")?;
+            replicate.record_series("forwarded_round_trip_ns", &[100.0])
+        }
+        let (outcome, _dir) = run(&guest_decl(twice), &Fixture::eligible());
+        outcome.result.as_ref().expect("the run finishes");
+        for line in lines_of(&outcome, "replicate") {
+            assert_eq!(
+                line["outcome"], "failed",
+                "a second retain_console must fail the replicate"
+            );
+        }
+        let written = outcome.sink.artifacts.borrow();
+        assert_eq!(written.len(), 9, "the first console of each replicate is written");
+        assert!(written.iter().all(|(_, _, bytes)| bytes == b"first"));
+    }
+
+    /// A console write that fails (a full disk) fails the replicate; the run continues.
+    #[test]
+    #[should_panic(expected = "a failed console write must fail the replicate")]
+    fn a_console_write_that_fails_fails_the_replicate_and_the_run_continues() {
+        fn retains(replicate: &mut Replicate) -> Result<(), ReplicateFailure> {
+            replicate.report_guest_view(view("7.0.0-38-generic"))?;
+            replicate.retain_console("console")?;
+            replicate.record_series("forwarded_round_trip_ns", &[100.0])
+        }
+        let decl = guest_decl(retains);
+        let dir = marker_dir();
+        let declared = std::slice::from_ref(&decl);
+        let sink = MemorySink::default();
+        sink.artifact_writes_fail.set(true);
+        let mut canary = CountingCanary::default();
+        let mut stdout = Vec::new();
+        let environment = Environment {
+            source_root: Some(dir.path().to_owned()),
+            run_id: RUN_ID.to_owned(),
+            seed: 42,
+        };
+        let arguments: Vec<String> = format!(
+            "run --family unit-family --results-root {}/benchmarks/results --bench",
+            dir.path().display()
+        )
+        .split_whitespace()
+        .map(str::to_owned)
+        .collect();
+        let probe = Fixture::eligible();
+        let enabler = Enabler(None);
+        let result = Runner {
+            evidence: Evidence::Maintained,
+            debug_assertions: false,
+            declared,
+            probe: &probe,
+            enabler: &enabler,
+            sink: &sink,
+            canary: &mut canary,
+            stdout: &mut stdout,
+        }
+        .run(&arguments, &environment);
+        result.expect("a failed console write does not end the run");
+        let lines = sink.lines();
+        let replicates: Vec<_> = lines.iter().filter(|line| line["t"] == "replicate").collect();
+        assert_eq!(replicates.len(), 9, "every replicate still ran");
+        for line in replicates {
+            assert_eq!(line["outcome"], "failed", "a failed console write must fail the replicate");
+        }
+    }
+
+    /// The directory-backed sink writes an artifact create-new, creating its parent directories;
+    /// writing the same path again is `AlreadyExists` and leaves the first bytes.
+    #[test]
+    #[should_panic(expected = "the file sink must write the artifact and its parents")]
+    fn the_file_sink_writes_an_artifact_create_new_and_creates_its_parents() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let dir = root.path().join("family").join(RUN_ID);
+        drop(FileSink.create(&dir).expect("created"));
+        let relative = Path::new("artifacts/default/0-0-forwarding/console.log");
+        FileSink.write_artifact(&dir, relative, b"console").expect("the artifact is written");
+        assert_eq!(
+            std::fs::read(dir.join(relative)).ok().as_deref(),
+            Some(b"console".as_slice()),
+            "the file sink must write the artifact and its parents"
+        );
+        let again = FileSink.write_artifact(&dir, relative, b"other");
+        assert_eq!(again.err().map(|error| error.kind()), Some(io::ErrorKind::AlreadyExists));
+        assert_eq!(std::fs::read(dir.join(relative)).expect("read"), b"console");
+    }
+
+    fn step_strategy() -> impl Strategy<Value = Step> {
+        prop_oneof![
+            Just(Step::Report("7.0.0-38-generic")),
+            Just(Step::Report("6.1.0-another")),
+            Just(Step::ReportThenFail("7.0.0-38-generic", "guest run: the program exited 1")),
+            Just(Step::ReportThenFail("6.1.0-another", "guest run: the program exited 1")),
+            Just(Step::Silent),
+            Just(Step::Fail("guest boot: no READY within 60s")),
+        ]
+    }
+
+    fn reported_kernel(step: &Step) -> Option<&'static str> {
+        match step {
+            Step::Report(kernel) | Step::ReportThenFail(kernel, _) => Some(kernel),
+            Step::Silent | Step::Fail(_) => None,
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig { cases: 64, failure_persistence: None, ..ProptestConfig::default() })]
+
+        /// The seeded ordering invariant of the runner over a guest benchmark (G-2 evidence lane):
+        /// whatever each replicate does, the record validates; there is at most one
+        /// `guest_observed` line and it exists exactly when a replicate reported a view; it holds the
+        /// first reported view and sits right before the first reporting replicate's line, so before
+        /// every `ok` line; a replicate that returned `Ok` without a view is failed with the
+        /// not-reported reason; the terminal line comes last.
+        #[test]
+        #[should_panic(expected = "guest record ordering invariant violated")]
+        fn the_guest_record_ordering_holds_for_every_script_of_replicates(
+            steps in proptest::collection::vec(step_strategy(), 9),
+        ) {
+            script(&steps);
+            let (outcome, _dir) = run(&guest_decl(scripted), &Fixture::eligible());
+            let lines = outcome.sink.lines();
+            // Every breach is collected, so a failing script names all of them in one message.
+            let mut violations: Vec<String> = Vec::new();
+            if outcome.result.is_err() {
+                violations.push("the run did not finish".to_owned());
+            }
+            if let Err(error) = validate(&outcome.sink.record()) {
+                violations.push(format!("the record does not validate: {error}"));
+            }
+            let observed: Vec<usize> = lines
+                .iter()
+                .enumerate()
+                .filter(|(_, line)| line["t"] == "guest_observed")
+                .map(|(at, _)| at)
+                .collect();
+            let first_reporter = steps.iter().position(|step| reported_kernel(step).is_some());
+            if observed.len() != usize::from(first_reporter.is_some()) {
+                violations.push(format!(
+                    "{} guest_observed lines, but a line exists exactly when a replicate reported a view",
+                    observed.len()
+                ));
+            }
+            let replicate_at: Vec<usize> = lines
+                .iter()
+                .enumerate()
+                .filter(|(_, line)| line["t"] == "replicate")
+                .map(|(at, _)| at)
+                .collect();
+            if let (Some(index), Some(&at)) = (first_reporter, observed.first()) {
+                let kernel = reported_kernel(&steps[index]).expect("a reporter");
+                if lines[at] != view_json(kernel) {
+                    violations.push("the line is not the first reported view".to_owned());
+                }
+                if replicate_at.get(index) != Some(&(at + 1)) {
+                    violations.push("the line is not right before the first reporting replicate".to_owned());
+                }
+            }
+            for (&line_at, step) in replicate_at.iter().zip(&steps) {
+                if matches!(step, Step::Silent)
+                    && lines[line_at]["failure"].as_str() != Some("the replicate reported no guest view")
+                {
+                    violations.push("a replicate without a view was not failed for it".to_owned());
+                }
+            }
+            if lines.last().map(|line| line["t"].as_str()) != Some(Some("run_finished")) {
+                violations.push("the terminal line is not last".to_owned());
+            }
+            prop_assert!(
+                violations.is_empty(),
+                "guest record ordering invariant violated: {violations:?}"
+            );
+        }
     }
 }

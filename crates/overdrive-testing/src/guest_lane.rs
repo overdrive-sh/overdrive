@@ -56,6 +56,7 @@
 use std::collections::HashMap;
 use std::io::{self, Write};
 use std::net::Ipv4Addr;
+use std::num::{NonZeroU8, NonZeroU32};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -69,7 +70,7 @@ use overdrive_core::guest_transport::wire::{
     FlowRequest,
 };
 use overdrive_core::guest_transport::{
-    GUEST_CID_BASE, GUEST_INBOUND_PORT, GUEST_NODE_GATEWAY, LaunchToken,
+    GUEST_CID_BASE, GUEST_INBOUND_PORT, GUEST_NODE_GATEWAY, GuestCid, LaunchToken,
 };
 use overdrive_core::net::ListenPort;
 use overdrive_core::vm::beacon::BeaconMessage;
@@ -545,6 +546,61 @@ pub(crate) fn run_in_guest_cell_attempt(
     // the VMM has exited.
     let _ = vm.wait_exit(Duration::from_secs(30))?;
     Ok(CellRun { cell: cell.to_owned(), exit_status, console: vm.console() })
+}
+
+/// The vCPU count of the guest [`run_in_guest_cell`] boots a production-init guest with;
+/// [`run_in_guest_program`] and the benchmark record read the same value.
+///
+/// SCAFFOLD: true. The values are the lane's current inline `2` and `512`; DELIVER makes the
+/// lane read these constants too.
+pub const LANE_GUEST_VCPUS: NonZeroU8 = NonZeroU8::MIN.saturating_add(1);
+/// The memory, in MiB, of the guest [`run_in_guest_cell`] boots a production-init guest with.
+pub const LANE_GUEST_MEMORY_MIB: NonZeroU32 = NonZeroU32::MIN.saturating_add(511);
+
+/// One program's run in a fresh production-init guest.
+#[derive(Debug)]
+pub struct ProgramRun {
+    /// The program's exit status as the guest's `EXIT` reported it, or why none arrived (no
+    /// READY within [`READY_BOUND`], no EXIT within `bound`, a beacon violation, the VMM still
+    /// running after the post-EXIT wait).
+    pub exit: Result<i32, GuestKitError>,
+    /// The guest console as it stands when the run ends, in every outcome.
+    pub console: String,
+}
+
+/// Runs `program` in a fresh production-init guest and ends the guest.
+///
+/// Boots `spec` (PID 1 must be [`GuestInit::OverdriveInit`]) at `cid`, plays the node beacon as
+/// [`run_in_guest_cell`] does (holds the guest owner's control session), runs `program` as the
+/// operator command after loading the vsock loopback module, waits for EXIT within `bound`, and
+/// ends the guest.
+///
+/// Postcondition: the VMM has exited and been reaped before return, in every outcome. The
+/// console is complete only when the VMM exited on its own after EXIT; a VMM that did not exit
+/// within the post-EXIT wait makes `exit` an `Err` (the wait result is never discarded).
+///
+/// # Errors
+///
+/// The outer `Err` is only for a failure before a VMM exists (image build, listener bind,
+/// launch); a failure after the VMM exists is [`ProgramRun::exit`] `Err(..)` with its console.
+///
+/// SCAFFOLD: true. Inert: boots nothing and reports a clean exit with an empty console until
+/// DELIVER lands the body.
+#[allow(
+    clippy::unnecessary_wraps,
+    clippy::missing_const_for_fn,
+    reason = "scaffold: the pinned signature, with an inert body until DELIVER"
+)]
+pub fn run_in_guest_program(
+    kit: &GuestKit,
+    spec: &GuestImageSpec,
+    program: &[String],
+    cid: GuestCid,
+    work: &Path,
+    bound: Duration,
+) -> Result<ProgramRun, GuestKitError> {
+    let _ = (kit, spec, program, cid, work, bound);
+    Ok(ProgramRun { exit: Ok(0), console: String::new() })
 }
 
 /// How a production guest's boot ended, as the lane's beacon saw it.

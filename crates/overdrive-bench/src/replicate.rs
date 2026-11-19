@@ -262,6 +262,43 @@ impl Replicate {
         Ok(String::from_utf8_lossy(&output.stdout).into_owned())
     }
 
+    /// Reports the guest view of this run (DDD-4).
+    ///
+    /// SCAFFOLD: true. Inert: it records nothing, so the runner writes no `guest_observed` line
+    /// until DELIVER implements it.
+    ///
+    /// # Errors
+    /// DELIVER: a `ReplicateFailure` when the benchmark does not declare the `guest` substrate.
+    #[allow(
+        clippy::needless_pass_by_value,
+        clippy::needless_pass_by_ref_mut,
+        clippy::unnecessary_wraps,
+        clippy::unused_self,
+        reason = "inert RED scaffold"
+    )]
+    pub fn report_guest_view(&mut self, view: crate::GuestView) -> Result<(), ReplicateFailure> {
+        let _ = view;
+        Ok(())
+    }
+
+    /// Writes `text` as this replicate's console beside the record (DDD-9).
+    ///
+    /// SCAFFOLD: true. Inert: it writes nothing until DELIVER implements it.
+    ///
+    /// # Errors
+    /// DELIVER: a second call by the same replicate, or a write failure.
+    #[allow(
+        clippy::missing_const_for_fn,
+        clippy::needless_pass_by_ref_mut,
+        clippy::unnecessary_wraps,
+        clippy::unused_self,
+        reason = "inert RED scaffold"
+    )]
+    pub fn retain_console(&mut self, text: &str) -> Result<(), ReplicateFailure> {
+        let _ = text;
+        Ok(())
+    }
+
     /// The BPF statistics hold: `Some` iff the benchmark declares `bpf_stats` and the runner
     /// holds the descriptor; `None` under the smoke variant.
     pub fn bpf_stats(&self) -> Option<&BpfStatsHold> {
@@ -716,5 +753,134 @@ mod tests {
             Err(ReplicateFailure::fixture("no dataplane"))
         }
         smoke(&decl(broken));
+    }
+
+    // ---- The smoke variant of a guest benchmark (DDD-9, DDD-10) ----
+
+    #[allow(clippy::expect_used, reason = "fixed non-zero literals")]
+    fn guest_view() -> crate::GuestView {
+        crate::GuestView {
+            vcpus: std::num::NonZeroU8::new(2).expect("two"),
+            memory_mib: crate::GuestMemoryMib::new(std::num::NonZeroU32::new(512).expect("512")),
+            kernel: crate::HostValue::Text("7.0.0-38-generic".to_owned()),
+            clocksource: crate::HostValue::Text("kvm-clock".to_owned()),
+            artifacts: crate::GuestArtifacts {
+                overdrive_init: crate::HostValue::Text("a".repeat(64)),
+                overdrive_guest_peer: crate::HostValue::Text("b".repeat(64)),
+                ovd_fwd: crate::HostValue::Text("c".repeat(64)),
+            },
+        }
+    }
+
+    /// Under the smoke variant a guest benchmark's body may report its view and retain its console:
+    /// both return `Ok` and nothing is recorded or written, so the smoke test of a guest family
+    /// passes after one replicate per arm and asserts nothing about time. GREEN guard (the
+    /// well-formed control of the three smoke refusals below).
+    /// `CONTRACT_SHAPE`: unbounded-preservation (nothing is written).
+    #[test]
+    fn a_guest_benchmarks_smoke_run_reports_and_retains_without_effect() {
+        fn guest_body(replicate: &mut Replicate) -> Result<(), ReplicateFailure> {
+            replicate.report_guest_view(guest_view())?;
+            replicate.retain_console("a console")?;
+            replicate.record_series("stream", &[100.0, 200.0])?;
+            replicate.record("scalar", 1.0)
+        }
+        let mut guest = decl(guest_body);
+        guest.substrate = "guest";
+        smoke(&guest);
+    }
+
+    // Under `smoke` only the effect is skipped (DDD-9): a guest-substrate precondition failure,
+    // the M-1 failure (a guest body that returns `Ok` without reporting a view) and a second
+    // `retain_console` call fail the replicate exactly as in a real run, so the smoke test of a
+    // guest family catches them. Each test first proves the well-formed guest body passes
+    // `smoke` (the control), then the one broken rule must panic naming the benchmark.
+    // `CONTRACT_SHAPE`: pure-function (declaration in, smoke verdict out).
+
+    /// What `smoke` panicked with, or `None` when it passed.
+    fn smoke_failure(decl: &BenchmarkDecl) -> Option<String> {
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| smoke(decl))).err().map(
+            |payload| {
+                payload
+                    .downcast_ref::<String>()
+                    .cloned()
+                    .or_else(|| payload.downcast_ref::<&str>().map(|text| (*text).to_owned()))
+                    .unwrap_or_default()
+            },
+        )
+    }
+
+    fn well_formed_guest_body(replicate: &mut Replicate) -> Result<(), ReplicateFailure> {
+        replicate.report_guest_view(guest_view())?;
+        replicate.retain_console("a console")?;
+        replicate.record_series("stream", &[100.0, 200.0])?;
+        replicate.record("scalar", 1.0)
+    }
+
+    /// M-1 under smoke: a guest body that returns `Ok` without reporting a view fails the smoke
+    /// run naming the benchmark and the pinned reason.
+    #[test]
+    #[should_panic(
+        expected = "a guest body that returns Ok without a view must fail its smoke run"
+    )]
+    fn smoke_fails_a_guest_body_that_returns_ok_without_reporting_a_view() {
+        fn no_view(replicate: &mut Replicate) -> Result<(), ReplicateFailure> {
+            replicate.retain_console("a console")?;
+            replicate.record_series("stream", &[100.0, 200.0])?;
+            replicate.record("scalar", 1.0)
+        }
+        let mut control = decl(well_formed_guest_body);
+        control.substrate = "guest";
+        assert_eq!(smoke_failure(&control), None, "the well-formed guest body must pass smoke");
+        let mut guest = decl(no_view);
+        guest.substrate = "guest";
+        let failure = smoke_failure(&guest).unwrap_or_else(|| {
+            panic!("a guest body that returns Ok without a view must fail its smoke run")
+        });
+        assert!(
+            failure.contains("unit_bench")
+                && failure.contains("the replicate reported no guest view"),
+            "the smoke failure names the benchmark and the reason: {failure}"
+        );
+    }
+
+    /// A second `retain_console` in one replicate fails the replicate under smoke as in a real run.
+    #[test]
+    #[should_panic(expected = "a second retain_console must fail its smoke run")]
+    fn smoke_fails_a_guest_body_that_retains_its_console_twice() {
+        fn twice(replicate: &mut Replicate) -> Result<(), ReplicateFailure> {
+            replicate.report_guest_view(guest_view())?;
+            replicate.retain_console("first")?;
+            replicate.retain_console("second")?;
+            replicate.record_series("stream", &[100.0, 200.0])?;
+            replicate.record("scalar", 1.0)
+        }
+        let mut control = decl(well_formed_guest_body);
+        control.substrate = "guest";
+        assert_eq!(smoke_failure(&control), None, "the well-formed guest body must pass smoke");
+        let mut guest = decl(twice);
+        guest.substrate = "guest";
+        let failure = smoke_failure(&guest)
+            .unwrap_or_else(|| panic!("a second retain_console must fail its smoke run"));
+        assert!(failure.contains("unit_bench"), "the smoke failure names the benchmark: {failure}");
+    }
+
+    /// The guest-substrate precondition under smoke: a native benchmark that reports a guest view
+    /// fails its smoke run (the view of a benchmark that does not declare the guest substrate).
+    #[test]
+    #[should_panic(expected = "a view reported by a native benchmark must fail its smoke run")]
+    fn smoke_fails_a_native_body_that_reports_a_guest_view() {
+        fn reports(replicate: &mut Replicate) -> Result<(), ReplicateFailure> {
+            replicate.report_guest_view(guest_view())?;
+            replicate.record_series("stream", &[100.0, 200.0])?;
+            replicate.record("scalar", 1.0)
+        }
+        let mut control = decl(well_formed_guest_body);
+        control.substrate = "guest";
+        assert_eq!(smoke_failure(&control), None, "the well-formed guest body must pass smoke");
+        let failure = smoke_failure(&decl(reports)).unwrap_or_else(|| {
+            panic!("a view reported by a native benchmark must fail its smoke run")
+        });
+        assert!(failure.contains("unit_bench"), "the smoke failure names the benchmark: {failure}");
     }
 }

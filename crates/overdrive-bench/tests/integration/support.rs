@@ -424,3 +424,84 @@ pub fn section<'a>(report: &'a str, label: &str) -> &'a str {
     let end = rest[1..].find("\n#").map_or(rest.len(), |i| i + 1);
     &rest[..end]
 }
+
+// ---- Guest records (guest-benchmark-substrate, ADR-0326, DDD-2) ----
+//
+// A guest record is the native schema plus the optional `guest` block of `run_started` and at most
+// one `guest_observed` line after the start canary. The shapes below are the ones DDD-2 pins.
+
+/// The pinned `clock.guest` string of the `guest_monotonic` source (DDD-1).
+pub const GUEST_MONOTONIC_CLOCK: &str = "CLOCK_MONOTONIC (in-guest Instant, 1 ns)";
+
+/// The reason a guest records for each setting it cannot see.
+pub const NOT_VISIBLE: &str = "not visible from a guest";
+
+/// The series metric of the first guest family.
+pub const GUEST_METRIC: &str = "forwarded_round_trip_ns";
+
+/// The `guest` block of `run_started`: what is true before any guest boots.
+pub fn guest_block() -> Value {
+    json!({
+        "launch": "metal_host", "boot": "per_replicate", "vcpu_scheduling": "unpinned",
+        "settings": {
+            "governor": { "absent": NOT_VISIBLE },
+            "smt": { "absent": NOT_VISIBLE },
+            "boost": { "absent": NOT_VISIBLE }
+        }
+    })
+}
+
+/// `run_started` of a guest benchmark: one arm, one series metric, the guest block, the guest
+/// clock string and no statistics.
+pub fn guest_started() -> Value {
+    let mut started = run_started(&["forwarding"]);
+    started["family"] = json!("guest-flow-forwarding");
+    started["benchmark"] = json!("guest_flow_forwarding");
+    started["substrate"] = json!("guest");
+    started["guest"] = guest_block();
+    started["bpf_stats"] = json!("off");
+    started["clock"] =
+        json!({ "host": "CLOCK_MONOTONIC_RAW", "service": null, "guest": GUEST_MONOTONIC_CLOCK });
+    started["declaration"] =
+        declaration(&["forwarding"], &[metric_decl(GUEST_METRIC, "ns", "forwarded-path", true)]);
+    started
+}
+
+/// The 64 lowercase hex digits of `digit` repeated: a staged-artifact digest.
+pub fn digest(digit: char) -> String {
+    digit.to_string().repeat(64)
+}
+
+/// The `guest_observed` line of a 2-vCPU, 512 MiB guest.
+pub fn guest_observed() -> Value {
+    json!({
+        "t": "guest_observed", "vcpus": 2, "memory_mib": 512,
+        "kernel": "7.0.0-38-generic", "clocksource": "kvm-clock",
+        "artifacts": {
+            "overdrive_init": digest('a'),
+            "overdrive_guest_peer": digest('b'),
+            "ovd_fwd": digest('c')
+        }
+    })
+}
+
+/// A passing guest replicate of block `block`: three round-trip times.
+pub fn guest_replicate(block: usize) -> Value {
+    replicate(
+        block,
+        0,
+        "forwarding",
+        "arm",
+        json!({ GUEST_METRIC: values_entry(&[41_000.0, 42_000.0, 43_000.0]) }),
+    )
+}
+
+/// A complete guest record: `run_started` (line 1), the start canary (2), `guest_observed` (3),
+/// `n` passing replicates, the end canary and `run_finished`.
+pub fn guest_record(n: usize) -> Lines {
+    let mut lines = vec![guest_started(), canary("start", 1000.0), guest_observed()];
+    lines.extend((0..n).map(guest_replicate));
+    lines.push(canary("end", 1000.0));
+    lines.push(finished(n, 0));
+    lines
+}

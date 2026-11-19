@@ -1,0 +1,90 @@
+0	lead-newline	0x1003000	0	true		true		true	0	0	13	71971	41024	7.0.0-38-generic
+1	bare	0x1003001	0	true		false	0 begin lines	true	0	0	13	72376	41392	7.0.0-38-generic
+2	bare	0x1003002	0	true		true		true	0	0	10	72767	41344	7.0.0-38-generic
+3	bare	0x1003003	0	true		true		true	0	0	10	71483	41015	7.0.0-38-generic
+4	lead-newline	0x1003004	0	true		true		true	0	0	13	71736	41261	7.0.0-38-generic
+5	bare	0x1003005	0	true		false	0 begin lines	true	0	0	13	71971	40994	7.0.0-38-generic
+6	bare	0x1003006	0	true		true		true	0	0	10	74028	41174	7.0.0-38-generic
+7	bare	0x1003007	0	true		true		true	0	0	10	71525	41055	7.0.0-38-generic
+8	lead-newline	0x1003008	0	true		true		true	0	0	13	71515	41043	7.0.0-38-generic
+9	bare	0x1003009	0	true		false	0 begin lines	true	0	0	13	71989	41012	7.0.0-38-generic
+10	bare	0x100300a	0	true		true		true	0	0	10	71550	41076	7.0.0-38-generic
+11	lead-newline	0x100300b	0	true		true		true	0	0	10	74330	41468	7.0.0-38-generic
+12	lead-newline	0x100300c	0	true		true		true	0	0	10	72051	41096	7.0.0-38-generic
+13	bare	0x100300d	0	true		false	0 begin lines	true	0	0	13	71484	40976	7.0.0-38-generic
+14	bare	0x100300e	0	true		false	0 begin lines	true	0	0	13	71513	41007	7.0.0-38-generic
+15	bare	0x100300f	0	true		true		true	0	0	10	71687	41216	7.0.0-38-generic
+16	bare	0x1003010	0	true		true		true	0	0	13	71622	41150	7.0.0-38-generic
+17	lead-newline	0x1003011	0	true		true		true	0	0	13	71603	41127	7.0.0-38-generic
+18	lead-newline	0x1003012	0	true		true		true	0	0	13	71503	41029	7.0.0-38-generic
+19	bare	0x1003013	0	true		true		true	0	0	10	71797	41326	7.0.0-38-generic
+20	bare	0x1003014	0	true		true		true	0	0	13	72953	41050	7.0.0-38-generic
+21	bare	0x1003015	0	true		false	0 begin lines	true	0	0	13	72192	41210	7.0.0-38-generic
+22	lead-newline	0x1003016	0	true		true		true	0	0	12	72030	41077	7.0.0-38-generic
+23	bare	0x1003017	0	true		false	0 begin lines	true	0	0	13	71969	40986	7.0.0-38-generic
+24	bare	0x1003018	0	true		false	0 begin lines	true	0	0	13	71514	41006	7.0.0-38-generic
+25	bare	0x1003019	0	true		true		true	0	0	13	72407	41457	7.0.0-38-generic
+26	lead-newline	0x100301a	0	true		true		true	0	0	10	72575	41145	7.0.0-38-generic
+27	lead-newline	0x100301b	0	true		true		true	0	0	13	72046	41093	7.0.0-38-generic
+28	bare	0x100301c	0	true		true		true	0	0	10	72064	41113	7.0.0-38-generic
+29	bare	0x100301d	0	true		false	0 begin lines	true	0	0	13	72480	41020	7.0.0-38-generic
+30	lead-newline	0x100301e	0	true		true		true	0	0	13	71508	41036	7.0.0-38-generic
+31	bare	0x100301f	0	true		true		true	0	0	10	72173	41221	7.0.0-38-generic
+32	bare	0x1003020	0	true		true		true	0	0	13	71870	41395	7.0.0-38-generic
+33	bare	0x1003021	0	true		false	0 begin lines	true	0	0	13	71878	41373	7.0.0-38-generic
+34	lead-newline	0x1003022	0	true		true		true	0	0	13	71026	41027	7.0.0-38-generic
+35	bare	0x1003023	0	true		true		true	0	0	10	71475	41005	7.0.0-38-generic
+36	bare	0x1003024	0	true		true		true	0	0	10	71495	41023	7.0.0-38-generic
+37	bare	0x1003025	0	true		true		true	0	0	13	73581	41202	7.0.0-38-generic
+38	lead-newline	0x1003026	0	true		true		true	0	0	10	71978	41029	7.0.0-38-generic
+39	bare	0x1003027	0	true		true		true	0	0	13	71025	41027	7.0.0-38-generic
+40	lead-newline	0x1003028	0	true		true		true	0	0	10	71983	41033	7.0.0-38-generic
+41	bare	0x1003029	0	true		true		true	0	0	10	71496	41025	7.0.0-38-generic
+42	lead-newline	0x100302a	0	true		true		true	0	0	10	71484	41011	7.0.0-38-generic
+43	bare	0x100302b	0	true		true		true	0	0	10	72851	41425	7.0.0-38-generic
+44	bare	0x100302c	0	true		true		true	0	0	10	72171	41218	7.0.0-38-generic
+45	lead-newline	0x100302d	0	true		true		true	0	0	10	73004	41098	7.0.0-38-generic
+46	bare	0x100302e	0	true		true		true	0	0	10	71488	41011	7.0.0-38-generic
+47	bare	0x100302f	0	true		false	0 begin lines	true	0	0	13	72179	41194	7.0.0-38-generic
+48	bare	0x1003030	0	true		true		true	0	0	10	71719	41243	7.0.0-38-generic
+49	lead-newline	0x1003031	0	true		true		true	0	0	13	71486	41011	7.0.0-38-generic
+50	bare	0x1003032	0	true		true		true	0	0	10	72521	41092	7.0.0-38-generic
+51	lead-newline	0x1003033	0	true		true		true	0	0	13	71493	41018	7.0.0-38-generic
+52	bare	0x1003034	0	true		false	0 begin lines	true	0	0	13	71958	40978	7.0.0-38-generic
+53	bare	0x1003035	0	true		false	0 begin lines	true	0	0	13	71557	41052	7.0.0-38-generic
+54	bare	0x1003036	0	true		true		true	0	0	10	71659	41183	7.0.0-38-generic
+55	bare	0x1003037	0	true		false	0 begin lines	true	0	0	13	71591	41082	7.0.0-38-generic
+56	lead-newline	0x1003038	0	true		true		true	0	0	10	72498	41069	7.0.0-38-generic
+57	bare	0x1003039	0	true		true		true	0	0	10	71012	41014	7.0.0-38-generic
+58	bare	0x100303a	0	true		true		true	0	0	10	73700	41318	7.0.0-38-generic
+59	lead-newline	0x100303b	0	true		true		true	0	0	13	72987	41081	7.0.0-38-generic
+60	bare	0x100303c	0	true		true		true	0	0	13	71551	41078	7.0.0-38-generic
+61	bare	0x100303d	0	true		false	0 begin lines	true	0	0	13	72618	41158	7.0.0-38-generic
+62	lead-newline	0x100303e	0	true		true		true	0	0	10	72926	41022	7.0.0-38-generic
+63	lead-newline	0x100303f	0	true		true		true	0	0	10	71486	41011	7.0.0-38-generic
+64	bare	0x1003040	0	true		true		true	0	0	13	72038	41090	7.0.0-38-generic
+65	bare	0x1003041	0	true		true		true	0	0	13	71759	41283	7.0.0-38-generic
+66	lead-newline	0x1003042	0	true		true		true	0	0	10	71734	41256	7.0.0-38-generic
+67	bare	0x1003043	0	true		true		true	0	0	10	72162	41213	7.0.0-38-generic
+68	bare	0x1003044	0	true		true		true	0	0	10	72980	41076	7.0.0-38-generic
+69	lead-newline	0x1003045	0	true		true		true	0	0	10	71973	41019	7.0.0-38-generic
+70	bare	0x1003046	0	true		false	0 begin lines	true	0	0	13	72598	41135	7.0.0-38-generic
+71	bare	0x1003047	0	true		false	0 begin lines	true	0	0	13	71971	40989	7.0.0-38-generic
+72	bare	0x1003048	0	true		true		true	0	0	10	71550	41077	7.0.0-38-generic
+73	lead-newline	0x1003049	0	true		true		true	0	0	13	72444	41063	7.0.0-38-generic
+74	bare	0x100304a	0	true		true		true	0	0	10	71572	41101	7.0.0-38-generic
+75	bare	0x100304b	0	true		false	0 begin lines	true	0	0	13	72081	41095	7.0.0-38-generic
+76	lead-newline	0x100304c	0	true		true		true	0	0	13	71480	41007	7.0.0-38-generic
+77	bare	0x100304d	0	true		false	0 begin lines	true	0	0	13	72639	41175	7.0.0-38-generic
+78	lead-newline	0x100304e	0	true		true		true	0	0	13	71496	41019	7.0.0-38-generic
+79	bare	0x100304f	0	true		false	0 begin lines	true	0	0	13	72058	41072	7.0.0-38-generic
+80	bare	0x1003050	0	true		true		true	0	0	10	71492	41017	7.0.0-38-generic
+81	bare	0x1003051	0	true		true		true	0	0	10	72532	41105	7.0.0-38-generic
+82	lead-newline	0x1003052	0	true		true		true	0	0	10	72508	41083	7.0.0-38-generic
+83	bare	0x1003053	0	true		false	0 begin lines	true	0	0	13	71489	40980	7.0.0-38-generic
+84	bare	0x1003054	0	true		false	0 begin lines	true	0	0	13	72488	41025	7.0.0-38-generic
+85	lead-newline	0x1003055	0	true		true		true	0	0	10	71505	41028	7.0.0-38-generic
+86	bare	0x1003056	0	true		false	0 begin lines	true	0	0	13	71484	40977	7.0.0-38-generic
+87	bare	0x1003057	0	true		true		true	0	0	10	73111	41206	7.0.0-38-generic
+88	bare	0x1003058	0	true		false	0 begin lines	true	0	0	13	72606	41142	7.0.0-38-generic
+89	lead-newline	0x1003059	0	true		true		true	0	0	13	71858	41380	7.0.0-38-generic

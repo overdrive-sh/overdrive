@@ -10,7 +10,7 @@
 //! (`Error::InvalidRecord`); a usage error exits 64; an unreadable record exits 70.
 //! Never 101 (a panic). Every test is CONTRACT_SHAPE pure-function (a record in, a verdict and a
 //! diagnostic out) except where it says otherwise. Traces: K3, K5.
-use serde_json::json;
+use serde_json::{Value, json};
 
 use super::support::*;
 
@@ -546,8 +546,8 @@ fn a_record_that_does_not_begin_with_run_started_is_refused() {
     assert!(!ok && code != Some(101), "an empty record must be refused: {stderr}");
 }
 
-/// A value outside a closed vocabulary is refused: `role`, `outcome`, `evidence`, `bpf_stats`, and the
-/// substrate `guest` (the registry is `native` only, DDD-4).
+/// A value outside a closed vocabulary is refused: `role`, `outcome`, `evidence`, `bpf_stats`, and a
+/// substrate outside the registry (`native` and `guest`).
 /// CONTRACT_SHAPE: pure-function (record in, verdict out).
 #[test]
 fn a_value_outside_a_closed_vocabulary_is_refused() {
@@ -556,7 +556,7 @@ fn a_value_outside_a_closed_vocabulary_is_refused() {
         ("outcome", "skipped"),
         ("evidence", "folklore"),
         ("bpf_stats", "sometimes"),
-        ("substrate", "guest"),
+        ("substrate", "hypervisor"),
     ] {
         let mut lines = valid();
         let index = usize::from(field == "role" || field == "outcome") * 2;
@@ -654,6 +654,318 @@ fn a_record_carrying_each_pinned_clock_string_validates() {
         assert!(
             ok && code == Some(0) && stderr.is_empty(),
             "a record with clock.service {service} and clock.guest {guest} must validate: status {code:?}: {stderr}"
+        );
+    }
+}
+
+// ---- The guest substrate (guest-benchmark-substrate, ADR-0325, ADR-0326, DDD-1, DDD-2) ----
+//
+// A guest record is the native schema plus the optional `guest` block of `run_started` and at
+// most one `guest_observed` line after the start canary. Each refusal below starts from a valid
+// guest record and breaks one rule, so a refusal is the rule's and not another's. Every test first
+// proves the valid control validates; until the validator accepts the guest substrate that
+// precondition is the RED. Evidence lane: integration (subprocess, examples only, Mandate 11: one
+// named sad path per failure mode). Traces: US-GBS-01 AC (b), US-GBS-02, K2, K3.
+
+/// One edit of the guest block of `run_started`.
+type Edit = Box<dyn Fn(&mut Value)>;
+
+const GUEST_CONTROL: &str = "the valid guest record must validate";
+
+/// Asserts the valid guest record validates silently with exit 0 (the control of every case).
+fn the_guest_control_validates() {
+    let d = dir();
+    let (ok, stderr, code) = validate(&write(d.path(), "control.jsonl", &guest_record(9)));
+    assert!(
+        ok && code == Some(0) && stderr.is_empty(),
+        "{GUEST_CONTROL}: status {code:?}: {stderr}"
+    );
+}
+
+/// Asserts `validate` refused the guest record with exit 65, the pinned prefix, the optional line
+/// and a reason naming `needle`.
+fn guest_refused(lines: &Lines, line: Option<usize>, needle: &str, why: &str) {
+    let d = dir();
+    let (ok, stderr, code) = validate(&write(d.path(), "r.jsonl", lines));
+    assert!(!ok, "validate must refuse a guest record with {why}");
+    assert_eq!(code, Some(65), "an invalid record exits 65, never a panic ({why}): {stderr}");
+    assert!(
+        stderr.starts_with(INVALID),
+        "the refusal for {why} must read `{INVALID}<n>: <reason>`: {stderr}"
+    );
+    if let Some(line) = line {
+        assert!(
+            stderr.starts_with(&format!("{INVALID}{line}: ")),
+            "the refusal for {why} must name line {line}: {stderr}"
+        );
+    }
+    assert!(stderr.contains(needle), "the reason for {why} must name `{needle}`: {stderr}");
+}
+
+/// A well-formed guest record validates silently in every terminal state: with its view, with
+/// every replicate failed and no view, with a failed replicate before the view, refused with the
+/// static guest block, incomplete (no terminal line), and with the view's values absent or
+/// unreadable. The same validator as a native record, no guest-only flag. US-GBS-01 AC (b); K1.
+/// CONTRACT_SHAPE: pure-function (record in, verdict out).
+#[test]
+#[should_panic(expected = "the valid guest record must validate")]
+fn a_wellformed_guest_record_validates_in_every_terminal_state() {
+    the_guest_control_validates();
+    let failed = |lines: &mut Lines, index: usize| {
+        let reason = "guest boot: no READY within 60s";
+        fail_replicate(lines, index, reason, json!({ GUEST_METRIC: failure_entry(reason) }));
+    };
+    let mut all_failed = vec![guest_started(), canary("start", 1000.0)];
+    all_failed.extend((0..9).map(guest_replicate));
+    all_failed.push(canary("end", 1000.0));
+    all_failed.push(finished(9, 0));
+    for index in 2..11 {
+        failed(&mut all_failed, index);
+    }
+    let mut failed_before_view = guest_record(9);
+    failed_before_view.swap(2, 3);
+    failed(&mut failed_before_view, 2);
+    let mut failed_inside = guest_record(9);
+    failed(&mut failed_inside, 6);
+    let incomplete: Lines = guest_record(9).into_iter().take(12).collect();
+    let mut forms = guest_record(9);
+    forms[2]["kernel"] = json!({ "absent": "no kernel release in the guest" });
+    forms[2]["clocksource"] = json!({ "unreadable": "permission denied" });
+    forms[2]["artifacts"]["ovd_fwd"] = json!({ "absent": "the module was not staged" });
+    for (name, lines) in [
+        ("with-view", guest_record(9)),
+        ("every-replicate-failed-no-view", all_failed),
+        ("a-failure-before-the-view", failed_before_view),
+        ("a-failure-between-ok-replicates", failed_inside),
+        (
+            "refused-with-the-guest-block",
+            vec![guest_started(), refusal("bpf_stats_enabled", "1", "0")],
+        ),
+        ("incomplete", incomplete),
+        ("view-value-forms", forms),
+    ] {
+        let d = dir();
+        let (ok, stderr, code) = validate(&write(d.path(), "r.jsonl", &lines));
+        assert!(
+            ok && code == Some(0) && stderr.is_empty(),
+            "{GUEST_CONTROL}: `{name}` was refused with status {code:?}: {stderr}"
+        );
+    }
+}
+
+/// The `guest` block is present exactly when the substrate is `guest`: a native record carrying
+/// one, and a guest record lacking it, are refused naming `guest` on line 1.
+/// CONTRACT_SHAPE: pure-function (record in, verdict out).
+#[test]
+#[should_panic(expected = "the valid guest record must validate")]
+fn a_guest_block_is_present_exactly_when_the_substrate_is_guest() {
+    the_guest_control_validates();
+    let mut native_with_block = valid();
+    native_with_block[0]["guest"] = guest_block();
+    guest_refused(&native_with_block, Some(1), "guest", "a guest block on a native record");
+    let mut guest_without_block = guest_record(9);
+    guest_without_block[0].as_object_mut().expect("object").remove("guest");
+    guest_refused(&guest_without_block, Some(1), "guest", "a guest record with no guest block");
+}
+
+/// Each value of the guest block outside its pinned vocabulary is refused naming the field:
+/// `launch` is `metal_host`, `boot` is `per_replicate`, `vcpu_scheduling` is `unpinned`, the
+/// three settings are each exactly `{ "absent": "not visible from a guest" }`, nothing else.
+/// CONTRACT_SHAPE: pure-function (record in, verdict out).
+#[test]
+#[should_panic(expected = "the valid guest record must validate")]
+fn a_guest_block_outside_its_pinned_vocabulary_is_refused_naming_the_field() {
+    the_guest_control_validates();
+    let cases: Vec<(&str, &str, Edit)> = vec![
+        ("launch", "launch nested", Box::new(|b| b["launch"] = json!("nested"))),
+        (
+            "launch",
+            "launch absent",
+            Box::new(|b| {
+                b.as_object_mut().expect("object").remove("launch");
+            }),
+        ),
+        ("boot", "boot per_run", Box::new(|b| b["boot"] = json!("per_run"))),
+        (
+            "vcpu_scheduling",
+            "vcpu_scheduling pinned",
+            Box::new(|b| b["vcpu_scheduling"] = json!("pinned")),
+        ),
+        (
+            "governor",
+            "governor a value",
+            Box::new(|b| b["settings"]["governor"] = json!("performance")),
+        ),
+        (
+            "governor",
+            "governor another reason",
+            Box::new(|b| b["settings"]["governor"] = json!({ "absent": "no cpufreq" })),
+        ),
+        (
+            "smt",
+            "smt unreadable",
+            Box::new(|b| b["settings"]["smt"] = json!({ "unreadable": "denied" })),
+        ),
+        ("boost", "boost zero-filled", Box::new(|b| b["settings"]["boost"] = json!("0"))),
+        (
+            "smt",
+            "smt missing",
+            Box::new(|b| {
+                b["settings"].as_object_mut().expect("object").remove("smt");
+            }),
+        ),
+        (
+            "turbo",
+            "an extra setting",
+            Box::new(|b| b["settings"]["turbo"] = json!({ "absent": NOT_VISIBLE })),
+        ),
+        ("pinned_cpus", "an unknown key", Box::new(|b| b["pinned_cpus"] = json!([0, 1]))),
+    ];
+    for (needle, why, edit) in cases {
+        let mut lines = guest_record(9);
+        edit(&mut lines[0]["guest"]);
+        guest_refused(&lines, Some(1), needle, why);
+    }
+}
+
+/// A `guest_observed` line outside its place is refused naming `guest_observed`: on a native
+/// record, before the start canary, twice, and after the first `ok` replicate line (which the
+/// rule says it must precede).
+/// CONTRACT_SHAPE: pure-function (record in, verdict out).
+#[test]
+#[should_panic(expected = "the valid guest record must validate")]
+fn a_guest_observed_line_outside_its_place_is_refused() {
+    the_guest_control_validates();
+    let mut on_native = valid();
+    on_native.insert(2, guest_observed());
+    guest_refused(
+        &on_native,
+        Some(3),
+        "guest_observed",
+        "a guest_observed line on a native record",
+    );
+    let mut before_the_start_canary = guest_record(9);
+    before_the_start_canary.swap(1, 2);
+    guest_refused(
+        &before_the_start_canary,
+        Some(2),
+        "guest_observed",
+        "the line before the start canary",
+    );
+    let mut twice = guest_record(9);
+    twice.insert(3, guest_observed());
+    guest_refused(&twice, Some(4), "guest_observed", "a second guest_observed line");
+    let mut after_an_ok_replicate = guest_record(9);
+    after_an_ok_replicate.swap(2, 3);
+    guest_refused(
+        &after_an_ok_replicate,
+        None,
+        "guest_observed",
+        "the line after the first ok replicate",
+    );
+    let mut no_view_with_an_ok_replicate = guest_record(9);
+    no_view_with_an_ok_replicate.remove(2);
+    guest_refused(
+        &no_view_with_an_ok_replicate,
+        None,
+        "guest_observed",
+        "an ok replicate and no view",
+    );
+}
+
+/// Each malformed field of `guest_observed` is refused naming it: `vcpus` and `memory_mib` are
+/// positive integers (0, a string, a fraction and null are not), `kernel` and `clocksource` are
+/// in the host block's three forms, `artifacts` has exactly the three keys with a text value of
+/// 64 lowercase hex digits (63, 65, upper case and a non-hex digit are not), and unknown keys are
+/// refused.
+/// CONTRACT_SHAPE: pure-function (record in, verdict out).
+#[test]
+#[should_panic(expected = "the valid guest record must validate")]
+fn a_malformed_guest_view_is_refused_naming_the_field() {
+    the_guest_control_validates();
+    let cases: Vec<(&str, &str, Value)> = vec![
+        ("vcpus", "vcpus 0", json!(0)),
+        ("vcpus", "vcpus a string", json!("2")),
+        ("vcpus", "vcpus a fraction", json!(1.5)),
+        ("vcpus", "vcpus null", json!(null)),
+        ("memory_mib", "memory_mib 0", json!(0)),
+        ("memory_mib", "memory_mib a string", json!("512")),
+        ("memory_mib", "memory_mib negative", json!(-512)),
+        ("kernel", "kernel a number", json!(7)),
+        ("kernel", "kernel two forms", json!({ "absent": "a", "unreadable": "b" })),
+        ("clocksource", "clocksource null", json!(null)),
+    ];
+    for (field, why, value) in cases {
+        let mut lines = guest_record(9);
+        lines[2][field] = value;
+        guest_refused(&lines, Some(3), field, why);
+    }
+    let digest_cases: Vec<(&str, String)> = vec![
+        ("63 digits", "a".repeat(63)),
+        ("65 digits", "a".repeat(65)),
+        ("upper case", "A".repeat(64)),
+        ("a non-hex digit", format!("{}g", "a".repeat(63))),
+        ("empty", String::new()),
+    ];
+    for (why, text) in digest_cases {
+        let mut lines = guest_record(9);
+        lines[2]["artifacts"]["overdrive_init"] = json!(text);
+        guest_refused(&lines, Some(3), "overdrive_init", &format!("an artifact digest of {why}"));
+    }
+    let mut missing_key = guest_record(9);
+    missing_key[2]["artifacts"].as_object_mut().expect("object").remove("ovd_fwd");
+    guest_refused(&missing_key, Some(3), "ovd_fwd", "a missing artifact key");
+    let mut extra_key = guest_record(9);
+    extra_key[2]["artifacts"]["extra_module"] = json!(digest('d'));
+    guest_refused(&extra_key, Some(3), "extra_module", "an extra artifact key");
+    let mut unknown_key = guest_record(9);
+    unknown_key[2]["load_average"] = json!(0.5);
+    guest_refused(&unknown_key, Some(3), "load_average", "an unknown key of the line");
+    let mut no_artifacts = guest_record(9);
+    no_artifacts[2].as_object_mut().expect("object").remove("artifacts");
+    guest_refused(&no_artifacts, Some(3), "artifacts", "no artifacts at all");
+}
+
+/// `clock.guest` accepts the in-guest monotonic string beside the init one and refuses any other
+/// string naming `clock.guest`; the record that names the guest clock source validates.
+/// CONTRACT_SHAPE: pure-function (record in, verdict out).
+#[test]
+#[should_panic(expected = "the valid guest record must validate")]
+fn the_guest_monotonic_clock_string_validates_and_any_other_is_refused() {
+    the_guest_control_validates();
+    let mut native_carrying_it = valid();
+    native_carrying_it[0]["clock"]["guest"] = json!(GUEST_MONOTONIC_CLOCK);
+    let d = dir();
+    let (ok, stderr, code) = validate(&write(d.path(), "r.jsonl", &native_carrying_it));
+    assert!(
+        ok && code == Some(0) && stderr.is_empty(),
+        "{GUEST_CONTROL}: clock.guest `{GUEST_MONOTONIC_CLOCK}` must be accepted: {stderr}"
+    );
+    for text in ["CLOCK_MONOTONIC (in-guest Instant, 1 ms)", "CLOCK_MONOTONIC", "tsc", ""] {
+        let mut lines = guest_record(9);
+        lines[0]["clock"]["guest"] = json!(text);
+        guest_refused(&lines, Some(1), "clock.guest", &format!("clock.guest `{text}`"));
+    }
+}
+
+/// No command takes two records (D8): `validate` and `render` given two record paths are usage
+/// errors (exit 64), so a guest record and a native record are never compared. GREEN guard.
+/// CONTRACT_SHAPE: pure-function (arguments in, verdict out).
+#[test]
+fn no_command_takes_two_records() {
+    let d = dir();
+    let native = write(d.path(), "native.jsonl", &valid());
+    let guest = write(d.path(), "guest.jsonl", &guest_record(9));
+    for subcommand in ["validate", "render"] {
+        let output = bench_report(&[
+            subcommand,
+            native.to_str().expect("utf-8"),
+            guest.to_str().expect("utf-8"),
+        ]);
+        assert_eq!(
+            output.status.code(),
+            Some(64),
+            "`{subcommand}` with two records must be a usage error"
         );
     }
 }

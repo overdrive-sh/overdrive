@@ -200,6 +200,51 @@ C4Component
     Rel(report, record, "Reads a validated record from")
 ```
 
+## Guest benchmark substrate (GH #362)
+
+**ACCEPTED 2026-11-19** (ADR-0325 to ADR-0333; feature `guest-benchmark-substrate`,
+[feature delta](../../feature/guest-benchmark-substrate/feature-delta.md#wave-design--ref-decisions-table)).
+Developer tooling; no new production runtime component and no new crate. Extends the
+native benchmark program above.
+
+### C4 Level 1 — System Context
+
+```mermaid
+C4Context
+  title System Context — measuring a component that runs in a workload VM
+  Person(marcus, "Marcus", "Platform verification engineer; coding agents run the same commands")
+  System(bench, "Benchmark program", "Declares, runs and records a benchmark; now also in a guest")
+  System_Ext(metal, "Native Metal host", "Exclusive, non-virtualized x86_64 host with the pinned settings")
+  Rel(marcus, bench, "runs the benchmark form of")
+  Rel(bench, metal, "takes exclusive admission on")
+```
+
+### C4 Level 2 — Container, one guest benchmark run
+
+```mermaid
+C4Container
+  title Container — a guest benchmark run on the Metal host
+  Person(marcus, "Marcus", "Runs the benchmark form, pulls the result")
+  System_Boundary(metal, "Native Metal host (exclusive admission, no nesting)") {
+    Container(runner, "Benchmark process", "overdrive-bench, overdrive-bench-families", "Checks the host, runs replicates, writes the record")
+    Container(kit, "Guest kit", "overdrive-testing", "Builds the image, launches the guest through CloudHypervisorVmm, plays the node beacon")
+    Container(vmm, "Cloud Hypervisor", "VMM process", "Runs one guest at a time")
+    Container(init, "overdrive-init", "PID 1 in the guest, production binary", "Guest flow owner over the ovd_fwd forwarder")
+    Container(peer, "overdrive-guest-peer", "Static release program in the guest", "Plays flow peer and application, stamps samples on the guest clock")
+    ContainerDb(results, "Result directory", "benchmarks/results/family/run-id", "record.jsonl, report.md, artifacts")
+  }
+  Rel(marcus, runner, "starts through the Metal benchmark form")
+  Rel(runner, kit, "asks to run a program in a fresh guest")
+  Rel(kit, vmm, "launches and ends")
+  Rel(vmm, init, "boots")
+  Rel(kit, init, "answers READY and sends EXEC to")
+  Rel(init, peer, "execs as the operator command")
+  Rel(peer, init, "opens flows to the inbound port of")
+  Rel(peer, kit, "prints a framed series block on the console read by")
+  Rel(runner, results, "appends the record and the console to")
+  Rel(marcus, results, "pulls and reads")
+```
+
 ## VM lifecycle responsiveness (#283/#260)
 
 **APPROVED, 2026-09-10; independent DESIGN review APPROVED; user ratification APPROVED.**

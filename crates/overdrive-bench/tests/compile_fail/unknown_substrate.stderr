@@ -1,4 +1,4 @@
-error[E0080]: evaluation panicked: substrate `guest_xyz` is not registered; the registered substrates are: native
+error[E0080]: evaluation panicked: substrate `guest_xyz` is not registered; the registered substrates are: native, guest
  --> tests/compile_fail/unknown_substrate.rs:6:17
   |
 6 |     substrate = guest_xyz,

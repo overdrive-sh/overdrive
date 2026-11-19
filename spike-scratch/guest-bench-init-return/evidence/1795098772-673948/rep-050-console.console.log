@@ -1,0 +1,779 @@
+[    0.000000] Linux version 7.0.0-38-generic (buildd@lcy02-amd64-070) (x86_64-linux-gnu-gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0, GNU ld (GNU Binutils for Ubuntu) 2.46) #38-Ubuntu SMP PREEMPT_DYNAMIC Fri Sep  4 09:10:14 UTC 2026 (Ubuntu 7.0.0-38.38-generic 7.0.14)
+[    0.000000] Command line: console=ttyS0 panic=1 root=/dev/vda rw overdrive.testinit=/lib/overdrive/overdrive-init overdrive.transport=vsock2,addr=100.95.48.50,dns=100.95.0.1,launch=6c616e652d6c61756e63682d746f6b65,beacon=1053109932,stream=1053109933,control=1053109934
+[    0.000000] KERNEL supported cpus:
+[    0.000000]   Intel GenuineIntel
+[    0.000000]   AMD AuthenticAMD
+[    0.000000]   Hygon HygonGenuine
+[    0.000000]   Centaur CentaurHauls
+[    0.000000]   zhaoxin   Shanghai  
+[    0.000000] [Firmware Bug]: TSC doesn't count with P0 frequency!
+[    0.000000] BIOS-provided physical RAM map:
+[    0.000000] BIOS-e820: [mem 0x0000000000000000-0x000000000009ffff]  System RAM
+[    0.000000] BIOS-e820: [gap 0x00000000000a0000-0x00000000000fffff]
+[    0.000000] BIOS-e820: [mem 0x0000000000100000-0x000000001fffffff]  System RAM
+[    0.000000] BIOS-e820: [gap 0x0000000020000000-0x00000000e7ffffff]
+[    0.000000] BIOS-e820: [mem 0x00000000e8000000-0x00000000f7ffffff]  device reserved
+[    0.000000] NX (Execute Disable) protection: active
+[    0.000000] APIC: Static calls initialized
+[    0.000000] SMBIOS 3.2.0 present.
+[    0.000000] DMI: Cloud Hypervisor cloud-hypervisor, BIOS 0 
+[    0.000000] DMI: Memory slots populated: 0/0
+[    0.000000] Hypervisor detected: KVM
+[    0.000000] last_pfn = 0x20000 max_arch_pfn = 0x10000000000
+[    0.000000] kvm-clock: Using msrs 4b564d01 and 4b564d00
+[    0.000000] kvm-clock: using sched offset of 162008452 cycles
+[    0.000003] clocksource: kvm-clock: mask: 0xffffffffffffffff max_cycles: 0x1cd42e4dffb, max_idle_ns: 881590591483 ns
+[    0.000006] tsc: Detected 2396.400 MHz processor
+[    0.000023] last_pfn = 0x20000 max_arch_pfn = 0x10000000000
+[    0.000072] MTRR map: 0 entries (0 fixed + 0 variable; max 16), built from 8 variable MTRRs
+[    0.000075] x86/PAT: Configuration [0-7]: WB  WC  UC- UC  WB  WP  UC- WT  
+[    0.000195] found SMP MP-table at [mem 0x000f0090-0x000f009f]
+[    0.000214] Using GB pages for direct mapping
+[    0.000289] ACPI: Early table checksum verification disabled
+[    0.000293] ACPI: RSDP 0x00000000000A0000 000024 (v02 CLOUDH)
+[    0.000297] ACPI: XSDT 0x00000000000A1469 00003C (v01 CLOUDH CHXSDT   00000001 RVAT 01000000)
+[    0.000302] ACPI: FACP 0x00000000000A12B7 000114 (v06 CLOUDH CHFACP   00000001 RVAT 01000000)
+[    0.000307] ACPI: DSDT 0x00000000000A0024 001293 (v06 CLOUDH CHDSDT   00000001 RVAT 01000000)
+[    0.000309] ACPI: APIC 0x00000000000A13CB 000062 (v05 CLOUDH CHMADT   00000001 RVAT 01000000)
+[    0.000312] ACPI: MCFG 0x00000000000A142D 00003C (v01 CLOUDH CHMCFG   00000001 RVAT 01000000)
+[    0.000314] ACPI: Reserving FACP table memory at [mem 0xa12b7-0xa13ca]
+[    0.000315] ACPI: Reserving DSDT table memory at [mem 0xa0024-0xa12b6]
+[    0.000316] ACPI: Reserving APIC table memory at [mem 0xa13cb-0xa142c]
+[    0.000316] ACPI: Reserving MCFG table memory at [mem 0xa142d-0xa1468]
+[    0.001061] No NUMA configuration found
+[    0.001063] Faking a node at [mem 0x0000000000000000-0x000000001fffffff]
+[    0.001075] NODE_DATA(0) allocated [mem 0x1ffd5280-0x1fffffff]
+[    0.002093] ACPI: PM-Timer IO Port: 0x608
+[    0.002235] IOAPIC[0]: apic_id 0, version 17, address 0xfec00000, GSI 0-23
+[    0.002241] ACPI: INT_SRC_OVR (bus 0 bus_irq 4 global_irq 4 dfl dfl)
+[    0.002245] ACPI: Using ACPI (MADT) for SMP configuration information
+[    0.002247] TSC deadline timer available
+[    0.002249] CPU topo: Max. logical packages:   1
+[    0.002250] CPU topo: Max. logical nodes:      1
+[    0.002251] CPU topo: Num. nodes per package:  1
+[    0.002253] CPU topo: Max. logical dies:       1
+[    0.002254] CPU topo: Max. dies per package:   1
+[    0.002258] CPU topo: Max. threads per core:   1
+[    0.002258] CPU topo: Num. cores per package:     2
+[    0.002259] CPU topo: Num. threads per package:   2
+[    0.002259] CPU topo: Allowing 2 present CPUs plus 0 hotplug CPUs
+[    0.002278] kvm-guest: APIC: eoi() replaced with kvm_guest_apic_eoi_write()
+[    0.002292] kvm-guest: KVM setup pv remote TLB flush
+[    0.002296] kvm-guest: setup PV sched yield
+[    0.002301] PM: hibernation: Registered nosave memory: [mem 0x00000000-0x00000fff]
+[    0.002303] PM: hibernation: Registered nosave memory: [mem 0x000a0000-0x000fffff]
+[    0.002304] [gap 0x20000000-0xe7ffffff] available for PCI devices
+[    0.002305] Booting paravirtualized kernel on KVM
+[    0.002307] clocksource: refined-jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 1910969940391419 ns
+[    0.002351] Zone ranges:
+[    0.002352]   DMA      [mem 0x0000000000001000-0x0000000000ffffff]
+[    0.002354]   DMA32    [mem 0x0000000001000000-0x000000001fffffff]
+[    0.002355]   Normal   empty
+[    0.002356]   Device   empty
+[    0.002357] Movable zone start for each node
+[    0.002359] Early memory node ranges
+[    0.002360]   node   0: [mem 0x0000000000001000-0x000000000009ffff]
+[    0.002361]   node   0: [mem 0x0000000000100000-0x000000001fffffff]
+[    0.002362] Initmem setup node 0 [mem 0x0000000000001000-0x000000001fffffff]
+[    0.002457] On node 0, zone DMA: 1 pages in unavailable ranges
+[    0.002471] On node 0, zone DMA: 96 pages in unavailable ranges
+[    0.003136] setup_percpu: NR_CPUS:8192 nr_cpumask_bits:2 nr_cpu_ids:2 nr_node_ids:1
+[    0.003281] percpu: Embedded 85 pages/cpu s225280 r8192 d114688 u1048576
+[    0.003318] kvm-guest: PV spinlocks enabled
+[    0.003320] PV qspinlock hash table entries: 256 (order: 0, 4096 bytes, linear)
+[    0.003324] Kernel command line: console=ttyS0 panic=1 root=/dev/vda rw overdrive.testinit=/lib/overdrive/overdrive-init overdrive.transport=vsock2,addr=100.95.48.50,dns=100.95.0.1,launch=6c616e652d6c61756e63682d746f6b65,beacon=1053109932,stream=1053109933,control=1053109934
+[    0.003396] random: crng init done
+[    0.003397] printk: log buffer data + meta data: 262144 + 1114112 = 1376256 bytes
+[    0.003415] Dentry cache hash table entries: 65536 (order: 7, 524288 bytes, linear)
+[    0.003426] Inode-cache hash table entries: 32768 (order: 6, 262144 bytes, linear)
+[    0.003460] Fallback order for Node 0: 0 
+[    0.003463] Built 1 zonelists, mobility grouping on.  Total pages: 130975
+[    0.003464] Policy zone: DMA32
+[    0.003471] mem auto-init: stack:all(zero), heap alloc:on, heap free:off
+[    0.005045] SLUB: HWalign=64, Order=0-3, MinObjects=0, CPUs=2, Nodes=1
+[    0.018855] ftrace: allocating 63997 entries in 252 pages
+[    0.018857] ftrace: allocated 252 pages with 6 groups
+[    0.019709] Dynamic Preempt: lazy
+[    0.019837] rcu: Preemptible hierarchical RCU implementation.
+[    0.019838] rcu: 	RCU restricting CPUs from NR_CPUS=8192 to nr_cpu_ids=2.
+[    0.019840] 	Trampoline variant of Tasks RCU enabled.
+[    0.019841] 	Rude variant of Tasks RCU enabled.
+[    0.019841] 	Tracing variant of Tasks RCU enabled.
+[    0.019842] rcu: RCU calculated value of scheduler-enlistment delay is 100 jiffies.
+[    0.019851] rcu: Adjusting geometry for rcu_fanout_leaf=16, nr_cpu_ids=2
+[    0.019862] RCU Tasks: Setting shift to 1 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=2.
+[    0.019864] RCU Tasks Rude: Setting shift to 1 and lim to 1 rcu_task_cb_adjust=1 rcu_task_cpu_ids=2.
+[    0.024951] NR_IRQS: 524544, nr_irqs: 424, preallocated irqs: 0
+[    0.025007] rcu: srcu_init: Setting srcu_struct sizes based on contention.
+[    0.025017] clocksource: jiffies: mask: 0xffffffff max_cycles: 0xffffffff, max_idle_ns: 1911260446275000 ns
+[    0.025080] Console: colour dummy device 80x25
+[    0.025174] printk: console [ttyS0] enabled
+[    0.203982] ACPI: Core revision 20251212
+[    0.205068] APIC: Switch to symmetric I/O mode setup
+[    0.207523] x2apic enabled
+[    0.209440] APIC: Switched APIC routing to: physical x2apic
+[    0.210880] kvm-guest: APIC: send_IPI_mask() replaced with kvm_send_ipi_mask()
+[    0.212722] kvm-guest: APIC: send_IPI_mask_allbutself() replaced with kvm_send_ipi_mask_allbutself()
+[    0.215062] kvm-guest: setup PV IPIs
+[    0.216061] clocksource: tsc-early: mask: 0xffffffffffffffff max_cycles: 0x228aeee0e7a, max_idle_ns: 440795314296 ns
+[    0.218733] Calibrating delay loop (skipped) preset value.. 4792.80 BogoMIPS (lpj=2396400)
+[    0.219728] x86/cpu: User Mode Instruction Prevention (UMIP) activated
+[    0.219728] Last level iTLB entries: 4KB 512, 2MB 512, 4MB 256
+[    0.219728] Last level dTLB entries: 4KB 3072, 2MB 3072, 4MB 1536, 1GB 0
+[    0.219728] mitigations: Enabled attack vectors: user_kernel, user_user, guest_host, guest_guest, SMT mitigations: auto
+[    0.219728] Speculative Store Bypass: Mitigation: Speculative Store Bypass disabled via prctl
+[    0.219728] Transient Scheduler Attacks: Vulnerable: No microcode
+[    0.219728] Spectre V2 : Mitigation: Enhanced / Automatic IBRS
+[    0.219728] Speculative Return Stack Overflow: Mitigation: Safe RET
+[    0.219728] Spectre V1 : Mitigation: usercopy/swapgs barriers and __user pointer sanitization
+[    0.219728] Spectre V2 : Enabling IBPB for BPF
+[    0.219728] Spectre V2 : mitigation: Enabling conditional Indirect Branch Prediction Barrier
+[    0.219728] active return thunk: srso_alias_return_thunk
+[    0.219728] x86/fpu: Supporting XSAVE feature 0x001: 'x87 floating point registers'
+[    0.219728] x86/fpu: Supporting XSAVE feature 0x002: 'SSE registers'
+[    0.219728] x86/fpu: Supporting XSAVE feature 0x004: 'AVX registers'
+[    0.219728] x86/fpu: Supporting XSAVE feature 0x020: 'AVX-512 opmask'
+[    0.219728] x86/fpu: Supporting XSAVE feature 0x040: 'AVX-512 Hi256'
+[    0.219728] x86/fpu: Supporting XSAVE feature 0x080: 'AVX-512 ZMM_Hi256'
+[    0.219728] x86/fpu: Supporting XSAVE feature 0x200: 'Protection Keys User registers'
+[    0.219728] x86/fpu: Supporting XSAVE feature 0x800: 'Control-flow User registers'
+[    0.219728] x86/fpu: Supporting XSAVE feature 0x1000: 'Control-flow Kernel registers (KVM only)'
+[    0.219728] x86/fpu: xstate_offset[2]:  576, xstate_sizes[2]:  256
+[    0.219728] x86/fpu: xstate_offset[5]:  832, xstate_sizes[5]:   64
+[    0.219728] x86/fpu: xstate_offset[6]:  896, xstate_sizes[6]:  512
+[    0.219728] x86/fpu: xstate_offset[7]: 1408, xstate_sizes[7]: 1024
+[    0.219728] x86/fpu: xstate_offset[9]: 2432, xstate_sizes[9]:    8
+[    0.219728] x86/fpu: xstate_offset[11]: 2440, xstate_sizes[11]:   16
+[    0.219728] x86/fpu: xstate_offset[12]: 2456, xstate_sizes[12]:   24
+[    0.219728] x86/fpu: Enabled xstate features 0x1ae7, context size is 2480 bytes, using 'compacted' format.
+[    0.219728] Freeing SMP alternatives memory: 56K
+[    0.219728] pid_max: default: 32768 minimum: 301
+[    0.219728] landlock: Up and running.
+[    0.219728] Yama: becoming mindful.
+[    0.219728] AppArmor: AppArmor initialized
+[    0.219728] AppArmor: AppArmor secmark mediation reserved: ready to be enabled
+[    0.219728] Mount-cache hash table entries: 1024 (order: 1, 8192 bytes, linear)
+[    0.219728] Mountpoint-cache hash table entries: 1024 (order: 1, 8192 bytes, linear)
+[    0.219728] VFS: Finished mounting rootfs on nullfs
+[    0.219728] smpboot: CPU0: AMD EPYC 8024P 8-Core Processor (family: 0x19, model: 0xa0, stepping: 0x2)
+[    0.220005] Performance Events: Fam17h+ core perfctr, AMD PMU driver.
+[    0.220744] ... version:                   2
+[    0.221733] ... bit width:                 48
+[    0.222733] ... generic counters:          6
+[    0.223733] ... generic bitmap:            000000000000003f
+[    0.224733] ... fixed-purpose counters:    0
+[    0.225733] ... fixed-purpose bitmap:      0000000000000000
+[    0.226733] ... value mask:                0000ffffffffffff
+[    0.227733] ... max period:                00007fffffffffff
+[    0.228733] ... global_ctrl mask:          000000000000003f
+[    0.229871] signal: max sigframe size: 3376
+[    0.230805] rcu: Hierarchical SRCU implementation.
+[    0.230807] rcu: 	Max phase no-delay instances is 400.
+[    0.232815] Timer migration: 1 hierarchy levels; 8 children per group; 1 crossnode level
+[    0.241604] smp: Bringing up secondary CPUs ...
+[    0.241928] smpboot: x86: Booting SMP configuration:
+[    0.241932] .... node  #0, CPUs:      #1
+[    0.242814] smp: Brought up 1 node, 2 CPUs
+[    0.242814] smpboot: Total of 2 processors activated (9585.60 BogoMIPS)
+[    0.245852] Memory: 168636K/523900K available (23836K kernel code, 4957K rwdata, 16776K rodata, 5304K init, 5840K bss, 349456K reserved, 0K cma-reserved)
+[    0.246861] devtmpfs: initialized
+[    0.246861] x86/mm: Memory block size: 128MB
+[    0.248854] posixtimers hash table entries: 1024 (order: 2, 16384 bytes, linear)
+[    0.248854] futex hash table entries: 512 (32768 bytes on 1 NUMA nodes, total 32 KiB, linear).
+[    0.249212] PM: RTC time: 14:35:10, date: 2026-11-19
+[    0.253191] NET: Registered PF_NETLINK/PF_ROUTE protocol family
+[    0.253312] DMA: preallocated 128 KiB GFP_KERNEL|GFP_DMA pool for atomic allocations
+[    0.253320] DMA: preallocated 128 KiB GFP_KERNEL|GFP_DMA32 pool for atomic allocations
+[    0.253331] audit: initializing netlink subsys (disabled)
+[    0.253572] thermal_sys: Registered thermal governor 'fair_share'
+[    0.253574] thermal_sys: Registered thermal governor 'bang_bang'
+[    0.253575] thermal_sys: Registered thermal governor 'step_wise'
+[    0.253576] thermal_sys: Registered thermal governor 'user_space'
+[    0.253577] thermal_sys: Registered thermal governor 'power_allocator'
+[    0.253587] audit: type=2000 audit(1795098910.598:1): state=initialized audit_enabled=0 res=1
+[    0.253739] cpuidle: using governor ladder
+[    0.255735] cpuidle: using governor menu
+[    0.262864] acpiphp: ACPI Hot Plug PCI Controller Driver version: 0.5
+[    0.263166] PCI: ECAM [mem 0xe8000000-0xe80fffff] (base 0xe8000000) for domain 0000 [bus 00-00]
+[    0.263172] PCI: ECAM [mem 0xe8000000-0xe80fffff] reserved as E820 entry
+[    0.263185] PCI: Using configuration type 1 for base access
+[    0.263799] kprobes: kprobe jump-optimization is enabled. All kprobes are optimized if possible.
+[    0.265929] HugeTLB: registered 1.00 GiB page size, pre-allocated 0 pages
+[    0.265931] HugeTLB: 16380 KiB vmemmap can be freed for a 1.00 GiB page
+[    0.265933] HugeTLB: registered 2.00 MiB page size, pre-allocated 0 pages
+[    0.265934] HugeTLB: 28 KiB vmemmap can be freed for a 2.00 MiB page
+[    0.267957] ACPI: Added _OSI(Module Device)
+[    0.267960] ACPI: Added _OSI(Processor Device)
+[    0.267961] ACPI: Added _OSI(Processor Aggregator Device)
+[    0.268918] ACPI: 1 ACPI AML tables successfully acquired and loaded
+[    0.302753] ACPI: \_SB_: platform _OSC: OS support mask [006e7eff]
+[    0.303411] ACPI: Interpreter enabled
+[    0.303427] ACPI: PM: (supports S0 S5)
+[    0.303430] ACPI: Using IOAPIC for interrupt routing
+[    0.303624] PCI: Using host bridge windows from ACPI; if necessary, use "pci=nocrs" and report a bug
+[    0.303626] PCI: Using E820 reservations for host bridge windows
+[    0.308464] ACPI: PCI Root Bridge [PC00] (domain 0000 [bus 00])
+[    0.308472] acpi PNP0A08:00: _OSC: OS supports [ExtendedConfig ASPM ClockPM Segments MSI EDR HPX-Type3]
+[    0.308480] acpi PNP0A08:00: _OSC: OS requested [PCIeHotplug SHPCHotplug PME AER PCIeCapability LTR DPC]
+[    0.308483] acpi PNP0A08:00: _OSC: platform willing to grant [PCIeHotplug SHPCHotplug PME AER PCIeCapability LTR DPC]
+[    0.308485] acpi PNP0A08:00: _OSC: platform retains control of PCIe features (AE_ERROR)
+[    0.309020] acpiphp: Slot [0] registered
+[    0.309064] acpiphp: Slot [1] registered
+[    0.309104] acpiphp: Slot [2] registered
+[    0.309154] acpiphp: Slot [3] registered
+[    0.309200] acpiphp: Slot [4] registered
+[    0.309240] acpiphp: Slot [5] registered
+[    0.309280] acpiphp: Slot [6] registered
+[    0.309320] acpiphp: Slot [7] registered
+[    0.309360] acpiphp: Slot [8] registered
+[    0.309400] acpiphp: Slot [9] registered
+[    0.309440] acpiphp: Slot [10] registered
+[    0.309480] acpiphp: Slot [11] registered
+[    0.309520] acpiphp: Slot [12] registered
+[    0.309560] acpiphp: Slot [13] registered
+[    0.309600] acpiphp: Slot [14] registered
+[    0.309640] acpiphp: Slot [15] registered
+[    0.309680] acpiphp: Slot [16] registered
+[    0.309720] acpiphp: Slot [17] registered
+[    0.309751] acpiphp: Slot [18] registered
+[    0.309794] acpiphp: Slot [19] registered
+[    0.309834] acpiphp: Slot [20] registered
+[    0.309874] acpiphp: Slot [21] registered
+[    0.309914] acpiphp: Slot [22] registered
+[    0.309954] acpiphp: Slot [23] registered
+[    0.309994] acpiphp: Slot [24] registered
+[    0.310034] acpiphp: Slot [25] registered
+[    0.310074] acpiphp: Slot [26] registered
+[    0.310121] acpiphp: Slot [27] registered
+[    0.310161] acpiphp: Slot [28] registered
+[    0.310201] acpiphp: Slot [29] registered
+[    0.310241] acpiphp: Slot [30] registered
+[    0.310281] acpiphp: Slot [31] registered
+[    0.310348] PCI host bridge to bus 0000:00
+[    0.310386] pci_bus 0000:00: root bus resource [mem 0xe8000000-0xe80fffff]
+[    0.310389] pci_bus 0000:00: root bus resource [mem 0xc0000000-0xe7ffffff window]
+[    0.310391] pci_bus 0000:00: root bus resource [mem 0x100000000-0x3fffffeeffff window]
+[    0.310393] pci_bus 0000:00: root bus resource [io  0x0000-0x0cf7 window]
+[    0.310395] pci_bus 0000:00: root bus resource [io  0x0d00-0xffff window]
+[    0.310397] pci_bus 0000:00: root bus resource [bus 00]
+[    0.310635] pci 0000:00:00.0: [8086:0d57] type 00 class 0x060000 conventional PCI endpoint
+[    0.312362] pci 0000:00:01.0: [1af4:1042] type 00 class 0x018000 conventional PCI endpoint
+[    0.313040] pci 0000:00:01.0: BAR 0 [mem 0xe7f80000-0xe7ffffff]
+[    0.314935] pci 0000:00:02.0: [1af4:1044] type 00 class 0xffff00 conventional PCI endpoint
+[    0.315637] pci 0000:00:02.0: BAR 0 [mem 0x3fffff800000-0x3fffff87ffff 64bit]
+[    0.317380] pci 0000:00:03.0: [1af4:1053] type 00 class 0xffff00 conventional PCI endpoint
+[    0.318088] pci 0000:00:03.0: BAR 0 [mem 0x3fffff000000-0x3fffff07ffff 64bit]
+[    0.333745] iommu: Default domain type: Translated
+[    0.333748] iommu: DMA domain TLB invalidation policy: lazy mode
+[    0.334232] SCSI subsystem initialized
+[    0.338804] ACPI: bus type USB registered
+[    0.338833] usbcore: registered new interface driver usbfs
+[    0.338858] usbcore: registered new interface driver hub
+[    0.338868] usbcore: registered new device driver usb
+[    0.338898] pps_core: LinuxPPS API ver. 1 registered
+[    0.338899] pps_core: Software ver. 5.3.6 - Copyright 2005-2007 Rodolfo Giometti <giometti@linux.it>
+[    0.338903] PTP clock support registered
+[    0.340799] EDAC MC: Ver: 3.0.0
+[    0.342541] NetLabel: Initializing
+[    0.342543] NetLabel:  domain hash size = 128
+[    0.342545] NetLabel:  protocols = UNLABELED CIPSOv4 CALIPSO
+[    0.342567] NetLabel:  unlabeled traffic allowed by default
+[    0.342773] mctp: management component transport protocol core
+[    0.342773] NET: Registered PF_MCTP protocol family
+[    0.342773] PCI: Using ACPI for IRQ routing
+[    0.343775] vgaarb: loaded
+[    0.345549] clocksource: Switched to clocksource kvm-clock
+[    0.347919] VFS: Disk quotas dquot_6.6.0
+[    0.347932] VFS: Dquot-cache hash table entries: 512 (order 0, 4096 bytes)
+[    0.350177] AppArmor: AppArmor Filesystem Enabled
+[    0.350199] acpi PNP0C02:00: Reserved [mem 0xe8000000-0xe80fffff]
+[    0.350217] pnp: PnP ACPI init
+[    0.350554] pnp: PnP ACPI: found 1 devices
+[    0.357415] clocksource: acpi_pm: mask: 0xffffff max_cycles: 0xffffff, max_idle_ns: 2085701024 ns
+[    0.357502] NET: Registered PF_INET protocol family
+[    0.357530] IP idents hash table entries: 8192 (order: 4, 65536 bytes, linear)
+[    0.374893] tcp_listen_portaddr_hash hash table entries: 256 (order: 0, 4096 bytes, linear)
+[    0.374907] Table-perturb hash table entries: 65536 (order: 6, 262144 bytes, linear)
+[    0.374919] TCP established hash table entries: 4096 (order: 3, 32768 bytes, linear)
+[    0.374927] TCP bind hash table entries: 4096 (order: 5, 131072 bytes, linear)
+[    0.374934] TCP: Hash tables configured (established 4096 bind 4096)
+[    0.374986] MPTCP token hash table entries: 512 (order: 2, 12288 bytes, linear)
+[    0.375000] UDP hash table entries: 256 (order: 2, 16384 bytes, linear)
+[    0.375005] UDP-Lite hash table entries: 256 (order: 2, 16384 bytes, linear)
+[    0.375059] NET: Registered PF_UNIX/PF_LOCAL protocol family
+[    0.375069] NET: Registered PF_XDP protocol family
+[    0.375081] pci_bus 0000:00: resource 4 [mem 0xe8000000-0xe80fffff]
+[    0.375084] pci_bus 0000:00: resource 5 [mem 0xc0000000-0xe7ffffff window]
+[    0.375086] pci_bus 0000:00: resource 6 [mem 0x100000000-0x3fffffeeffff window]
+[    0.375088] pci_bus 0000:00: resource 7 [io  0x0000-0x0cf7 window]
+[    0.375090] pci_bus 0000:00: resource 8 [io  0x0d00-0xffff window]
+[    0.375221] PCI: CLS 0 bytes, default 64
+[    0.375395] clocksource: tsc: mask: 0xffffffffffffffff max_cycles: 0x228aeee0e7a, max_idle_ns: 440795314296 ns
+[    0.375686] clocksource: Switched to clocksource tsc
+[    0.375737] platform rtc_cmos: registered platform RTC device (no PNP device found)
+[    0.376353] Initialise system trusted keyrings
+[    0.376365] Key type blacklist registered
+[    0.377654] workingset: timestamp_bits=36 max_order=17 bucket_order=0
+[    0.378087] squashfs: version 4.0 (2009/01/31) Phillip Lougher
+[    0.379804] fuse: init (API version 7.45)
+[    0.385384] integrity: Platform Keyring initialized
+[    0.385389] integrity: Machine keyring initialized
+[    0.398138] Key type asymmetric registered
+[    0.398140] Asymmetric key parser 'x509' registered
+[    0.398163] Block layer SCSI generic (bsg) driver version 0.4 loaded (major 242)
+[    0.398759] io scheduler mq-deadline registered
+[    0.400905] ledtrig-cpu: registered to indicate activity on CPUs
+[    0.401564] input: Power Button as /devices/platform/PNP0C0C:00/input/input0
+[    0.401596] ACPI: button: Power Button [PWRB]
+[    0.402686] virtio-pci 0000:00:01.0: enabling device (0000 -> 0002)
+[    0.404102] virtio-pci 0000:00:02.0: enabling device (0000 -> 0002)
+[    0.405463] virtio-pci 0000:00:03.0: enabling device (0000 -> 0002)
+[    0.406936] Serial: 8250/16550 driver, 32 ports, IRQ sharing enabled
+[    0.431297] 00:00: ttyS0 at I/O 0x3f8 (irq = 24, base_baud = 115200) is a U6_16550A
+[    0.437433] Linux agpgart interface v0.103
+[    0.442739] loop: module loaded
+[    0.443021] virtio_blk virtio0: 1/0/0 default/read/poll queues
+[    0.444286] virtio_blk virtio0: [vda] 174080 512-byte logical blocks (89.1 MB/85.0 MiB)
+[    0.452640] ACPI: bus type drm_connector registered
+[    0.452929] tun: Universal TUN/TAP device driver, 1.6
+[    0.452996] PPP generic driver version 2.4.2
+[    0.453166] i8042: PNP: No PS/2 controller found.
+[    0.453235] mousedev: PS/2 mouse device common for all mice
+[    0.453562] rtc_cmos rtc_cmos: only 24-hr supported
+[    0.453586] i2c_dev: i2c /dev entries driver
+[    0.453613] device-mapper: core: CONFIG_IMA_DISABLE_HTABLE is disabled. Duplicate IMA measurements will not be recorded in the IMA log.
+[    0.453632] device-mapper: uevent: version 1.0.3
+[    0.453699] device-mapper: ioctl: 4.50.0-ioctl (2025-04-28) initialised: dm-devel@lists.linux.dev
+[    0.453703] amd_pstate: The CPPC feature is supported but currently disabled by the BIOS.
+[    0.453703] Please enable it if your BIOS has the CPPC option.
+[    0.453704] amd_pstate: the _CPC object is not present in SBIOS or ACPI disabled
+[    0.453770] drop_monitor: Initializing network drop monitor service
+[    0.453904] NET: Registered PF_INET6 protocol family
+[    0.454211] Segment Routing with IPv6
+[    0.454221] In-situ OAM (IOAM) with IPv6
+[    0.454244] NET: Registered PF_PACKET protocol family
+[    0.454278] Key type dns_resolver registered
+[    0.456067] IPI shorthand broadcast: enabled
+[    0.459438] sched_clock: Marking stable (265002341, 193711397)->(579581710, -120867972)
+[    0.462151] registered taskstats version 1
+[    0.469313] Loading compiled-in X.509 certificates
+[    0.469909] Loaded X.509 cert 'Build time autogenerated kernel key: 6b2b0d62fc3a1216c49fda2b061b13d4dbf474bd'
+[    0.470347] Loaded X.509 cert 'Canonical Ltd. Live Patch Signing 2025 Kmod: d541cef61dc7e793b7eb7e899970a2eef0b5dc8c'
+[    0.470792] Loaded X.509 cert 'Canonical Ltd. Live Patch Signing: 14df34d1a87cf37625abec039ef2bf521249b969'
+[    0.471230] Loaded X.509 cert 'Canonical Ltd. Kernel Module Signing 2025 Kmod: 4627603d2357a2a3f81006370894c221175893e9'
+[    0.471666] Loaded X.509 cert 'Canonical Ltd. Kernel Module Signing: 88f752e560a1e0737e31163a466ad7b70a850c19'
+[    0.471667] blacklist: Loading compiled-in revocation X.509 certificates
+[    0.471683] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing: 61482aa2830d0ab2ad5af10b7250da9033ddcef0'
+[    0.471696] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2017): 242ade75ac4a15e50d50c84b0d45ff3eae707a03'
+[    0.471722] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (ESM 2018): 365188c1d374d6b07c3c8f240f8ef722433d6a8b'
+[    0.471734] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2019): c0746fd6c5da3ae827864651ad66ae47fe24b3e8'
+[    0.471745] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2021 v1): a8d54bbb3825cfb94fa13c9f8a594a195c107b8d'
+[    0.471756] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2021 v2): 4cf046892d6fd3c9a5b03f98d845f90851dc6a8c'
+[    0.471767] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (2021 v3): 100437bb6de6e469b581e61cd66bce3ef4ed53af'
+[    0.471781] Loaded X.509 cert 'Canonical Ltd. Secure Boot Signing (Ubuntu Core 2019): c1d57b8f6b743f23ee41f4f7ee292f06eecadfb9'
+[    0.481197] Demotion targets for Node 0: null
+[    0.481312] Key type .fscrypt registered
+[    0.481314] Key type fscrypt-provisioning registered
+[    0.481493] Key type big_key registered
+[    0.484936] Key type encrypted registered
+[    0.484939] AppArmor: AppArmor sha256 policy hashing enabled
+[    0.484942] ima: No TPM chip found, activating TPM-bypass!
+[    0.484945] Loading compiled-in module X.509 certificates
+[    0.485411] Loaded X.509 cert 'Build time autogenerated kernel key: 6b2b0d62fc3a1216c49fda2b061b13d4dbf474bd'
+[    0.485413] ima: Allocated hash algorithm: sha256
+[    0.485428] ima: No architecture policies found
+[    0.485451] evm: Initialising EVM extended attributes:
+[    0.485452] evm: security.selinux
+[    0.485454] evm: security.SMACK64
+[    0.485455] evm: security.SMACK64EXEC
+[    0.485456] evm: security.SMACK64TRANSMUTE
+[    0.485456] evm: security.SMACK64MMAP
+[    0.485457] evm: security.apparmor
+[    0.485458] evm: security.ima
+[    0.485459] evm: security.capability
+[    0.485460] evm: HMAC attrs: 0x1
+[    0.485761] PM:   Magic number: 2:972:586
+[    0.485969] RAS: Correctable Errors collector initialized.
+[    0.486276] clk: Disabling unused clocks
+[    0.486278] PM: genpd: Disabling unused power domains
+[    0.502188] md: Waiting for all devices to be available before autodetect
+[    0.502191] md: If you don't use raid, use raid=noautodetect
+[    0.502192] md: Autodetecting RAID arrays.
+[    0.502193] md: autorun ...
+[    0.502194] md: ... autorun DONE.
+[    0.507059] EXT4-fs (vda): mounted filesystem c19adc05-d1c6-437b-8d51-499fed0f5f2a r/w with ordered data mode. Quota mode: none.
+[    0.507074] VFS: Mounted root (ext4 filesystem) on device 253:0.
+[    0.507201] devtmpfs: mounted
+[    0.507314] VFS: Pivoted into new rootfs
+[    0.509186] Freeing unused decrypted memory: 2028K
+[    0.509914] Freeing unused kernel image (initmem) memory: 5304K
+[    0.509928] Write protecting the kernel read-only data: 43008k
+[    0.510433] Freeing unused kernel image (text/rodata gap) memory: 736K
+[    0.510754] Freeing unused kernel image (rodata/data gap) memory: 1656K
+[    0.574792] x86/mm: Checked W+X mappings: passed, no W+X pages found.
+[    0.574801] Run /sbin/init as init process
+[    0.581813] NET: Registered PF_VSOCK protocol family
+[    0.729671] ovd_fwd: loading out-of-tree module taints kernel.
+[    0.729682] ovd_fwd: module verification failed: signature and/or required key missing - tainting kernel
+overdrive-init: beacon boundary tx READY
+overdrive-init: beacon boundary rx EXEC
+init-return-guest-kernel: 7.0.0-38-generic
+direction-check: app_to_vsock=ok
+direction-check: vsock_to_app_echoed=ok
+bench-series-begin: accept_ns 500
+bench-values: accept_ns 932478,927601,920761,946429,920400,915713,969244,1899529,919860,923015,928293,925268,926780,920030,945859,909434
+bench-values: accept_ns 941512,923835,933550,922504,930506,925168,937847,926760,946610,917225,932128,926921,940891,935293,941883,929544
+bench-values: accept_ns 934552,920791,940630,922954,940470,953851,926670,889074,934783,918167,949684,924637,932278,922173,940461,923385
+bench-values: accept_ns 942043,929384,933330,927762,947301,918678,944437,923425,934000,934221,934372,918387,957546,924137,949384,907210
+bench-values: accept_ns 942554,922083,932970,938168,923956,928573,918597,951958,923235,927731,927211,935172,919589,930315,931027,921472
+bench-values: accept_ns 921983,924137,929264,931307,935413,923735,921642,926820,930085,967191,1903115,926720,933320,907371,939128,923666
+bench-values: accept_ns 930836,937306,915644,931267,938768,909344,944166,925668,929103,922163,930876,932168,941132,921042,939889,929835
+bench-values: accept_ns 933540,937736,926590,936194,920150,930656,935604,929534,965418,921883,909083,943626,902995,940801,932659,933560
+bench-values: accept_ns 920040,928092,936956,940781,921713,933170,924467,932970,926680,924927,945618,929194,927431,929384,929223,940140
+bench-values: accept_ns 932058,939600,923976,934051,929264,926881,945778,934843,910456,947662,891247,951337,965308,956185,961001,962624
+bench-values: accept_ns 964717,956165,973480,957766,957095,951658,973801,960220,1017066,915072,973130,956685,1018027,1925449,971998,971267
+bench-values: accept_ns 935834,971828,967261,956034,969284,955954,961893,960641,952519,993650,977175,919700,975523,952729,979840,959779
+bench-values: accept_ns 955123,969885,970937,966530,970866,967531,954181,958818,963645,966539,974521,983095,955343,928252,1017566,915373
+bench-values: accept_ns 971247,966279,958878,958899,964657,965017,967171,971477,956735,970876,969975,960781,967562,967701,960731,972469
+bench-values: accept_ns 956355,965728,964747,1005589,927892,950756,962053,964176,967611,965498,961232,949965,958888,991907,963676,957196
+bench-values: accept_ns 956124,977867,959389,962974,971948,962053,952619,955823,962925,974041,961813,958007,952028,970866,960220,1004456
+bench-values: accept_ns 1936876,958358,959619,950216,973831,955783,964276,968313,940721,967241,965138,953340,981012,965328,954812,969635
+bench-values: accept_ns 962624,965308,969965,964387,957647,970686,950406,967612,1091788,1885658,912128,973830,960671,991788,958077,938968
+bench-values: accept_ns 964958,988764,966590,956464,948663,967241,962384,961382,973270,969023,948533,956375,1015393,911036,971688,961833
+bench-values: accept_ns 951747,972088,964997,954752,970525,965007,970536,953200,963105,970736,968974,962023,963215,954321,956535,986490
+bench-values: accept_ns 942463,963015,961362,955023,960171,968262,968273,957086,966940,958207,961692,968763,964907,964457,953159,965719
+bench-values: accept_ns 958608,1008563,1939329,959730,957846,953360,972699,954371,976295,977156,940341,964327,967261,953851,984737,943906
+bench-values: accept_ns 1004597,915894,976765,949654,974091,958638,960261,963285,965839,959519,980261,964136,954782,956264,974552,949625
+bench-values: accept_ns 995042,967110,932429,962093,948012,968282,996775,927181,961382,1016134,912138,978608,954632,958218,969124,973410
+bench-values: accept_ns 958398,961843,969714,956455,979109,960521,953691,962063,962624,960181,960982,964397,956635,961012,969053,961652
+bench-values: accept_ns 959970,959770,1034481,889644,981092,952819,972949,958718,959689,960230,964527,961102,966920,963946,950976,1047071
+bench-values: accept_ns 1890185,969805,959739,1003805,1934161,956514,963726,949394,969154,974421,964547,965749,951737,964797,967321,963916
+bench-values: accept_ns 958638,953350,969484,952559,963505,1011037,920861,965899,956375,968563,965839,950366,968713,963385,969425,976354
+bench-values: accept_ns 960761,950856,983165,964197,942944,977927,959429,962434,952910,962444,1009585,925909,969264,953320,970335,969484
+bench-values: accept_ns 957376,964987,965849,975013,975454,956725,967411,960410,961532,965307,977637,966339,945478,958198,966620,960711
+bench-values: accept_ns 1030355,910166,963586,948162,1012318,928533,950586,962484,969995,963725,973610,954972,977005,947021,962093,962874
+bench-values: accept_ns 977085,957116,948112,959379
+bench-series-end: accept_ns 500 826bba66878dfdf1
+bench-series-begin: rtt_ns 5000
+bench-values: rtt_ns 40731,40571,40320,40591,40531,40731,40511,40381,40180,40321,40290,40661,40501,40461,40310,40110
+bench-values: rtt_ns 50286,48022,41182,41082,40641,40991,50246,40951,40731,40912,40991,40751,40391,41152,40901,40511
+bench-values: rtt_ns 40351,40461,40821,41092,42163,43045,41482,49474,42083,41032,40340,40782,41312,51227,46479,40862
+bench-values: rtt_ns 41853,40941,40521,41041,40721,40701,40601,40500,40520,40471,40831,41072,40491,40340,40591,52940
+bench-values: rtt_ns 41652,40902,40721,40541,40531,47391,42243,40601,40421,40561,40621,40370,40431,40451,40761,40531
+bench-values: rtt_ns 40821,40501,40581,40561,40761,40641,40531,51978,41462,40591,41092,40531,40450,47081,41412,40711
+bench-values: rtt_ns 40701,41702,37807,41572,40701,41342,41061,40831,40421,40261,38207,42133,41312,40962,41432,48393
+bench-values: rtt_ns 41582,40651,40761,40391,40691,40731,50246,40470,40451,40561,41002,40330,40351,40751,40411,40460
+bench-values: rtt_ns 40441,40270,40270,40300,40121,40280,40351,40641,52128,40741,40641,40491,40561,40501,49925,40731
+bench-values: rtt_ns 40691,40591,40481,40761,40471,40381,40490,40151,40380,40231,40290,40391,40230,40291,40220,40160
+bench-values: rtt_ns 51057,40471,40551,40601,40520,40301,45859,41412,40931,40320,40741,40150,40390,40912,40320,40401
+bench-values: rtt_ns 40310,40030,40311,40451,40430,40651,40651,40491,43345,40862,40140,40491,40160,40200,48062,41352
+bench-values: rtt_ns 40851,40250,40391,40551,40471,40520,40570,40301,40571,40020,40391,40000,40430,40101,40460,40221
+bench-values: rtt_ns 49204,44246,40421,40380,40501,40501,40401,50726,41212,40530,40410,40551,40381,40360,40611,40862
+bench-values: rtt_ns 41532,38297,40681,40741,40701,40651,40481,40601,40330,52619,41613,40520,40341,40521,40300,53020
+bench-values: rtt_ns 41352,41062,40360,40291,40430,40320,40601,40431,40541,40450,40701,40311,40531,41041,40531,40491
+bench-values: rtt_ns 40180,50686,40560,40631,57156,41392,47772,42834,40651,40451,40591,40881,40611,40381,40631,40331
+bench-values: rtt_ns 40540,40450,40711,40621,40872,40771,40531,40591,47621,41763,40721,40771,40832,40530,48483,42344
+bench-values: rtt_ns 40441,40530,40371,40671,40361,40671,40671,40611,40761,40441,40430,40722,40530,40712,40050,40491
+bench-values: rtt_ns 47721,44447,40641,40381,40230,40661,40411,51297,40781,40631,40411,40841,40761,40351,40310,40271
+bench-values: rtt_ns 40310,40311,40661,40190,40671,40291,40581,40140,40501,51597,40902,40601,40380,40291,40420,50056
+bench-values: rtt_ns 40791,40561,40671,40491,40701,40410,40261,40491,40560,40390,40571,40240,40630,40620,40781,40400
+bench-values: rtt_ns 40281,51197,40751,40681,40501,41111,40751,45208,41071,40701,40561,40631,40832,44837,40701,40371
+bench-values: rtt_ns 40420,40291,40180,40611,40331,40561,40280,40531,40080,43856,41021,40480,40361,40591,40230,46901
+bench-values: rtt_ns 40891,40551,40340,40141,40340,40441,40341,40611,40530,40681,40320,40431,40621,40911,40601,40391
+bench-values: rtt_ns 40240,47782,41122,40591,40340,40631,40251,40300,50366,40571,40731,40491,40430,40471,40351,40310
+bench-values: rtt_ns 40341,40340,40431,40531,40541,40621,40370,40591,40541,40321,51056,40361,40581,40270,40461,40491
+bench-values: rtt_ns 49604,40852,40500,40371,40331,40410,40661,40211,40270,40381,40040,40541,40260,40621,40241,40460
+bench-values: rtt_ns 40341,40571,51317,40821,40571,40511,41963,40511,45809,41101,40621,40491,40671,40811,40701,40871
+bench-values: rtt_ns 40741,40210,40431,40491,40310,40341,40411,40500,40631,40091,42664,41021,40761,40521,40731,40491
+bench-values: rtt_ns 46821,41091,40671,40731,40540,40161,40300,40281,40260,40060,40331,40430,40410,40511,40671,40331
+bench-values: rtt_ns 40530,40500,50927,41512,40601,40461,40460,47601,46640,41172,40380,40551,40281,40501,40360,40631
+bench-values: rtt_ns 40261,40320,40541,40341,40290,40341,40400,40291,40300,40391,47241,41262,40340,40401,40200,40490
+bench-values: rtt_ns 40791,51737,40751,40951,40391,40390,40521,40701,40391,40551,40401,40330,40331,40561,40641,40190
+bench-values: rtt_ns 40180,40221,40480,51498,40641,40501,40050,40360,40211,46409,41122,40521,40320,40360,40220,40100
+bench-values: rtt_ns 40260,40421,40400,40501,40601,40150,40801,40410,40291,40621,40200,42534,40601,40661,40681,40531
+bench-values: rtt_ns 40361,46019,41482,40491,40661,40310,40511,40591,40361,40220,40191,40270,40120,40391,40581,40821
+bench-values: rtt_ns 41512,40481,40321,47151,41281,40470,40962,40340,40121,40881,49835,40390,40481,40471,40681,40361
+bench-values: rtt_ns 40480,40281,40381,40220,40120,40331,40080,40511,40220,40401,39990,40280,50977,40621,40070,40280
+bench-values: rtt_ns 40341,40921,43486,41021,40631,40471,40801,40461,40060,40371,40421,40020,40450,40351,40060,40261
+bench-values: rtt_ns 40350,40571,40511,40270,42775,41011,40771,40411,40270,40410,47251,42915,40290,40541,40561,40651
+bench-values: rtt_ns 40631,40931,41673,43145,41081,40752,41151,40431,40281,40270,40290,40340,52869,41152,40521,40561
+bench-values: rtt_ns 40320,40360,46169,41453,40651,40751,40621,40641,40901,40471,40451,40471,40210,40341,40240,40531
+bench-values: rtt_ns 40330,40331,40411,40340,47752,44316,40651,40171,40330,40371,40360,49554,40561,40290,40661,40671
+bench-values: rtt_ns 40501,40451,40561,40270,40361,40260,40591,40541,40491,40190,40421,40481,40360,51187,40521,40341
+bench-values: rtt_ns 41091,41332,40141,44036,41111,41221,40601,40902,40771,40341,40130,40501,40330,40191,40931,40761
+bench-values: rtt_ns 40351,40561,40380,40561,40181,43305,40701,40561,40621,40550,40371,46760,43466,40841,40611,40421
+bench-values: rtt_ns 40610,40721,40470,40341,40591,40451,40360,40271,40551,40260,40721,40501,40391,46700,41202,40530
+bench-values: rtt_ns 40421,40481,40551,46339,42504,40601,40301,40500,40360,40511,40250,40301,40350,40291,40421,40941
+bench-values: rtt_ns 40401,40370,40331,40591,40360,40791,51257,40360,40631,40351,40451,40581,43885,41001,41002,40641
+bench-values: rtt_ns 40821,40501,40470,40340,40391,40350,40321,40611,40781,40561,40351,40721,40390,40802,43044,40761
+bench-values: rtt_ns 40831,40541,40981,40741,47141,51027,40601,41222,41592,40541,40731,40751,40411,40461,40290,40511
+bench-values: rtt_ns 40511,40701,40561,40491,40541,40801,43605,41493,40721,40631,40671,40350,47331,42283,40721,42193
+bench-values: rtt_ns 41652,40541,40531,40470,40600,40742,40811,40641,40811,40621,40811,40892,40781,40401,49895,41812
+bench-values: rtt_ns 40702,40641,40651,40901,47421,41713,40441,40851,41342,40351,40350,40291,40470,43576,40511,41081
+bench-values: rtt_ns 40591,40701,40381,40681,40911,40781,51106,41863,40651,40401,40671,40581,46950,41883,40842,40791
+bench-values: rtt_ns 40581,40621,40671,40491,40641,40731,40891,40401,40531,40571,40611,40400,40541,40771,47762,41673
+bench-values: rtt_ns 40861,40401,40801,40681,46740,42925,40621,40490,40681,40310,40331,40530,40581,40521,40721,40321
+bench-values: rtt_ns 40511,40480,40290,40070,40311,40330,40331,51747,40682,40460,40631,40671,40451,44487,41242,40941
+bench-values: rtt_ns 40501,40581,40711,40441,40421,40781,40280,40781,40781,40340,41352,40671,40872,40641,40611,51757
+bench-values: rtt_ns 41291,40711,40490,40391,40691,47291,41392,42825,41502,41021,40911,40441,40931,40331,40791,40300
+bench-values: rtt_ns 40601,40480,40321,40481,41001,40441,40591,50496,41061,40932,40541,40571,40180,44607,41232,51317
+bench-values: rtt_ns 40591,40591,40881,40901,40871,40781,40811,40421,40921,40751,40651,40821,40561,40791,40771,52018
+bench-values: rtt_ns 40611,40341,40651,40581,40681,43565,40872,41182,41041,41052,40781,40561,40401,40340,40481,40681
+bench-values: rtt_ns 40721,40791,40861,40451,40711,40360,40491,43646,41021,41072,40671,40671,40601,46910,41493,40681
+bench-values: rtt_ns 40511,40350,40681,40721,40461,40190,40330,40391,40591,40440,40471,40441,40711,40571,40721,49584
+bench-values: rtt_ns 41573,40751,40801,40651,40731,47411,41001,40811,40841,41041,40732,40370,40341,40420,40581,40531
+bench-values: rtt_ns 40621,40351,40641,40741,40591,40391,40320,48182,41692,40821,41312,40631,40631,40451,50306,41252
+bench-values: rtt_ns 40821,41262,40701,40431,40691,40561,42153,41162,40340,40671,40972,40691,40521,40551,40881,51978
+bench-values: rtt_ns 41623,40701,40591,40681,40751,47792,43275,40791,40541,40921,40351,40410,40511,40791,40290,40661
+bench-values: rtt_ns 40611,40651,40291,40621,40590,40310,40771,40701,52048,40650,40881,40801,40771,40521,49725,41031
+bench-values: rtt_ns 41052,40851,40671,40430,40741,41052,40601,40831,40982,40871,40361,40491,40560,40371,40491,40591
+bench-values: rtt_ns 52689,40921,40772,40781,40731,40661,48583,40801,40621,40691,40581,40581,40441,40811,40601,40661
+bench-values: rtt_ns 40341,40741,40431,40520,40451,40571,40421,40360,52309,40801,40581,40561,41072,40641,43675,41022
+bench-values: rtt_ns 40991,40822,40350,40691,40892,40711,40340,40581,40501,40461,40781,40641,40501,40551,40701,40431
+bench-values: rtt_ns 42944,41102,41843,40971,41903,44457,44006,41312,40831,40751,40601,40321,40601,40521,40731,40331
+bench-values: rtt_ns 40230,40441,40571,40500,40141,40140,40361,40230,49755,41312,40230,40501,40391,40440,46710,42775
+bench-values: rtt_ns 40520,40270,45068,40771,40350,40381,40701,40291,40330,40521,40791,40922,40490,40711,40470,40521
+bench-values: rtt_ns 51147,41312,40361,40601,40490,40832,47661,41002,40881,40731,40862,40641,40671,40310,40441,40391
+bench-values: rtt_ns 40430,40251,40280,40291,40110,40361,40520,40421,48443,44677,40581,40390,40380,40681,40601,49164
+bench-values: rtt_ns 41082,40881,41152,40721,40881,40681,40801,40330,40721,40411,40541,40461,40350,40331,40360,40701
+bench-values: rtt_ns 40540,51186,40621,40551,40491,40521,40731,48853,40942,40651,40681,40761,40791,40471,40431,40471
+bench-values: rtt_ns 40981,40561,40691,40561,41442,40351,40481,40681,40360,51267,40771,40681,40400,40531,40651,43445
+bench-values: rtt_ns 42644,41132,40882,41211,46280,40601,40330,40591,42013,41882,40952,41572,44757,42854,40621,40340
+bench-values: rtt_ns 40681,51768,40491,40991,40380,40461,40320,48864,40601,40471,40450,40842,40550,40230,40330,40411
+bench-values: rtt_ns 40251,40310,40621,40290,40470,40371,40531,40290,40391,51517,40531,40701,40651,40471,40671,45368
+bench-values: rtt_ns 41162,40952,40791,40791,40441,40931,40761,40822,40731,40521,40731,40481,40561,44286,40741,40501
+bench-values: rtt_ns 40401,50856,41062,41161,40550,40501,40471,42113,41102,40631,40471,40761,40701,40561,40641,40340
+bench-values: rtt_ns 40671,40380,40421,40310,40571,40421,37026,40570,40731,50175,41703,40821,40411,40631,40540,48633
+bench-values: rtt_ns 43045,40631,40511,40621,40601,40801,40691,40601,40581,40441,40551,40661,40531,40741,41372,40751
+bench-values: rtt_ns 41022,50606,41572,41432,40741,40712,40340,48122,40832,40741,40671,41853,40671,40791,40491,40401
+bench-values: rtt_ns 40641,40721,40330,40421,40621,40350,40921,40601,40350,47190,41342,40571,40341,40961,40942,47721
+bench-values: rtt_ns 43084,40721,40581,40561,48283,41061,40681,40722,40430,40561,40511,40591,40481,40420,40401,40301
+bench-values: rtt_ns 40731,50806,41693,40691,40471,40491,41512,47882,41262,40400,40701,40721,40400,40812,40570,40341
+bench-values: rtt_ns 40381,40340,40371,40380,40381,40381,40450,40461,40341,46950,40942,40360,40741,40802,40541,40671
+bench-values: rtt_ns 50576,40801,40541,40541,40791,40751,40681,41222,40701,40591,40471,40501,40560,40320,40591,40661
+bench-values: rtt_ns 40371,40500,50486,40401,40991,40702,40781,40501,49985,40781,40611,40891,40211,40490,41032,40431
+bench-values: rtt_ns 40711,40611,40661,40711,40451,40581,40451,40430,40491,40481,52629,40821,40952,40520,40421,40481
+bench-values: rtt_ns 45538,41082,40831,41112,40561,40541,40721,41001,40831,40731,40611,40551,41292,40390,40671,40390
+bench-values: rtt_ns 40912,40360,49004,41041,40451,40491,40340,40541,43636,41442,40821,40812,40811,40471,40841,40771
+bench-values: rtt_ns 40401,40250,40521,40781,40471,40611,40491,40340,40501,40321,47311,41382,40661,40721,40771,40461
+bench-values: rtt_ns 47151,42384,40671,40410,40441,40601,40851,40641,40421,40741,40701,40771,40330,40701,40781,40381
+bench-values: rtt_ns 40321,40520,46851,41212,40721,40471,40550,40541,40351,51948,40871,40371,40581,40541,40140,40330
+bench-values: rtt_ns 40481,40972,40631,40400,40371,40320,40620,41071,40461,40441,40320,52459,40621,40601,40661,40611
+bench-values: rtt_ns 40591,50395,40841,40821,40992,40881,40461,40691,40781,40671,40521,40581,40591,40461,40661,40490
+bench-values: rtt_ns 40601,40591,40461,51117,40551,40440,40461,40331,40370,48723,41181,40601,40591,40571,40481,40441
+bench-values: rtt_ns 40651,40831,40501,40491,40420,40751,40801,40511,40631,40691,40520,58918,40971,40941,40771,40491
+bench-values: rtt_ns 40711,51527,43015,41302,40471,40521,40881,57727,40410,40792,40611,40781,40981,40691,40621,40591
+bench-values: rtt_ns 40611,40591,47411,41021,40561,40711,40691,40801,47682,41212,40631,41021,41281,40480,40882,40621
+bench-values: rtt_ns 40270,40501,40981,40391,40511,40551,40511,40300,40731,40621,50686,41593,40370,40481,40361,40831
+bench-values: rtt_ns 49254,41953,40951,40771,40811,40721,40691,40601,40771,40351,40561,40511,40521,40580,40691,40330
+bench-values: rtt_ns 40491,40350,47871,41202,40481,40791,40261,40761,40220,53180,40801,40762,40791,40631,40481,40400
+bench-values: rtt_ns 40641,40351,40811,40451,40270,40381,40581,40340,40370,40291,40310,51537,40661,40811,40941,40661
+bench-values: rtt_ns 40541,50115,40831,40551,40531,40540,40722,40721,40541,40671,40721,40861,40601,40801,40621,40341
+bench-values: rtt_ns 40521,40290,40711,50886,40591,40390,40712,40370,40521,49074,40661,40711,40441,40450,40872,40290
+bench-values: rtt_ns 40511,40471,40721,40391,40631,40611,40591,40641,40751,40350,40571,51708,41222,40671,40521,40571
+bench-values: rtt_ns 40280,40581,41122,40951,40762,40791,40471,40410,40912,40761,40581,40591,40280,41022,40741,40401
+bench-values: rtt_ns 40691,42774,40681,46079,41442,41132,40821,40781,40791,46420,41682,40771,40812,40521,40350,40761
+bench-values: rtt_ns 41312,40591,40341,40571,40370,40822,40340,40581,40421,40581,40320,50817,41662,42774,40722,40621
+bench-values: rtt_ns 40891,46970,41962,40420,40571,40571,40371,40360,40581,40281,40701,40511,40490,40241,40491,40320
+bench-values: rtt_ns 40591,40661,40571,47982,41232,40381,40711,40611,40681,40471,47851,40842,40410,40471,40611,40611
+bench-values: rtt_ns 40571,41172,40811,44217,43425,41562,40992,41572,40621,40621,40641,48713,42574,40551,40781,42394
+bench-values: rtt_ns 46350,47230,42013,40881,40431,40370,40411,40481,40521,48342,40942,40801,40721,40451,40551,40180
+bench-values: rtt_ns 40731,40531,40331,50836,41212,40340,40351,40541,40511,47240,41372,40591,40611,40701,40380,40341
+bench-values: rtt_ns 40451,40310,40381,40711,40581,40450,40430,40531,40671,40611,40261,48192,41412,40601,40691,43025
+bench-values: rtt_ns 38698,48773,42954,41322,40781,40490,41232,42484,41913,40511,40420,40701,40681,40861,40831,40431
+bench-values: rtt_ns 40691,40541,40421,50445,41573,40941,41893,40631,40811,47211,41392,40792,40531,40390,40461,40371
+bench-values: rtt_ns 40691,40350,40661,40661,40381,40511,40390,40451,40311,40390,40621,47211,41502,40821,40911,41152
+bench-values: rtt_ns 40681,40901,49083,40791,40501,40551,40721,40832,40370,40331,40541,40350,40541,40421,40771,41062
+bench-values: rtt_ns 41362,43064,43004,47952,44687,40811,40792,40721,41632,49304,45398,41772,41713,42744,40591,40421
+bench-values: rtt_ns 40350,40371,40471,40330,40551,40401,40420,40591,40822,40350,40611,48162,41072,40371,40751,40561
+bench-values: rtt_ns 40541,49043,43195,40561,40611,40551,40421,40380,40381,40501,40380,40281,40581,40581,40260,40551
+bench-values: rtt_ns 40320,40080,40260,40321,51617,40651,40631,40581,40771,40631,48293,40691,40851,40571,40531,42243
+bench-values: rtt_ns 40841,41382,41462,41162,40881,40641,41453,37526,41863,40871,41162,41052,52508,40611,41172,40471
+bench-values: rtt_ns 40541,40601,49204,40901,40801,40621,40822,40330,40341,40370,40331,40581,40160,40341,40491,40641
+bench-values: rtt_ns 40450,40451,40301,40651,50896,40371,40250,40551,40461,40390,42564,41292,41162,40661,40741,40912
+bench-values: rtt_ns 40741,40401,40470,40421,40421,40290,40731,40411,40441,40270,40171,40440,47421,41181,40451,40531
+bench-values: rtt_ns 40350,40400,46630,41252,40751,40201,40551,40440,40361,40320,40020,40370,57536,40650,40490,40541
+bench-values: rtt_ns 40291,40300,40451,40160,43365,40782,40951,40721,40831,40791,46890,40912,40811,40831,40461,40551
+bench-values: rtt_ns 40230,40651,40431,40270,40361,40320,40360,40401,40541,40631,40450,40591,48393,41472,40451,40471
+bench-values: rtt_ns 40270,40421,40060,48893,40891,40541,40791,40501,40461,40641,40250,40401,40310,37246,41082,40551
+bench-values: rtt_ns 40621,40500,40360,40551,40651,52379,38067,40941,40812,40621,40270,42924,40650,40811,40541,40420
+bench-values: rtt_ns 40361,40401,40440,41242,40681,40451,40621,40290,40420,40611,40932,40110,40551,42964,40862,40560
+bench-values: rtt_ns 40681,40250,40381,46770,41252,40671,40451,40671,40521,40260,40331,40270,40491,40420,40380,40541
+bench-values: rtt_ns 40411,40531,40400,40160,40390,48002,44036,40661,40291,40461,40480,40111,48092,40681,40320,40480
+bench-values: rtt_ns 40611,37096,40921,40571,40641,41002,40591,40310,40451,40391,40350,40291,40260,40631,49024,40801
+bench-values: rtt_ns 40521,40501,40581,40420,42834,40791,40591,40791,40271,40410,40461,40150,40281,40130,40271,40611
+bench-values: rtt_ns 40340,40391,40431,40310,40371,40270,49885,41392,40691,40441,40942,40370,47081,41322,40751,40521
+bench-values: rtt_ns 40501,40190,40331,40791,40300,40130,40350,40291,40410,40450,40401,40421,40591,40691,47871,41261
+bench-values: rtt_ns 40441,40501,40230,41292,40381,51517,40972,40531,40651,40441,40620,41161,40671,40551,40541,40821
+bench-values: rtt_ns 40732,40490,40611,40591,40531,40611,40571,52228,40692,40310,40661,40571,40691,51988,40982,40541
+bench-values: rtt_ns 40290,40270,40671,40560,40560,40351,40481,40420,40631,40511,40451,40541,40401,40600,40691,49414
+bench-values: rtt_ns 40561,40490,40430,40771,40421,43445,40812,40721,40571,40581,40500,40511,40491,40521,40451,40691
+bench-values: rtt_ns 54091,40991,40621,40681,40772,40721,40280,51387,40782,40520,40360,40271,40590,48272,40711,40861
+bench-values: rtt_ns 40641,40712,40430,40671,40531,40611,40491,40551,40270,40581,40311,40390,40581,40721,40681,51827
+bench-values: rtt_ns 40982,40621,40541,40290,40681,43015,41031,40610,40450,40501,40611,40551,40571,40661,40551,40721
+bench-values: rtt_ns 40541,40551,40671,40450,40511,40511,40531,47321,41292,40721,40801,40621,40731,45869,41062,40501
+bench-values: rtt_ns 40430,40791,40471,40741,40461,40771,40581,40741,40741,40491,40471,40561,40651,40490,40712,49935
+bench-values: rtt_ns 41682,40631,40551,40421,40781,46980,41171,40571,40661,40491,40531,40421,40250,40421,40671,40340
+bench-values: rtt_ns 40201,40170,40160,40431,40421,40390,40651,48163,41682,40501,40851,40321,40701,40491,48513,40731
+bench-values: rtt_ns 40811,40741,40401,40601,40611,40751,40671,40681,40401,40741,40441,40771,40501,40671,40451,40400
+bench-values: rtt_ns 50817,40400,40761,40420,40601,40281,44266,40761,40731,40832,40801,40290,40540,40882,40791,40581
+bench-values: rtt_ns 40391,40540,40712,40671,40310,40551,40691,40461,43155,40801,40661,40941,40822,40761,46299,41102
+bench-values: rtt_ns 40531,40741,40541,40721,40641,40441,40521,40440,40762,40510,40801,40531,40560,42013,40901,40761
+bench-values: rtt_ns 48183,41322,40290,41002,40520,40500,47782,42654,40571,40551,40451,40821,40441,40881,40691,40341
+bench-values: rtt_ns 40480,40461,40581,40501,40421,40320,40601,40461,47882,41372,40491,40751,40501,40721,40521,49684
+bench-values: rtt_ns 40571,40501,40501,40410,40451,40461,40691,40571,40641,40601,40731,40401,40450,40431,40451,40471
+bench-values: rtt_ns 40611,49103,40691,40651,40601,40581,40421,44166,40982,41001,40401,40511,40531,40591,41001,42344
+bench-values: rtt_ns 43024,41082,41062,41442,34772,40281,40801,40411,40500,44447,40992,40681,40771,40581,40521,45628
+bench-values: rtt_ns 40932,40601,41031,40561,40681,40511,40591,40331,40160,40150,40381,40260,40120,40360,40230,40400
+bench-values: rtt_ns 40231,48542,41022,40461,40681,40330,40541,40221,53440,40681,40521,40581,40591,40701,40430,40490
+bench-values: rtt_ns 40531,40681,40611,40551,40230,40410,40731,40451,40391,40340,52850,40651,40470,41242,41112,40771
+bench-values: rtt_ns 50646,40952,40731,40591,40461,40721,40300,40481,40521,40621,40671,40601,40331,40440,40701,41272
+bench-values: rtt_ns 40691,40471,53270,40711,40491,40471,40461,40450,50867,40951,40261,41051,40361,40451,40771,40481
+bench-values: rtt_ns 40590,40450,40611,40461,40571,40340,40450,40581,40251,40631,56755,40771,40611,40481,40491,40530
+bench-values: rtt_ns 49585,40801,40521,40531,40240,40481,40210,40571,41002,40651,40431,40440,40451,40631,40210,40481
+bench-values: rtt_ns 40461,40340,50776,40591,40500,40761,40591,40490,49765,40851,40511,40511,40471,40691,40401,40490
+bench-values: rtt_ns 40391,40901,40570,40491,40611,40801,40430,40411,40441,40480,58258,40961,40501,40952,40410,40671
+bench-values: rtt_ns 49154,41012,40801,40932,41352,40440,40591,40441,40451,40200,40591,40681,40471,40200,40521,40421
+bench-values: rtt_ns 40380,40531,52199,40621,40530,40781,40721,40511,47000,41192,45528,42094,41181,40771,40490,40510
+bench-values: rtt_ns 40591,40211,40540,40861,40531,40240,40251,40480,40471,40621,51087,40921,40701,40611,40621,40581
+bench-values: rtt_ns 43425,40621,40752,40831,40531,40541,40490,40712,40510,40631,40311,40441,40661,40661,40370,40561
+bench-values: rtt_ns 40471,40731,43916,41152,40891,40541,40611,40251,47541,41262,40611,40360,40651,43435,40541,40440
+bench-values: rtt_ns 40271,40390,40531,40561,40321,40671,40601,36434,40431,40881,48192,41272,40611,40430,40831,40511
+bench-values: rtt_ns 40591,49874,40611,40471,40451,40501,40480,40540,40621,40501,40821,40480,40431,40511,40521,40571
+bench-values: rtt_ns 40580,40590,40671,51437,40621,40500,40550,40251,40130,51678,40561,40260,40290,40500,40481,40311
+bench-values: rtt_ns 40510,40551,40551,40811,40781,40340,41182,40721,40521,40621,40531,51327,40531,40661,40461,40611
+bench-values: rtt_ns 40300,45679,40791,41372,41823,40511,40450,40651,40491,40471,40481,40531,40450,40461,40431,40370
+bench-values: rtt_ns 40451,40661,40601,43676,40911,40581,40591,40461,40611,46640,40991,40691,40731,40661,40510,40470
+bench-values: rtt_ns 40541,40280,40702,40430,40451,40441,40511,40460,40461,40491,40280,48373,41452,40601,40781,40611
+bench-values: rtt_ns 40421,47842,41001,40792,40591,40601,40811,40721,40461,40591,40310,40441,40691,40581,40381,40671
+bench-values: rtt_ns 40520,40340,40351,47761,41222,40361,40541,40681,40370,40431,49785,40541,40250,40521,40541,40471
+bench-values: rtt_ns 40270,40551,40250,40732,40530,40571,40391,40451,40420,40541,40311,40160,50856,40601,40581,40541
+bench-values: rtt_ns 40711,40641,43345,40661,40671,40490,40771,40610,40370,40421,40410,40471,40331,40551,40591,40420
+bench-values: rtt_ns 40781,40681,40400,40571,43465,41232,40721,41443,40430,40461,48753,41102,40831,40261,41122,40691
+bench-values: rtt_ns 40440,40201,40230,42213,40821,40310,40211,40470,40221,40541,40180,40731,52860,41662,40541,40491
+bench-values: rtt_ns 40531,40761,50666,42303,40571,40421,40481,40200,40481,40461,40440,40461,40241,40440,40251,40390
+bench-values: rtt_ns 40661,40571,40381,40381,47791,41362,40571,40511,40451,40591,40420,50375,40631,40621,40831,40601
+bench-values: rtt_ns 40802,40490,40531,40481,40701,40912,40280,40170,40501,40341,48042,40771,47481,41673,40811,40661
+bench-values: rtt_ns 40551,40691,40531,48423,40921,41002,40581,40851,40541,40771,40591,40681,40471,40451,40741,40671
+bench-values: rtt_ns 40461,40571,40480,40751,40300,51267,40521,40871,40511,40651,40371,49354,40661,40641,40751,40501
+bench-values: rtt_ns 40751,40911,40641,40391,40551,40521,40290,40651,40471,40481,40701,40521,40531,51647,41092,41362
+bench-values: rtt_ns 41012,41422,45598,50626,41012,40531,40671,40581,40541,40731,40571,41061,40882,40611,40901,40882
+bench-values: rtt_ns 40590,40791,40561,40591,40550,52618,40961,40511,40501,40601,40480,49054,40471,40531,40641,40811
+bench-values: rtt_ns 40611,40701,40821,40561,40501,40341,40560,40702,40480,40661,40571,40511,40551,51297,40901,40762
+bench-values: rtt_ns 40801,40491,40561,48232,40651,40581,40581,41182,40851,40611,40471,40751,40391,40811,40491,40571
+bench-values: rtt_ns 40751,40501,40420,40541,40721,50336,40881,40601,40591,40721,40611,43165,40942,40711,40851,40731
+bench-values: rtt_ns 40571,40441,40621,40631,40471,40410,40281,40210,40591,40761,40411,40521,40651,47531,41613,40721
+bench-values: rtt_ns 40751,40521,40851,46911,41822,40742,40540,40621,40832,40681,40691,40971,41112,40972,40591,40691
+bench-values: rtt_ns 40931,40912,40721,40651,40591,48342,41673,40511,40671,40521,40540,47421,42824,41983,40841,40621
+bench-values: rtt_ns 42464,46270,40751,40651,40611,41833,41422,40861,41713,44807,41643,40601,40751,43765,41091,40601
+bench-values: rtt_ns 40741,40471,40811,45709,41032,40881,40821,40591,40591,40641,40561,40972,40761,40350,40631,40561
+bench-values: rtt_ns 40661,40541,40681,40461,40681,50776,41372,40600,40440,40811,40681,47531,42434,40781,40831,40571
+bench-values: rtt_ns 40711,40431,40711,40371,40681,40541,40561,40861,40851,41132,40791,40681,41052,60541,41923,40701
+bench-values: rtt_ns 41142,40601,40901,46039,41412,40772,40991,40831,40761,40511,40851,41342,40481,44857,40521,40521
+bench-values: rtt_ns 40591,40731,36535,40791,41552,50747,41492,40501,40410,40822,40621,46489,41843,40611,40541,40421
+bench-values: rtt_ns 40450,40610,40250,40721,40451,40671,40681,40491,40511,40480,40832,41692,41062,46870,41072,41362
+bench-values: rtt_ns 41012,40631,40550,47150,43476,40681,40591,40761,41212,40470,40441,40681,40401,40701,40441,40651
+bench-values: rtt_ns 40450,40630,40610,41021,40571,40501,51267,40631,40621,40881,40571,40681,49735,41131,40681,40821
+bench-values: rtt_ns 40921,40922,40741,40591,40981,40732,40550,40491,40721,40451,40471,40541,40591,40490,51917,40451
+bench-values: rtt_ns 40761,40701,41091,41032,48973,40792,40791,40491,41131,41392,40991,40351,40520,40541,40591,40741
+bench-values: rtt_ns 40481,40721,40771,40761,40751,49334,44447,40471,40891,40621,40992,46790,43986,40531,40641,40591
+bench-values: rtt_ns 40571,40491,40701,40731,41152,40470,40560,40561,40741,40842,40861,40661,40621,40721,52169,40861
+bench-values: rtt_ns 40451,40701,40561,40420,48353,40551,40491,40631,40480,40531,40511,40461,40571,40671,40501,40481
+bench-values: rtt_ns 40971,40741,40631,40541,40812,40701,51106,40681,41061,41052,40851,40441,48062,40711,40481,40971
+bench-values: rtt_ns 40511,40471,36925,40972,40531,40651,40621,41102,41772,40731,40431,40261,40230,40621,42494,40781
+bench-values: rtt_ns 40871,40832,40771,40651,45989,40901,40521,40561,40541,40401,40701,40220,40471,40491,40290,40501
+bench-values: rtt_ns 40401,40340,40501,40591,40461,40350,46951,41482,40441,40430,40811,40811,47101,42744,40781,41042
+bench-values: rtt_ns 40571,40761,40561,40701,40461,40571,40420,40551,40831,40501,40621,40581,40671,40561,47982,41412
+bench-values: rtt_ns 40932,40891,40361,40571,40510,48242,40681,40471,40601,40480,40560,40481,40551,40461,40641,40501
+bench-values: rtt_ns 40200,40451,40440,40430,40932,40871,40631,50145,40781,40580,40842,40491,40460,42574,41152,40511
+bench-values: rtt_ns 40451,40731,40460,40862,40781,40641,40591,40491,40320,40591,40541,40451,40511,40460,40441,47101
+bench-values: rtt_ns 40841,40651,40631,40541,40411,46640,41162,40731,40420,40541,40421,40621,40461,40400,40561,40621
+bench-values: rtt_ns 40772,40931,36875,40691,40982,40671,40491,48012,41492,40641,40421,40521,40631,40440,50475,38148
+bench-values: rtt_ns 40971,40821,40752,40801,40811,40811,40501,40391,40501,40460,40541,40551,40521,40781,40421,40300
+bench-values: rtt_ns 51628,40731,40631,40481,40501,40741,48523,40651,41091,40621,40792,40490,41162,40441,40381,40430
+bench-values: rtt_ns 40902,40581,40230,40421,40490,40550,40491,40471,51157,40711,40601,40551,40561,40631,43054,40811
+bench-values: rtt_ns 40711,40611,41081,40621,40451,40541,40531,40480,40440,40231,40210,40300,40460,40341,40501,40230
+bench-values: rtt_ns 47822,41352,40811,40872,40801,40230,45749,41001,40560,40641,40451,40741,40641,40601,40251,40380
+bench-values: rtt_ns 40441,40361,40470,40431,40311,40470,40411,40461,48483,41372,40871,40451,40491,40390,40601,48954
+bench-values: rtt_ns 40541,40300,40581,40491,40561,40501,40550,40341,40871,40491,40441,40651,40531,40491,40761,40511
+bench-values: rtt_ns 40500,51177,40571,40491,41172,40631,40350,50036,40681,40611,40440,40441,40481,40400,40600,40861
+bench-values: rtt_ns 40631,40310,40742,40560,40631,40360,40461,40551,40571,51257,40500,40601,40271,40320,40511,44036
+bench-values: rtt_ns 40731,40791,40661,40541,40721,40350,40451,40561,40501,40611,40390,40580,40692,40420,40842,37466
+bench-values: rtt_ns 41332,49504,42264,40791,40701,40781,40241,48182,41512,40321,40761,40120,40481,40851,40902,40340
+bench-values: rtt_ns 40201,40430,40520,40461,40331,40440,40832,40440,40461,50085,41452,40510,40531,40621,40361,48062
+bench-values: rtt_ns 42464,40490,40280,40230,40471,40070,40291,40090,40471,40090,40631,40541,40541,42463,40151,40410
+bench-values: rtt_ns 40241,47511,43936,40711,40621,40391,40561,40581,48923,40471,40511,40551,40420,40802,40390,40772
+bench-values: rtt_ns 40450,43395,44807,41592,40982,41943,40631,40451,40420,48423,42333,40941,40641,41122,45718,52048
+bench-values: rtt_ns 41372,40570,40440,40301,40370,40211,40501,40320,40901,40681,40100,40330,40371,40421,40450,40561
+bench-values: rtt_ns 40161,47781,41172,40521,40240,40261,40390,40321,50085,40751,40381,40321,40380,40311,40180,40411
+bench-values: rtt_ns 40551,40250,40531,40491,40190,40391,40190,40351,40430,40561,46430,40791,40481,42153,42925,36945
+bench-values: rtt_ns 43435,41212,40972,40871,40200,40281,41953,41352,40351,40350,40130,40361,40621,40851,40211,40360
+bench-values: rtt_ns 40221,40621,42534,40751,40781,41853,40681,40461,46359,41112,40371,40601,40551,40320,40361,40491
+bench-values: rtt_ns 40450,40291,40390,40571,40381,40381,40530,40391,40331,40530,47611,41352,40361,40671,40791,40401
+bench-values: rtt_ns 36815,50025,40861,40691,40311,40270,40541,40000,40121,40390,40471,40411,40200,41272,40982,41292
+bench-values: rtt_ns 42363,42674,40872,52338,41202,40741,40281,41652,41432,53580,41492,40812,41332,40410,40050,40321
+bench-values: rtt_ns 40401,40210,40260,40091,40330,40341,40210,40421,40410,40151,40250,53841,40651,40611,40431,40200
+bench-values: rtt_ns 40371,52579,40330,40371,40591,40380,40151,40180,40371,40270,40521,40380,40300,40290,40150,40300
+bench-values: rtt_ns 40070,40311,40260,49585,40541,40400,36916,40601,40440,43425,40691,40511,40761,41061,38618,40812
+bench-values: rtt_ns 40651,41863,41141,40701,40160,40561,40430,37336,40741,40721,41071,49765,41482,40311,40751,40301
+bench-values: rtt_ns 40340,47191,40992,40450,40691,40391,40190,40391,40080,40120,40190,40040,40310,40380,40331,40210
+bench-values: rtt_ns 40230,40411,40160,47472,44056,40701,40621,40120,40361,40230,50546,40421,40381,40500,40271,40591
+bench-values: rtt_ns 40521,40460,40301,40140,40451,40250,40141,40290,40301,40310,40421,40290,50716,40341,40511,40160
+bench-values: rtt_ns 40030,40291,43565,41042,40571,40530,40470,40401,40441,40060,40130,40120,40551,40170,40701,40450
+bench-values: rtt_ns 40511,40100,40171,40100,47331,41282,40701,40250,40521,40381,46460,40761,40481,40230,40291,40340
+bench-values: rtt_ns 40040,40050,40191,40120,39990,40190,40291,40310,40291,40120,40411,40591,40240,57046,41412,40541
+bench-values: rtt_ns 40811,40351,50325,42885,40811,40531,40400,40721,40310,40230,40221,40140,40461,38608,41492,40321
+bench-values: rtt_ns 40771,40451,40320,40611,40341,52038,39108,40721,40581,40540,40261,50075,40601,40571,40501,40440
+bench-values: rtt_ns 40701,40340,40751,40571,40361,40601,40571,40410,40591,40511,41022,40280,40391,51127,40370,40181
+bench-values: rtt_ns 40280,40220,40451,43185,40951,40620,40240,40521,40410,40601,40050,40540,40421,40351,40380,40251
+bench-values: rtt_ns 40430,40161,40320,40171,40150,46930,41102,40290,40480,40201,40320,48062,41172,40371,40330,40321
+bench-values: rtt_ns 40481,40220,40521,40370,40430,40140,40290,40310,40390,40341,40290,40251,40330,48082,43786,41052
+bench-values: rtt_ns 40260,40651,40481,40351,48733,40491,40410,40431,40571,40361,40290,40381,40661,40430,40430,40140
+bench-values: rtt_ns 40351,40120,40331,40340,40461,40251,50005,40731,40601,40410,47371,40811,49324,40801,40451,40391
+bench-values: rtt_ns 40210,40421,39900,40370,40351,40511,40010,40070,40420,40440,40331,40220,40130,40301,49634,40541
+bench-values: rtt_ns 40571,40371,40581,41041,82294,53400,40881,47000,40721,41152,40501,40290,40191,40400,40391,40501
+bench-values: rtt_ns 40621,40360,40521,40441,40170,49004,53921,49264,48763,48443,54091,48553,48583,48493,48453,48432
+bench-values: rtt_ns 48473,48353,48442,48463,48884,48552,48453,48633,48383,55794,49253,48622,48372,48333,55122,48572
+bench-values: rtt_ns 48413,48483,48322,48553,48423,48493,48302,48403,48302,48513,48413,48373,48372,56054,52890,48553
+bench-values: rtt_ns 48533,48452,54512,48954,48472,48413,49284,48383,48472,48393,48753,48543,48613,48443,48703,48413
+bench-values: rtt_ns 48432,48433,56495,48603,48422,48553,51097,54201,48493,48403,48533,48643,48673,48563,48813,48403
+bench-values: rtt_ns 48372,48443,48343,48502,48433,48373,54221,49054,48483,48392,48473,54422,48492,48392,48493,48723
+bench-values: rtt_ns 48503,48393,48382,48283,48402,48453,48413,48422,48413,48653,55503,49154,48663,48583,48513,53861
+bench-values: rtt_ns 48773,48563,48613,48413,48372,48313,48302,48333,48292,48383,48303,48302,48343,48342,48593,64527
+bench-values: rtt_ns 47812,41322,40701,40171,46630,41121,40631,40832,40350,40551,40611,40631,40711,40391,40401,40470
+bench-values: rtt_ns 40381,40311,40591,40350,40341,40390,48774,45458,40741,40641,40621,40421,47401,41272,40420,40620
+bench-values: rtt_ns 40340,40311,40621,40110,40410,40390,40471,40591,40471,40320,40731,40201,40340,40401,47341,41622
+bench-values: rtt_ns 40671,40681,40841,40340,40510,50526,40841,40630,40280,40651,40341,40600,40250,40280,40261,40130
+bench-values: rtt_ns 40281,40681,41873,40961,41502,40531,40711,51608,40521,40791,40591,40591,40420,49384,40631,40551
+bench-values: rtt_ns 40440,40441,40771,40401,40911,40171,40080,40300,40251,40080,40401,40320,40301,40410,40701,50226
+bench-values: rtt_ns 40721,40651,40381,40300,40351,43765,41172,40631,40641,40491,40451,40220,40331,40541,40831,40641
+bench-values: rtt_ns 40651,40491,40410,40311,40451,40430,40181,47591,41322,40841,40410,40531,40361,47631,41262,40511
+bench-values: rtt_ns 40260,40391,40391,40450,40601,41493,42383,42284,40150,40621,41142,40541,40320,40271,40400,50927
+bench-values: rtt_ns 41572,40681,40100,40350,40110,46981,41492,40561,40331,40571,40360,40341,40250,40241,40340,40291
+bench-values: rtt_ns 40260,40231,40320,39970,40040,40251,40210,39950,51367,40521,40401,40280,40281,40010,47431,40721
+bench-values: rtt_ns 40391,40420,40551,40671,40321,40380,40230,40451,40100,40471,40370,40271,40220,40351,40350,40511
+bench-values: rtt_ns 43766,41111,40530,40281,40891,40701,46370,41933,40621,40861,40621,40371,40421,40260,40301,40611
+bench-values: rtt_ns 40781,40260,40761,40701,40260,40290,40480,40231,45338,41502,40601,40701,40721,40441,46199,43766
+bench-values: rtt_ns 40631,40411,40801,40531,40511,40300,40080,40391,40140,40381,40310,40361,40551,40411,40420,40231
+bench-values: rtt_ns 40130,50796,40761,40231,40320,40201,40310,43065,40761,40721,40331,40591,40390,40381,40270,40511
+bench-values: rtt_ns 40151,40300,40260,40210,40270,40261,40180,40240,40390,47632,40821,40240,40221,40320,40431,46650
+bench-values: rtt_ns 41012,40420,40351,40380,40280,40361,40200,40340,40370,40160,40171,40310,40431,40300,40060,40460
+bench-values: rtt_ns 40281,47772,41141,40411,40391,40510,40290,40481,48212,65899,41572,40431,40571,40701,40851,40691
+bench-values: rtt_ns 40370,40551,40521,40771,40341,40360,40331,40401,40450,47161,41142,40741,40341,40270,40391,47361
+bench-values: rtt_ns 41532,40381,40370,37135,41032,40270,40491,40541,40451,40300,40501,40461,40220,40331,40310,40171
+bench-values: rtt_ns 40010,40450,52509,40912,40621,40320,40341,40370,49114,40311,40420,40431,40140,40451,40351,40140
+bench-values: rtt_ns 40391,40280,40341,40941,40341,40080,40230,40201,40400,40401,51647,40610,40610,40311,40381,40230
+bench-values: rtt_ns 42894,40912,40721,40641,40280,40160,40280,40111,40520,40551,40531,40421,40370,40381,40341,40390
+bench-values: rtt_ns 40161,40250,46940,41422,40450,40481,40441,40511,47381,40901,40301,40370,40291,40411,40430,40321
+bench-values: rtt_ns 40511,40330,40501,40310,40470,40651,40591,40311,40531,40370,48032,41453,40230,40401,40220,40451
+bench-values: rtt_ns 40250,48463,40491,40430,40320,40441,40651,40240,40251,40500,40141,40360,40441,40361,40831,40851
+bench-values: rtt_ns 40741,40511,40711,50787,40911,40411,40661,40611
+bench-series-end: rtt_ns 5000 21e5227635cbe381
+overdrive-init: guest-flow forward-end id=ForwardId(1) outcome=Aborted { cause: PeerAbort { side: A } }
+overdrive-init: guest-flow handle-end id=ForwardId(1) outcome=Aborted { cause: PeerAbort { side: A } } tcp_pairs=1 pending_end_closes=0
+overdrive-init: guest-flow deferred-close stream id=ForwardId(1) clear_linger=false outer=GuestPairSocket(Handle { seam: SeamInstance(1), id: SocketId(1043) }) vsock=GuestPairSocket(Handle { seam: SeamInstance(1), id: SocketId(1042) })
+overdrive-init: group-complete elapsed_ms=1433
+overdrive-init: poweroff-requested elapsed_ms=1434
+overdrive-init: beacon boundary tx EXIT
+[    2.178373] ACPI: PM: Preparing to enter system sleep state S5
+[    2.180227] reboot: Power down

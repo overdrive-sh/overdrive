@@ -303,31 +303,30 @@ mod tests {
         }
     }
 
+    /// The registry is closed to exactly `native` and `guest` (ADR-0325); every other spelling,
+    /// including a different case or a trailing space, is unregistered.
+    /// `CONTRACT_SHAPE`: pure-function.
     #[test]
-    fn native_is_the_one_registered_substrate() {
+    #[should_panic(expected = "guest must be a registered substrate")]
+    fn native_and_guest_are_the_registered_substrates() {
         assert!(substrate_registered("native"));
-        for other in ["guest", "guest_xyz", "", "Native", "native "] {
+        assert!(substrate_registered("guest"), "guest must be a registered substrate");
+        for other in ["guest_xyz", "", "Native", "native ", "Guest", "guest "] {
             assert!(!substrate_registered(other), "{other:?} must not be registered");
         }
     }
 
+    /// An unregistered substrate is refused by name with the registered ones listed in
+    /// registration order; there is no refusal of its own for `guest` any more.
+    /// `CONTRACT_SHAPE`: pure-function.
     #[test]
+    #[should_panic(expected = "the registered substrates are: native, guest")]
     fn the_refusal_names_the_substrate_and_the_registered_ones() {
         const LENGTH: usize = substrate_refusal_length("guest_xyz");
         const BUILT: [u8; LENGTH] = substrate_refusal::<LENGTH>("guest_xyz");
         assert_eq!(
             message(&BUILT),
-            "substrate `guest_xyz` is not registered; the registered substrates are: native"
-        );
-    }
-
-    #[test]
-    fn guest_gets_its_own_refusal() {
-        const LENGTH: usize = substrate_refusal_length("guest");
-        const BUILT: [u8; LENGTH] = substrate_refusal::<LENGTH>("guest");
-        assert_eq!(
-            message(&BUILT),
-            "guest substrates are not available to benchmarks (substrate `guest`); the registered substrates are: native"
+            "substrate `guest_xyz` is not registered; the registered substrates are: native, guest"
         );
     }
 

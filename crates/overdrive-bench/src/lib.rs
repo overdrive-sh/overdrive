@@ -21,6 +21,7 @@ mod schedule;
 mod stats;
 mod stats_hold;
 
+pub use record::{GuestArtifacts, GuestMemoryMib, GuestMemoryMibError, GuestView, HostValue};
 pub use registry::BenchmarkDecl;
 pub use replicate::{HostClock, HostInstant, Replicate, ReplicateFailure, smoke};
 pub use stats_hold::{BpfStatsHold, RunStats, StatsError};

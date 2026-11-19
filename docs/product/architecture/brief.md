@@ -2247,6 +2247,44 @@ Interface contracts:
 [feature delta](../../feature/native-benchmark-program/feature-delta.md#wave-design--ref-interface-contracts).
 Diagrams: [c4-diagrams.md](c4-diagrams.md).
 
+### Guest benchmark substrate (feature `guest-benchmark-substrate`, GH #362, 2026-11-19) — ACCEPTED
+
+**Accepted by the user, 2026-11-19** (PD-1 to PD-9; the feature delta's "User approval"
+section lists each verdict). Extends the native benchmark program with a
+second substrate, `guest`: a benchmark of a component that runs inside a workload VM
+measures it inside a guest-kit guest that the benchmark process launches directly on the
+exclusive Metal host (never nested), through the unchanged `cargo xtask metal run
+--benchmark` form. The host half applies the full host eligibility list before any guest
+boots, then runs a fresh guest per replicate (no probe guest; each replicate reports the
+guest's kernel and clocksource with the digests of the staged artifacts, computed once per
+run, and the shape it booted in; the first report fixes the run's guest view in one
+`guest_observed` line and later reports are not compared; about 1.1 s per guest
+lifecycle, about 2.75 s per whole replicate cycle with the workload and the return,
+about 83 s per 30 replicates, measured on the Metal host); an in-guest program on the
+guest clock returns one framed series block on the console, led by a newline so the block
+starts a console line (about 0.65 s per replicate; the production-init console return was
+proven over 180 replicates by validation item V-B2; vsock is the measured alternative,
+PD-6, saving about 20 s per 30 replicates). The record gains one optional `guest` block in
+`run_started` and one `guest_observed` line that also names the staged guest artifacts
+that ran (schema and methodology stay 1); native records and reports are unchanged. The
+first family, `guest-flow-forwarding`, drives the production `overdrive-init` guest flow
+owner over `ovd_fwd` through its vsock wire seam, with no production change; what it does
+not measure is tracked by #370, and BPF program statistics inside a guest by #371. No new
+crate and no change to `overdrive-bench`'s dependencies: the family launches its own
+guests. Decisions:
+[ADR-0325](adr-0325-the-guest-substrate-joins-the-closed-benchmark-registry.md) (amends ADR-0299),
+[ADR-0326](adr-0326-a-guest-benchmark-record-states-the-guests-conditions-in-run-started-and-its-view-in-one-guest-observed-line.md),
+[ADR-0327](adr-0327-adding-a-substrate-does-not-bump-the-methodology-version.md),
+[ADR-0328](adr-0328-a-guest-benchmark-refuses-the-host-before-it-boots-a-guest-and-takes-the-guests-view-from-its-replicates.md),
+[ADR-0329](adr-0329-a-guest-benchmark-boots-a-fresh-guest-for-every-replicate.md),
+[ADR-0330](adr-0330-a-guest-returns-its-samples-on-its-console-as-framed-series-lines.md),
+[ADR-0331](adr-0331-a-guest-benchmark-family-launches-its-own-guests-and-the-benchmark-core-has-no-guest-port.md),
+[ADR-0332](adr-0332-the-first-guest-family-drives-the-production-guest-flow-owner-through-its-vsock-wire-seam.md),
+[ADR-0333](adr-0333-a-replicate-retains-its-guest-console.md).
+Interface contracts:
+[feature delta](../../feature/guest-benchmark-substrate/feature-delta.md#wave-design--ref-interface-contracts).
+Diagrams (C4 L1, L2): [c4-diagrams.md](c4-diagrams.md#guest-benchmark-substrate-gh-362).
+
 ### Approved VM lifecycle responsiveness amendment (#283 / #260, 2026-09-10)
 
 **APPROVED; independent DESIGN review APPROVED; user ratification APPROVED, 2026-09-10.**

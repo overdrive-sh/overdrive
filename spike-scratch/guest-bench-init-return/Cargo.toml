@@ -1,0 +1,30 @@
+# Throwaway DESIGN spike (guest-benchmark-substrate, V-B2). Not a test, not a gate.
+# Self-contained workspace; links workspace crates by path only. Never touches crates/.
+[package]
+name = "guest-bench-init-return"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+libc = "0.2"
+overdrive-bench = { path = "../../crates/overdrive-bench" }
+overdrive-core = { path = "../../crates/overdrive-core" }
+overdrive-testing = { path = "../../crates/overdrive-testing" }
+overdrive-testing-macros = { path = "../../crates/overdrive-testing-macros" }
+
+[lib]
+name = "guest_bench_init_return"
+path = "src/lib.rs"
+
+# The in-guest operator program: plays the host flow peer over loopback vsock and the application.
+[[bin]]
+name = "init-return-guest"
+path = "src/init_return_guest.rs"
+
+[[bench]]
+name = "benchmarks"
+harness = false
+path = "benches/benchmarks.rs"
+
+[workspace]

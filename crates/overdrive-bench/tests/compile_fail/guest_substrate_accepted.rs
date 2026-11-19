@@ -4,9 +4,10 @@ use overdrive_testing_macros::overdrive_bench;
 #[overdrive_bench(
     family = "f",
     substrate = guest,
-    arms = ["a", "b"],
-    replicates = 9,
-    metric(name = "m", unit = ns, table = "t"),
+    arms = ["forwarding"],
+    replicates = 30,
+    metric(name = "m", unit = ns, table = "t", series),
+    clock(guest = guest_monotonic),
     smoke(host_pure),
 )]
 fn b(_rep: &mut Replicate) -> Result<(), ReplicateFailure> {

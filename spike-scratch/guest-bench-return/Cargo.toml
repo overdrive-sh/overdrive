@@ -1,0 +1,30 @@
+# Throwaway DESIGN spike (guest-benchmark-substrate, O3 + O6). Not a test, not a gate.
+# Self-contained workspace; links workspace crates by path only. Never touches crates/.
+[package]
+name = "guest-bench-return"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+libc = "0.2"
+overdrive-bench = { path = "../../crates/overdrive-bench" }
+overdrive-core = { path = "../../crates/overdrive-core" }
+overdrive-testing = { path = "../../crates/overdrive-testing" }
+overdrive-testing-macros = { path = "../../crates/overdrive-testing-macros" }
+
+[lib]
+name = "guest_bench_return"
+path = "src/lib.rs"
+
+# The in-guest payload: emits a block of u64 nanosecond timings over the console or vsock.
+[[bin]]
+name = "guest-sampler"
+path = "src/guest_sampler.rs"
+
+[[bench]]
+name = "benchmarks"
+harness = false
+path = "benches/benchmarks.rs"
+
+[workspace]

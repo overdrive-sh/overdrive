@@ -285,6 +285,11 @@ pub mod cid_bands {
     pub const FWD_UNLOAD_IN_GUEST: CidBand =
         CidBand { name: "overdrive-fwd unload_in_guest", first_offset: 0x2040, width: 16 };
 
+    /// `overdrive-bench-families` guest benchmarks (`guest-flow-forwarding`): the family's own
+    /// replicate counter, modulo the band width, picks the slot.
+    pub const GUEST_BENCHMARK: CidBand =
+        CidBand { name: "overdrive-bench guest benchmark", first_offset: 0x2050, width: 16 };
+
     /// Every registered band.
     pub const REGISTERED: [CidBand; 5] = [
         FWD_GUEST_BOUNDARY,
@@ -362,6 +367,16 @@ impl GuestImageSpec {
             loopback_module: false,
             extra: Vec::new(),
         }
+    }
+
+    /// The image a guest benchmark boots: the production `overdrive-init` as PID 1, the
+    /// forwarder module and the vsock loopback module, no further files.
+    ///
+    /// SCAFFOLD: true. Inert: returns the workload image (no loopback module) until DELIVER
+    /// replaces it with the pinned literal.
+    #[must_use]
+    pub const fn benchmark() -> Self {
+        Self::workload()
     }
 
     /// A scripted guest with the kit's module (its forwarder usable).
@@ -1362,5 +1377,66 @@ mod tests {
         assert!(!registry_is_sound(&overlapping));
         let in_production = [CidBand { name: "c", first_offset: 0, width: 1 }];
         assert!(!registry_is_sound(&in_production));
+    }
+
+    // ---- The guest benchmark band and image (guest-benchmark-substrate, DDD-5, DDD-7) ----
+    // CONTRACT_SHAPE: pure-function.
+
+    /// The benchmark guest band is registered beside the five existing ones, sixteen wide at
+    /// offset 0x2050, disjoint and above the production band; its sixteen CIDs are distinct.
+    #[test]
+    #[should_panic(expected = "the benchmark guest band must be registered")]
+    fn the_benchmark_guest_band_is_registered_disjoint_and_sixteen_wide() {
+        use std::collections::BTreeSet;
+
+        use overdrive_core::guest_transport::GUEST_CID_BASE;
+
+        use super::cid_bands::GUEST_BENCHMARK;
+
+        assert!(
+            REGISTERED.contains(&GUEST_BENCHMARK),
+            "the benchmark guest band must be registered"
+        );
+        assert_eq!(REGISTERED.len(), 6, "the registry grows to six bands");
+        assert!(registry_is_sound(&REGISTERED), "the six bands are pairwise disjoint");
+        assert_eq!((GUEST_BENCHMARK.first_offset, GUEST_BENCHMARK.width), (0x2050, 16));
+        assert_eq!(GUEST_BENCHMARK.raw(0), GUEST_CID_BASE + 0x2050);
+        let cids: BTreeSet<u32> = (0..16).map(|slot| GUEST_BENCHMARK.raw(slot)).collect();
+        assert_eq!(
+            cids.len(),
+            16,
+            "sixteen distinct CIDs, so a counter modulo 16 picks a free one"
+        );
+    }
+
+    /// A slot past the benchmark band is refused; the family's counter wraps at the width (16).
+    /// GREEN guard on the band's own boundary.
+    #[test]
+    #[should_panic(expected = "past the end of the CID band")]
+    fn a_slot_past_the_benchmark_guest_band_is_refused() {
+        let _ = super::cid_bands::GUEST_BENCHMARK.raw(16);
+    }
+
+    /// The image a guest benchmark boots is the production `overdrive-init` as PID 1 with the
+    /// forwarder module and the vsock loopback module and no further files (it differs from
+    /// `workload()` by the loopback module).
+    #[test]
+    #[should_panic(
+        expected = "the benchmark image must be production init with both modules and no extra files"
+    )]
+    fn the_benchmark_image_boots_production_init_with_both_modules_and_no_extra_files() {
+        use super::{GuestImageSpec, GuestInit};
+
+        assert_eq!(
+            GuestImageSpec::benchmark(),
+            GuestImageSpec {
+                init: GuestInit::OverdriveInit,
+                forwarder_module: true,
+                loopback_module: true,
+                extra: Vec::new(),
+            },
+            "the benchmark image must be production init with both modules and no extra files"
+        );
+        assert_ne!(GuestImageSpec::benchmark(), GuestImageSpec::workload());
     }
 }

@@ -18,6 +18,7 @@
 mod integration {
     mod scenario_support;
 
+    mod guest_program_failures;
     mod lane_placement;
     mod placement_off_metal;
     mod shared_client_protocol;

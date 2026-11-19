@@ -70,6 +70,7 @@ steps:
     failure_modes:
       - Host setting drifted (refused, names the setting and both values)
       - A replicate fails (counted and reported, never dropped)
+      - A guest benchmark's guest cannot boot (including an unprepared guest kit) or dies; that is a counted failed replicate with its console retained, and the run continues
     gherkin: |
       Scenario: A drifted host is refused
         Given a host setting differs from the pinned settings
@@ -87,7 +88,7 @@ steps:
       host: ${host_summary}  bpf stats: ${bpf_stats}  commit: ${commit} dirty=${dirty}
     shared_artifacts:
       - name: raw_samples
-        source: The retained machine-readable record (every sample, every failure)
+        source: The retained machine-readable record (each replicate's series, every failure); a guest benchmark's record keeps raw values up to 1,000 per replicate and a histogram above, and the raw block is in the retained, uncommitted guest console
         consumers: [report, reviewer]
       - name: methodology_version
         source: The methodology field of the record header (run_started)
@@ -106,6 +107,12 @@ steps:
         consumers: [report]
       - name: host_summary
         source: The host block of the record header
+        consumers: [report]
+      - name: guest_view
+        source: The guest block of run_started, present only when the substrate is guest (settings a guest cannot see are absent with a reason), and the one guest_observed line the first replicate that reports a view fixes (kernel, clocksource, staged-artifact digests; absent when no replicate reported one) (guest-benchmark-substrate)
+        consumers: [report]
+      - name: vcpu_scheduling
+        source: The vCPU scheduling (unpinned today) of the guest block of run_started, and the vCPU count and memory the kit booted the guest in, carried on the guest_observed line, so a record in which every replicate failed states no count (guest-benchmark-substrate)
         consumers: [report]
       - name: median
         source: Derived by the report from the retained samples
@@ -158,3 +165,6 @@ changelog:
   - date: 2026-11-17
     feature: native-benchmark-program
     change: Aligned with the accepted design (shared artifact sources, per-step emotion, spike and smoke step, --benchmark spelling).
+  - date: 2026-11-19
+    feature: guest-benchmark-substrate
+    change: Step 3 gains the guest_view and vcpu_scheduling shared artifacts for records whose substrate is guest; the command in step 2 is unchanged.

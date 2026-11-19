@@ -1649,4 +1649,104 @@ mod tests {
         let path = scratch_path("absent");
         assert!(!rootfs_image_is_valid(&path));
     }
+
+    // -------------------------------------------------------------
+    // workspace_root (guest-benchmark-substrate: the benchmark form's
+    // execution class is `exclusive`)
+    // -------------------------------------------------------------
+
+    /// Restores the environment variables a test sets, on drop, so a failing assertion cannot leak.
+    struct EnvGuard {
+        saved: Vec<(&'static str, Option<std::ffi::OsString>)>,
+    }
+
+    impl EnvGuard {
+        fn set(variables: &[(&'static str, Option<&str>)]) -> Self {
+            let saved = variables.iter().map(|(name, _)| (*name, std::env::var_os(name))).collect();
+            for (name, value) in variables {
+                // SAFETY: `#[serial(env)]` gives the test exclusive access to the process
+                // environment for its duration, and the guard restores it on drop.
+                unsafe {
+                    match value {
+                        Some(value) => std::env::set_var(name, value),
+                        None => std::env::remove_var(name),
+                    }
+                }
+            }
+            Self { saved }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            for (name, value) in &self.saved {
+                // SAFETY: as in `set`; the serial test still holds the environment.
+                unsafe {
+                    match value {
+                        Some(value) => std::env::set_var(name, value),
+                        None => std::env::remove_var(name),
+                    }
+                }
+            }
+        }
+    }
+
+    const EXPORTED_ROOT: &str = "/nonexistent/overdrive-exported-source-root";
+
+    /// In the `exclusive` execution class (the benchmark form's) the kit resolves its staged
+    /// artifacts under the exported source root, whatever the process's cwd (DDD-11).
+    /// `CONTRACT_SHAPE`: pure-function over the environment.
+    #[test]
+    #[serial_test::serial(env)]
+    #[should_panic(
+        expected = "workspace_root must use the exported source root in the exclusive class"
+    )]
+    fn the_workspace_root_is_the_exported_source_root_in_the_exclusive_class() {
+        let _env = EnvGuard::set(&[
+            ("OVERDRIVE_METAL_EXECUTION_CLASS", Some("exclusive")),
+            ("OVERDRIVE_METAL_SOURCE_ROOT", Some(EXPORTED_ROOT)),
+        ]);
+        assert_eq!(
+            workspace_root(),
+            PathBuf::from(EXPORTED_ROOT),
+            "workspace_root must use the exported source root in the exclusive class"
+        );
+    }
+
+    /// The `ordinary` class still uses the exported source root; every other context resolves the
+    /// workspace from the working directory with `cargo locate-project`, whether the class is
+    /// unset, unknown or `exclusive` with no exported root. GREEN guard (those behaviours are
+    /// unchanged).
+    /// `CONTRACT_SHAPE`: pure-function over the environment.
+    #[test]
+    #[serial_test::serial(env)]
+    fn the_workspace_root_keeps_the_ordinary_class_and_every_other_context_unchanged() {
+        let located = {
+            let _env = EnvGuard::set(&[
+                ("OVERDRIVE_METAL_EXECUTION_CLASS", None),
+                ("OVERDRIVE_METAL_SOURCE_ROOT", None),
+            ]);
+            workspace_root()
+        };
+        assert_ne!(located, PathBuf::from(EXPORTED_ROOT), "the control resolves through cargo");
+        {
+            let _env = EnvGuard::set(&[
+                ("OVERDRIVE_METAL_EXECUTION_CLASS", Some("ordinary")),
+                ("OVERDRIVE_METAL_SOURCE_ROOT", Some(EXPORTED_ROOT)),
+            ]);
+            assert_eq!(workspace_root(), PathBuf::from(EXPORTED_ROOT), "ordinary uses the root");
+        }
+        for (class, root) in [
+            (None, Some(EXPORTED_ROOT)),
+            (Some("not-a-class"), Some(EXPORTED_ROOT)),
+            (Some("exclusive"), None),
+            (Some("ordinary"), None),
+        ] {
+            let _env = EnvGuard::set(&[
+                ("OVERDRIVE_METAL_EXECUTION_CLASS", class),
+                ("OVERDRIVE_METAL_SOURCE_ROOT", root),
+            ]);
+            assert_eq!(workspace_root(), located, "class {class:?} with root {root:?}");
+        }
+    }
 }

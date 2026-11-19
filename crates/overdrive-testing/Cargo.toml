@@ -58,6 +58,9 @@ overdrive-fwd.workspace  = true
 # `overdrive-host` in turn takes this crate as a dev-dependency (a cargo-legal
 # dev-dependency cycle, as with `overdrive-fwd`).
 overdrive-host.path       = "../overdrive-host"
+# The guest program's series checksum and the host half's parser of it
+# (`guest_app::parse_program_return`) share one SHA-256 definition.
+sha2.workspace           = true
 thiserror.workspace      = true
 # The `#[overdrive_test(guest = "<group>")]` attribute, re-exported from this
 # crate so test crates depend on `overdrive-testing` only.

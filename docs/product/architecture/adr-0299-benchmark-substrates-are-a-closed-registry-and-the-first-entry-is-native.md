@@ -2,7 +2,7 @@
 
 ## Status
 
-**Accepted.** Approved by the user 2026-11-17; independent design review resolved 2026-11-17. DDD-4 in the feature delta.
+**Accepted.** Approved by the user 2026-11-17; independent design review resolved 2026-11-17. DDD-4 in the feature delta. [ADR-0325](adr-0325-the-guest-substrate-joins-the-closed-benchmark-registry.md) adds `guest` to the registry and removes the "guest substrates are not available" refusal; the rest of this decision stands.
 
 ## Context
 

@@ -747,7 +747,7 @@ jobs:
       can reproduce and compare, without hand-writing a sampler, recorder and
       report for each spike or arguing about how the number was taken.
     source: native-benchmark-program DISCUSS (2026-11-16), GH #287, user rulings in intake.md, and the existing spikes (pig-connect-cost, bpf-stats-overhead, netns-density-295)
-    served_by_phase: native-benchmark-program
+    served_by_phase: native-benchmark-program, guest-benchmark-substrate
     status: active
     dimensions:
       functional: One declared benchmark yields raw samples, a distribution report, an A/B comparison against a noise floor, and the environment it ran in
@@ -760,6 +760,16 @@ jobs:
       habit: Spikes live in spike-scratch and are read by hand; the metal run grammar must keep meaning the same for tests
 
 changelog:
+  - date: 2026-11-19
+    change: >
+      EXTENDED J-PLAT-008 for guest-benchmark-substrate (GH #362), authored by
+      the DISCUSS wave. No new job: the outcome (comparable, reproducible
+      numbers for a boundary or mechanism choice) now also covers a component
+      that runs inside a workload VM, measured in a guest the way production
+      runs one. The guest sentence lives in
+      docs/feature/guest-benchmark-substrate/feature-delta.md, not in the job
+      statement; the contract text is unchanged and stories trace to it
+      through that feature delta.
   - date: 2026-11-16
     change: >
       Added J-PLAT-008 for native-benchmark-program, a developer-tooling

@@ -1013,6 +1013,95 @@ mod remote_peer {
     }
 }
 
+// ---------------------------------------------------------------------------------------------
+// The guest benchmark program's return (guest-benchmark-substrate, DDD-6): the readings and the
+// framed series block the program prints on the console, and the host half's parser of them.
+
+/// One guest reading as the guest printed it.
+///
+/// SCAFFOLD: true (the whole return surface below); DELIVER implements the parser.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum GuestReading {
+    /// The source was read.
+    Text(String),
+    /// The source does not exist in the guest, with the reason.
+    Absent(String),
+    /// The source exists and could not be read, with the error.
+    Unreadable(String),
+}
+
+/// What an intact program return holds.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ProgramReturn {
+    pub kernel: GuestReading,
+    pub clocksource: GuestReading,
+    pub values: Vec<u64>,
+}
+
+/// Why a console holds no intact return; each variant's `Display` names its cause.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProgramReturnError {
+    ReadingMissing { key: String },
+    ReadingRepeated { key: String },
+    ReadingMalformed { key: String },
+    BlockMissing,
+    BlockRepeated,
+    BlockMalformed,
+    CountMismatch { expected: usize, found: usize },
+    ChecksumMismatch,
+}
+
+impl fmt::Display for ProgramReturnError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("RED scaffold: ProgramReturnError display")
+    }
+}
+
+impl std::error::Error for ProgramReturnError {}
+
+/// The text a guest benchmark program writes to its console after its timed phase: one `\n`, the
+/// two reading lines (`kernel`, then `clocksource`), then the framed block of `metric` holding
+/// `values` (DDD-6, ADR-0330). The printer and [`parse_program_return`] are one owner of the grammar.
+///
+/// SCAFFOLD: true. Inert: it prints nothing until DELIVER implements the grammar. Pinned
+/// grammar: `guest-reading: <key>=<value>` (a value is text, `absent:<reason>` or
+/// `unreadable:<error>`); `bench-series-begin: <metric>`; one or more
+/// `bench-values: <metric> <v1>,<v2>,...` lines of at most 16 decimal values in measurement order;
+/// `bench-series-end: <metric> <checksum>` carrying only the metric and the checksum (SHA-256, 64
+/// lowercase hex digits, of the values as consecutive little-endian `u64` bytes), no count.
+#[must_use]
+#[allow(clippy::missing_const_for_fn, reason = "inert RED scaffold")]
+pub fn print_program_return(
+    kernel: &GuestReading,
+    clocksource: &GuestReading,
+    metric: &str,
+    values: &[u64],
+) -> String {
+    let _ = (kernel, clocksource, metric, values);
+    String::new()
+}
+
+/// Parses `console` for the two readings and exactly one block of `metric` holding
+/// `expected_count` values.
+///
+/// SCAFFOLD: true. Inert: it finds no block, so every console is `BlockMissing` until DELIVER
+/// implements the grammar.
+///
+/// # Errors
+/// The matching [`ProgramReturnError`]; there is never a short series.
+#[allow(clippy::missing_const_for_fn, reason = "inert RED scaffold")]
+pub fn parse_program_return(
+    console: &str,
+    metric: &str,
+    expected_count: usize,
+) -> Result<ProgramReturn, ProgramReturnError> {
+    let _ = (console, metric, expected_count);
+    Err(ProgramReturnError::BlockMissing)
+}
+
+#[cfg(test)]
+mod program_return_tests;
+
 #[cfg(test)]
 mod tests {
     use super::*;

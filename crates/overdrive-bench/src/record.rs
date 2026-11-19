@@ -201,9 +201,9 @@ fn serialize_guest_clock<S: serde::Serializer>(
 }
 
 /// One value of the `host` block: a string, an absent source, or an unreadable one.
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(untagged)]
-pub(crate) enum HostValue {
+pub enum HostValue {
     Text(String),
     Absent { absent: String },
     Unreadable { unreadable: String },
@@ -228,6 +228,82 @@ impl HostValue {
             }
             _ => Err(FORMS),
         }
+    }
+}
+
+// SCAFFOLD: true. The guest benchmark vocabulary (DDD-4, DDD-7): the shapes are the pinned
+// interface contract; `FromStr` and the serde impls of `GuestMemoryMib` are inert (every text
+// is refused, serialising writes a fixed wrong value, every JSON value is refused), so each
+// test reaches its own assertion; DELIVER replaces them.
+
+/// The guest's view of a run: what a replicate reports through
+/// [`Replicate::report_guest_view`](crate::Replicate::report_guest_view).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GuestView {
+    pub vcpus: std::num::NonZeroU8,
+    pub memory_mib: GuestMemoryMib,
+    pub kernel: HostValue,
+    pub clocksource: HostValue,
+    pub artifacts: GuestArtifacts,
+}
+
+/// The three staged files the kit copies into the guest image, each its SHA-256.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GuestArtifacts {
+    pub overdrive_init: HostValue,
+    pub overdrive_guest_peer: HostValue,
+    pub ovd_fwd: HostValue,
+}
+
+/// A guest memory size in MiB: positive.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct GuestMemoryMib(std::num::NonZeroU32);
+
+impl GuestMemoryMib {
+    #[must_use]
+    pub const fn new(mib: std::num::NonZeroU32) -> Self {
+        Self(mib)
+    }
+}
+
+/// Why a string is not a guest memory size.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct GuestMemoryMibError;
+
+impl std::fmt::Display for GuestMemoryMibError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("not a guest memory size")
+    }
+}
+
+impl std::error::Error for GuestMemoryMibError {}
+
+impl std::fmt::Display for GuestMemoryMib {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}", self.0)
+    }
+}
+
+impl std::str::FromStr for GuestMemoryMib {
+    type Err = GuestMemoryMibError;
+
+    fn from_str(_text: &str) -> std::result::Result<Self, Self::Err> {
+        Err(GuestMemoryMibError)
+    }
+}
+
+impl Serialize for GuestMemoryMib {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        serializer.serialize_u32(0)
+    }
+}
+
+impl<'de> Deserialize<'de> for GuestMemoryMib {
+    fn deserialize<D: Deserializer<'de>>(_deserializer: D) -> std::result::Result<Self, D::Error> {
+        Err(D::Error::custom("RED scaffold: GuestMemoryMib::deserialize is not implemented"))
     }
 }
 
@@ -964,6 +1040,92 @@ mod tests {
             let text = serde_json::to_string(&entry).expect("serialise");
             let back: MetricEntry = serde_json::from_str(&text).expect("parse");
             prop_assert_eq!(back, entry);
+        }
+    }
+
+    // ---- `GuestMemoryMib` (guest-benchmark-substrate, DDD-4) ----
+    //
+    // A positive MiB count: `Display` is the decimal digits, `FromStr` accepts decimal digits
+    // only and refuses zero and anything else with a typed error, serde is the JSON integer
+    // the record carries and deserialising 0 is refused naming `memory_mib`.
+    // CONTRACT_SHAPE: pure-function. Layers 1-2: PBT full (Mandate 9).
+
+    fn guest_memory() -> impl Strategy<Value = GuestMemoryMib> {
+        (1u32..=u32::MAX).prop_map(|mib| {
+            GuestMemoryMib::new(std::num::NonZeroU32::new(mib).expect("a positive count"))
+        })
+    }
+
+    /// `Display` is the decimal digits of the count.
+    #[test]
+    fn a_guest_memory_size_displays_as_its_decimal_digits() {
+        let mib = GuestMemoryMib::new(std::num::NonZeroU32::new(512).expect("512"));
+        assert_eq!(mib.to_string(), "512");
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig { failure_persistence: None, ..ProptestConfig::default() })]
+
+        /// Text round trip: `Display` then `FromStr` returns the size.
+        #[test]
+        #[should_panic(expected = "the text of a size must parse back to the size")]
+        fn a_guest_memory_size_round_trips_through_its_text(size in guest_memory()) {
+            let text = size.to_string();
+            prop_assert_eq!(
+                text.parse::<GuestMemoryMib>(),
+                Ok(size),
+                "the text of a size must parse back to the size"
+            );
+        }
+
+        /// Record round trip: the JSON integer is the same digits as `Display`, and it reads back.
+        #[test]
+        #[should_panic(expected = "the record carries the size as the JSON integer of its digits")]
+        fn a_guest_memory_size_round_trips_through_the_json_integer_the_record_carries(
+            size in guest_memory(),
+        ) {
+            let json = serde_json::to_string(&size).expect("serialise");
+            prop_assert_eq!(
+                &json,
+                &size.to_string(),
+                "the record carries the size as the JSON integer of its digits"
+            );
+            let back: GuestMemoryMib = serde_json::from_str(&json).expect("parse");
+            prop_assert_eq!(back, size);
+        }
+    }
+
+    /// Text that is not decimal digits, or is zero, or overflows `u32`, is refused with a typed
+    /// error; each case is one named sad path (the boundary 0 and `u32::MAX + 1` are listed).
+    #[test]
+    #[should_panic(expected = "the largest count parses")]
+    fn text_that_is_not_a_positive_decimal_count_is_refused() {
+        // Control first: a refusal table is vacuous against a parser that refuses everything.
+        assert_eq!(
+            "4294967295".parse::<GuestMemoryMib>().map(|mib| mib.to_string()),
+            Ok("4294967295".to_owned()),
+            "the largest count parses"
+        );
+        for text in ["", "0", "00", "-1", "+5", "1.5", "5 ", " 5", "0x10", "512mib", "4294967296"] {
+            assert!(text.parse::<GuestMemoryMib>().is_err(), "`{text}` is not a guest memory size");
+        }
+    }
+
+    /// Deserialising zero, a negative number, a fraction or a string is refused, and the refusal
+    /// of zero names `memory_mib`.
+    #[test]
+    #[should_panic(expected = "a positive JSON integer deserialises to its size")]
+    fn a_json_value_that_is_not_a_positive_integer_is_refused_naming_the_field() {
+        // Control first: a refusal table is vacuous against a deserialiser that refuses everything.
+        assert_eq!(
+            serde_json::from_str::<GuestMemoryMib>("512").map(|mib| mib.to_string()).ok(),
+            Some("512".to_owned()),
+            "a positive JSON integer deserialises to its size"
+        );
+        let zero = serde_json::from_str::<GuestMemoryMib>("0").expect_err("zero is refused");
+        assert!(zero.to_string().contains("memory_mib"), "the refusal names memory_mib: {zero}");
+        for text in ["-1", "1.5", "\"512\"", "null", "4294967296"] {
+            assert!(serde_json::from_str::<GuestMemoryMib>(text).is_err(), "`{text}` is refused");
         }
     }
 }

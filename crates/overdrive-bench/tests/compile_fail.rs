@@ -17,15 +17,29 @@
 use overdrive_testing::overdrive_test;
 use serial_test::serial;
 
-/// An unregistered substrate identifier, and the guest substrate, are build errors naming the value.
+/// An unregistered substrate identifier is a build error naming the value and the registered
+/// substrates in registration order (`native, guest`).
 /// CONTRACT_SHAPE: pure-function (source text in, diagnostic out).
+#[overdrive_test(host_pure)]
 #[test]
 #[serial(trybuild)]
-#[overdrive_test(host_pure)]
-fn an_unregistered_or_guest_substrate_fails_the_build_naming_it() {
+#[should_panic(expected = "1 of 1 tests failed")]
+fn an_unregistered_substrate_fails_the_build_naming_it_and_the_registered_ones() {
     let cases = trybuild::TestCases::new();
     cases.compile_fail("tests/compile_fail/unknown_substrate.rs");
-    cases.compile_fail("tests/compile_fail/guest_substrate.rs");
+}
+
+/// A benchmark declaring the `guest` substrate with the `guest_monotonic` clock source and a
+/// series metric builds: the registry holds `guest` (ADR-0325) and the guest clock vocabulary holds
+/// `guest_monotonic` (DDD-1). The "guest substrates are not available" refusal is gone.
+/// CONTRACT_SHAPE: pure-function (source text in, diagnostic out).
+#[overdrive_test(host_pure)]
+#[test]
+#[serial(trybuild)]
+#[should_panic(expected = "1 of 1 tests failed")]
+fn a_guest_benchmark_declaration_builds() {
+    let cases = trybuild::TestCases::new();
+    cases.pass("tests/compile_fail/guest_substrate_accepted.rs");
 }
 
 /// A substrate written as a string literal is a build error that says a substrate is a bare
@@ -81,14 +95,25 @@ fn malformed_declarations_fail_the_build_naming_the_offending_key_or_value() {
 
 // ---- The `clock(service = ..., guest = ...)` key (DDD-2 "Clock sources") ----
 
-/// A service or guest clock source outside its closed set is a build error naming the set.
+/// A service clock source outside its closed set is a build error naming the set.
 /// CONTRACT_SHAPE: pure-function (source text in, diagnostic out).
 #[test]
 #[serial(trybuild)]
 #[overdrive_test(host_pure)]
-fn an_unknown_clock_source_fails_the_build_naming_the_set() {
+fn an_unknown_service_clock_source_fails_the_build_naming_the_set() {
     let cases = trybuild::TestCases::new();
     cases.compile_fail("tests/compile_fail/unknown_service_clock_source.rs");
+}
+
+/// A guest clock source outside its closed set is a build error naming the set, which holds
+/// `init_elapsed_ms` and `guest_monotonic` in that order (DDD-1).
+/// CONTRACT_SHAPE: pure-function (source text in, diagnostic out).
+#[overdrive_test(host_pure)]
+#[test]
+#[serial(trybuild)]
+#[should_panic(expected = "1 of 1 tests failed")]
+fn an_unknown_guest_clock_source_fails_the_build_naming_the_set() {
+    let cases = trybuild::TestCases::new();
     cases.compile_fail("tests/compile_fail/unknown_guest_clock_source.rs");
 }
 

@@ -23,6 +23,7 @@ persona:
       - The same suite needs to run independently for two changes
       - Adding, renaming or moving an integration test that must run in a specific Metal isolation (metal-test-placement-attribute, 2026-11-13)
       - A design choice or a primitive's cost needs an end-to-end native number (native-benchmark-program, 2026-11-16)
+      - The component to measure runs inside a workload VM in production, so a host number does not describe it (guest-benchmark-substrate, 2026-11-19)
   motivations:
     functional: Verify changes concurrently without source, resource or evidence interference
     emotional: Trust each result without waiting on an unrelated invocation

@@ -928,3 +928,224 @@ fn a_one_arm_benchmark_reports_a_distribution_and_no_comparison() {
         );
     }
 }
+
+// ---- The guest substrate (guest-benchmark-substrate, ADR-0326, DDD-2 "Report") ----
+//
+// The report of a guest record states `substrate: guest` and, between the nine host lines and
+// `bpf stats`, the guest's conditions: how it was launched, booted and scheduled, the three
+// settings a guest cannot see (absent, with the reason), and what the first replicate's view
+// observed. A native report is byte-identical to what it was. Evidence lane: integration
+// (subprocess). CONTRACT_SHAPE: pure-function (record in, report out) unless a test says otherwise.
+
+/// The report lines from the one after `from` (a line prefix) to the one before `to`.
+fn between<'a>(report: &'a str, from: &str, to: &str) -> Vec<&'a str> {
+    let lines: Vec<&str> = report.lines().collect();
+    let start = lines
+        .iter()
+        .position(|line| line.starts_with(from))
+        .unwrap_or_else(|| panic!("the report must have a line starting `{from}`:\n{report}"));
+    let end = lines
+        .iter()
+        .position(|line| line.starts_with(to))
+        .unwrap_or_else(|| panic!("the report must have a line starting `{to}`:\n{report}"));
+    lines[start + 1..end].to_vec()
+}
+
+/// The guest conditions in the report, in order: after `irq_time_accounting` (the last host line)
+/// and before `bpf stats`, one line each, the settings printing `absent: <reason>`.
+/// US-GBS-02 AC (b), (c), (d); K2.
+#[test]
+#[should_panic(expected = "the report must render for a valid record")]
+fn the_report_states_the_guests_conditions_between_the_host_lines_and_the_statistics_line() {
+    let report = report_of(&guest_record(9));
+    assert_eq!(header(&report, "substrate"), "guest");
+    let expected = [
+        "- guest launch: metal host (not nested)".to_owned(),
+        "- guest boot: fresh guest per replicate".to_owned(),
+        "- guest vcpu scheduling: unpinned".to_owned(),
+        format!("- guest governor: absent: {NOT_VISIBLE}"),
+        format!("- guest smt: absent: {NOT_VISIBLE}"),
+        format!("- guest boost: absent: {NOT_VISIBLE}"),
+        "- guest vcpus: 2".to_owned(),
+        "- guest memory mib: 512".to_owned(),
+        "- guest kernel: 7.0.0-38-generic".to_owned(),
+        "- guest clocksource: kvm-clock".to_owned(),
+        format!("- guest artifact overdrive_init: {}", digest('a')),
+        format!("- guest artifact overdrive_guest_peer: {}", digest('b')),
+        format!("- guest artifact ovd_fwd: {}", digest('c')),
+    ];
+    assert_eq!(
+        between(&report, "- irq_time_accounting: ", "- bpf stats: "),
+        expected.iter().map(String::as_str).collect::<Vec<_>>(),
+        "the guest lines sit between the last host line and the statistics line:\n{report}"
+    );
+    assert!(
+        header(&report, "clock").contains(GUEST_MONOTONIC_CLOCK),
+        "the clock line names the guest clock source: {report}"
+    );
+}
+
+/// A guest record with no `guest_observed` line (every replicate failed before reporting a view)
+/// prints each observed value as `absent: no replicate returned a guest view`, never a zero or a
+/// blank, while the conditions stated before any guest booted are still printed.
+/// CA-4 (a record in which every replicate failed before reporting a view).
+#[test]
+#[should_panic(expected = "the report must render for a valid record")]
+fn a_guest_record_without_a_view_prints_the_observed_values_as_absent() {
+    let reason = "guest boot: no READY within 60s";
+    let mut lines = vec![guest_started(), canary("start", 1000.0)];
+    lines.extend((0..9).map(guest_replicate));
+    lines.push(canary("end", 1000.0));
+    lines.push(finished(9, 0));
+    for index in 2..11 {
+        fail_replicate(&mut lines, index, reason, json!({ GUEST_METRIC: failure_entry(reason) }));
+    }
+    let report = report_of(&lines);
+    let none = "absent: no replicate returned a guest view";
+    for key in [
+        "guest vcpus",
+        "guest memory mib",
+        "guest kernel",
+        "guest clocksource",
+        "guest artifact overdrive_init",
+        "guest artifact overdrive_guest_peer",
+        "guest artifact ovd_fwd",
+    ] {
+        assert_eq!(header(&report, key), none, "header line `{key}`");
+    }
+    assert_eq!(header(&report, "guest launch"), "metal host (not nested)");
+    assert_eq!(header(&report, "guest vcpu scheduling"), "unpinned");
+    assert_eq!(header(&report, "replicates ok"), "0");
+    assert_eq!(header(&report, "replicates failed"), "9");
+    assert!(
+        report.contains(&format!("arm forwarding: {reason}")),
+        "each failed replicate is listed with its arm and reason:\n{report}"
+    );
+}
+
+/// A host refused before any guest booted still reports the guest conditions known beforehand,
+/// the refusal naming the setting with its found and pinned values, and no guest view.
+/// US-GBS-02 AC (a): the run refuses before any guest boots.
+#[test]
+#[should_panic(expected = "the report must render for a valid record")]
+fn a_guest_run_refused_on_a_drifted_host_reports_the_refusal_and_the_static_conditions() {
+    let report = report_of(&vec![guest_started(), refusal("bpf_stats_enabled", "1", "0")]);
+    assert_eq!(header(&report, "status"), "refused: bpf_stats_enabled found 1 pinned 0");
+    assert_eq!(header(&report, "guest launch"), "metal host (not nested)");
+    assert_eq!(header(&report, "guest kernel"), "absent: no replicate returned a guest view");
+    assert_eq!(header(&report, "replicates ok"), "0");
+    assert!(!report.contains("incomplete"), "a refusal is not incomplete: {report}");
+}
+
+/// A guest run killed before its terminal line is reported incomplete and keeps the replicates
+/// written so far; a replicate that failed in the guest is counted with its arm and reason and the
+/// others are reported. US-GBS-03 AC (b), (c) as CA-1 restates them.
+#[test]
+#[should_panic(expected = "the report must render for a valid record")]
+fn a_killed_guest_run_is_incomplete_and_a_failed_guest_replicate_is_counted() {
+    let reason = "guest run: no EXIT within the bound";
+    let mut lines = guest_record(9);
+    fail_replicate(&mut lines, 8, reason, json!({ GUEST_METRIC: failure_entry(reason) }));
+    lines.truncate(lines.len() - 2);
+    let report = report_of(&lines);
+    assert_eq!(header(&report, "status"), "incomplete (no run_finished or run_refused)");
+    assert_eq!(header(&report, "replicates failed"), "1");
+    let failures = section(&report, "Failures");
+    assert!(
+        failures.contains(&format!("arm forwarding: {reason}")),
+        "the failed replicate is listed with its arm and reason: {failures}"
+    );
+}
+
+/// A one-arm guest benchmark reports its distribution and no comparison: the series row carries
+/// percentiles, the value count and the replicate count over every retained sample, and only `ok`
+/// replicates feed it. US-GBS-01 AC (a); the report statistics derive only from retained samples.
+#[test]
+#[should_panic(expected = "the report must render for a valid record")]
+fn a_one_arm_guest_report_shows_the_distribution_of_the_retained_samples() {
+    let report = report_of(&guest_record(9));
+    let table = section(&report, "Table: forwarded-path");
+    let row = series_row(table, GUEST_METRIC, "forwarding");
+    assert_eq!(
+        &row[6..],
+        ["27", "9", "0"],
+        "values, replicates, failures of nine replicates of three samples"
+    );
+    assert!(
+        !report.contains("distinguishable") && !report.contains("A/A"),
+        "a one-arm family has no comparison and no A/A control: {report}"
+    );
+}
+
+/// Rendering a guest record twice is byte-identical and leaves the record untouched.
+/// CONTRACT_SHAPE: unbounded-preservation.
+#[test]
+#[should_panic(expected = "the report must render for a valid record")]
+fn rendering_a_guest_record_twice_is_byte_identical_and_leaves_the_record_untouched() {
+    let d = dir();
+    let path = write(d.path(), "r.jsonl", &guest_record(9));
+    let before = std::fs::read(&path).expect("read");
+    let first = render(&path);
+    let second = render(&path);
+    assert_eq!(first, second);
+    assert_eq!(std::fs::read(&path).expect("read"), before);
+}
+
+/// A native report prints no guest line and keeps its substrate: the guest conditions exist only
+/// for a record that has a guest block. GREEN guard (US-GBS-01 scenario "native unchanged").
+#[test]
+fn a_native_report_prints_no_guest_line_and_states_substrate_native() {
+    let report = report_of(&two_arm(&tight(), &shifted(&tight(), 500.0), &tight()));
+    assert_eq!(header(&report, "substrate"), "native");
+    assert!(
+        !report.lines().any(|line| line.starts_with("- guest ")),
+        "a native report has no guest line:\n{report}"
+    );
+}
+
+/// Every committed record that retains a `report.md` re-renders to exactly those bytes: the
+/// change adds nothing to a native report (K4, DDD-2 "A native report is byte-identical"), and
+/// every committed native record states substrate native with no guest block and no
+/// `guest_observed` line. GREEN guard.
+/// CONTRACT_SHAPE: unbounded-preservation (retained bytes against a fresh render).
+#[test]
+fn every_committed_native_report_re_renders_byte_identical() {
+    fn records(dir: &std::path::Path, found: &mut Vec<std::path::PathBuf>) {
+        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        for entry in entries.map(|entry| entry.expect("read a results entry")) {
+            let path = entry.path();
+            if path.is_dir() {
+                records(&path, found);
+            } else if path.file_name().is_some_and(|name| name == "record.jsonl") {
+                found.push(path);
+            }
+        }
+    }
+    let root =
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../benchmarks/results");
+    let mut found = Vec::new();
+    records(&root, &mut found);
+    let mut compared = 0;
+    for record in &found {
+        let text = std::fs::read_to_string(record).expect("read the record");
+        for line in text.lines() {
+            let value: serde_json::Value = serde_json::from_str(line).expect("a record line");
+            if value["t"] == "run_started" {
+                assert_eq!(value["substrate"], "native", "{} is native", record.display());
+                assert!(value.get("guest").is_none(), "{} has no guest block", record.display());
+            }
+            assert_ne!(value["t"], "guest_observed", "{} has no guest view", record.display());
+        }
+        let report = record.with_file_name("report.md");
+        if let Ok(retained) = std::fs::read(&report) {
+            let rendered = render(record);
+            assert!(
+                rendered.as_bytes() == retained.as_slice(),
+                "re-rendering {} must give the retained report.md byte for byte",
+                record.display()
+            );
+            compared += 1;
+        }
+    }
+    assert!(compared > 0, "at least one committed record retains a report to compare");
+}
