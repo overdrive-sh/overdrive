@@ -23,9 +23,10 @@ use crate::args::Args;
 use crate::host::{HostProbe, HostReading, ProcSysProbe};
 use crate::marker::{self, MARKER_SETTING, Marker};
 use crate::record::{
-    BpfStatsMode, Canary, CanaryPhase, Clock, ClockSource, Declaration, EvidenceClass, GuestBlock, GuestObserved, GuestView, Host, Line,
-    METHODOLOGY_VERSION, MetricDecl, ObservedArtifacts, Outcome, ProfileDecl, RecordWriter,
-    ReferenceDecl, ReplicateLine, RunFinished, RunRefused, RunStarted, SCHEMA_VERSION, Substrate, Unit,
+    BpfStatsMode, Canary, CanaryPhase, Clock, ClockSource, Declaration, EvidenceClass, GuestBlock,
+    GuestObserved, GuestView, Host, Line, METHODOLOGY_VERSION, MetricDecl, ObservedArtifacts,
+    Outcome, ProfileDecl, RecordWriter, ReferenceDecl, ReplicateLine, RunFinished, RunRefused,
+    RunStarted, SCHEMA_VERSION, Substrate, Unit,
 };
 use crate::registry::{self, BenchmarkDecl};
 use crate::replicate::{GUEST_SUBSTRATE, HostClock, Replicate, ReplicateFailure};
@@ -336,8 +337,13 @@ impl Runner<'_> {
         record.append(&Line::RunStarted(Box::new(start.line(mode))))?;
 
         self.canary_samples(&mut record, CanaryPhase::Start)?;
-        let counts =
-            execute(decl, environment.seed, hold.as_ref(), &mut record, (self.sink, dir.as_path()))?;
+        let counts = execute(
+            decl,
+            environment.seed,
+            hold.as_ref(),
+            &mut record,
+            (self.sink, dir.as_path()),
+        )?;
         self.canary_samples(&mut record, CanaryPhase::End)?;
         record.append(&Line::RunFinished(RunFinished {
             finished: now(),
