@@ -267,7 +267,6 @@ impl Case {
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default", profile = "nested-launch")]
 #[test]
-#[should_panic(expected = "a guest that never sent READY must not report an exit status")]
 fn a_guest_that_sends_no_ready_is_a_failed_run_that_keeps_its_console_and_leaves_no_vmm() {
     let case = Case::new("no-ready");
     let spec = GuestImageSpec { forwarder_module: false, ..GuestImageSpec::benchmark() };
@@ -298,7 +297,6 @@ fn a_guest_that_sends_no_ready_is_a_failed_run_that_keeps_its_console_and_leaves
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default", profile = "nested-launch")]
 #[test]
-#[should_panic(expected = "a guest stalled past the READY bound must not report an exit status")]
 fn a_guest_stalled_past_the_ready_bound_is_ended_and_its_program_never_runs() {
     let case = Case::new("stalled");
     let started = Instant::now();
@@ -340,7 +338,6 @@ fn a_guest_stalled_past_the_ready_bound_is_ended_and_its_program_never_runs() {
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default", profile = "nested-launch")]
 #[test]
-#[should_panic(expected = "a guest that died after READY must not report an exit status")]
 fn a_guest_that_dies_after_ready_is_a_failed_run_that_keeps_its_console_and_leaves_no_vmm() {
     let case = Case::new("dies-after-ready");
     let (run, seen) = case.run(
@@ -371,7 +368,6 @@ fn a_guest_that_dies_after_ready_is_a_failed_run_that_keeps_its_console_and_leav
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default", profile = "nested-launch")]
 #[test]
-#[should_panic(expected = "a program that misses the exit bound must not report an exit status")]
 fn a_program_that_misses_the_exit_bound_is_a_failed_run_that_keeps_its_console_and_ends_the_guest()
 {
     let case = Case::new("misses-exit-bound");
@@ -408,7 +404,6 @@ fn a_program_that_misses_the_exit_bound_is_a_failed_run_that_keeps_its_console_a
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default", profile = "nested-launch")]
 #[test]
-#[should_panic(expected = "the console is returned with what the program wrote")]
 fn a_program_that_exits_within_the_bound_reports_its_exit_keeps_its_console_and_frees_the_cid() {
     let case = Case::new("clean-exit");
     let (run, seen) = case.run(
@@ -442,7 +437,6 @@ fn a_program_that_exits_within_the_bound_reports_its_exit_keeps_its_console_and_
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default", profile = "nested-launch")]
 #[test]
-#[should_panic(expected = "a VMM that outlives its guest's EXIT must not report an exit status")]
 fn a_vmm_that_outlives_its_guests_exit_is_a_failed_run_that_keeps_its_console_and_is_ended() {
     let case = Case::new("outlives-exit");
     let spec = case.spec_whose_guest_never_powers_off();

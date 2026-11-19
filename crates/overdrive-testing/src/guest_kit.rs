@@ -372,12 +372,14 @@ impl GuestImageSpec {
 
     /// The image a guest benchmark boots: the production `overdrive-init` as PID 1, the
     /// forwarder module and the vsock loopback module, no further files.
-    ///
-    /// SCAFFOLD: true. Inert: returns the workload image (no loopback module) until DELIVER
-    /// replaces it with the pinned literal.
     #[must_use]
     pub const fn benchmark() -> Self {
-        Self::workload()
+        Self {
+            init: GuestInit::OverdriveInit,
+            forwarder_module: true,
+            loopback_module: true,
+            extra: Vec::new(),
+        }
     }
 
     /// A scripted guest with the kit's module (its forwarder usable).
@@ -1422,9 +1424,6 @@ mod tests {
     /// forwarder module and the vsock loopback module and no further files (it differs from
     /// `workload()` by the loopback module).
     #[test]
-    #[should_panic(
-        expected = "the benchmark image must be production init with both modules and no extra files"
-    )]
     fn the_benchmark_image_boots_production_init_with_both_modules_and_no_extra_files() {
         use super::{GuestImageSpec, GuestInit};
 

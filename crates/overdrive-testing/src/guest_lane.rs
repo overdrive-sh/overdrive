@@ -59,7 +59,7 @@ use std::net::Ipv4Addr;
 use std::num::{NonZeroU8, NonZeroU32};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -456,46 +456,139 @@ pub(crate) fn run_in_guest_cell_attempt(
         extra: guest_lane_image_files(tests, attempt),
     };
     let image = build_guest_lane_image(kit, work, &name, &spec, attempt)?;
+    let mut operator_command: Vec<String> = Vec::new();
+    if let Some(attempt) = attempt {
+        operator_command.extend(guest_lane_exec_argv(attempt));
+    } else {
+        operator_command.extend(
+            [IN_GUEST_TESTS_PATH, "--exact", cell, "--test-threads=1", "--nocapture"]
+                .into_iter()
+                .map(str::to_owned),
+        );
+    }
+    let exchange = exchange_with_production_guest(
+        kit,
+        &ProductionGuestRun {
+            label: cell,
+            image: &image,
+            cid,
+            run_dir: work.join(format!("{name}-run")),
+            operator_command,
+            exit_bound: CELL_BOUND,
+        },
+    )?;
+    let exit_status = exchange.exit?;
+    Ok(CellRun { cell: cell.to_owned(), exit_status, console: exchange.console })
+}
+
+/// How long a guest that sent EXIT has to power off and its VMM to exit.
+const POST_EXIT_BOUND: Duration = Duration::from_secs(30);
+/// How often the beacon exchange looks for a VMM that ended on its own.
+const VMM_POLL_SLICE: Duration = Duration::from_millis(100);
+
+/// One operator command to run in a fresh production-init guest, and how.
+struct ProductionGuestRun<'a> {
+    /// Names the run in failure messages.
+    label: &'a str,
+    image: &'a crate::guest_kit::GuestImage,
+    cid: u32,
+    run_dir: PathBuf,
+    /// The command after the vsock loopback module is loaded.
+    operator_command: Vec<String>,
+    /// Measured from the EXEC write.
+    exit_bound: Duration,
+}
+
+/// What the beacon exchange ended with, once the VMM has exited and been reaped.
+struct GuestExchange {
+    exit: Result<i32, GuestKitError>,
+    console: String,
+}
+
+/// Boots the guest, plays the node beacon, runs the operator command and ends the guest.
+///
+/// The outer `Err` is only for a failure before a VMM exists. Afterwards the VMM has exited and
+/// been reaped before return in every outcome, and the exchange's failure is in `exit`.
+fn exchange_with_production_guest(
+    kit: &GuestKit,
+    run: &ProductionGuestRun<'_>,
+) -> Result<GuestExchange, GuestKitError> {
+    let cid = run.cid;
     let listeners = HostListeners::bind()?;
     let token = listeners.transport_token(cid);
     let HostListeners { beacon, stream: _stream, control } = listeners;
     let _holder = Holder::start(control, cid);
-    let run_dir = work.join(format!("{name}-run"));
-    let vm = kit.boot(&GuestBoot {
-        image: &image,
+    let mut vm = kit.boot(&GuestBoot {
+        image: run.image,
         cid,
         cmdline_extra: vec![token],
-        memory_mib: 512,
-        vcpus: 2,
-        run_dir: &run_dir,
+        memory_mib: LANE_GUEST_MEMORY_MIB.get(),
+        vcpus: LANE_GUEST_VCPUS.get(),
+        run_dir: &run.run_dir,
     })?;
-    let deadline = Instant::now() + READY_BOUND;
+    let exit = converse(&vm, &beacon, run);
+    let exit = settle_vmm(&mut vm, exit);
+    Ok(GuestExchange { exit, console: vm.console() })
+}
+
+/// Reads one line, giving up at `deadline` (`Ok(None)`) and failing as soon as the VMM has
+/// exited with nothing left to read.
+fn read_line_while_vmm_runs(
+    vm: &crate::guest_kit::GuestKitVm,
+    stream: &VsockStream,
+    deadline: Instant,
+) -> io::Result<Option<String>> {
+    loop {
+        let slice = deadline.saturating_duration_since(Instant::now()).min(VMM_POLL_SLICE);
+        if let Some(line) = read_line(stream, slice)? {
+            return Ok(Some(line));
+        }
+        if vm.try_exit().is_some() {
+            return Err(io::Error::other("the VMM exited"));
+        }
+        if Instant::now() >= deadline {
+            return Ok(None);
+        }
+    }
+}
+
+/// The beacon exchange: accept the guest's connection, READY, EXEC, then LISTEN lines and EXIT.
+fn converse(
+    vm: &crate::guest_kit::GuestKitVm,
+    beacon: &VsockListener,
+    run: &ProductionGuestRun<'_>,
+) -> Result<i32, GuestKitError> {
+    let label = run.label;
+    let tail = || vm.console_tail(16_384);
+    let ready_deadline = Instant::now() + READY_BOUND;
     let conn = loop {
-        let left = deadline.saturating_duration_since(Instant::now());
-        match beacon.accept_within(left) {
-            Ok(Some((stream, peer))) if peer.cid == cid => break stream,
+        match beacon.accept_within(VMM_POLL_SLICE) {
+            Ok(Some((stream, peer))) if peer.cid == run.cid => break stream,
             Ok(Some(_)) => {}
             Ok(None) => {
-                return Err(lane_error(format!(
-                    "{cell}: the guest sent no beacon within {READY_BOUND:?}; console:\n{}",
-                    vm.console_tail(8192)
-                )));
+                if vm.try_exit().is_some() {
+                    return Err(lane_error(format!(
+                        "{label}: the VMM exited before the guest sent a beacon; console:\n{}",
+                        tail()
+                    )));
+                }
+                if Instant::now() >= ready_deadline {
+                    return Err(lane_error(format!(
+                        "{label}: the guest sent no beacon within {READY_BOUND:?}; console:\n{}",
+                        tail()
+                    )));
+                }
             }
-            Err(e) => return Err(lane_error(format!("{cell}: beacon accept: {e}"))),
+            Err(e) => return Err(lane_error(format!("{label}: beacon accept: {e}"))),
         }
     };
-    let ready = read_line(&conn, READY_BOUND)
-        .map_err(|e| {
-            let _ = vm.wait_exit(Duration::from_secs(5));
-            lane_error(format!("{cell}: reading READY: {e}; console:\n{}", vm.console_tail(16_384)))
-        })?
-        .ok_or_else(|| {
-            lane_error(format!("{cell}: no READY; console:\n{}", vm.console_tail(8192)))
-        })?;
+    let ready = read_line_while_vmm_runs(vm, &conn, ready_deadline)
+        .map_err(|e| lane_error(format!("{label}: reading READY: {e}; console:\n{}", tail())))?
+        .ok_or_else(|| lane_error(format!("{label}: no READY; console:\n{}", tail())))?;
     match ready.parse::<BeaconMessage>() {
         Ok(BeaconMessage::Ready { .. }) => {}
         other => {
-            return Err(lane_error(format!("{cell}: expected READY, got {ready:?} ({other:?})")));
+            return Err(lane_error(format!("{label}: expected READY, got {ready:?} ({other:?})")));
         }
     }
     let mut argv: Vec<String> =
@@ -503,56 +596,66 @@ pub(crate) fn run_in_guest_cell_attempt(
             .iter()
             .map(|s| (*s).to_owned())
             .collect();
-    if let Some(attempt) = attempt {
-        argv.extend(guest_lane_exec_argv(attempt));
-    } else {
-        argv.extend(
-            [IN_GUEST_TESTS_PATH, "--exact", cell, "--test-threads=1", "--nocapture"]
-                .into_iter()
-                .map(str::to_owned),
-        );
-    }
+    argv.extend(run.operator_command.iter().cloned());
     let exec = BeaconMessage::Exec { argv };
     (&conn)
         .write_all(format!("{exec}\n").as_bytes())
-        .map_err(|e| lane_error(format!("{cell}: writing EXEC: {e}")))?;
-    let exit_deadline = Instant::now() + CELL_BOUND;
-    let exit_status = loop {
-        let remaining = exit_deadline.saturating_duration_since(Instant::now());
-        let line = read_line(&conn, remaining)
+        .map_err(|e| lane_error(format!("{label}: writing EXEC: {e}")))?;
+    let exit_deadline = Instant::now() + run.exit_bound;
+    loop {
+        let line = read_line_while_vmm_runs(vm, &conn, exit_deadline)
             .map_err(|e| {
-                lane_error(format!(
-                    "{cell}: reading LISTEN or EXIT: {e}; console:\n{}",
-                    vm.console_tail(16_384)
-                ))
+                lane_error(format!("{label}: reading LISTEN or EXIT: {e}; console:\n{}", tail()))
             })?
             .ok_or_else(|| {
                 lane_error(format!(
-                    "{cell}: no EXIT within {CELL_BOUND:?}; console:\n{}",
-                    vm.console_tail(16_384)
+                    "{label}: no EXIT within {:?}; console:\n{}",
+                    run.exit_bound,
+                    tail()
                 ))
             })?;
         match line.parse::<BeaconMessage>() {
             Ok(BeaconMessage::Listen { .. }) => {}
-            Ok(BeaconMessage::Exit { status }) => break status,
+            Ok(BeaconMessage::Exit { status }) => return Ok(status),
             other => {
                 return Err(lane_error(format!(
-                    "{cell}: expected LISTEN or EXIT, got {line:?} ({other:?})"
+                    "{label}: expected LISTEN or EXIT, got {line:?} ({other:?})"
                 )));
             }
         }
+    }
+}
+
+/// Ends the guest: after an EXIT the guest powers off and its VMM must exit within
+/// [`POST_EXIT_BOUND`]; in every other outcome, and for a VMM that does not exit, the VMM is
+/// killed and reaped. The exchange's `exit` comes back unchanged only when the VMM ended
+/// cleanly.
+fn settle_vmm(
+    vm: &mut crate::guest_kit::GuestKitVm,
+    exchange: Result<i32, GuestKitError>,
+) -> Result<i32, GuestKitError> {
+    let failure = match exchange {
+        Ok(status) => match vm.wait_exit(POST_EXIT_BOUND) {
+            Ok(Some(_)) => return Ok(status),
+            Ok(None) => lane_error(format!(
+                "the VMM was still running {POST_EXIT_BOUND:?} after the guest's EXIT; console:\n{}",
+                vm.console_tail(16_384)
+            )),
+            Err(e) => e,
+        },
+        Err(e) => e,
     };
-    // The guest powers off once EXIT is sent; the console is complete when
-    // the VMM has exited.
-    let _ = vm.wait_exit(Duration::from_secs(30))?;
-    Ok(CellRun { cell: cell.to_owned(), exit_status, console: vm.console() })
+    if vm.try_exit().is_some() {
+        return Err(failure);
+    }
+    match vm.kill() {
+        Ok(_) => Err(failure),
+        Err(kill) => Err(lane_error(format!("{failure}; and ending the VMM failed: {kill}"))),
+    }
 }
 
 /// The vCPU count of the guest [`run_in_guest_cell`] boots a production-init guest with;
 /// [`run_in_guest_program`] and the benchmark record read the same value.
-///
-/// SCAFFOLD: true. The values are the lane's current inline `2` and `512`; DELIVER makes the
-/// lane read these constants too.
 pub const LANE_GUEST_VCPUS: NonZeroU8 = NonZeroU8::MIN.saturating_add(1);
 /// The memory, in MiB, of the guest [`run_in_guest_cell`] boots a production-init guest with.
 pub const LANE_GUEST_MEMORY_MIB: NonZeroU32 = NonZeroU32::MIN.saturating_add(511);
@@ -583,14 +686,6 @@ pub struct ProgramRun {
 ///
 /// The outer `Err` is only for a failure before a VMM exists (image build, listener bind,
 /// launch); a failure after the VMM exists is [`ProgramRun::exit`] `Err(..)` with its console.
-///
-/// SCAFFOLD: true. Inert: boots nothing and reports a clean exit with an empty console until
-/// DELIVER lands the body.
-#[allow(
-    clippy::unnecessary_wraps,
-    clippy::missing_const_for_fn,
-    reason = "scaffold: the pinned signature, with an inert body until DELIVER"
-)]
 pub fn run_in_guest_program(
     kit: &GuestKit,
     spec: &GuestImageSpec,
@@ -599,9 +694,32 @@ pub fn run_in_guest_program(
     work: &Path,
     bound: Duration,
 ) -> Result<ProgramRun, GuestKitError> {
-    let _ = (kit, spec, program, cid, work, bound);
-    Ok(ProgramRun { exit: Ok(0), console: String::new() })
+    if spec.init != GuestInit::OverdriveInit {
+        return Err(lane_error("run_in_guest_program needs a production-init image".to_owned()));
+    }
+    let name = format!(
+        "guest-program-{}-{}",
+        cid.get(),
+        PROGRAM_RUN_SEQUENCE.fetch_add(1, Ordering::SeqCst)
+    );
+    let image = kit.image(work, &name, spec)?;
+    let exchange = exchange_with_production_guest(
+        kit,
+        &ProductionGuestRun {
+            label: "guest program",
+            image: &image,
+            cid: cid.get(),
+            run_dir: work.join(format!("{name}-run")),
+            operator_command: program.to_vec(),
+            exit_bound: bound,
+        },
+    )?;
+    Ok(ProgramRun { exit: exchange.exit, console: exchange.console })
 }
+
+/// Makes each program run's image and run directory its own, so a second run on one CID in one
+/// work directory never reuses the first's files.
+static PROGRAM_RUN_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
 /// How a production guest's boot ended, as the lane's beacon saw it.
 #[derive(Debug, Clone, PartialEq, Eq)]
