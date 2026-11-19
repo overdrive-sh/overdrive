@@ -1,0 +1,83 @@
+---
+title: One benchmark runner for kernel hooks, VMs, DNS and mTLS
+description: Each of our spikes carried its own sampler and report, so each reported numbers its own way. We built one runner on the test machine and measured four components with it.
+date: 2026-11-19
+author: The Overdrive team
+summary: A shared runner with a fixed statistical protocol replaced per-spike scripts. This post covers the alternatives we dropped, the two small production changes the measurements required, and what the first four families do and do not show.
+---
+
+Overdrive's correctness tests answer whether a component works. They say nothing about how long it takes or what it costs. The only latency evidence we had came from spikes, the throwaway probe programs we write to test one assumption. Each spike measured well: interleaved arms, a fresh fixture per run, raw rows kept. Each also carried its own sampler, recorder and report, and the connect-hook spike was a copy of an earlier one. The only performance gate in the repository, `xdp-perf`, covers XDP programs and compares a mean.
+
+We built a benchmark program: a shared runner with one statistical protocol, a declaration attribute, and retained records. It runs on a shared test machine, a physical x86_64 server with KVM, and it has measured four components. This post covers why we built it the way we did, what we rejected, and what the first four result sets show and do not show.
+
+## What a benchmark has to cross
+
+The components we wanted numbers for do not sit in one process. The gateway's `cgroup/connect4` BPF program runs in the kernel on every `connect(2)` under a cgroup. A VM workload moves from a deploy call through the control plane, a Cloud Hypervisor process and a guest's init. The DNS responder serves UDP from a network namespace. The mTLS hop sits between a workload's plaintext socket and a TLS peer.
+
+In-process microbenchmark frameworks like Criterion time a closure in one process. Their analysis ideas are good, and we kept them: warm-up, bootstrap intervals, a noise threshold. Their harness does not fit a measurement that starts at an operator's deploy call and ends at a reaped VMM. So the runner owns the fixture, the clocks and the statistics, and a family supplies the workload.
+
+We also kept benchmarks out of the test tiers. A test passes or fails, and a benchmark has no threshold to fail on. A test also shares the machine with other tests, and a benchmark's numbers are only comparable when nothing else is loading the host. A benchmark therefore runs through its own form of the test-machine runner, `cargo xtask metal run --benchmark <family>`, which takes exclusive admission and accepts no other command. The cost is plain. While a benchmark runs, nobody else's run does.
+
+## The shape we chose
+
+The program is two dev-only crates. `overdrive-bench` owns the measuring: the protocol, the record, the report and the `bench-report` tool. `overdrive-bench-families` owns the workloads, one module per family. Neither crate appears in the dependencies of any production crate.
+
+A family is one function with an `#[overdrive_bench(...)]` attribute naming its arms, replicates, profiles and metrics. The attribute also generates a smoke test that takes one replicate per arm and asserts no timing. We added that because a benchmark that only runs on the exclusive machine can rot unnoticed between measured runs, and the smoke test runs in an ordinary nextest run. The price is an attribute with more keys than a test attribute.
+
+A run writes an append-only record and derives the report from it. The record states the methodology version, the commit, whether the working tree was dirty, the host settings and the seed. Each retained run below had uncommitted changes in the tree, and its record says so.
+
+The protocol is fixed. Each arm runs at least 9 replicates, here 30. Arms interleave in shuffled blocks, with an A/A control, a second run of the reference arm, in every block. A difference counts only when its 95% bootstrap interval excludes zero and the point estimate exceeds the A/A interval's larger bound. The [methodology page](/docs/concepts/benchmark-methodology) has the full rules.
+
+## Alternatives we dropped
+
+**The global BPF statistics sysctl.** Per-program run time and count need `kernel.bpf_stats_enabled=1`. We measured what that switch costs: about 67 ns per program run. With the two connect programs attached, that added 145 ns to a 30.4 µs loopback connect, or 0.48%. On a 71 ns XDP lookup it added 94%. The switch applies to every program on the machine. The kernel also offers a per-process file descriptor, `BPF_ENABLE_STATS`, that raises the statistics only while a process holds it and lowers them when the process exits, including when it is killed. We confirmed that on the test machine: the sysctl read 0 throughout, 5,000 connects with the descriptor held advanced each connect program's run count by 5,000, and killing the holder with `kill -9` left the count flat. The runner uses the descriptor and never writes the sysctl. It also scans for other holders before it starts, because the sysctl cannot see a descriptor-scoped enable.
+
+**Timing the DNS answer functions alone.** The pure functions that build the reply are easy to time. They leave out the receive and the send, which is where a responder spends time under load. We chose a `QueryObserver` that the responder calls once per datagram with its service time, measured from receive to reply sent. The production composition passes an empty observer. The cost is two clock reads and one dynamic call per datagram. A 10-million-iteration microbenchmark measured 62.7 ns with the empty observer and 75.2 ns with a recording one. The end-to-end comparison found no difference distinguishable from noise, but its A/A floor of about 700 ns only rules out costs above that. The microbenchmark gives the actual bound.
+
+**Waiting for the guest's exit line on a VM stop.** The stop path never delivers it to the host. The host sends the shutdown message and then closes the beacon connection, the channel on which the guest reports its lifecycle lines. The guest's `EXIT` line has nowhere to go, and in 60 stop cycles the host received it zero times. Holding the connection open for the benchmark would have changed production to suit a measurement, since nothing in production reads that line. So the VM family stamps stages at events that already exist, and takes the guest's own shutdown handling as a duration the guest measured, at 1 ms resolution.
+
+**Guessing which mTLS thread does the work.** To split forward work from return work on the egress path, we needed to attribute CPU to the two pump threads. They were unnamed, and each inherited the name `tokio-rt-worker`. We gave them fixed names, `mtls-out-fwd` and `mtls-out-ret`. That is the second production change. A spike confirmed the heavy thread follows the direction of the transfer. It also exposed a fixture trap: if the TLS peer sends a session ticket, the kernel-TLS receive path fails with `EINVAL` and the connection tears down. Production peers disable tickets, so the benchmark peer does too.
+
+## What the four families measured
+
+All four ran on one machine: an AMD EPYC 8024P with 16 CPUs, Linux 7.0.0-38, release builds. Each ran 30 replicates per arm, and in each run the loopback-connect canary read the same at the start and the end.
+
+### Connect-hook cost
+
+The gateway's connect program costs a median **137.4 ns** of kernel run time per connect, with an interquartile range of 4.2 ns over 30 replicates. An earlier hand-rolled spike measured 137.6 ns. The wall-clock cost of a loopback connect-and-close is about 30.1 µs without the hook and 30.4 µs with it. The difference is **246 ns**, with a 95% interval of [132, 333] ns. The A/A interval is [−116, +89] ns, so the difference clears the noise floor and the verdict is `distinguishable`. That is under 1% of a connect. The wall difference exceeds the program's own run time because it includes the cgroup-BPF dispatch around the program.
+
+### VM lifecycle
+
+This family has one arm, so it reports distributions and no verdicts. For one workload, the median admission takes 2.8 ms and the VMM launch takes 14.1 ms. The guest reaches `READY` about 1.28 s after the VMM is created. After a stop, the VMM exits a median 61.5 ms after the shutdown message is delivered, and the guest measured 18 ms of its own shutdown handling. A workload that ignores the stop signal exits at the guest's grace deadline: 5.07 s to the reap and 5.02 s measured inside the guest.
+
+With four workloads deployed together, the median VMM launch rises to 31.5 ms. Cold-cache and warm-cache profiles show a median launch of 20.8 ms and 18.0 ms. We made no statistical comparison between profiles, so we do not claim a cache effect from those two numbers.
+
+### DNS responder
+
+Under a fixed schedule of arrivals (2,000 queries per second for 5 seconds), one client and one name, the median client-observed latency is 38.8 µs with a p99 of 55.7 µs. The responder's own receive-to-send time is a median 14.0 µs. About 25 µs of the client's view therefore sits outside the responder's service interval, in the kernel and the scheduler. Every query got a correct reply at the scheduled rate in every profile, so none of them approached saturation and we have not measured the responder's capacity.
+
+The heavier profile uses 1,000 names, 4 client sockets and 8,000 queries per second. There the client median is 99.9 µs and the service median is 77.0 µs. That profile changes three things at once, so the data cannot say which of them raised service time. We did not vary them separately. An AAAA query for a name with no AAAA record has a service median of 22.9 µs, and an unknown name has 15.6 µs.
+
+The responder has no cache, so the family has no cache axis.
+
+### mTLS hop
+
+The mTLS family compares a plaintext baseline with the real enforcement and intercept path, in both directions, with a plaintext dialler on egress as a workload would be. The peer runs on the same host over loopback, so the relative overhead is an upper bound: loopback carries no NIC or IRQ cost to dilute it. The client and peer also share CPUs with the agent, so the TLS peer may co-limit throughput and tail latency, and the numbers are not pure agent cost.
+
+On egress, the handshake takes a median 2.85 ms, and first-byte latency goes from 118 µs to 2.96 ms. Tail latency over 10,000 64-byte round trips goes from a 17.4 µs median to 64.6 µs, a difference of 48.8 µs with an interval of [40.5, 54.3] µs. Throughput of one 256 MiB frame drops from 2.67 GB/s to 0.87 GB/s, a drop of 1.80 GB/s that sits far outside the A/A interval. The forward pump thread took all of the pump CPU and the return pump took none we could see. Thread CPU is read in 10 ms ticks, and the 256 MiB frame travels one way, so the return pump's share is below the tick and the split is a lower bound.
+
+On egress, the extra system CPU of the mTLS arm is inside the A/A noise despite a small p-value from the Mann-Whitney test, a rank-based test of whether two samples differ. The extra memory (about 1.5 MB) is also inside the noise. The mTLS arm holds 5 more sockets.
+
+On ingress, the handshake takes a median 0.82 ms, and first-byte latency goes from 72 µs to 948 µs. Tail latency rises from 27.6 µs to 38.2 µs at the median. Throughput reads higher with mTLS, 1.21 GB/s against 1.03 GB/s, and the difference clears the A/A bound, but its interval is wide, from 10 to 220 MB/s. The ingress baseline is a plaintext bridge to an in-memory sink, not a faithful stand-in for the whole inbound path, and we have no explanation for the direction. We do not read it as mTLS being faster.
+
+Two limits apply to ingress. The measurement excludes the guest transport, because the guest end is in memory. And the ingress handshake time starts when the enforcement accepts the connection, so it includes the wait for the client's `ClientHello`. Issue [#303: kernel mTLS inside the guest](https://github.com/overdrive-sh/overdrive/issues/303) tracks replacing the host agent's ingress path. The program's boundary, plaintext against mTLS at the same interface, is the comparison that replacement needs.
+
+## What it costs and what it leaves open
+
+The program costs two crates, two small production changes, an attribute with a long key list, and an exclusive machine for every measured run. In return, the four families share one protocol, one record format and one report, and a spike can use the same attribute and produce a record in the same schema.
+
+The runner records results and compares nothing across runs. It has no baseline and no regression gate. Whether a family is repeatable enough to gate is a separate decision, tracked in [issue #361: baseline promotion and regression-gate policy](https://github.com/overdrive-sh/overdrive/issues/361). Benchmarks also run only on the native test machine, so a component that runs inside a workload VM cannot be benchmarked. Issue [#362: a guest execution environment for components that run inside a workload VM](https://github.com/overdrive-sh/overdrive/issues/362) tracks lifting that limit.
+
+The A/A intervals in these runs give a first look at repeatability. The connect-hook delta is about 250 ns on a 30 µs operation, and its A/A interval spans roughly ±100 ns. A gate on that family would have to be tuned to a change much larger than the noise. We have not run the families repeatedly across days, so we do not yet know how stable these medians are over time.
+
+To declare or run one yourself, see [Write and run a benchmark](/docs/how-to/write-and-run-a-benchmark).

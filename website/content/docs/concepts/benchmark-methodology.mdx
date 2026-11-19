@@ -1,0 +1,62 @@
+---
+title: Benchmark methodology
+description: How Overdrive's benchmark runner turns replicates into comparable numbers, and what it does to keep a noisy host from producing false differences.
+---
+
+A benchmark answers a narrow question: how does this component behave on this machine under this load? The runner in `overdrive-bench` fixes the protocol that turns raw samples into an answer, so two families report their numbers the same way. The protocol has a version. Every record states the methodology version that produced it, and any change to a rule below bumps the version. The current version is 1.
+
+To declare and run a benchmark, see [Write and run a benchmark](/docs/how-to/write-and-run-a-benchmark).
+
+## Replicates, arms and blocks
+
+A replicate is one fresh fixture and one run of the benchmark body. No fixture state survives from one replicate to the next. The host's page cache does persist, so a family that needs a cold cache declares a profile that drops it before each replicate. A family declares at least 9 replicates per arm, and a declaration below 9 does not build.
+
+An arm is one condition under comparison. The first declared arm is the reference. The runner schedules replicates in blocks. A block holds every arm once, plus one A/A control when the benchmark has two or more arms. The control is a second run of the reference arm. Inside a block the order is a seeded shuffle, and the seed comes from the operating system's entropy and is recorded in the record. You cannot set it.
+
+Interleaving arms inside each block matters because a machine drifts. Temperature, background work and frequency change over a run of minutes. If every replicate of arm A ran before every replicate of arm B, that drift would look like a difference between the arms. With blocks, both arms sample the same drift.
+
+## The A/A control sets the noise floor
+
+The control tells you how large a difference appears between two runs of the same thing. That number is the noise floor for the comparison. A reported difference smaller than the floor is not a finding.
+
+For each metric, the runner computes the difference of per-replicate medians, non-reference arm minus reference arm, and a 95% percentile bootstrap interval over 10,000 seeded resamples. It computes the same interval for the A/A pair, and it adds a Mann-Whitney U test, a rank-based test of whether two samples differ, with a seeded 10,000-permutation p-value. The verdict is `distinguishable` only when two conditions hold. The delta interval excludes zero, and the absolute point estimate exceeds the larger absolute bound of the A/A interval. Otherwise the verdict is `not distinguishable from noise`. With fewer than 9 usable replicates, the verdict is `insufficient replicates`.
+
+The two-part rule is deliberately strict. In one retained run, a host CPU metric had a Mann-Whitney p-value of 0.001 and still got the verdict `not distinguishable from noise`, because its delta stayed inside the A/A interval. The p-value alone would have called it a difference.
+
+Only replicates that finished `ok` feed a statistic. A failed replicate's partial metrics are recorded and never used.
+
+## A canary watches the host itself
+
+The runner measures loopback TCP connect-and-close at the start and at the end of every run, 16 samples each, before any fixture exists. If the end differs from the start by the same verdict rule, the run is marked `unstable`. The canary does not measure your component. It measures whether the machine kept the same speed while you measured it.
+
+## Percentiles and histogram storage
+
+A metric that records many values per replicate is a series. Series values are never dropped. A replicate with at most 1,000 values stores them raw. A replicate with more stores a log-linear histogram of at most 2,049 buckets. Percentiles come from linear interpolation between closest ranks. A percentile read from a histogram is within one bucket width of the exact one, which is 3.125% relative error for values of 1 and above. The report states that error under any table whose percentiles came from histograms.
+
+The histogram buckets are defined bit by bit, so two implementations produce byte-identical reports from the same record.
+
+## Failure and absence are data
+
+The runner never drops or zero-fills a failure. A failed replicate, a failed metric and a metric that does not apply are each recorded and counted. A metric that does not apply to an arm appears as `absent` with its reason in the report, for example "no connect program is attached on this arm". A series metric can be partly measured: a VM lifecycle replicate that launches four workloads may complete a stage for three. The three values feed the statistics and the one failure is counted beside them.
+
+## Clocks
+
+Every instant that crosses a boundary is stamped on the host with `CLOCK_MONOTONIC_RAW`, which network time adjustments do not slew. A stage that happens inside a guest VM is a duration the guest measured. It is never added to or subtracted from a host instant, because the guest's clocks have a different zero point. A stage the guest cannot report is absent. The DNS responder's own service time uses the monotonic `Clock::now` the responder is constructed with, and the record names it. BPF program time is the kernel's per-program `run_time_ns` over `run_count`. It is reported as a separate metric and never mixed with wall time.
+
+A family declares its service and guest clock sources, and the record's `clock` block names them.
+
+## BPF statistics are held per process
+
+The kernel's global `kernel.bpf_stats_enabled` sysctl turns statistics on for every program on the machine, and a measurement showed it adds about 67 ns to every program run. The runner never writes it. A benchmark that declares `bpf_stats` holds a `BPF_ENABLE_STATS` file descriptor for the run. The kernel lowers the statistics when the process exits, even when it is killed. Because a descriptor-scoped enable is invisible to the sysctl, the runner scans for another holder of a `bpf-stats` descriptor and refuses to start if one exists.
+
+## The host is pinned, not tuned
+
+The runner sets no noise controls. It does not pin frequency, disable boost, or isolate cores. It reads the machine against a pinned list (kernel series `7.0`, governor `schedutil`, SMT on, boost on, no stats sysctl, no other stats holder, a release build), records the settings, and refuses a run on any difference. The reasoning is that the numbers should describe the settings the appliance runs at. See the how-to for the refusal order.
+
+## Cold and warm
+
+A family states whether it measures cold or warm behavior. A warm family runs unrecorded operations before the timed phase, and those never enter a metric. A cold family uses profiles whose preparation names the cache state, such as one that drops the page cache before each replicate.
+
+## What the report does not do
+
+The report compares the arms of one record and nothing else. It does not compare two records and it does not compare a record against a baseline. Records taken in different execution environments are never compared, and the runner has no command that takes two records. The only execution environment is the native test machine.

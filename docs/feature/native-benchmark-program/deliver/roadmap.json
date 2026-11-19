@@ -1,0 +1,480 @@
+{
+  "roadmap": {
+    "project_id": "native-benchmark-program",
+    "created_at": "2026-11-17T12:58:14Z",
+    "total_steps": 17
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Walking skeleton: connect-hook cost through core, report, macro and Metal form",
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "Record schema, writer and bench-report validate",
+          "description": "Retained-record model (run_started, canary, replicate, run_finished, run_refused), its writer (raw values up to 1,000, histogram above), and the bench-report validate command with typed refusals.",
+          "implementation_notes": "Scenario count 24 (flag): all pure-function record-in/verdict-out tests over one module; V1 and V17 are GREEN guards, rest RED. Histogram encoder, writer switch at 1,000 values and record types are crafter-owned (G1): add unit and proptest coverage (roundtrip of histogram encode, writer switch boundary). Exit codes 64/65/70, never 101. Do not add API beyond DDD-6.",
+          "criteria": [
+            "All V1-V24 tests pass with their should_panic markers removed (V1, V17 already green stay green)",
+            "validate refuses malformed records with exit 65 naming line number and offending field; usage errors exit 64; unreadable record exit 70",
+            "Histogram shape rules (bucket index, order, empty bucket, count, min/max range) are enforced in the DDD-6 order",
+            "Unit and proptest coverage of the histogram encoder and the raw-versus-histogram switch passes"
+          ],
+          "dependencies": [],
+          "files_to_modify": [
+            "crates/overdrive-bench/src/lib.rs",
+            "crates/overdrive-bench/src/record.rs",
+            "crates/overdrive-bench/src/histogram.rs",
+            "crates/overdrive-bench/bin/bench_report.rs"
+          ],
+          "effort_hours": 12,
+          "test_file": "crates/overdrive-bench/tests/integration/report_validation.rs",
+          "scenario_name": "a_wellformed_record_validates_in_every_terminal_state_and_evidence_class, a_malformed_line_is_refused_naming_its_line_number, an_unknown_field_is_refused_naming_the_field, an_unsupported_schema_version_is_refused, a_record_missing_a_provenance_field_is_refused, a_host_object_without_exactly_the_pinned_keys_is_refused, a_host_value_in_none_of_the_three_forms_is_refused, a_metric_entry_that_does_not_hold_exactly_one_thing_is_refused, counts_that_do_not_add_up_are_refused, a_replicate_naming_an_undeclared_arm_profile_or_metric_is_refused, a_control_that_does_not_carry_the_reference_arm_is_refused, a_failure_reason_is_present_exactly_when_the_replicate_failed, a_line_after_the_terminal_line_is_refused, a_record_that_does_not_begin_with_run_started_is_refused, a_value_outside_a_closed_vocabulary_is_refused, the_tools_usage_errors_are_typed_refusals, the_histogram_shape_the_malformed_cases_start_from_is_valid, a_histogram_bucket_index_above_2048_is_refused, a_histogram_whose_bucket_indices_do_not_ascend_or_repeat_is_refused, a_histogram_bucket_holding_no_values_is_refused, a_histogram_of_1000_or_fewer_values_is_refused, a_histogram_whose_min_exceeds_its_max_is_refused, a_histogram_min_outside_its_lowest_bucket_is_refused, a_histogram_max_outside_its_highest_bucket_is_refused"
+        },
+        {
+          "id": "01-02",
+          "name": "Statistics and bench-report render",
+          "description": "Fixed statistical protocol (R-7 percentiles, A/A control, bootstrap intervals, Mann-Whitney, verdict rule, canary verdict) and the deterministic Markdown renderer shared by the runner and bench-report render.",
+          "implementation_notes": "Scenario count 26 (flag): pure-function record-in/report-out over one renderer; R17 is unbounded-preservation (record untouched). Statistics, canary verdict and histogram percentile decoding are crafter-owned (G1): unit and proptest coverage required (percentile R-7, bootstrap determinism under seed, verdict rule, canary threshold). Only ok replicates feed statistics. One render function used by the runner, no subprocess. Canary split: this step owns the pure canary verdict over start and end samples; 01-04 owns sampling the loopback canary in the runner.",
+          "criteria": [
+            "All R1-R19 tests pass with should_panic markers removed",
+            "Rendering the same record twice is byte-identical and leaves the record file unchanged",
+            "A comparison row whose reference arm, compared arm or A/A control holds fewer than 9 ok replicates carries the verdict insufficient replicates (the arm row is kept with its count); one-arm benchmarks report a distribution and no verdict (R6, R18)",
+            "Histogram-derived percentiles match the DDD-5 computation exactly and carry the stated relative-error note",
+            "Unit and proptest coverage of statistics and canary verdict passes"
+          ],
+          "dependencies": [
+            "01-01"
+          ],
+          "files_to_modify": [
+            "crates/overdrive-bench/src/stats.rs",
+            "crates/overdrive-bench/src/report.rs",
+            "crates/overdrive-bench/src/canary.rs",
+            "crates/overdrive-bench/bin/bench_report.rs"
+          ],
+          "effort_hours": 14,
+          "test_file": "crates/overdrive-bench/tests/integration/report_rendering.rs",
+          "scenario_name": "the_report_shows_median_iqr_and_replicate_count_per_arm, the_report_header_carries_the_run_provenance_and_host_state, an_absent_or_unreadable_host_setting_prints_its_reason_in_the_header, a_run_without_statistics_reports_them_off, a_clear_difference_is_reported_with_its_intervals_and_a_distinguishable_verdict, a_difference_inside_the_noise_floor_is_labelled_not_distinguishable_from_noise, an_arm_with_fewer_than_nine_successes_is_reported_as_insufficient_replicates, a_failed_replicate_is_listed_with_its_arm_and_the_rest_are_reported, a_failed_metric_is_listed_with_its_arm_and_metric_and_reason, a_shifting_canary_flags_the_run_unstable, a_steady_canary_does_not_flag_the_run, the_spike_reference_is_shown_beside_the_measurement_labelled_as_a_different_run, a_spike_record_is_labelled_spike_evidence_and_a_maintained_one_is_not, a_record_without_run_finished_is_reported_incomplete, a_refused_run_names_the_setting_with_its_found_and_pinned_values, a_failed_host_probe_refuses_with_every_host_key_unreadable, a_refused_run_reports_the_full_host_block_no_statistics_no_canary_and_no_replicates, an_absent_metric_prints_its_reason_and_never_a_zero, a_metric_with_no_stored_value_in_a_compared_arm_has_no_comparison_row, a_series_stored_as_a_histogram_renders_percentiles_within_the_stated_error_and_says_so, series_percentiles_use_linear_interpolation_between_closest_ranks, the_series_marker_alone_selects_the_series_columns, metrics_are_reported_in_separate_tables_by_their_declared_label, rendering_the_same_record_twice_is_byte_identical_and_leaves_the_record_untouched, a_one_arm_benchmark_reports_a_distribution_and_no_comparison, only_ok_replicates_feed_the_statistics"
+        },
+        {
+          "id": "01-03",
+          "name": "overdrive_bench attribute, registration, substrate registry and generated smoke test",
+          "description": "The #[overdrive_bench] attribute in overdrive-testing-macros with the pinned build errors, link-time registration, closed substrate registry (native) and the generated smoke_<name> test running one replicate per arm.",
+          "implementation_notes": "Scenario count 8 (flag, at threshold): 5 trybuild + 3 smoke. Macro goes in overdrive-testing-macros per ruling. trybuild activation: remove the should_panic in compile_fail.rs, regenerate .stderr once with TRYBUILD=overwrite, confirm git diff shows only span/label lines and every pinned error: line unchanged (E0080 form for substrate and smoke(none)). Smoke holds no statistics, bpf_stats() is None. Add linkme dependency; smoke attribute order per placement rules. Placement-lint must pass.",
+          "criteria": [
+            "T1-T4 (13 trybuild fixtures) pass with should_panic removed; .stderr regenerated and every pinned error: line unchanged in git diff",
+            "W9-W11 pass: generated smoke runs exactly one replicate per arm, holds no statistics, and a broken fixture fails naming the benchmark and reason",
+            "Unknown, repeated, missing and malformed keys, replicates below 9, bad arms, units, substrate and smoke arguments are build errors with the pinned messages",
+            "Unit coverage of the substrate registry and registration selection passes; placement-lint clean",
+            "Replicate (record, record_series, record_failure, absent, undeclared-metric refusal, bpf_stats() accessor) per DDD-2/DDD-6 is implemented here so the generated smoke body (W10) can call it; linkme added as a workspace dependency"
+          ],
+          "dependencies": [
+            "01-01"
+          ],
+          "files_to_modify": [
+            "crates/overdrive-testing-macros/src/lib.rs",
+            "crates/overdrive-testing-macros/src/bench.rs",
+            "crates/overdrive-bench/src/lib.rs",
+            "crates/overdrive-bench/src/registry.rs",
+            "crates/overdrive-bench/Cargo.toml",
+            "crates/overdrive-bench/tests/compile_fail.rs",
+            "crates/overdrive-bench/src/replicate.rs",
+            "Cargo.toml"
+          ],
+          "effort_hours": 14,
+          "test_file": "crates/overdrive-bench/tests/compile_fail.rs, crates/overdrive-bench/tests/integration/smoke_variant.rs",
+          "scenario_name": "an_unregistered_or_guest_substrate_fails_the_build_naming_it, a_substrate_written_as_a_string_literal_fails_the_build_asking_for_an_identifier, fewer_than_nine_replicates_fails_the_build_naming_the_minimum, the_smoke_argument_rules_fail_the_build_naming_the_value_or_the_missing_argument, malformed_declarations_fail_the_build_naming_the_offending_key_or_value, the_generated_smoke_test_runs_one_replicate_per_arm_and_passes, the_smoke_variant_holds_no_statistics_and_asserts_no_timing, a_broken_fixture_fails_its_generated_smoke_test_naming_the_benchmark"
+        },
+        {
+          "id": "01-04",
+          "name": "Benchmark runner: schedule, host eligibility, per-process BPF statistics, canary and retention",
+          "description": "run_main end to end: argument parsing, blocked A/B/control schedule from OS-entropy seed, host probe and eligibility refusal, per-process BPF_ENABLE_STATS hold, bracketing canary, record writing and report.md, checkout marker reader, result-dir line.",
+          "implementation_notes": "No acceptance test: the end-to-end run over a cohort is a benchmark, never nextest. All pure internals are crafter-owned with unit and proptest coverage (G1): plan (every block holds every arm once), eligibility with a fixture HostProbe (drift, absent, unreadable), arg parser (U1-U5: undeclared family, relative or outside results root, malformed line, injected --bench), marker reader (missing, unreadable, malformed), Error-to-exit mapping 64/78/70. Never write kernel.bpf_stats_enabled. Replace scaffold RED exit-70. Canary split: 01-02 owns the verdict function; this step samples the canary at start and end and feeds it.",
+          "criteria": [
+            "Runner unit and proptest suites for schedule, eligibility, canary, argument parser, marker reader and exit mapping pass",
+            "Refusal order follows DDD-7 and writes run_started then run_refused with exit 78 before any sample",
+            "BPF statistics are held per process and the sysctl is never written",
+            "OVERDRIVE_BENCH_RESULT_DIR line is printed once the results directory exists and before the canary, repo-relative",
+            "bench main references the declaring crate so linkme entries are not dropped"
+          ],
+          "dependencies": [
+            "01-01",
+            "01-02",
+            "01-03"
+          ],
+          "files_to_modify": [
+            "crates/overdrive-bench/src/lib.rs",
+            "crates/overdrive-bench/src/runner.rs",
+            "crates/overdrive-bench/src/schedule.rs",
+            "crates/overdrive-bench/src/host.rs",
+            "crates/overdrive-bench/src/marker.rs",
+            "crates/overdrive-bench/src/args.rs",
+            "crates/overdrive-bench-families/benches/benchmarks.rs"
+          ],
+          "effort_hours": 20,
+          "test_file": "",
+          "scenario_name": ""
+        },
+        {
+          "id": "01-05",
+          "name": "Metal --benchmark form in xtask and bootstrap.sh",
+          "description": "cargo xtask metal run --benchmark <family> [--spike <name>] running the closed cargo bench command under exclusive admission, with typed status-64 refusals.",
+          "implementation_notes": "Scenario count 6. xtask Run gains benchmark and spike options; benchmark conflicts with --exclusive and trailing command. bootstrap.sh validates FAMILY ^[a-z][a-z0-9-]{0,62}$ and NAME ^[a-z0-9][a-z0-9-]{0,62}$, spike Cargo.toml existence after sync; errors benchmark_family_invalid, benchmark_spike_invalid, invalid_mode. Results root is absolute under OVERDRIVE_METAL_SOURCE_ROOT. Orchestrator edits .claude/rules/testing.md after this step commits (exclusive exemption beside expectation captures, two new status-64 diagnostics, grammar description): not in files_to_modify. xtask must not gain overdrive-* deps.",
+          "criteria": [
+            "W7, W8, X1a-c and X2 pass with should_panic removed; the form runs exactly the closed command under class exclusive",
+            "Malformed family or spike and conflicting forms are refused with status 64 and the named error before any command runs",
+            "--spike runs the spike crate's benchmark with results rooted in the spike directory",
+            "Orchestrator edits .claude/rules/testing.md after this step commits; placement-lint clean"
+          ],
+          "dependencies": [],
+          "files_to_modify": [
+            "xtask/src/main.rs",
+            "infra/metal/bootstrap.sh"
+          ],
+          "effort_hours": 8,
+          "test_file": "xtask/tests/acceptance/metal_run_isolation/benchmark_form.rs",
+          "scenario_name": "the_benchmark_form_runs_exactly_the_closed_benchmark_command_under_exclusive_admission, the_spike_form_runs_the_spike_crates_benchmark_and_results_stay_in_its_directory, a_malformed_benchmark_family_is_refused_as_benchmark_family_invalid, a_malformed_or_missing_spike_is_refused_as_benchmark_spike_invalid, a_benchmark_request_in_conflict_with_another_form_is_refused_as_invalid_mode, the_xtask_command_line_names_the_conflict_between_the_benchmark_form_and_other_forms"
+        },
+        {
+          "id": "01-06",
+          "name": "Connect-hook family, methodology and catalogue, with retained runs E-1, E-2, E-3, E-8",
+          "description": "cgroup-connect-hook family (service-only vs service+gateway) with raw bpf(2) link detach, benchmarks/methodology.md version 1, benchmarks catalogue; retained evidence on the Metal host.",
+          "implementation_notes": "Scenario count 2 docs tests plus live smoke_connect_hook_cost (guest cgroup-default; prerequisites bpf-build, kmod-build, guest-kit-prepare, metal run --exclusive kmod-load). No detach handle added to EbpfDataplane; use raw BPF_LINK_* commands. kernel.bpf_stats_enabled stays 0. Delete scaffold fixture failure. Evidence: E-1 conforming host (hook-time delta within 115.5..126.5 ns of 117 ns); E-2 on a host drifted by a second BPF_ENABLE_STATS holder; E-3 E-1 killed by SIGKILL then a post-run probe (sysctl and anon_inode:bpf-stats scan); E-8 missing and malformed marker. Raise OVERDRIVE_METAL_LEASE_TIMEOUT_SECONDS if admission starves. Clean leaked ip overdrive-mtls table after any serve probe.",
+          "criteria": [
+            "D1 and D2 pass with should_panic removed (D2: benchmarks/catalogue.md gains the connect-hook row with workload, clock and owner); generated smoke_connect_hook_cost passes in cgroup-default",
+            "E-1 run on Metal: record.jsonl and report.md pulled with cargo xtask metal pull, committed under benchmarks/results/cgroup-connect-hook/<run-id>/, cargo bench-report validate exits 0, W1-W3 observations hold, and the hook-time delta lies within 115.5..126.5 ns of the spike's 117 ns (V-6/K2)",
+            "E-2 refused run (exit 78; record is exactly run_started then run_refused; setting bpf-stats; found and pinned present) and E-3 killed run (incomplete record, no report.md, bench-report render prints status: incomplete) are each pulled and committed under benchmarks/results/cgroup-connect-hook/<run-id>/ and validated per W4, W5; the E-2 drift helper and the E-3 post-run probe (sysctl read + anon_inode:bpf-stats holder scan) are ad-hoc evidence-capture commands, their stdout committed as a receipt file beside the record",
+            "E-8 observed: missing and malformed marker each give exit 78, one stderr line bench: refused: .overdrive-metal-source: <reason>, no result directory, no OVERDRIVE_BENCH_RESULT_DIR line (W12); the exit status and stderr of both observations are committed as a receipt under benchmarks/results/cgroup-connect-hook/e-8-marker-refusal/"
+          ],
+          "dependencies": [
+            "01-04",
+            "01-05"
+          ],
+          "files_to_modify": [
+            "crates/overdrive-bench-families/src/families/cgroup_connect_hook.rs",
+            "crates/overdrive-bench-families/src/lib.rs",
+            "crates/overdrive-bench-families/Cargo.toml",
+            "benchmarks/methodology.md",
+            "benchmarks/catalogue.md"
+          ],
+          "effort_hours": 16,
+          "test_file": "crates/overdrive-bench/tests/integration/methodology_documents.rs",
+          "scenario_name": "the_methodology_document_states_its_version_and_every_required_topic, the_catalogue_has_a_row_per_benchmark_with_its_workload_clock_and_owner, smoke_connect_hook_cost"
+        },
+        {
+          "id": "01-07",
+          "name": "Re-express pig-connect-cost spike on the core, retained run E-4",
+          "description": "Spike crate pig-connect-cost declares its benchmark through the attribute and runs via --spike, producing a schema-identical record marked spike evidence.",
+          "implementation_notes": "All code under spike-scratch/pig-connect-cost; nothing under crates/. Spike main references the declaring crate (use ... as _;) and calls run_main(Evidence::Spike); smoke(none) allowed there. Results stay under spike-scratch/pig-connect-cost/results/, not benchmarks/.",
+          "criteria": [
+            "E-4 run on Metal with --benchmark cgroup-connect-hook --spike pig-connect-cost; record and report pulled and committed under spike-scratch/pig-connect-cost/results/",
+            "bench-report validate exits 0, evidence is spike, report header says spike evidence (W6)",
+            "No file under crates/ changes for the probe"
+          ],
+          "dependencies": [
+            "01-06"
+          ],
+          "files_to_modify": [
+            "spike-scratch/pig-connect-cost/Cargo.toml",
+            "spike-scratch/pig-connect-cost/benches/benchmarks.rs",
+            "spike-scratch/pig-connect-cost/src/lib.rs"
+          ],
+          "effort_hours": 6,
+          "test_file": "",
+          "scenario_name": ""
+        },
+        {
+          "id": "01-08",
+          "name": "connect-hook benchmark measures the gateway hook against no hook",
+          "description": "The cgroup-connect-hook family and the pig-connect-cost spike use the arms no-hook (reference, the gateway program's cgroup link detached) and gateway-hook, because the boot attaches only the gateway connect program. The spike is re-run first on the same arms; its values become the family's references; E-1 is re-run.",
+          "implementation_notes": "Exact contract in feature-delta 'Connect-hook family' (arms, metrics, identification of the gateway program, references) and K2 (a) to (d). Commit cfcc67612 deleted the service cgroup_connect4 program, so smoke_connect_hook_cost fails at HEAD until this step. Identification: take the programs that appeared after the pre-load program set, keep those named cgroup_connect4 (the kernel truncation of cgroup_connect4_gateway), require exactly one, and confirm it references the map named GATEWAY_CONNECT; zero, several or an unconfirmed one fails the replicate naming what was found. gateway-hook records hook_ns_per_connect from that program's run_time_ns and run_count deltas; no-hook records record_absent('hook_ns_per_connect', 'no connect program is attached on this arm'), never zero. Under smoke both arms record it absent. The spike crate declares the same arms and no reference. Order: (1) family and spike change, smoke passes in cgroup-default; (2) run the spike on Metal, pull, validate, commit under a new run id; (3) put its gateway-hook median hook time and its wall-time delta in the family's two references with the pinned labels and the spike report as source; (4) run E-1 on Metal, pull, validate, commit under a new run id. The records taken against the two-program dataplane (benchmarks/results/cgroup-connect-hook/ E-1 to E-3 and spike-scratch/pig-connect-cost/results/cgroup-connect-hook/afda96dd5b779f7516937a4f) are history: leave them in place, do not re-render them. K2 (b) checks that the record and report carry the wall_ns_per_connect delta, its bootstrap interval, the A/A interval and the verdict; either verdict is accepted and reported as observed, never retried or chosen. Catalogue row wording: arms no-hook (reference, gateway link detached, nothing attached on the cgroup) and gateway-hook; workload: the gateway connect program the dataplane boot attaches, 500 warm-up then 5,000 timed loopback connect-and-close, 30 replicates per arm; clock boundary: hook_ns_per_connect is the gateway program's kernel run_time_ns over run_count on gateway-hook only (absent on no-hook), wall_ns_per_connect is host CLOCK_MONOTONIC_RAW stamps around the timed loop divided by 5,000 and its delta contains the cgroup-BPF dispatch cost. Prerequisites: bpf-build, kmod-build, guest-kit-prepare, exclusive kmod-load.",
+          "criteria": [
+            "The family declares arms no-hook (reference) and gateway-hook; hook_ns_per_connect is recorded on gateway-hook and absent with the pinned reason on no-hook; the gateway program is identified as pinned; generated smoke_connect_hook_cost passes in cgroup-default",
+            "The pig-connect-cost spike declares the same arms with no reference and is re-run with cargo xtask metal run --benchmark cgroup-connect-hook --spike pig-connect-cost; record and report are pulled, bench-report validate exits 0, and they are committed under spike-scratch/pig-connect-cost/results/cgroup-connect-hook/<new-run-id>/ with the earlier run left in place",
+            "The family's two references hold the re-run spike's gateway-hook hook-time median and wall-time delta, with the labels spike evidence, different run, gateway-hook median and spike evidence, different run, gateway-hook minus no-hook delta, and the spike report as source",
+            "E-1 re-run on Metal with cargo xtask metal run --benchmark cgroup-connect-hook: record and report pulled, bench-report validate exits 0, committed under benchmarks/results/cgroup-connect-hook/<new-run-id>/ with the earlier records left in place; W1 to W3 observations hold and K2 (a) to (d) hold",
+            "benchmarks/catalogue.md connect-hook row names the arms no-hook and gateway-hook, the workload, and the clock boundary as pinned in the implementation notes"
+          ],
+          "dependencies": [
+            "01-07"
+          ],
+          "files_to_modify": [
+            "crates/overdrive-bench-families/src/families/cgroup_connect_hook.rs",
+            "spike-scratch/pig-connect-cost/src/lib.rs",
+            "benchmarks/catalogue.md",
+            "benchmarks/results/cgroup-connect-hook/",
+            "spike-scratch/pig-connect-cost/results/cgroup-connect-hook/"
+          ],
+          "effort_hours": 10,
+          "test_file": "crates/overdrive-bench-families/src/families/ (macro-generated smoke test)",
+          "scenario_name": "smoke_connect_hook_cost"
+        }
+      ]
+    },
+    {
+      "id": "02",
+      "name": "VM lifecycle family",
+      "steps": [
+        {
+          "id": "02-01",
+          "name": "vm-lifecycle host-observable stages and profiles",
+          "description": "Family vm-lifecycle with the eight host stage metrics, five named profiles and VM condition notes, driven through the operator driving port and public seams only.",
+          "implementation_notes": "Run V-10 first (boot the guest-kit workload image under production overdrive-init with the console-log decorator); a falsified result returns to DESIGN. Decorators: BeaconIo, Vmm (reads console log at exit watch), tracing layer, observation subscription. Create data dir under scoped umask(0o022) with RAII restore (runner umask 027 makes the uid-dropped VMM disk clone fail EACCES; #363 tracks production side). Missing prerequisites refuse naming kmod-build or guest-kit-prepare. A stage that does not complete is record_failure, later stages absent. The stop-grace-deadline profile is declared here but its stop-ignoring guest-peer fixture lands in 02-02; until then that profile's replicate records the affected stages as a failure/absent with a reason, never a zero.",
+          "criteria": [
+            "V-10 result recorded before implementation proceeds",
+            "Generated smoke_vm_lifecycle_stages passes in cgroup-default",
+            "Declaration holds the 8 host-stages metrics in table host-stages and profiles healthy-concurrency-1, healthy-concurrency-4, cold-cache, warm-cache, stop-grace-deadline with the pinned preparation text",
+            "Incomplete stages are recorded as failures with later stages absent, never zero-filled",
+            "benchmarks/catalogue.md gains this family's row (workload, clock, owner)"
+          ],
+          "dependencies": [
+            "01-06"
+          ],
+          "files_to_modify": [
+            "crates/overdrive-bench-families/src/families/vm_lifecycle.rs",
+            "crates/overdrive-bench-families/src/families/mod.rs",
+            "crates/overdrive-bench-families/Cargo.toml",
+            "benchmarks/catalogue.md"
+          ],
+          "effort_hours": 18,
+          "test_file": "crates/overdrive-bench-families/src/families/ (macro-generated smoke test)",
+          "scenario_name": "smoke_vm_lifecycle_stages (name is the macro-generated smoke_<fn>; the crafter names the function)"
+        },
+        {
+          "id": "02-02",
+          "name": "vm-lifecycle guest-measured stage, grace-deadline fixture and retained run E-5",
+          "description": "Guest shutdown-handling duration read from the console log, the stop-grace-deadline guest-peer fixture, and the retained VM-lifecycle run.",
+          "implementation_notes": "Guest durations never combined with host instants; absent with reason when missing. Guest-peer subcommand that ignores the stop signal is test-support in overdrive-testing, not a production seam. Prerequisites: bpf-build, kmod-build, guest-kit-prepare, exclusive kmod-load. Raise lease timeout rather than retrying blindly. Guest-peer subcommand constants live in crates/overdrive-testing/src/guest_app.rs (e.g. IDLE); dispatch in bin/guest_peer.rs and src/guest_peer.rs \u2014 confirm where a new stop-ignoring subcommand registers. It is test-support surface, not a production seam.",
+          "criteria": [
+            "E-5 run on Metal: record and report pulled, committed under benchmarks/results/vm-lifecycle/<run-id>/ and validated",
+            "F1-F3 observations hold: eight separate stage rows, five profiles with at least 9 replicates, guest_shutdown_handling_ns in table guest-stages positive or absent with reason",
+            "Notes carry cache_state, vm_resources, concurrency, cloud_hypervisor_version, host_kernel; clock.host is CLOCK_MONOTONIC_RAW"
+          ],
+          "dependencies": [
+            "02-01"
+          ],
+          "files_to_modify": [
+            "crates/overdrive-bench-families/src/families/vm_lifecycle.rs",
+            "crates/overdrive-testing/src/guest_app.rs",
+            "crates/overdrive-testing/src/guest_peer.rs",
+            "crates/overdrive-testing/bin/guest_peer.rs"
+          ],
+          "effort_hours": 12,
+          "test_file": "",
+          "scenario_name": ""
+        },
+        {
+          "id": "02-03",
+          "name": "benchmark declaration names its service and guest clock sources",
+          "description": "The #[overdrive_bench] attribute gains the optional clock(service = <source>, guest = <source>) key (DDD-2 \"Clock sources\"): closed identifier sets validated at build time, declaration fields service_clock and guest_clock, the pinned record strings in run_started.clock, and bench-report validate refusing any other string. The vm-lifecycle family declares its guest source and E-5 is re-run so its record carries it.",
+          "implementation_notes": "Exact contract in feature-delta DDD-2 \"Clock sources\": identifiers injected_monotonic (service) and init_elapsed_ms (guest); variants ServiceClock::InjectedMonotonic and GuestClock::InitElapsedMs in overdrive_bench::registry (doc(hidden) pub, as_str is the only home of the record strings \"Clock::now (monotonic)\" and \"CLOCK_MONOTONIC (overdrive-init Instant::elapsed, 1 ms)\"); BenchmarkDecl gains service_clock and guest_clock as Option, None when omitted; the macro holds the identifier lists (as it does for units) and emits the variant paths; the runner replaces the hardcoded None, None in the run_started clock block. The record Clock type deserialises service and guest through closed vocabularies so validate refuses any other string naming clock.service or clock.guest (exit 65). Omitting the key records null; the report clock line is unchanged. Do not add API beyond DDD-2. benchmarks/methodology.md Clock boundaries section needs one sentence: a family declares its service and guest clock sources and the record names them (not edited by the designer). The earlier E-5 record ab04acf6fd5ba76ef370ac0f stays as retained history; the new run is a separate result directory. Prerequisites for the Metal run: bpf-build, kmod-build, guest-kit-prepare, exclusive kmod-load.",
+          "criteria": [
+            "The macro accepts clock(service = injected_monotonic, guest = init_elapsed_ms), each sub-key optional, and rejects an unknown source, an unknown sub-key, a repeated sub-key, a string literal and an empty clock() at build time with the pinned messages; trybuild fixtures under crates/overdrive-bench/tests/compile_fail/ with regenerated .stderr, and the unknown-key message lists clock",
+            "run_started.clock.service and .guest are the pinned strings for a declared source and null when omitted; clock.host stays CLOCK_MONOTONIC_RAW",
+            "bench-report validate exits 65 naming clock.service or clock.guest for a string other than null or the pinned one; validate accepts a record with each pinned string",
+            "The vm-lifecycle family declares clock(guest = init_elapsed_ms) and the report clock line prints the guest source",
+            "E-5 re-run on Metal with cargo xtask metal run --benchmark vm-lifecycle: record and report pulled, validated, and committed under benchmarks/results/vm-lifecycle/<run-id>/ with clock.guest set to the pinned string; the earlier E-5 record ab04acf6fd5ba76ef370ac0f is left in place"
+          ],
+          "dependencies": [
+            "02-02"
+          ],
+          "files_to_modify": [
+            "crates/overdrive-testing-macros/src/bench.rs",
+            "crates/overdrive-bench/src/registry.rs",
+            "crates/overdrive-bench/src/record.rs",
+            "crates/overdrive-bench/src/runner.rs",
+            "crates/overdrive-bench/tests/compile_fail.rs",
+            "crates/overdrive-bench/tests/compile_fail/",
+            "crates/overdrive-bench/tests/integration/report_validation.rs",
+            "crates/overdrive-bench-families/src/families/vm_lifecycle.rs",
+            "benchmarks/methodology.md",
+            "benchmarks/results/vm-lifecycle/"
+          ],
+          "effort_hours": 8,
+          "test_file": "crates/overdrive-bench/tests/compile_fail.rs, crates/overdrive-bench/tests/integration/report_validation.rs",
+          "scenario_name": ""
+        },
+        {
+          "id": "02-04",
+          "name": "a partly failed series keeps its measured values",
+          "description": "A series metric entry of an ok replicate holds its measured values and its failures together, so a stage that fails for one workload at concurrency 4 no longer discards the values the other workloads measured.",
+          "implementation_notes": "Exact contract in feature-delta DDD-6 'Partly measured series' and the Replicate method comments; no new method, no new record field, schema stays 1. Replicate: record_series and record_failure on one series metric are accepted in either order and the metric holds both; record_failure after a scalar record, record_absent on a metric holding values or failures, and record_series or record_failure on an absent metric stay a ReplicateFailure. The recording is written as the existing four-field entry with values or histogram (a series of more than 1,000 values is a histogram, failures alongside) and failures together. Validator: an ok replicate's scalar entry holds exactly one of a value, failures or absent; a series entry holds measured, failures, both, or absent alone; the two messages are pinned in DDD-6. Statistics are unchanged in form: values feed the distribution, the failures column still counts replicates, ## Failures lists one line per reason; confirm report.rs needs no change. The vm-lifecycle record_cycles (stage metrics) records every workload's value with record_series and every failure with record_failure, and records absent only when no workload reached the stage; guest_shutdown_handling_ns keeps its form. Retained records must still validate: run bench-report validate over every record under benchmarks/results and spike-scratch/pig-connect-cost/results. benchmarks/methodology.md failure accounting gains one sentence stating that a partly measured series keeps both. Acceptance scenario bodies (validate accepts and refuses the entry shapes, the report counts a partly measured series, the retained records validate) are authored by the acceptance designer in a DISTILL addendum before this step; the crafter does not write them. No Metal re-run of vm-lifecycle is required by this step.",
+          "criteria": [
+            "bench-report validate accepts a series entry holding values (or a histogram) together with failures in an ok replicate, and refuses a scalar entry combining a value with failures, any entry combining absent with values or failures, and an entry holding nothing, with the pinned messages naming the metric",
+            "Replicate record_series and record_failure on one series metric accept either order and the written entry holds both; the pinned refusals for scalar, absent and undeclared metrics hold; the replicate stays ok",
+            "The report counts a partly measured entry in replicates and in failures, pools its values into the percentiles, feeds its replicate median into the delta, and lists each failure reason under Failures",
+            "The vm-lifecycle family records each workload's value or failure per stage without discarding either, and a stage metric is absent only when no workload reached it",
+            "Every retained record under benchmarks/results and spike-scratch/pig-connect-cost/results still validates with bench-report validate, and the methodology failure accounting states the rule"
+          ],
+          "dependencies": [
+            "02-03"
+          ],
+          "files_to_modify": [
+            "crates/overdrive-bench/src/replicate.rs",
+            "crates/overdrive-bench/src/record.rs",
+            "crates/overdrive-bench/src/report.rs",
+            "crates/overdrive-bench/tests/integration/report_validation.rs",
+            "crates/overdrive-bench-families/src/families/vm_lifecycle.rs",
+            "benchmarks/methodology.md"
+          ],
+          "effort_hours": 8,
+          "test_file": "crates/overdrive-bench/tests/integration/report_validation.rs",
+          "scenario_name": ""
+        }
+      ]
+    },
+    {
+      "id": "03",
+      "name": "DNS responder family",
+      "steps": [
+        {
+          "id": "03-01",
+          "name": "DnsResponder per-query observer (DDD-12)",
+          "description": "QueryObserver, QueryOutcome and NoQueryObserver on DnsResponder::new, called once per datagram with service time on the injected clock; production composition passes NoQueryObserver.",
+          "implementation_notes": "Approved production change DDD-12, exact shape in feature-delta; no other surface. Two existing callers updated, HostGuestDnsFactory passes NoQueryObserver. Budget: two Clock::now reads and one dynamic call per datagram, no allocation or lock. Guest-placed tests: need bpf-build, guest-kit-prepare first.",
+          "criteria": [
+            "P1 and P2 pass with should_panic removed; P3 stays green",
+            "Observer receives Answered, NoData, NameError and Dropped outcomes for the four datagram shapes",
+            "Reply bytes are identical with the production observer and a recording one"
+          ],
+          "dependencies": [],
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/dns_responder/mod.rs",
+            "crates/overdrive-control-plane/src/dns_responder/responder.rs",
+            "crates/overdrive-control-plane/tests/integration/dns_query_observer.rs"
+          ],
+          "effort_hours": 6,
+          "test_file": "crates/overdrive-control-plane/tests/integration/dns_query_observer.rs",
+          "scenario_name": "the_responder_reports_the_outcome_of_every_datagram_to_its_observer, every_observed_service_time_is_measured_on_the_injected_clock, replies_are_byte_identical_with_the_production_observer_and_a_recording_one"
+        },
+        {
+          "id": "03-02",
+          "name": "dns-responder family and retained run E-6",
+          "description": "dns_query_latency benchmark with four scheduled-arrival profiles, separate client-observed and resolver-internal tables, histogram storage for large series, in a family-created netns.",
+          "implementation_notes": "Responder constructed directly with a recording observer; clients in a netns (overdrive-testing NetNs). Profiles state scheduled-arrival, qps and seconds; no cache or tcp axes. Timeout counts as failure. Series above 1,000 values must be stored as histogram by the writer (observed in E-6).",
+          "criteria": [
+            "Generated smoke_dns_query_latency passes in cgroup-default",
+            "E-6 run on Metal: record and report pulled, committed under benchmarks/results/dns-responder/<run-id>/ and validated",
+            "F4-F6 hold: client-observed and resolver-internal tables are separate, four named profiles state arrival model, rate and duration, no cache-hit, cache-miss or tcp profile",
+            "Large series are histogram-stored with the histogram-derived note and no truncated field",
+            "The family declares clock(service = injected_monotonic) (step 02-03) and its record carries clock.service \"Clock::now (monotonic)\"",
+            "benchmarks/catalogue.md gains this family's row (workload, clock, owner)"
+          ],
+          "dependencies": [
+            "03-01",
+            "01-06"
+          ],
+          "files_to_modify": [
+            "crates/overdrive-bench-families/src/families/dns_responder.rs",
+            "crates/overdrive-bench-families/src/families/mod.rs",
+            "crates/overdrive-bench-families/Cargo.toml",
+            "benchmarks/catalogue.md"
+          ],
+          "effort_hours": 16,
+          "test_file": "crates/overdrive-bench-families/src/families/ (macro-generated smoke test)",
+          "scenario_name": "smoke_dns_query_latency (name is the macro-generated smoke_<fn>; the crafter names the function)"
+        }
+      ]
+    },
+    {
+      "id": "04",
+      "name": "mTLS path family",
+      "steps": [
+        {
+          "id": "04-01",
+          "name": "Named mTLS outbound pump threads (DDD-14)",
+          "description": "spawn_encrypt and spawn_decrypt take a required thread name and return io::Result; outbound uses mtls-out-fwd and mtls-out-ret, tests use mtls-test names.",
+          "implementation_notes": "Approved production change DDD-14, signatures pinned in feature-delta. Read the activation note in mtls_guardrails.rs first: the after-teardown assertion has never run; teardown joins both pumps, so keep it as written and poll live_thread_names for about one second only if it is ever seen failing with pumps joined. Spawn failure maps to MtlsEnforcementError::Io; close both legs and stop-and-join the forward pump before returning. Inbound path unchanged. Guest group mtls-relay.",
+          "criteria": [
+            "P4 passes with should_panic removed, including the assertion that no role-named pump thread outlives teardown",
+            "An active outbound connection has exactly one mtls-out-fwd and one mtls-out-ret thread",
+            "Existing outbound and enforcement unit and Tier-3 tests pass with named test pumps; inbound unchanged"
+          ],
+          "dependencies": [],
+          "files_to_modify": [
+            "crates/overdrive-dataplane/src/mtls/splice.rs",
+            "crates/overdrive-dataplane/src/mtls/outbound.rs",
+            "crates/overdrive-dataplane/src/mtls/mod.rs"
+          ],
+          "effort_hours": 5,
+          "test_file": "crates/overdrive-dataplane/tests/integration/mtls_guardrails.rs",
+          "scenario_name": "an_outbound_connection_names_its_pump_threads_by_role"
+        },
+        {
+          "id": "04-02",
+          "name": "mtls-path rigs, baseline arm and latency and throughput measures",
+          "description": "mtls_hop benchmark with egress and ingress profiles, plaintext-baseline and composed-mtls arms, and connection establishment, handshake, first-byte, throughput and tail-latency metrics.",
+          "implementation_notes": "Egress rig: HostMtlsEnforcement, HostMtlsIntercept, MtlsInterceptWorker, rustls mesh peer over veth on a TestCidrLease; plaintext dialer. Mesh peer sets send_tls13_tickets = 0 or kTLS-RX splice fails EINVAL. Ingress: Routed::Inbound over loopback leg C with in-memory GuestStreamDial. Handshake via timing decorator, absent on baseline. Rig takes node-global kernel-state lock and cleans shared nft state; clean any ip overdrive-mtls table left by a probe. Closed-loop stated in preparation. Smoke in mtls-relay.",
+          "criteria": [
+            "Generated smoke_mtls_hop passes in mtls-relay",
+            "Both profiles run baseline then composed arms with the five measures as separate metrics and each preparation defining the baseline and saying closed-loop",
+            "handshake_ns is absent with a reason on the baseline arm and never zero (F7, F8 observable in the 04-03 run)",
+            "benchmarks/catalogue.md gains this family's row (workload, clock, owner)"
+          ],
+          "dependencies": [
+            "04-01",
+            "01-06"
+          ],
+          "files_to_modify": [
+            "crates/overdrive-bench-families/src/families/mtls_path.rs",
+            "crates/overdrive-bench-families/src/families/mod.rs",
+            "crates/overdrive-bench-families/Cargo.toml",
+            "benchmarks/catalogue.md"
+          ],
+          "effort_hours": 20,
+          "test_file": "crates/overdrive-bench-families/src/families/ (macro-generated smoke test)",
+          "scenario_name": "smoke_mtls_hop (name is the macro-generated smoke_<fn>; the crafter names the function)"
+        },
+        {
+          "id": "04-03",
+          "name": "mtls-path resource cost and forward/return split, retained run E-7",
+          "description": "Whole-host CPU split, memory, socket count, concurrency and per-thread forward/return CPU ratios, with the retained mtls-path run.",
+          "implementation_notes": "Whole-host CPU from /proc/stat; no cgroup-scoped metric names. Forward/return from /proc/self/task/*/stat by thread name excluding the family's own client and server threads (lg- prefix); report states heavy-to-light ratio is a lower bound (10 ms tick). Ingress forward/return absent: asynchronous relay on shared runtime threads.",
+          "criteria": [
+            "E-7 run on Metal: record and report pulled, committed under benchmarks/results/mtls-path/<run-id>/ and validated",
+            "F7-F10 hold: egress and ingress profiles with A/A intervals, handshake absent on baseline, host_cpu split, memory, socket and concurrency declared, whole-host scope stated",
+            "forward_userspace_cpu_ratio and return_splice_cpu_ratio hold values on egress composed-mtls and are absent with the stated reason on ingress"
+          ],
+          "dependencies": [
+            "04-02"
+          ],
+          "files_to_modify": [
+            "crates/overdrive-bench-families/src/families/mtls_path.rs"
+          ],
+          "effort_hours": 12,
+          "test_file": "",
+          "scenario_name": ""
+        }
+      ]
+    }
+  ],
+  "implementation_scope": {
+    "source_directories": [
+      "crates/overdrive-bench/",
+      "crates/overdrive-bench-families/",
+      "crates/overdrive-testing-macros/",
+      "crates/overdrive-control-plane/src/dns_responder/",
+      "crates/overdrive-dataplane/src/mtls/",
+      "xtask/src/",
+      "infra/metal/",
+      "benchmarks/",
+      "spike-scratch/pig-connect-cost/"
+    ],
+    "test_directories": [
+      "crates/overdrive-bench/tests/",
+      "crates/overdrive-control-plane/tests/integration/",
+      "crates/overdrive-dataplane/tests/integration/",
+      "xtask/tests/acceptance/metal_run_isolation/"
+    ],
+    "excluded_patterns": [
+      "target/**",
+      "vendors/**",
+      "benchmarks/results/**"
+    ]
+  },
+  "validation": {
+    "status": "approved",
+    "reviewer": "nw-acceptance-designer-reviewer (CHANGES_REQUESTED findings 1-4,7-9,11-13 applied by orchestrator)",
+    "approved_at": "2026-11-17T13:20:00Z"
+  }
+}

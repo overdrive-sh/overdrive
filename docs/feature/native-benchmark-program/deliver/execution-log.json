@@ -1,0 +1,405 @@
+{
+  "schema_version": "3.0",
+  "feature_id": "native-benchmark-program",
+  "events": [
+    {
+      "sid": "01-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-17T13:08:50Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-17T13:16:11Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-17T13:25:00Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-17T13:29:00Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-17T13:36:39Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-17T15:25:21Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-17T15:39:43Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-17T15:46:43Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-17T15:47:08Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: no pre-authored acceptance test (benchmark-run evidence); pure internals and their unit/proptest suites were authored together, no separate failing run was made",
+      "t": "2026-11-17T16:03:00Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-17T16:03:01Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-17T16:04:01Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: pre-authored should_panic markers proved the semantic RED on HEAD (unknown arg: --benchmark); markers removed alongside the implementation",
+      "t": "2026-11-17T16:08:19Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-17T16:08:20Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-17T16:08:48Z"
+    },
+    {
+      "sid": "01-06",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-17T16:11:53Z"
+    },
+    {
+      "sid": "01-06",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-17T16:18:52Z"
+    },
+    {
+      "sid": "01-06",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-17T16:19:22Z"
+    },
+    {
+      "sid": "01-07",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: evidence-only step; W6 is discharged by retained run E-4",
+      "t": "2026-11-17T17:19:37Z"
+    },
+    {
+      "sid": "01-07",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-17T17:41:00Z"
+    },
+    {
+      "sid": "01-07",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-17T17:41:28Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "CHECKPOINT_PENDING: V-10 falsified the EXIT boundary of DDD-11 stages 6 and 7 on operator stop (findings-v10-guest-boot.md); blocked on a design ruling, no RED work executed",
+      "t": "2026-11-17T18:35:59Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "CHECKPOINT_PENDING: V-10 falsified the EXIT boundary of DDD-11 stages 6 and 7 on operator stop (findings-v10-guest-boot.md); blocked on a design ruling, no GREEN work executed",
+      "t": "2026-11-17T18:35:59Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "CHECKPOINT_PENDING: V-10 falsified the EXIT boundary of DDD-11 stages 6 and 7 on operator stop (findings-v10-guest-boot.md); blocked on a design ruling, no COMMIT work executed",
+      "t": "2026-11-17T18:35:59Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-17T21:03:45Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-17T21:10:13Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-17T21:10:14Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-17T21:28:34Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-17T21:55:43Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-17T22:42:44Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-17T22:57:55Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-17T23:07:00Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-18T01:40:46Z"
+    },
+    {
+      "sid": "01-08",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-18T14:36:30Z"
+    },
+    {
+      "sid": "01-08",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-18T14:42:22Z"
+    },
+    {
+      "sid": "01-08",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-11-18T17:35:25Z"
+    },
+    {
+      "sid": "01-08",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "CHECKPOINT_PENDING: code, spike record, references and E-1 record are committed (5f78426f7, 379e5af25, 8dabedfc3, 9fc7b8471) and K2 (a)-(d) hold, but overdrive-bench test the_catalogue_has_a_row_per_benchmark_with_its_workload_clock_and_owner still asserts the old arms service-only and service+gateway; it needs the acceptance designer to update it to no-hook and gateway-hook before the step can close PASS",
+      "t": "2026-11-18T17:35:46Z"
+    },
+    {
+      "sid": "01-08",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-18T17:40:58Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-18T17:59:14Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-18T18:01:40Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-18T18:05:15Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-18T18:17:52Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-18T18:21:03Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-18T18:21:30Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: a new family's smoke test is emitted by the macro from the declaration, so it does not exist before the family; no separate semantic RED is observable",
+      "t": "2026-11-18T18:32:15Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-18T18:32:15Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-18T18:48:42Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-18T19:17:24Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-18T19:22:18Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-18T19:22:45Z"
+    },
+    {
+      "sid": "04-02",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: the acceptance test is the macro-generated smoke test, which does not exist before the declaration",
+      "t": "2026-11-18T19:44:13Z"
+    },
+    {
+      "sid": "04-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-18T19:44:13Z"
+    },
+    {
+      "sid": "04-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-18T19:44:43Z"
+    },
+    {
+      "sid": "04-03",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: pure /proc parsers and their unit tests were authored together and not observed failing separately; no acceptance test exists for this step",
+      "t": "2026-11-18T20:08:35Z"
+    },
+    {
+      "sid": "04-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-18T20:08:35Z"
+    },
+    {
+      "sid": "04-03",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "CHECKPOINT_PENDING: code committed; E-7 retained run not yet completed",
+      "t": "2026-11-18T20:09:09Z"
+    },
+    {
+      "sid": "04-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-18T21:15:41Z"
+    }
+  ]
+}

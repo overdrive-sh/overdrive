@@ -171,6 +171,8 @@ host module needs this separate setup step:
 cargo xtask metal run --exclusive -- cargo xtask kmod-load
 ```
 
+A benchmark takes exclusive admission through its own form, `cargo xtask metal run --benchmark <family>`. That form builds its command itself, accepts no other command, and holds the machine alone so that no concurrent run changes the numbers. Verification captures and maintenance also run `--exclusive`. No test does. See [Write and run a benchmark](/docs/how-to/write-and-run-a-benchmark).
+
 `--exclusive` applies only to `metal run`. It takes the exclusive maintenance
 barrier and waits for admitted ordinary units to finish their stop and cleanup
 lifecycle. `metal shell` and provisioning also remain exclusive. `--no-sudo`

@@ -1,0 +1,164 @@
+---
+title: Write and run a benchmark
+description: Declare a benchmark family with an attribute, run it on the shared test machine, pull the retained record, and read the report.
+---
+
+A benchmark measures how fast, how much, or how variable a component is on a controlled machine. It is not a test. It never passes or fails on a number, and it produces a retained record instead of a test result. This page covers declaring a benchmark, running it, and reading its output. For the statistics behind the report, see [Benchmark methodology](/docs/concepts/benchmark-methodology).
+
+Benchmarks run on the shared test machine: a physical x86_64 server with KVM. Setting it up is covered in [Run verification on Metal](/docs/how-to/run-verification-on-metal).
+
+## Declare a benchmark family
+
+A family is one benchmark function with a declaration above it. The attribute `#[overdrive_bench]` lives in `overdrive-testing-macros`. The measuring library is `overdrive-bench`. Families live in the `overdrive-bench-families` crate, one module per family under `crates/overdrive-bench-families/src/families/`.
+
+To declare a family, write a function that takes `&mut Replicate` and put the attribute above it:
+
+```rust
+use overdrive_bench::{Replicate, ReplicateFailure};
+use overdrive_testing_macros::overdrive_bench;
+
+#[overdrive_bench(
+    family = "cgroup-connect-hook",
+    substrate = native,
+    arms = ["no-hook", "gateway-hook"],
+    replicates = 30,
+    bpf_stats,
+    metric(name = "hook_ns_per_connect", unit = ns, table = "hook-time"),
+    metric(name = "wall_ns_per_connect", unit = ns, table = "wall-time"),
+    smoke(guest = "cgroup-default"),
+)]
+fn connect_hook_cost(rep: &mut Replicate) -> Result<(), ReplicateFailure> {
+    // Build a fresh fixture, run the timed work, record each metric.
+    Ok(())
+}
+```
+
+The attribute takes these keys:
+
+| Key | Meaning |
+| --- | --- |
+| `family` | The family name, in kebab case. A family has exactly one benchmark. |
+| `substrate` | The execution environment, written as a bare identifier. The only accepted value is `native`: the test machine itself, with no namespace and no wrapper. |
+| `arms` | One or more unique arm names. The first arm is the reference arm. Other arms compare against it. |
+| `replicates` | Replicates per arm. Fewer than 9 is a build error. |
+| `profile(name = ..., preparation = ...)` | A workload variant. Repeat the key for more profiles. With none, the benchmark has one profile named `default`. |
+| `metric(name = ..., unit = ..., table = ...)` | One recorded metric. The unit is one of `ns`, `bytes`, `bytes_per_second`, `qps`, `ratio` or `count`. Add `series` for a metric that records many values per replicate. |
+| `bpf_stats` | Holds per-process BPF run statistics for the run. |
+| `reference(...)` | A value from earlier evidence, printed under the metric's table with its label and never used as a comparison. |
+| `clock(...)` | Names the service clock (`injected_monotonic`) and guest clock (`init_elapsed_ms`) the family uses. |
+| `smoke(...)` | The placement of the generated smoke test. Required. |
+
+An unknown key, a repeated key, a malformed value, or a substrate other than `native` is a build error that names the key.
+
+Inside the function, build a fresh fixture, do the work, and report with these `Replicate` methods:
+
+| Method | Records |
+| --- | --- |
+| `record(metric, value)` | One scalar value. |
+| `record_series(metric, values)` | Every value of a series metric. |
+| `record_failure(metric, reason)` | A failure for that metric, counted in the report. |
+| `record_absent(metric, reason)` | A metric that does not apply to this arm, with the reason. |
+| `note(key, value)` | A note carried in the replicate's line of the record. |
+| `arm()`, `profile()` | The arm and profile this replicate runs. |
+| `clock().now()` | A host timestamp for `CLOCK_MONOTONIC_RAW`. |
+
+Return `Err(ReplicateFailure::fixture(..))` when the fixture cannot be built and `Err(ReplicateFailure::measurement(..))` when a measurement is invalid. A failed replicate does not stop the run. It appears in the report and never feeds a statistic.
+
+## Run the generated smoke test
+
+The attribute also generates a test named `smoke_<function>`. The test takes one replicate per arm and asserts no timing. It fails if the benchmark function fails, so a broken benchmark cannot go unnoticed between measured runs. It is gated on the `integration-tests` feature and carries the placement you gave in `smoke(...)`. Every family in the repository uses `smoke(guest = "cgroup-default")`, which boots a fresh guest. A benchmark with no node-global effect can use `smoke(host_pure)`. See [the placement forms](/docs/how-to/run-verification-on-metal#reference-placement-forms).
+
+To run the smoke tests of every family, run:
+
+```bash
+cargo xtask metal run -- cargo nextest run -p overdrive-bench-families --features integration-tests
+```
+
+Under the smoke test the run holds no BPF statistics descriptor, so a metric that needs statistics is recorded as absent.
+
+## Run a benchmark
+
+A benchmark runs on its own, through `cargo xtask metal run --benchmark`:
+
+```bash
+cargo xtask metal run --benchmark cgroup-connect-hook
+```
+
+The form takes the family name and no other command. It builds the one command itself, `cargo bench -p overdrive-bench-families --bench benchmarks -- run --family <family>`, and runs it under exclusive admission. No other run, test or maintenance command shares the machine while samples are taken, because a concurrent run would change the numbers.
+
+The runner prints `OVERDRIVE_METAL_RUN_ID=<id>`, then the line `OVERDRIVE_BENCH_RESULT_DIR=<path>` with the repository-relative directory where the record goes. Before it takes any sample, it checks the machine against a pinned list. Benchmarks, verification captures and physical maintenance take exclusive admission. No test does.
+
+The family name must match `^[a-z][a-z0-9-]{0,62}$`. A malformed name refuses with `benchmark_family_invalid` and status 64. A family that no declared benchmark uses refuses with status 64 and lists the families it found.
+
+### Run a spike probe on the same machinery
+
+A throwaway probe under `spike-scratch/<name>/` can use the same attribute and produce a record in the same schema, marked as spike evidence. The probe is a standalone crate with:
+
+- a dependency on `overdrive-bench` and `overdrive-testing` by path,
+- a `[[bench]] name = "benchmarks" harness = false` target,
+- a `main` that references the crate declaring its benchmarks (`use my_probe as _;`) and calls `overdrive_bench::run_main(overdrive_bench::Evidence::Spike)`.
+
+Declare its benchmark with `smoke(none)`. That form is accepted only under `spike-scratch/`. To run it, add `--spike`:
+
+```bash
+cargo xtask metal run --benchmark my-family --spike my-probe
+```
+
+Results go to `spike-scratch/my-probe/results/<family>/<run-id>/`. `--spike` without `--benchmark` refuses with `invalid_mode`, and a name that has no `spike-scratch/<name>/Cargo.toml` refuses with `benchmark_spike_invalid`.
+
+## Understand a refused run
+
+Before the first sample, the runner reads the machine and refuses on the first setting that differs from the pinned list, in this order:
+
+| Setting | Pinned value |
+| --- | --- |
+| Probe self-check | The probe succeeds |
+| Kernel series | `7.0` |
+| `kernel.bpf_stats_enabled` | `0` |
+| CPU governor | `schedutil` |
+| SMT | on |
+| CPU boost | on |
+| Holder of a `bpf-stats` descriptor | none |
+| Build | release, with no debug assertions |
+
+A setting with no readable source cannot be verified, so it also refuses. CPU model, CPU count, clocksource and IRQ time accounting are recorded and never refuse.
+
+A refused run writes the record's `run_started` and `run_refused` lines, names the setting with the value found and the value pinned, takes no sample, and exits with status 78. Fix the machine. Do not edit the pinned list to make a run pass, because records taken under different settings are not comparable.
+
+Other exit statuses are 64 for a usage error and 70 for an internal error, including a failed attempt to enable BPF statistics. A run that finishes with failed replicates still exits 0. The failures are in the report.
+
+## Pull and read the result
+
+A run writes `record.jsonl` and `report.md` into its result directory on the test machine. Neither comes back on its own. To copy them into your checkout, run:
+
+```bash
+cargo xtask metal pull benchmarks/results/cgroup-connect-hook/<run-id>
+```
+
+`record.jsonl` is append-only JSON Lines and is the evidence. `report.md` is derived from it. The record has these line kinds:
+
+| Line | Content |
+| --- | --- |
+| `run_started` | Methodology version, execution environment, host settings, the declaration, the seed, the commit and whether the tree was dirty |
+| `canary` | Samples of loopback connect-and-close, taken at the start and the end of the run |
+| `replicate` | Profile, arm, block, outcome, metrics, notes and the commands the replicate ran |
+| `run_finished` or `run_refused` | How the run ended |
+
+A run that was killed has no terminal line and no report. To check or render a record on any machine, use `bench-report`:
+
+```bash
+cargo bench-report validate benchmarks/results/cgroup-connect-hook/<run-id>/record.jsonl
+cargo bench-report render benchmarks/results/cgroup-connect-hook/<run-id>/record.jsonl
+```
+
+`validate` exits 65 for a record that breaks the schema. `render` validates first, then prints the report, and describes a killed run as incomplete. Neither command compares two records, because each record is read on its own.
+
+The report opens with the host settings, the clocks, the canary verdict and the replicate counts. Then it prints one table per metric group. A single-arm distribution table lists p50, p90, p95 and p99. A two-arm benchmark adds the delta, its 95% bootstrap interval, the A/A interval, the Mann-Whitney p-value and a verdict. A metric a replicate could not measure shows as `absent` with its reason. It is not zero-filled.
+
+Retained results live in `benchmarks/results/<family>/<run-id>/`. The catalogue of families, their arms and their clock boundaries is `benchmarks/catalogue.md`, and the protocol is `benchmarks/methodology.md`.
+
+## Limitations
+
+- Benchmarks run only on the native test machine. A component that runs inside a workload VM in production cannot be benchmarked. Issue [#362: a guest execution environment for components that run inside a workload VM](https://github.com/overdrive-sh/overdrive/issues/362) tracks lifting this.
+- The program records results and compares nothing across runs. It has no baseline and no regression gate. Issue [#361: baseline promotion and regression-gate policy](https://github.com/overdrive-sh/overdrive/issues/361) tracks both.
+- A family has one benchmark, and the run's seed always comes from the operating system. You cannot set a seed.
