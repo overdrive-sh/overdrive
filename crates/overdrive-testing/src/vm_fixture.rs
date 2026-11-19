@@ -1090,7 +1090,7 @@ pub(crate) fn workspace_root() -> PathBuf {
     // name that fixture instead of the checkout that owns prepared artifacts.
     if matches!(
         std::env::var("OVERDRIVE_METAL_EXECUTION_CLASS"),
-        Ok(ref execution_class) if execution_class == "ordinary"
+        Ok(ref execution_class) if execution_class == "ordinary" || execution_class == "exclusive"
     ) && let Some(source_root) = std::env::var_os("OVERDRIVE_METAL_SOURCE_ROOT")
     {
         return PathBuf::from(source_root);
@@ -1698,9 +1698,6 @@ mod tests {
     /// `CONTRACT_SHAPE`: pure-function over the environment.
     #[test]
     #[serial_test::serial(env)]
-    #[should_panic(
-        expected = "workspace_root must use the exported source root in the exclusive class"
-    )]
     fn the_workspace_root_is_the_exported_source_root_in_the_exclusive_class() {
         let _env = EnvGuard::set(&[
             ("OVERDRIVE_METAL_EXECUTION_CLASS", Some("exclusive")),

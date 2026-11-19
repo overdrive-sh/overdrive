@@ -291,12 +291,13 @@ pub mod cid_bands {
         CidBand { name: "overdrive-bench guest benchmark", first_offset: 0x2050, width: 16 };
 
     /// Every registered band.
-    pub const REGISTERED: [CidBand; 5] = [
+    pub const REGISTERED: [CidBand; 6] = [
         FWD_GUEST_BOUNDARY,
         HOST_FLOW_ACCEPT_PATH,
         HOST_BEACON_ACCEPT_PATH,
         INIT_IN_GUEST_LANE,
         FWD_UNLOAD_IN_GUEST,
+        GUEST_BENCHMARK,
     ];
 
     /// The guard the registry carries: bands are pairwise disjoint, above
@@ -1386,7 +1387,6 @@ mod tests {
     /// The benchmark guest band is registered beside the five existing ones, sixteen wide at
     /// offset 0x2050, disjoint and above the production band; its sixteen CIDs are distinct.
     #[test]
-    #[should_panic(expected = "the benchmark guest band must be registered")]
     fn the_benchmark_guest_band_is_registered_disjoint_and_sixteen_wide() {
         use std::collections::BTreeSet;
 
