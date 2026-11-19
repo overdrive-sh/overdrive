@@ -87,7 +87,6 @@ fn values_of(count: usize) -> Vec<u64> {
 /// kernel lines surround it, and the unterminated `overdrive-init` fragment before the program's
 /// leading `\n` is ended by it.
 #[test]
-#[should_panic(expected = "an intact console must parse")]
 fn an_intact_console_parses_to_its_readings_and_values_in_order() {
     let values = values_of(5);
     let parsed = parse_program_return(&console_around(&intact(&values)), METRIC, 5)
@@ -101,7 +100,6 @@ fn an_intact_console_parses_to_its_readings_and_values_in_order() {
 /// A reading the guest could not provide is `absent:<reason>` or `unreadable:<error>` and parses
 /// to the matching form, never to text and never to a default.
 #[test]
-#[should_panic(expected = "a console with absent and unreadable readings must parse")]
 fn a_reading_the_guest_could_not_provide_parses_as_absent_or_unreadable() {
     let values = values_of(3);
     let printed = print_program_return(
@@ -119,7 +117,6 @@ fn a_reading_the_guest_could_not_provide_parses_as_absent_or_unreadable() {
 /// The checksum is SHA-256 of the values as consecutive little-endian `u64` bytes, in lowercase
 /// hex: two fixed vectors computed outside the parser (`[1, 2, 3]` and `[42, u64::MAX]`).
 #[test]
-#[should_panic(expected = "a block with the pinned checksum must parse")]
 fn the_checksum_is_the_sha256_of_the_values_as_little_endian_bytes() {
     for (values, digest) in [
         (vec![1_u64, 2, 3], "e2e2033ae7e19d680599d4eb0a1359a2b48ec5baac75066c317fbf85159c54ef"),
@@ -143,7 +140,6 @@ fn the_checksum_is_the_sha256_of_the_values_as_little_endian_bytes() {
 /// Boundaries of the value-line grouping (at most 16 per line): 1, 15, 16, 17, 32, 33 and the
 /// family's 5,000 values all parse to exactly what was printed.
 #[test]
-#[should_panic(expected = "a block of every size must parse")]
 fn a_block_parses_at_every_value_line_boundary() {
     for count in [1_usize, 2, 15, 16, 17, 31, 32, 33, 5_000] {
         let values = values_of(count);
@@ -159,7 +155,6 @@ fn a_block_parses_at_every_value_line_boundary() {
 /// (the program's leading `\n` ended the fragment); the same return glued to the fragment, without
 /// that `\n`, finds no first reading line and fails: the strict start-of-line rule, V-B2's finding.
 #[test]
-#[should_panic(expected = "a return after a fragment and its newline must parse")]
 fn a_return_after_an_unterminated_fragment_parses_only_with_the_leading_newline() {
     let values = values_of(8);
     let printed = intact(&values);
@@ -182,7 +177,6 @@ fn a_return_after_an_unterminated_fragment_parses_only_with_the_leading_newline(
 /// A begin line glued to foreign text is not a begin line: the block is not found (or is
 /// malformed) and the return fails; it is never parsed from the middle of a line.
 #[test]
-#[should_panic(expected = "the unglued control must parse")]
 fn a_begin_line_glued_to_foreign_text_is_refused() {
     let values = values_of(8);
     parse_program_return(&intact(&values), METRIC, 8).expect("the unglued control must parse");
@@ -196,7 +190,6 @@ fn a_begin_line_glued_to_foreign_text_is_refused() {
 /// A console with no block for the metric is `BlockMissing`: an empty console, readings only, and
 /// a block of another metric.
 #[test]
-#[should_panic(expected = "the control console must parse")]
 fn a_console_with_no_block_for_the_metric_is_refused_as_missing() {
     parse_program_return(&intact(&values_of(4)), METRIC, 4)
         .expect("the control console must parse");
@@ -216,7 +209,6 @@ fn a_console_with_no_block_for_the_metric_is_refused_as_missing() {
 
 /// Two blocks of the metric are `BlockRepeated`: the console never yields either one.
 #[test]
-#[should_panic(expected = "two blocks must be BlockRepeated")]
 fn a_block_printed_twice_is_refused_as_repeated() {
     let values = values_of(20);
     let printed = intact(&values);
@@ -232,7 +224,6 @@ fn a_block_printed_twice_is_refused_as_repeated() {
 /// A reading that is missing is `ReadingMissing` naming its key, and one printed twice is
 /// `ReadingRepeated` naming its key; each of the two keys is checked.
 #[test]
-#[should_panic(expected = "a missing reading must name its key")]
 fn a_reading_that_is_missing_or_repeated_is_refused_naming_its_key() {
     let printed = intact(&values_of(6));
     for key in ["kernel", "clocksource"] {
@@ -258,7 +249,6 @@ fn a_reading_that_is_missing_or_repeated_is_refused_naming_its_key() {
 /// A reading line with no `=` and so no value is not a reading: the return is refused, never read
 /// with an empty value or a default (the variant, missing or malformed, is the crafter's).
 #[test]
-#[should_panic(expected = "the control console must parse")]
 fn a_reading_line_without_a_value_is_refused() {
     let printed = intact(&values_of(6));
     parse_program_return(&printed, METRIC, 6).expect("the control console must parse");
@@ -272,7 +262,6 @@ fn a_reading_line_without_a_value_is_refused() {
 /// never read as a shorter series: no end line, an unterminated final value line, a non-digit, a
 /// negative number, a value above `u64::MAX`, an empty value list.
 #[test]
-#[should_panic(expected = "the control console must parse")]
 fn a_cut_or_malformed_block_is_refused_and_never_read_as_a_shorter_series() {
     let printed = intact(&values_of(20));
     parse_program_return(&printed, METRIC, 20).expect("the control console must parse");
@@ -302,7 +291,6 @@ fn a_cut_or_malformed_block_is_refused_and_never_read_as_a_shorter_series() {
 /// `overdrive-init` fragment arriving mid-line) breaks the count or the checksum, so the replicate
 /// fails; it is never a short series or an altered one.
 #[test]
-#[should_panic(expected = "the control console must parse")]
 fn foreign_text_spliced_into_a_block_line_is_refused_never_shortened() {
     let printed = intact(&values_of(20));
     parse_program_return(&printed, METRIC, 20).expect("the control console must parse");
@@ -322,7 +310,6 @@ fn foreign_text_spliced_into_a_block_line_is_refused_never_shortened() {
 /// A block holding a different number of values from the one asked for is `CountMismatch` with
 /// both numbers, and its `Display` names them; the boundary 4,999 and 5,001 against 5,000.
 #[test]
-#[should_panic(expected = "a short or long block must be a count mismatch")]
 fn a_block_of_a_different_count_is_refused_naming_both_counts() {
     for found in [4_999_usize, 5_001, 1, 2] {
         let printed = intact(&values_of(found));
@@ -347,7 +334,6 @@ fn a_block_of_a_different_count_is_refused_naming_both_counts() {
 
 /// A block whose values changed but whose count is right is `ChecksumMismatch`.
 #[test]
-#[should_panic(expected = "a changed value must be a checksum mismatch")]
 fn a_block_whose_values_do_not_match_its_checksum_is_refused() {
     let printed = intact(&values_of(20));
     let altered = printed.replacen("41007", "41008", 1);
@@ -361,7 +347,6 @@ fn a_block_whose_values_do_not_match_its_checksum_is_refused() {
 /// Every error names its cause in its `Display`: the key of a reading, the two counts of a
 /// mismatch and a distinct text for each block and checksum variant.
 #[test]
-#[should_panic(expected = "ReadingMissing must name its key")]
 fn every_error_names_its_cause() {
     for error in [
         ProgramReturnError::ReadingMissing { key: "kernel".to_owned() },
@@ -410,7 +395,6 @@ proptest! {
     /// lines before and after and any unterminated fragment before the program's `\n`, what the
     /// printer printed is what the parser returns.
     #[test]
-    #[should_panic(expected = "what was printed must parse back")]
     fn a_printed_return_parses_back_to_exactly_what_was_printed(
         values in proptest::collection::vec(any::<u64>(), 1..300),
         kernel in kernel_text(),
@@ -432,7 +416,6 @@ proptest! {
     /// mismatch (or a checksum mismatch), and adding one likewise: the parser never returns a
     /// series other than the one the checksum covers.
     #[test]
-    #[should_panic(expected = "a damaged block must never parse to a different series")]
     fn a_damaged_block_never_parses_to_a_different_series(
         values in proptest::collection::vec(1_u64..u64::MAX - 1, 2..200),
         at in any::<proptest::sample::Index>(),

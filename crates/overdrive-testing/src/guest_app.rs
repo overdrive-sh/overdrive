@@ -38,9 +38,11 @@
     reason = "protocol docs open with the full sentence they define"
 )]
 
-use std::fmt;
+use std::fmt::{self, Write as _};
 use std::io;
 use std::str::FromStr;
+
+use sha2::{Digest, Sha256};
 
 /// Where every guest-kit image carries the guest program.
 pub const GUEST_PEER_GUEST_PATH: &str = "/sbin/overdrive-guest-peer";
@@ -1021,8 +1023,6 @@ mod remote_peer {
 // framed series block the program prints on the console, and the host half's parser of them.
 
 /// One guest reading as the guest printed it.
-///
-/// SCAFFOLD: true (the whole return surface below); DELIVER implements the parser.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum GuestReading {
     /// The source was read.
@@ -1056,7 +1056,30 @@ pub enum ProgramReturnError {
 
 impl fmt::Display for ProgramReturnError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("RED scaffold: ProgramReturnError display")
+        match self {
+            Self::ReadingMissing { key } => write!(formatter, "guest reading `{key}` is missing"),
+            Self::ReadingRepeated { key } => {
+                write!(formatter, "guest reading `{key}` is printed more than once")
+            }
+            Self::ReadingMalformed { key } => {
+                write!(formatter, "guest reading `{key}` has no `=` value")
+            }
+            Self::BlockMissing => {
+                formatter.write_str("the series block is missing from the console")
+            }
+            Self::BlockRepeated => {
+                formatter.write_str("the series block is printed more than once")
+            }
+            Self::BlockMalformed => formatter.write_str(
+                "the series block is cut or holds a line that is not a decimal u64 list",
+            ),
+            Self::CountMismatch { expected, found } => {
+                write!(formatter, "the series block holds {found} values, expected {expected}")
+            }
+            Self::ChecksumMismatch => {
+                formatter.write_str("the series block's values do not match its checksum")
+            }
+        }
     }
 }
 
@@ -1066,40 +1089,147 @@ impl std::error::Error for ProgramReturnError {}
 /// two reading lines (`kernel`, then `clocksource`), then the framed block of `metric` holding
 /// `values` (DDD-6, ADR-0330). The printer and [`parse_program_return`] are one owner of the grammar.
 ///
-/// SCAFFOLD: true. Inert: it prints nothing until DELIVER implements the grammar. Pinned
-/// grammar: `guest-reading: <key>=<value>` (a value is text, `absent:<reason>` or
+/// Grammar: `guest-reading: <key>=<value>` (a value is text, `absent:<reason>` or
 /// `unreadable:<error>`); `bench-series-begin: <metric>`; one or more
 /// `bench-values: <metric> <v1>,<v2>,...` lines of at most 16 decimal values in measurement order;
 /// `bench-series-end: <metric> <checksum>` carrying only the metric and the checksum (SHA-256, 64
 /// lowercase hex digits, of the values as consecutive little-endian `u64` bytes), no count.
+///
+/// The leading `\n` is load-bearing: `overdrive-init` writes unterminated log fragments to the
+/// shared console, and a first line glued to one is lost to the parser's start-of-line rule.
 #[must_use]
-#[allow(clippy::missing_const_for_fn, reason = "inert RED scaffold")]
 pub fn print_program_return(
     kernel: &GuestReading,
     clocksource: &GuestReading,
     metric: &str,
     values: &[u64],
 ) -> String {
-    let _ = (kernel, clocksource, metric, values);
-    String::new()
+    let mut out = String::with_capacity(160 + values.len() * 8);
+    out.push('\n');
+    for (key, reading) in [("kernel", kernel), ("clocksource", clocksource)] {
+        let _ = writeln!(out, "{READING_PREFIX}{key}={}", reading.encode());
+    }
+    let _ = writeln!(out, "{BEGIN_PREFIX}{metric}");
+    for chunk in values.chunks(VALUES_PER_LINE) {
+        let line: Vec<String> = chunk.iter().map(u64::to_string).collect();
+        let _ = writeln!(out, "{VALUES_PREFIX}{metric} {}", line.join(","));
+    }
+    let _ = writeln!(out, "{END_PREFIX}{metric} {}", series_checksum(values));
+    out
 }
 
 /// Parses `console` for the two readings and exactly one block of `metric` holding
 /// `expected_count` values.
 ///
-/// SCAFFOLD: true. Inert: it finds no block, so every console is `BlockMissing` until DELIVER
-/// implements the grammar.
+/// A reading line, the begin line and every block line match only at the start of a console line.
 ///
 /// # Errors
 /// The matching [`ProgramReturnError`]; there is never a short series.
-#[allow(clippy::missing_const_for_fn, reason = "inert RED scaffold")]
 pub fn parse_program_return(
     console: &str,
     metric: &str,
     expected_count: usize,
 ) -> Result<ProgramReturn, ProgramReturnError> {
-    let _ = (console, metric, expected_count);
-    Err(ProgramReturnError::BlockMissing)
+    let lines: Vec<&str> = console.lines().collect();
+    let (values, checksum) = parse_block(&lines, metric)?;
+    let kernel = parse_reading(&lines, "kernel")?;
+    let clocksource = parse_reading(&lines, "clocksource")?;
+    if values.len() != expected_count {
+        return Err(ProgramReturnError::CountMismatch {
+            expected: expected_count,
+            found: values.len(),
+        });
+    }
+    if checksum != series_checksum(&values) {
+        return Err(ProgramReturnError::ChecksumMismatch);
+    }
+    Ok(ProgramReturn { kernel, clocksource, values })
+}
+
+const READING_PREFIX: &str = "guest-reading: ";
+const BEGIN_PREFIX: &str = "bench-series-begin: ";
+const VALUES_PREFIX: &str = "bench-values: ";
+const END_PREFIX: &str = "bench-series-end: ";
+const VALUES_PER_LINE: usize = 16;
+
+impl GuestReading {
+    fn decode(value: &str) -> Self {
+        match (value.strip_prefix("absent:"), value.strip_prefix("unreadable:")) {
+            (Some(reason), _) => Self::Absent(reason.to_owned()),
+            (None, Some(error)) => Self::Unreadable(error.to_owned()),
+            (None, None) => Self::Text(value.to_owned()),
+        }
+    }
+
+    fn encode(&self) -> String {
+        match self {
+            Self::Text(text) => text.clone(),
+            Self::Absent(reason) => format!("absent:{reason}"),
+            Self::Unreadable(error) => format!("unreadable:{error}"),
+        }
+    }
+}
+
+/// SHA-256, 64 lowercase hex digits, of `values` as consecutive little-endian `u64` bytes.
+fn series_checksum(values: &[u64]) -> String {
+    let mut hasher = Sha256::new();
+    for value in values {
+        hasher.update(value.to_le_bytes());
+    }
+    hasher.finalize().iter().fold(String::with_capacity(64), |mut hex, byte| {
+        let _ = write!(hex, "{byte:02x}");
+        hex
+    })
+}
+
+/// One decimal `u64`: digits only, so a sign, a space or an empty item is refused.
+fn parse_value(item: &str) -> Result<u64, ProgramReturnError> {
+    if item.is_empty() || !item.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(ProgramReturnError::BlockMalformed);
+    }
+    item.parse::<u64>().map_err(|_| ProgramReturnError::BlockMalformed)
+}
+
+/// The one `guest-reading: <key>=<value>` line of `key`, matched at the start of a console line.
+fn parse_reading(lines: &[&str], key: &str) -> Result<GuestReading, ProgramReturnError> {
+    let mut found =
+        lines.iter().filter_map(|line| line.strip_prefix(READING_PREFIX)).filter_map(|rest| {
+            match rest.split_once('=') {
+                Some((name, value)) => (name == key).then_some(Ok(value)),
+                None => (rest == key).then_some(Err(())),
+            }
+        });
+    let first =
+        found.next().ok_or_else(|| ProgramReturnError::ReadingMissing { key: key.to_owned() })?;
+    if found.next().is_some() {
+        return Err(ProgramReturnError::ReadingRepeated { key: key.to_owned() });
+    }
+    let value = first.map_err(|()| ProgramReturnError::ReadingMalformed { key: key.to_owned() })?;
+    Ok(GuestReading::decode(value))
+}
+
+fn parse_block(lines: &[&str], metric: &str) -> Result<(Vec<u64>, String), ProgramReturnError> {
+    let begin = format!("{BEGIN_PREFIX}{metric}");
+    let mut begins = lines.iter().enumerate().filter(|(_, line)| **line == begin);
+    let (at, _) = begins.next().ok_or(ProgramReturnError::BlockMissing)?;
+    if begins.next().is_some() {
+        return Err(ProgramReturnError::BlockRepeated);
+    }
+    let value_prefix = format!("{VALUES_PREFIX}{metric} ");
+    let end_prefix = format!("{END_PREFIX}{metric} ");
+    let mut values = Vec::new();
+    for line in lines.iter().skip(at + 1) {
+        if let Some(list) = line.strip_prefix(value_prefix.as_str()) {
+            for item in list.split(',') {
+                values.push(parse_value(item)?);
+            }
+        } else if let Some(checksum) = line.strip_prefix(end_prefix.as_str()) {
+            return Ok((values, checksum.to_owned()));
+        } else {
+            return Err(ProgramReturnError::BlockMalformed);
+        }
+    }
+    Err(ProgramReturnError::BlockMalformed)
 }
 
 #[cfg(test)]
