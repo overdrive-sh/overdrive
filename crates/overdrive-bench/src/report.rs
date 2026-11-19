@@ -12,8 +12,9 @@ use rand::rngs::StdRng;
 use crate::Result;
 use crate::canary::{CanaryVerdict, verdict};
 use crate::record::{
-    BpfStatsMode, Canary, CanaryPhase, EvidenceClass, HOST_KEYS, HostValue, Line, MetricDecl,
-    MetricEntry, Outcome, ProfileDecl, ReplicateLine, Role, RunRefused, RunStarted, parse,
+    BpfStatsMode, Canary, CanaryPhase, EvidenceClass, GuestObserved, HOST_KEYS, HostValue, Line,
+    MetricDecl, MetricEntry, NOT_VISIBLE_FROM_A_GUEST, Outcome, ProfileDecl, ReplicateLine, Role,
+    RunRefused, RunStarted, parse,
 };
 use crate::registry::{GuestClock, ServiceClock};
 use crate::stats::{
@@ -29,6 +30,7 @@ const SCALAR_COLUMNS: [&str; 6] = ["metric", "arm", "median", "IQR", "replicates
 const SERIES_COLUMNS: [&str; 9] =
     ["metric", "arm", "p50", "p90", "p95", "p99", "values", "replicates", "failures"];
 const NOT_COMPARED: &str = "n/a";
+const NO_GUEST_VIEW: &str = "absent: no replicate returned a guest view";
 
 /// Render the report of a record, validating it first.
 pub fn render(text: &str) -> Result<String> {
@@ -50,6 +52,7 @@ struct Run<'a> {
     started: &'a RunStarted,
     start_canary: Option<&'a Canary>,
     end_canary: Option<&'a Canary>,
+    guest_view: Option<&'a GuestObserved>,
     replicates: Vec<&'a ReplicateLine>,
     terminal: Terminal<'a>,
 }
@@ -64,6 +67,7 @@ impl<'a> Run<'a> {
             started,
             start_canary: None,
             end_canary: None,
+            guest_view: None,
             replicates: Vec::new(),
             terminal: Terminal::Incomplete,
         };
@@ -71,6 +75,7 @@ impl<'a> Run<'a> {
             match line {
                 Line::RunStarted(_) => unreachable!("a validated record holds run_started once"),
                 Line::Canary(canary) => run.keep_canary(canary),
+                Line::GuestObserved(view) => run.guest_view = Some(view),
                 Line::Replicate(replicate) => run.replicates.push(replicate),
                 Line::RunFinished(_) => run.terminal = Terminal::Finished,
                 Line::RunRefused(refused) => run.terminal = Terminal::Refused(refused),
@@ -289,6 +294,9 @@ impl<'a> Renderer<'a> {
             let value = started.host.0.get(key).map(host_text).unwrap_or_default();
             self.bullet(key, value);
         }
+        if started.guest.is_some() {
+            self.guest_lines();
+        }
         let statistics = match started.bpf_stats {
             BpfStatsMode::PerProcess => "on (per process)",
             BpfStatsMode::Off => "off",
@@ -301,6 +309,43 @@ impl<'a> Renderer<'a> {
         self.bullet("status", status_text(&run.terminal));
         if let Terminal::Refused(refused) = run.terminal {
             self.bullet("refused", refusal_text(refused));
+        }
+    }
+
+    /// The guest's conditions: those true before any guest booted, then what the first reporting
+    /// replicate's view observed (or that none did).
+    fn guest_lines(&mut self) {
+        self.bullet("guest launch", "metal host (not nested)");
+        self.bullet("guest boot", "fresh guest per replicate");
+        self.bullet("guest vcpu scheduling", "unpinned");
+        for setting in ["governor", "smt", "boost"] {
+            self.bullet(&format!("guest {setting}"), format!("absent: {NOT_VISIBLE_FROM_A_GUEST}"));
+        }
+        let keys = [
+            "guest vcpus",
+            "guest memory mib",
+            "guest kernel",
+            "guest clocksource",
+            "guest artifact overdrive_init",
+            "guest artifact overdrive_guest_peer",
+            "guest artifact ovd_fwd",
+        ];
+        let values: [String; 7] = self.run.guest_view.map_or_else(
+            || std::array::from_fn(|_| NO_GUEST_VIEW.to_owned()),
+            |view| {
+                [
+                    view.vcpus.to_string(),
+                    view.memory_mib.to_string(),
+                    host_text(&view.kernel),
+                    host_text(&view.clocksource),
+                    host_text(&view.artifacts.overdrive_init),
+                    host_text(&view.artifacts.overdrive_guest_peer),
+                    host_text(&view.artifacts.ovd_fwd),
+                ]
+            },
+        );
+        for (key, value) in keys.into_iter().zip(values) {
+            self.bullet(key, value);
         }
     }
 

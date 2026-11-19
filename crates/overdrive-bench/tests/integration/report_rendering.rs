@@ -955,7 +955,6 @@ fn between<'a>(report: &'a str, from: &str, to: &str) -> Vec<&'a str> {
 /// and before `bpf stats`, one line each, the settings printing `absent: <reason>`.
 /// US-GBS-02 AC (b), (c), (d); K2.
 #[test]
-#[should_panic(expected = "the report must render for a valid record")]
 fn the_report_states_the_guests_conditions_between_the_host_lines_and_the_statistics_line() {
     let report = report_of(&guest_record(9));
     assert_eq!(header(&report, "substrate"), "guest");
@@ -990,7 +989,6 @@ fn the_report_states_the_guests_conditions_between_the_host_lines_and_the_statis
 /// blank, while the conditions stated before any guest booted are still printed.
 /// CA-4 (a record in which every replicate failed before reporting a view).
 #[test]
-#[should_panic(expected = "the report must render for a valid record")]
 fn a_guest_record_without_a_view_prints_the_observed_values_as_absent() {
     let reason = "guest boot: no READY within 60s";
     let mut lines = vec![guest_started(), canary("start", 1000.0)];
@@ -1027,10 +1025,10 @@ fn a_guest_record_without_a_view_prints_the_observed_values_as_absent() {
 /// the refusal naming the setting with its found and pinned values, and no guest view.
 /// US-GBS-02 AC (a): the run refuses before any guest boots.
 #[test]
-#[should_panic(expected = "the report must render for a valid record")]
 fn a_guest_run_refused_on_a_drifted_host_reports_the_refusal_and_the_static_conditions() {
     let report = report_of(&vec![guest_started(), refusal("bpf_stats_enabled", "1", "0")]);
-    assert_eq!(header(&report, "status"), "refused: bpf_stats_enabled found 1 pinned 0");
+    assert_eq!(header(&report, "status"), "refused");
+    assert_eq!(header(&report, "refused"), "bpf_stats_enabled found 1 pinned 0");
     assert_eq!(header(&report, "guest launch"), "metal host (not nested)");
     assert_eq!(header(&report, "guest kernel"), "absent: no replicate returned a guest view");
     assert_eq!(header(&report, "replicates ok"), "0");
@@ -1041,7 +1039,6 @@ fn a_guest_run_refused_on_a_drifted_host_reports_the_refusal_and_the_static_cond
 /// written so far; a replicate that failed in the guest is counted with its arm and reason and the
 /// others are reported. US-GBS-03 AC (b), (c) as CA-1 restates them.
 #[test]
-#[should_panic(expected = "the report must render for a valid record")]
 fn a_killed_guest_run_is_incomplete_and_a_failed_guest_replicate_is_counted() {
     let reason = "guest run: no EXIT within the bound";
     let mut lines = guest_record(9);
@@ -1061,7 +1058,6 @@ fn a_killed_guest_run_is_incomplete_and_a_failed_guest_replicate_is_counted() {
 /// percentiles, the value count and the replicate count over every retained sample, and only `ok`
 /// replicates feed it. US-GBS-01 AC (a); the report statistics derive only from retained samples.
 #[test]
-#[should_panic(expected = "the report must render for a valid record")]
 fn a_one_arm_guest_report_shows_the_distribution_of_the_retained_samples() {
     let report = report_of(&guest_record(9));
     let table = section(&report, "Table: forwarded-path");
@@ -1080,7 +1076,6 @@ fn a_one_arm_guest_report_shows_the_distribution_of_the_retained_samples() {
 /// Rendering a guest record twice is byte-identical and leaves the record untouched.
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[test]
-#[should_panic(expected = "the report must render for a valid record")]
 fn rendering_a_guest_record_twice_is_byte_identical_and_leaves_the_record_untouched() {
     let d = dir();
     let path = write(d.path(), "r.jsonl", &guest_record(9));

@@ -448,6 +448,7 @@ impl Start<'_> {
                 service: self.decl.service_clock,
                 guest: self.decl.guest_clock,
             },
+            guest: None,
             bpf_stats,
             declaration: declaration(self.decl),
         }

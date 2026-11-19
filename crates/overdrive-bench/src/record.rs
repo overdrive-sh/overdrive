@@ -87,6 +87,7 @@ pub(crate) enum Line {
     Replicate(Box<ReplicateLine>),
     RunFinished(RunFinished),
     RunRefused(RunRefused),
+    GuestObserved(GuestObserved),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -100,12 +101,14 @@ pub(crate) enum EvidenceClass {
 #[serde(rename_all = "snake_case")]
 pub(crate) enum Substrate {
     Native,
+    Guest,
 }
 
 impl Substrate {
     pub(crate) const fn as_str(self) -> &'static str {
         match self {
             Self::Native => "native",
+            Self::Guest => "guest",
         }
     }
 }
@@ -172,8 +175,9 @@ fn service_clock<'de, D: Deserializer<'de>>(
 fn guest_clock<'de, D: Deserializer<'de>>(
     deserializer: D,
 ) -> std::result::Result<Option<GuestClock>, D::Error> {
-    let source = GuestClock::InitElapsedMs;
-    closed_clock(deserializer, "clock.guest", &[(source.as_str(), source)])
+    let vocabulary =
+        [GuestClock::InitElapsedMs, GuestClock::Monotonic].map(|source| (source.as_str(), source));
+    closed_clock(deserializer, "clock.guest", &vocabulary)
 }
 
 #[allow(
@@ -312,6 +316,207 @@ impl<'de> Deserialize<'de> for GuestMemoryMib {
     }
 }
 
+/// What a guest cannot see of the host's settings, as the record states it.
+pub(crate) const NOT_VISIBLE_FROM_A_GUEST: &str = "not visible from a guest";
+
+const GUEST_SETTINGS: [&str; 3] = ["governor", "smt", "boost"];
+const GUEST_ARTIFACTS: [&str; 3] = ["overdrive_init", "overdrive_guest_peer", "ovd_fwd"];
+
+/// The optional `guest` block of `run_started` (DDD-2): what is true before any guest boots.
+/// Every value is pinned (`launch` is `metal_host`, `boot` is `per_replicate`, `vcpu_scheduling`
+/// is `unpinned`, and the three host settings are each absent: not visible from a guest), so the
+/// block carries no data and the validator accepts exactly that one JSON object.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct GuestBlock;
+
+impl GuestBlock {
+    fn json() -> serde_json::Value {
+        let absent = serde_json::json!({ "absent": NOT_VISIBLE_FROM_A_GUEST });
+        serde_json::json!({
+            "launch": "metal_host",
+            "boot": "per_replicate",
+            "vcpu_scheduling": "unpinned",
+            "settings": { "governor": absent, "smt": absent, "boost": absent },
+        })
+    }
+
+    fn check(raw: &BTreeMap<String, serde_json::Value>) -> std::result::Result<(), String> {
+        const KEYS: [&str; 4] = ["launch", "boot", "vcpu_scheduling", "settings"];
+        if let Some(key) = raw.keys().find(|key| !KEYS.contains(&key.as_str())) {
+            return Err(format!("guest has unknown key `{key}`"));
+        }
+        for (key, pinned) in
+            [("launch", "metal_host"), ("boot", "per_replicate"), ("vcpu_scheduling", "unpinned")]
+        {
+            match raw.get(key) {
+                Some(serde_json::Value::String(text)) if text == pinned => {}
+                Some(_) => return Err(format!("guest {key} must be `{pinned}`")),
+                None => return Err(format!("guest is missing key `{key}`")),
+            }
+        }
+        match raw.get("settings") {
+            Some(serde_json::Value::Object(settings)) => Self::check_settings(settings),
+            Some(_) => Err("guest settings must be an object".to_owned()),
+            None => Err("guest is missing key `settings`".to_owned()),
+        }
+    }
+
+    fn check_settings(
+        settings: &serde_json::Map<String, serde_json::Value>,
+    ) -> std::result::Result<(), String> {
+        if let Some(key) = settings.keys().find(|key| !GUEST_SETTINGS.contains(&key.as_str())) {
+            return Err(format!("guest settings has unknown key `{key}`"));
+        }
+        let pinned = serde_json::json!({ "absent": NOT_VISIBLE_FROM_A_GUEST });
+        for key in GUEST_SETTINGS {
+            match settings.get(key) {
+                Some(value) if *value == pinned => {}
+                Some(_) => {
+                    return Err(format!(
+                        "guest setting `{key}` must be exactly {{\"absent\": \"{NOT_VISIBLE_FROM_A_GUEST}\"}}"
+                    ));
+                }
+                None => return Err(format!("guest settings is missing key `{key}`")),
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Serialize for GuestBlock {
+    fn serialize<S: serde::Serializer>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error> {
+        Self::json().serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for GuestBlock {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+        let raw = BTreeMap::<String, serde_json::Value>::deserialize(deserializer)?;
+        Self::check(&raw).map_err(D::Error::custom)?;
+        Ok(Self)
+    }
+}
+
+/// The three staged artifacts of a `guest_observed` line, each a SHA-256 in one of the host
+/// block's three forms.
+#[derive(Debug, Serialize)]
+pub(crate) struct ObservedArtifacts {
+    pub(crate) overdrive_init: HostValue,
+    pub(crate) overdrive_guest_peer: HostValue,
+    pub(crate) ovd_fwd: HostValue,
+}
+
+/// The `guest_observed` line (DDD-2): the guest's view as the first reporting replicate
+/// reported it.
+#[derive(Debug, Serialize)]
+pub(crate) struct GuestObserved {
+    pub(crate) vcpus: std::num::NonZeroU8,
+    pub(crate) memory_mib: GuestMemoryMib,
+    pub(crate) kernel: HostValue,
+    pub(crate) clocksource: HostValue,
+    pub(crate) artifacts: ObservedArtifacts,
+}
+
+/// Whether `text` is a SHA-256 as the record writes it: 64 lowercase hex digits.
+fn is_sha256_hex(text: &str) -> bool {
+    text.len() == 64 && text.bytes().all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+}
+
+fn observed_field<'a>(
+    raw: &'a BTreeMap<String, serde_json::Value>,
+    key: &str,
+) -> std::result::Result<&'a serde_json::Value, String> {
+    raw.get(key).ok_or_else(|| format!("guest_observed is missing key `{key}`"))
+}
+
+fn observed_value(
+    raw: &BTreeMap<String, serde_json::Value>,
+    key: &str,
+) -> std::result::Result<HostValue, String> {
+    HostValue::from_json(observed_field(raw, key)?)
+        .map_err(|form| format!("guest_observed `{key}` {form}"))
+}
+
+fn observed_count<T>(
+    raw: &BTreeMap<String, serde_json::Value>,
+    key: &str,
+    make: impl FnOnce(u64) -> Option<T>,
+    range: &str,
+) -> std::result::Result<T, String> {
+    observed_field(raw, key)?
+        .as_u64()
+        .and_then(make)
+        .ok_or_else(|| format!("guest_observed `{key}` must be an integer {range}"))
+}
+
+fn observed_artifacts(
+    raw: &BTreeMap<String, serde_json::Value>,
+) -> std::result::Result<ObservedArtifacts, String> {
+    let serde_json::Value::Object(artifacts) = observed_field(raw, "artifacts")? else {
+        return Err("guest_observed `artifacts` must be an object".to_owned());
+    };
+    if let Some(key) = artifacts.keys().find(|key| !GUEST_ARTIFACTS.contains(&key.as_str())) {
+        return Err(format!("guest_observed artifacts has unknown key `{key}`"));
+    }
+    let digest = |key: &str| {
+        let value = artifacts
+            .get(key)
+            .ok_or_else(|| format!("guest_observed artifacts is missing key `{key}`"))
+            .and_then(|value| {
+                HostValue::from_json(value)
+                    .map_err(|form| format!("guest_observed artifact `{key}` {form}"))
+            })?;
+        match &value {
+            HostValue::Text(text) if !is_sha256_hex(text) => Err(format!(
+                "guest_observed artifact `{key}` must be 64 lowercase hex digits, found `{text}`"
+            )),
+            _ => Ok(value),
+        }
+    };
+    Ok(ObservedArtifacts {
+        overdrive_init: digest("overdrive_init")?,
+        overdrive_guest_peer: digest("overdrive_guest_peer")?,
+        ovd_fwd: digest("ovd_fwd")?,
+    })
+}
+
+impl GuestObserved {
+    fn check(raw: &BTreeMap<String, serde_json::Value>) -> std::result::Result<Self, String> {
+        const KEYS: [&str; 5] = ["vcpus", "memory_mib", "kernel", "clocksource", "artifacts"];
+        if let Some(key) = raw.keys().find(|key| !KEYS.contains(&key.as_str())) {
+            return Err(format!("guest_observed has unknown key `{key}`"));
+        }
+        Ok(Self {
+            vcpus: observed_count(
+                raw,
+                "vcpus",
+                |count| u8::try_from(count).ok().and_then(std::num::NonZeroU8::new),
+                "from 1 to 255",
+            )?,
+            memory_mib: observed_count(
+                raw,
+                "memory_mib",
+                |count| u32::try_from(count).ok().and_then(std::num::NonZeroU32::new),
+                "from 1 to 4294967295",
+            )
+            .map(GuestMemoryMib::new)?,
+            kernel: observed_value(raw, "kernel")?,
+            clocksource: observed_value(raw, "clocksource")?,
+            artifacts: observed_artifacts(raw)?,
+        })
+    }
+}
+
+impl<'de> Deserialize<'de> for GuestObserved {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+        let raw = BTreeMap::<String, serde_json::Value>::deserialize(deserializer)?;
+        Self::check(&raw).map_err(D::Error::custom)
+    }
+}
+
 /// The `host` block: exactly the nine pinned keys, each in one of the three forms.
 #[derive(Debug, Serialize)]
 pub(crate) struct Host(pub(crate) BTreeMap<String, HostValue>);
@@ -433,6 +638,9 @@ pub(crate) struct RunStarted {
     pub(crate) started: String,
     pub(crate) host: Host,
     pub(crate) clock: Clock,
+    /// Present exactly when the substrate is `guest` (DDD-2).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) guest: Option<GuestBlock>,
     pub(crate) bpf_stats: BpfStatsMode,
     pub(crate) declaration: Declaration,
 }
@@ -451,7 +659,15 @@ impl RunStarted {
         if self.declaration.arms.is_empty() {
             return Err("declaration.arms must name at least the reference arm".to_owned());
         }
-        Ok(())
+        match (self.substrate, &self.guest) {
+            (Substrate::Guest, None) => {
+                Err("guest is required when the substrate is guest".to_owned())
+            }
+            (Substrate::Native, Some(_)) => {
+                Err("guest is allowed only when the substrate is guest".to_owned())
+            }
+            _ => Ok(()),
+        }
     }
 }
 
@@ -689,6 +905,10 @@ enum Step {
 
 struct Open {
     declaration: Declaration,
+    /// Whether `run_started` carries a `guest` block.
+    guest: bool,
+    /// Whether the record's one `guest_observed` line has been seen.
+    view_seen: bool,
     stage: Stage,
     ok: u64,
     failed: u64,
@@ -705,6 +925,8 @@ impl Checker {
                 started.check()?;
                 *self = Self::Open(Open {
                     declaration: started.declaration.clone(),
+                    guest: started.guest.is_some(),
+                    view_seen: false,
                     stage: Stage::Started,
                     ok: 0,
                     failed: 0,
@@ -725,6 +947,19 @@ impl Open {
     fn accept(&mut self, line: &Line) -> std::result::Result<Step, String> {
         match (&self.stage, line) {
             (_, Line::RunStarted(_)) => Err("run_started may only be the first line".to_owned()),
+            (_, Line::GuestObserved(_)) if !self.guest => {
+                Err("guest_observed requires a run_started with a guest block".to_owned())
+            }
+            (Stage::Started, Line::GuestObserved(_)) => {
+                Err("guest_observed may only follow the start canary".to_owned())
+            }
+            (Stage::Measuring, Line::GuestObserved(_)) => {
+                if self.view_seen {
+                    return Err("guest_observed may appear at most once".to_owned());
+                }
+                self.view_seen = true;
+                Ok(Step::Continue)
+            }
             (Stage::Started, Line::Canary(canary)) if canary.phase == CanaryPhase::Start => {
                 self.stage = Stage::Measuring;
                 Ok(Step::Continue)
@@ -785,6 +1020,12 @@ impl Open {
             {
                 return Err(format!("metric `{name}`: {error}"));
             }
+        }
+        if self.guest && replicate.outcome == Outcome::Ok && !self.view_seen {
+            return Err(
+                "the first ok replicate of a guest record must follow its guest_observed line"
+                    .to_owned(),
+            );
         }
         match replicate.outcome {
             Outcome::Ok => self.ok += 1,
@@ -1127,6 +1368,59 @@ mod tests {
         assert!(zero.to_string().contains("memory_mib"), "the refusal names memory_mib: {zero}");
         for text in ["-1", "1.5", "\"512\"", "null", "4294967296"] {
             assert!(serde_json::from_str::<GuestMemoryMib>(text).is_err(), "`{text}` is refused");
+        }
+    }
+
+    proptest! {
+        /// A digest is accepted exactly when it is 64 characters of lowercase hex.
+        #[test]
+        fn a_digest_is_sha256_hex_exactly_when_it_is_64_lowercase_hex_digits(
+            hex in "[0-9a-f]{64}",
+            other in "\\PC{0,70}",
+        ) {
+            prop_assert!(is_sha256_hex(&hex));
+            prop_assert_eq!(
+                is_sha256_hex(&other),
+                other.len() == 64 && other.chars().all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
+            );
+            prop_assert!(!is_sha256_hex(&hex[1..]));
+            let longer = format!("{hex}0");
+            prop_assert!(!is_sha256_hex(&longer));
+        }
+    }
+
+    /// The guest line's place: only after the start canary, once, and before the first ok
+    /// replicate of a guest record; never on a record whose `run_started` has no guest block.
+    #[test]
+    fn the_guest_observed_line_keeps_to_its_place() {
+        let mut guest_started = started(false);
+        guest_started["substrate"] = json!("guest");
+        guest_started["guest"] = GuestBlock::json();
+        let view = json!({
+            "t": "guest_observed", "vcpus": 2, "memory_mib": 512, "kernel": "k",
+            "clocksource": { "absent": "none" },
+            "artifacts": {
+                "overdrive_init": "a".repeat(64),
+                "overdrive_guest_peer": "b".repeat(64),
+                "ovd_fwd": { "unreadable": "denied" },
+            },
+        });
+        let ok = replicate_of(&MetricEntry::scalar(1.0));
+        let good = [guest_started.clone(), canary("start"), view.clone(), ok.clone()];
+        assert!(validate(&record(&good)).is_ok(), "the control validates");
+        let mut native = good;
+        native[0] = started(false);
+        let after_ok = [guest_started.clone(), canary("start"), ok.clone(), view.clone()];
+        let twice = [guest_started.clone(), canary("start"), view.clone(), view.clone(), ok];
+        let early = [guest_started, view, canary("start")];
+        for (lines, why) in [
+            (&native[..], "a native record"),
+            (&after_ok[..], "after an ok replicate"),
+            (&twice[..], "twice"),
+            (&early[..], "before the start canary"),
+        ] {
+            let error = validate(&record(lines)).expect_err(why).to_string();
+            assert!(error.contains("guest_observed"), "{why}: {error}");
         }
     }
 }

@@ -43,6 +43,48 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-11-19T21:57:48Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: acceptance body a_guest_run_refused_on_a_drifted_host_reports_the_refusal_and_the_static_conditions asserts status line carries refusal detail, contradicting the native test and DDD-2; needs acceptance-designer fix. Work uncommitted in working tree",
+      "t": "2026-11-19T22:03:57Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: acceptance body a_guest_run_refused_on_a_drifted_host_reports_the_refusal_and_the_static_conditions asserts status line carries refusal detail, contradicting the native test and DDD-2; needs acceptance-designer fix. Work uncommitted in working tree",
+      "t": "2026-11-19T22:03:57Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: acceptance body a_guest_run_refused_on_a_drifted_host_reports_the_refusal_and_the_static_conditions asserts status line carries refusal detail, contradicting the native test and DDD-2; needs acceptance-designer fix. Work uncommitted in working tree",
+      "t": "2026-11-19T22:03:57Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-19T22:06:40Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-19T22:12:13Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-19T22:12:13Z"
     }
   ]
 }

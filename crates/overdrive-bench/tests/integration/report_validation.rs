@@ -708,7 +708,6 @@ fn guest_refused(lines: &Lines, line: Option<usize>, needle: &str, why: &str) {
 /// unreadable. The same validator as a native record, no guest-only flag. US-GBS-01 AC (b); K1.
 /// CONTRACT_SHAPE: pure-function (record in, verdict out).
 #[test]
-#[should_panic(expected = "the valid guest record must validate")]
 fn a_wellformed_guest_record_validates_in_every_terminal_state() {
     the_guest_control_validates();
     let failed = |lines: &mut Lines, index: usize| {
@@ -757,7 +756,6 @@ fn a_wellformed_guest_record_validates_in_every_terminal_state() {
 /// one, and a guest record lacking it, are refused naming `guest` on line 1.
 /// CONTRACT_SHAPE: pure-function (record in, verdict out).
 #[test]
-#[should_panic(expected = "the valid guest record must validate")]
 fn a_guest_block_is_present_exactly_when_the_substrate_is_guest() {
     the_guest_control_validates();
     let mut native_with_block = valid();
@@ -773,7 +771,6 @@ fn a_guest_block_is_present_exactly_when_the_substrate_is_guest() {
 /// three settings are each exactly `{ "absent": "not visible from a guest" }`, nothing else.
 /// CONTRACT_SHAPE: pure-function (record in, verdict out).
 #[test]
-#[should_panic(expected = "the valid guest record must validate")]
 fn a_guest_block_outside_its_pinned_vocabulary_is_refused_naming_the_field() {
     the_guest_control_validates();
     let cases: Vec<(&str, &str, Edit)> = vec![
@@ -833,7 +830,6 @@ fn a_guest_block_outside_its_pinned_vocabulary_is_refused_naming_the_field() {
 /// rule says it must precede).
 /// CONTRACT_SHAPE: pure-function (record in, verdict out).
 #[test]
-#[should_panic(expected = "the valid guest record must validate")]
 fn a_guest_observed_line_outside_its_place_is_refused() {
     the_guest_control_validates();
     let mut on_native = valid();
@@ -880,7 +876,6 @@ fn a_guest_observed_line_outside_its_place_is_refused() {
 /// refused.
 /// CONTRACT_SHAPE: pure-function (record in, verdict out).
 #[test]
-#[should_panic(expected = "the valid guest record must validate")]
 fn a_malformed_guest_view_is_refused_naming_the_field() {
     the_guest_control_validates();
     let cases: Vec<(&str, &str, Value)> = vec![
@@ -930,7 +925,6 @@ fn a_malformed_guest_view_is_refused_naming_the_field() {
 /// string naming `clock.guest`; the record that names the guest clock source validates.
 /// CONTRACT_SHAPE: pure-function (record in, verdict out).
 #[test]
-#[should_panic(expected = "the valid guest record must validate")]
 fn the_guest_monotonic_clock_string_validates_and_any_other_is_refused() {
     the_guest_control_validates();
     let mut native_carrying_it = valid();
