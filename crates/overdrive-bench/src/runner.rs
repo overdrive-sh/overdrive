@@ -29,7 +29,7 @@ use crate::record::{
     RunStarted, SCHEMA_VERSION, Substrate, Unit,
 };
 use crate::registry::{self, BenchmarkDecl};
-use crate::replicate::{GUEST_SUBSTRATE, HostClock, Replicate, ReplicateFailure};
+use crate::replicate::{HostClock, Replicate, ReplicateFailure};
 use crate::report::render;
 use crate::schedule::plan;
 use crate::stats_hold::{AyaStatsEnabler, BpfStatsHold, StatsEnabler, ineffective_program};
@@ -433,7 +433,7 @@ struct Start<'a> {
 
 impl Start<'_> {
     fn guest(&self) -> bool {
-        self.decl.substrate == GUEST_SUBSTRATE
+        self.decl.substrate == Substrate::Guest.as_str()
     }
 
     fn line(&self, bpf_stats: BpfStatsMode) -> RunStarted {

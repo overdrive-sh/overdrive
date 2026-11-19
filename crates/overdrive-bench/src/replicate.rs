@@ -11,15 +11,12 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::histogram::{NotStorable, storable};
-use crate::record::{Command as LoggedCommand, GuestView, MetricEntry};
+use crate::record::{Command as LoggedCommand, GuestView, MetricEntry, Substrate};
 use crate::registry::BenchmarkDecl;
 use crate::{BpfStatsHold, Result};
 
 /// The profile name of a benchmark that declares none.
 const IMPLICIT_PROFILE: &str = "default";
-
-/// The substrate a benchmark declares to run in a kit guest.
-pub const GUEST_SUBSTRATE: &str = "guest";
 
 /// Why a guest-substrate replicate that returned `Ok` without a view is failed (M-1).
 const NO_GUEST_VIEW: &str = "the replicate reported no guest view";
@@ -159,7 +156,7 @@ impl Replicate {
             entries: BTreeMap::new(),
             notes: BTreeMap::new(),
             commands: Vec::new(),
-            guest: decl.substrate == GUEST_SUBSTRATE,
+            guest: decl.substrate == Substrate::Guest.as_str(),
             view: None,
             console: None,
         }

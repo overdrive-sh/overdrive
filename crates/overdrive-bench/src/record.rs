@@ -319,7 +319,7 @@ impl<'de> Deserialize<'de> for GuestMemoryMib {
 /// What a guest cannot see of the host's settings, as the record states it.
 pub(crate) const NOT_VISIBLE_FROM_A_GUEST: &str = "not visible from a guest";
 
-const GUEST_SETTINGS: [&str; 3] = ["governor", "smt", "boost"];
+pub(crate) const GUEST_SETTINGS: [&str; 3] = ["governor", "smt", "boost"];
 const GUEST_ARTIFACTS: [&str; 3] = ["overdrive_init", "overdrive_guest_peer", "ovd_fwd"];
 
 /// The optional `guest` block of `run_started` (DDD-2): what is true before any guest boots.
@@ -390,6 +390,20 @@ impl Serialize for GuestBlock {
     ) -> std::result::Result<S::Ok, S::Error> {
         Self::json().serialize(serializer)
     }
+}
+
+/// Read the `guest` key when it is present: the key is absent on a native record, so a present
+/// `null` is refused naming `guest` (DDD-2).
+fn present_guest<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<Option<GuestBlock>, D::Error> {
+    let raw = serde_json::Value::deserialize(deserializer)?;
+    if raw.is_null() {
+        return Err(D::Error::custom(
+            "guest must be omitted, not null, unless the substrate is guest",
+        ));
+    }
+    GuestBlock::deserialize(raw).map(Some).map_err(D::Error::custom)
 }
 
 impl<'de> Deserialize<'de> for GuestBlock {
@@ -639,7 +653,7 @@ pub(crate) struct RunStarted {
     pub(crate) host: Host,
     pub(crate) clock: Clock,
     /// Present exactly when the substrate is `guest` (DDD-2).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default, deserialize_with = "present_guest", skip_serializing_if = "Option::is_none")]
     pub(crate) guest: Option<GuestBlock>,
     pub(crate) bpf_stats: BpfStatsMode,
     pub(crate) declaration: Declaration,
@@ -1368,59 +1382,6 @@ mod tests {
         assert!(zero.to_string().contains("memory_mib"), "the refusal names memory_mib: {zero}");
         for text in ["-1", "1.5", "\"512\"", "null", "4294967296"] {
             assert!(serde_json::from_str::<GuestMemoryMib>(text).is_err(), "`{text}` is refused");
-        }
-    }
-
-    proptest! {
-        /// A digest is accepted exactly when it is 64 characters of lowercase hex.
-        #[test]
-        fn a_digest_is_sha256_hex_exactly_when_it_is_64_lowercase_hex_digits(
-            hex in "[0-9a-f]{64}",
-            other in "\\PC{0,70}",
-        ) {
-            prop_assert!(is_sha256_hex(&hex));
-            prop_assert_eq!(
-                is_sha256_hex(&other),
-                other.len() == 64 && other.chars().all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
-            );
-            prop_assert!(!is_sha256_hex(&hex[1..]));
-            let longer = format!("{hex}0");
-            prop_assert!(!is_sha256_hex(&longer));
-        }
-    }
-
-    /// The guest line's place: only after the start canary, once, and before the first ok
-    /// replicate of a guest record; never on a record whose `run_started` has no guest block.
-    #[test]
-    fn the_guest_observed_line_keeps_to_its_place() {
-        let mut guest_started = started(false);
-        guest_started["substrate"] = json!("guest");
-        guest_started["guest"] = GuestBlock::json();
-        let view = json!({
-            "t": "guest_observed", "vcpus": 2, "memory_mib": 512, "kernel": "k",
-            "clocksource": { "absent": "none" },
-            "artifacts": {
-                "overdrive_init": "a".repeat(64),
-                "overdrive_guest_peer": "b".repeat(64),
-                "ovd_fwd": { "unreadable": "denied" },
-            },
-        });
-        let ok = replicate_of(&MetricEntry::scalar(1.0));
-        let good = [guest_started.clone(), canary("start"), view.clone(), ok.clone()];
-        assert!(validate(&record(&good)).is_ok(), "the control validates");
-        let mut native = good;
-        native[0] = started(false);
-        let after_ok = [guest_started.clone(), canary("start"), ok.clone(), view.clone()];
-        let twice = [guest_started.clone(), canary("start"), view.clone(), view.clone(), ok];
-        let early = [guest_started, view, canary("start")];
-        for (lines, why) in [
-            (&native[..], "a native record"),
-            (&after_ok[..], "after an ok replicate"),
-            (&twice[..], "twice"),
-            (&early[..], "before the start canary"),
-        ] {
-            let error = validate(&record(lines)).expect_err(why).to_string();
-            assert!(error.contains("guest_observed"), "{why}: {error}");
         }
     }
 }

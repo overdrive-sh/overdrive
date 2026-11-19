@@ -12,9 +12,9 @@ use rand::rngs::StdRng;
 use crate::Result;
 use crate::canary::{CanaryVerdict, verdict};
 use crate::record::{
-    BpfStatsMode, Canary, CanaryPhase, EvidenceClass, GuestObserved, HOST_KEYS, HostValue, Line,
-    MetricDecl, MetricEntry, NOT_VISIBLE_FROM_A_GUEST, Outcome, ProfileDecl, ReplicateLine, Role,
-    RunRefused, RunStarted, parse,
+    BpfStatsMode, Canary, CanaryPhase, EvidenceClass, GUEST_SETTINGS, GuestObserved, HOST_KEYS,
+    HostValue, Line, MetricDecl, MetricEntry, NOT_VISIBLE_FROM_A_GUEST, Outcome, ProfileDecl,
+    ReplicateLine, Role, RunRefused, RunStarted, parse,
 };
 use crate::registry::{GuestClock, ServiceClock};
 use crate::stats::{
@@ -318,7 +318,7 @@ impl<'a> Renderer<'a> {
         self.bullet("guest launch", "metal host (not nested)");
         self.bullet("guest boot", "fresh guest per replicate");
         self.bullet("guest vcpu scheduling", "unpinned");
-        for setting in ["governor", "smt", "boost"] {
+        for setting in GUEST_SETTINGS {
             self.bullet(&format!("guest {setting}"), format!("absent: {NOT_VISIBLE_FROM_A_GUEST}"));
         }
         let keys = [
