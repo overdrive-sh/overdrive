@@ -58,7 +58,7 @@ RED skipped as not applicable: 01-07 (the semantic RED for GF1-GF6 and GK3 again
 
 ## Evidence runs
 
-All runs are on the native Metal host (AMD EPYC 8024P, 16 CPUs, kernel 7.0.0-38-generic), commit `36618cba7`, tree dirty. Result directories are under `benchmarks/results/guest-flow-forwarding/<run-id>/`. Each receipt in `deliver/evidence/` was checked against the committed record.
+All runs are on the native Metal host (AMD EPYC 8024P, 16 CPUs, kernel 7.0.0-38-generic), commit `36618cba7` (the commit the records name; the branch was rebased afterwards, so it is not an ancestor of the merged history), tree dirty. Result directories are under `benchmarks/results/guest-flow-forwarding/<run-id>/`. Each receipt in `deliver/evidence/` was checked against the committed record.
 
 | Run | Run id | What it shows |
 |---|---|---|
@@ -130,4 +130,4 @@ Phase B scan of `docs/feature/guest-benchmark-substrate/` against the destinatio
 - **Review:** independent documentation review, two rounds: CHANGES_REQUESTED (four major findings: the second clean run unreported, cost figures without provenance, undefined terms, an incomplete finalization record), then APPROVED with four low nits, two applied. Artifact: `docs/feature/guest-benchmark-substrate/deliver/review-finalize-content.md`.
 - **Issues closed:** #362.
 - **Open observation:** the `overdrive-init` lane test `a_burst_of_host_aborts_resets_every_connection_in_a_real_guest` failed on Metal ("every burst flow ended not reached within 1s") in `run_in_guest_owner_cell`, which this feature does not change. It was not investigated and has no issue.
-- **Metal box cleanup:** this checkout's remote directory on the Metal box removed after every result was pulled (see the commit that records this section).
+- **Metal box cleanup:** after every result was pulled, this checkout's remote directory on the Metal box (77 GB, including its build output) was removed in exclusive run `0a9ce7a8d4d42ce1b4f88a67`. The session files (`.nwave/des/deliver-session.json`, `deliver/.develop-progress.json`) were removed.
