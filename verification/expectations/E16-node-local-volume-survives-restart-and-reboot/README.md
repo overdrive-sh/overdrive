@@ -14,16 +14,18 @@ This expectation records, once, what an operator sees across a real node reboot.
 
 ## The claim
 
-An operator deploys a VM workload that declares `[vm.volume] size = "<n>GiB"` with `overdrive deploy`, and the guest writes
-records to its second disk (serial `ovd-volume`). Restart and stop/resume are not re-claimed here: S-VOL-T3-07 proves them on
-every run. This record claims only what a test cannot show:
+An operator deploys the checked-in example `examples/node-local-volume/volume-service.toml` with `overdrive deploy`: a
+single-replica VM Service declaring `[vm.volume] size = "1GiB"`. Its guest appends one note to its second disk (virtio serial
+`ovd-volume`) on every start and reads the earlier notes back, so each start's note records how many predecessors it verified.
+Restart and stop/resume are not re-claimed here: S-VOL-T3-07 proves them on every run. This record claims only what a test
+cannot show:
 
 1. A real node reboot: after the node boots, the volume is present but inactive; the next launch activates it (no operator
    action, no manual `lvchange`), and the guest reads the records written before the reboot.
 2. What the operator sees on `overdrive workload describe`: `Volume  <n>GiB (guest disk: virtio serial ovd-volume)` before and
-   after the reboot; and, for a second workload declaring a volume larger than the pool's free space, a typed reason that
-   names the volume, the cause (`InsufficientSpace`, with the requested and free figures) and the remedy, rather than a
-   generic failure.
+   after the reboot; and, for the example's second spec `examples/node-local-volume/volume-oversized.toml` (a `1000TiB`
+   volume, larger than the pool's free space), a typed reason that names the volume, the cause (`InsufficientSpace`, with
+   the requested and free figures) and the remedy, rather than a generic failure.
 
 ## Substrate
 
@@ -41,14 +43,15 @@ need a reboot and can be captured before sub-claim 1 is authorised; an unauthori
 
 ## Edge cases the capture must include
 
-- One workload is running and one is stopped when the node reboots: both volumes are inactive afterwards, and a later launch
-  or resume activates each.
+- The workload is running when the node reboots (its intent still says run): the volume is inactive after the boot, and the
+  relaunch `serve` makes activates it with no operator step.
 - The volume is larger than the guest's first write: the data written is a few records, not the whole device, so the claim
   does not rest on a zero-filled device reading back as zero.
-- A second workload with its own volume is deployed beside the first: after every step each workload reads only its own
-  records (no volume is shared or swapped).
-- A workload declared **without** `[vm.volume]` is deployed beside them and behaves as before: no second disk, no volume
-  line in `describe`.
+- The oversized example spec is deployed beside the first workload: the first workload's notes and `describe` are unchanged
+  by the refusal, and the pool gains no logical volume for the oversized one.
+- A workload declared **without** `[vm.volume]` (any existing example Service, for instance
+  `examples/service-kind-vm-workloads/service.toml`, which shares the preparation directory and so is deployed after the
+  volume example's workloads are stopped, not beside them) behaves as before: no second disk, no volume line in `describe`.
 
 ## Non-effects (what must not happen)
 
@@ -75,14 +78,28 @@ Any one of these observed in the captured output refutes the claim:
 
 ## Capture steps
 
-1. Deploy the workload (and the workload declared without `[vm.volume]`), write records, record `lvs` and `describe`.
-2. Deploy the oversized second workload; record its `describe` (the typed reason) and `lvs`.
-3. Under the owner's authorisation, reboot; on return record `lvs`, `describe`, the guest's read-back, and the host's
-   direct-I/O read of the device node while no VMM holds it.
+The capture deploys the checked-in example specs by path; it uses no ad hoc spec. `examples/node-local-volume/README.md`
+documents the commands, and `examples/node-local-volume/run-example.sh` has one step per command (`prepare`, `serve`,
+`cleanup`) so that the journey can span the reboot.
+
+1. `run-example.sh prepare`, then `run-example.sh serve`; record `lvs overdrive`. Deploy
+   `examples/node-local-volume/volume-service.toml` with `overdrive deploy`; when `describe` shows the readiness probe
+   passing, record `describe` and `lvs`. Stop the workload, read the volume's device node from the host with direct I/O and
+   record the notes; resume with `overdrive workload restart`.
+2. Deploy `examples/node-local-volume/volume-oversized.toml`; record its `describe` (the typed reason) and `lvs`.
+3. With the first workload running and the owner's authorisation, reboot. On return record `lvs`, run `run-example.sh serve`
+   against the same preparation directory (confirm it is still present first), record the first workload's `describe` once its readiness probe passes (its newest
+   note shows `prior_verified` equal to the notes written before the reboot), stop it and read the device node from the host
+   again.
+
+`run-example.sh run restart-survives` and `run oversized` run the reboot-free parts of steps 1 and 2 in one invocation. They
+are aids to the capture, not the capture: the reboot half has no scripted form.
 
 ## Capture plan (DELIVER or DEVOPS, not authored here)
 
 Evidence is captured after the feature is delivered, against the built `overdrive` binary, by someone other than the
 implementation author, then reviewed by a different reviewer (`.claude/rules/verification.md` § "The different fox audit").
 A native-metal capture runs `cargo xtask metal run --exclusive -- env KEY=VALUE ... verification/harness/run-expectation.sh <ID>`
-with the reboot authorisation above. This file carries no `verification.yaml`, no `evidence/` and no `satisfied` status.
+with the reboot authorisation above. The deployed specs are the ones checked in under `examples/node-local-volume/`, pinned
+by the capture's recorded SHA; the example deploys successfully only once the volume launch path is delivered. This file carries no `verification.yaml`,
+no `evidence/` and no `satisfied` status.

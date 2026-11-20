@@ -1,0 +1,36 @@
+[service]
+id = "volume-oversized"
+replicas = 1
+
+[[listener]]
+port = 18080
+protocol = "tcp"
+
+[vm]
+command = "/opt/overdrive/examples/svm/volume-notes"
+args = []
+kernel = "/srv/vm/overdrive-testing/svm-e08/kernel"
+rootfs = "/srv/vm/overdrive-testing/svm-e08/rootfs.ext4"
+
+[vm.volume]
+size = "1000TiB"
+
+[resources]
+cpu_milli = 500
+memory_bytes = 134217728
+
+[[health_check.startup]]
+type = "tcp"
+host = "0.0.0.0"
+port = 18080
+interval_seconds = 1
+timeout_seconds = 1
+max_attempts = 30
+
+[[health_check.readiness]]
+type = "http"
+path = "/ready"
+port = 18080
+interval_seconds = 1
+timeout_seconds = 1
+success_threshold = 1
