@@ -112,7 +112,7 @@ actor that cannot exist on the appliance, drop it.
 Two upstream projects are vendored as git submodules under `vendors/`:
 
 - **`vendors/cloud-hypervisor`** — Overdrive's own Cloud Hypervisor fork
-  (`overdrive-sh/cloud-hypervisor`, branch `overdrive/vhost-kernel-vsock`).
+  (`overdrive-sh/cloud-hypervisor`, branch `main`: upstream `main` plus our commits on top).
   Overdrive runs **only** with this fork; there is no supported path for a
   stock or third-party Cloud Hypervisor binary. Do not design probes, error
   variants, capability checks or fallbacks that detect or tolerate another VMM

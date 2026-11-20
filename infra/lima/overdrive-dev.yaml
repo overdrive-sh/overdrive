@@ -115,7 +115,7 @@ param:
   # rebuilt). aarch64 has no release asset and builds the pinned source. Both
   # are checksum-gated in the user provision block.
   CLOUD_HYPERVISOR_FORK_REPO:       "overdrive-sh/cloud-hypervisor"
-  CLOUD_HYPERVISOR_FORK_REV:        "f252bb20b0d141d59e4c15a9ac09c5c2dd7c350d"
+  CLOUD_HYPERVISOR_FORK_REV:        "483e8bc16c2f2668291a5723b8d562f11a0805f6"
   CLOUD_HYPERVISOR_BUILD_TOOLCHAIN: "1.89.0"
   CLOUD_HYPERVISOR_RELEASE_TAG_X86_64: "overdrive-f252bb20b0d1"
   CLOUD_HYPERVISOR_SHA256_X86_64:   "6d54fbd2611e692fda00e476fc0723e9502bfd8acd53c8bc46edd96e84f3e842"
