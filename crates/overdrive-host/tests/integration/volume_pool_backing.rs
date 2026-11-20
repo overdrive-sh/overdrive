@@ -56,7 +56,6 @@ fn open_exclusive(device: &Path) -> std::fs::File {
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[test]
-#[ignore = "needs the volume-pool guest's pool: the guest-kit volume-pool step provisions it (prerequisite 1)"]
 #[should_panic(
     expected = "the guest's pool is found (ensure_creates_the_declared_size_activated_under_the_hashed_name)"
 )]
@@ -96,7 +95,6 @@ fn ensure_creates_the_declared_size_activated_under_the_hashed_name() {
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[test]
-#[ignore = "needs the volume-pool guest's pool: the guest-kit volume-pool step provisions it (prerequisite 1)"]
 #[should_panic(
     expected = "the guest's pool is found (ensure_is_idempotent_and_does_not_compare_the_existing_size)"
 )]
@@ -120,7 +118,6 @@ fn ensure_is_idempotent_and_does_not_compare_the_existing_size() {
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[test]
-#[ignore = "needs the volume-pool guest's pool: the guest-kit volume-pool step provisions it (prerequisite 1)"]
 #[should_panic(
     expected = "the guest's pool is found (an_inactive_volume_is_activated_by_ensure_and_reads_not_found_until_then)"
 )]
@@ -148,7 +145,6 @@ fn an_inactive_volume_is_activated_by_ensure_and_reads_not_found_until_then() {
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[test]
-#[ignore = "needs the volume-pool guest's pool: the guest-kit volume-pool step provisions it (prerequisite 1)"]
 #[should_panic(
     expected = "the guest's pool is found (claim_state_reports_held_free_and_not_found_as_the_kernel_does)"
 )]
@@ -179,7 +175,6 @@ fn claim_state_reports_held_free_and_not_found_as_the_kernel_does() {
 /// CONTRACT_SHAPE: pure-function.
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[test]
-#[ignore = "needs the volume-pool guest's pool: the guest-kit volume-pool step provisions it (prerequisite 1)"]
 #[should_panic(
     expected = "the guest's pool is found (sad_claim_state_of_an_absent_volume_is_not_found)"
 )]
@@ -198,7 +193,6 @@ fn sad_claim_state_of_an_absent_volume_is_not_found() {
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[test]
-#[ignore = "needs the volume-pool guest's pool: the guest-kit volume-pool step provisions it (prerequisite 1)"]
 #[should_panic(
     expected = "the guest's pool is found (sad_insufficient_space_names_both_figures_and_creates_nothing)"
 )]
@@ -226,7 +220,6 @@ fn sad_insufficient_space_names_both_figures_and_creates_nothing() {
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[test]
-#[ignore = "needs the volume-pool guest's pool: the guest-kit volume-pool step provisions it (prerequisite 1)"]
 #[should_panic(
     expected = "the guest's pool is found (sad_a_failing_lvm_command_is_a_pool_command_error)"
 )]
@@ -271,7 +264,6 @@ fn sad_a_failing_lvm_command_is_a_pool_command_error() {
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[test]
-#[ignore = "needs the volume-pool guest's pool: the guest-kit volume-pool step provisions it (prerequisite 1)"]
 #[should_panic(
     expected = "the guest's pool is found (sad_an_ensure_blocked_on_the_group_lock_times_out_as_a_command_failure)"
 )]
@@ -321,7 +313,6 @@ fn sad_an_ensure_blocked_on_the_group_lock_times_out_as_a_command_failure() {
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[test]
-#[ignore = "needs the volume-pool guest's pool: the guest-kit volume-pool step provisions it (prerequisite 1)"]
 #[should_panic(
     expected = "the guest's pool is found (two_workloads_ensured_at_once_each_get_their_own_volume)"
 )]

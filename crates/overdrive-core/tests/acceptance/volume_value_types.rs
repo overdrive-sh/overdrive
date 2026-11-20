@@ -150,7 +150,6 @@ fn the_insufficient_space_cause_carries_free_space_as_a_string() {
 /// serial: the argv golden of the single render site.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "the volume --disk argument must render direct=on and serial=ovd-volume")]
 fn the_volume_disk_renders_the_golden_argument() {
     let device = PathBuf::from("/dev/mapper/overdrive-ovd--0123456789abcdef0123456789abcdef");
     assert_eq!(

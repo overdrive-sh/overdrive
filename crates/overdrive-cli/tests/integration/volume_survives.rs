@@ -379,7 +379,6 @@ impl Journey {
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "needs the volume-pool guest's pool: the guest-kit volume-pool step provisions it (prerequisite 1)"]
 #[should_panic(expected = "a VM workload that declares [vm.volume] must deploy (vol-restart)")]
 async fn data_written_by_the_guest_survives_a_workload_restart() {
     let journey = Journey::new();
@@ -442,7 +441,6 @@ async fn data_written_by_the_guest_survives_a_workload_restart() {
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "needs the volume-pool guest's pool: the guest-kit volume-pool step provisions it (prerequisite 1)"]
 #[should_panic(expected = "a VM workload that declares [vm.volume] must deploy (vol-killed)")]
 async fn a_record_the_guest_flushed_survives_a_killed_vmm() {
     let journey = Journey::new();
@@ -464,7 +462,6 @@ async fn a_record_the_guest_flushed_survives_a_killed_vmm() {
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "needs the volume-pool guest's pool: the guest-kit volume-pool step provisions it (prerequisite 1)"]
 #[should_panic(expected = "a VM workload that declares [vm.volume] must deploy (vol-stop)")]
 async fn an_operator_stop_keeps_the_volume_and_a_resume_reattaches_it() {
     let journey = Journey::new();
@@ -504,7 +501,6 @@ async fn an_operator_stop_keeps_the_volume_and_a_resume_reattaches_it() {
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "needs the volume-pool guest's pool: the guest-kit volume-pool step provisions it (prerequisite 1)"]
 #[should_panic(expected = "a VM workload that declares [vm.volume] must deploy (vol-drain)")]
 async fn a_replacement_waits_for_the_claim_while_the_old_writers_io_drains() {
     let journey = Journey::new();
@@ -597,7 +593,6 @@ fn flakey_table(current: &str, down_seconds: u32) -> String {
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "needs the volume-pool guest's pool: the guest-kit volume-pool step provisions it (prerequisite 1), with dmsetup and the dm-flakey module and loader"]
 #[should_panic(expected = "a VM workload that declares [vm.volume] must deploy (vol-flush)")]
 async fn a_failed_host_flush_reaches_the_guests_fsync_as_an_error() {
     let journey = Journey::new();
@@ -729,7 +724,6 @@ fn assert_nothing_failed_or_charged(
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "needs the volume-pool guest's pool, dmsetup and a real VMM: the guest-kit volume-pool step provisions them (prerequisite 1)"]
 #[should_panic(expected = "a VM workload that declares [vm.volume] must deploy (vol-stop-held)")]
 async fn a_workload_stop_during_a_held_claim_returns_promptly_with_no_failed_row() {
     let journey = Journey::new();
@@ -825,7 +819,6 @@ async fn a_workload_stop_during_a_held_claim_returns_promptly_with_no_failed_row
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[tokio::test]
 #[serial(cgroup)]
-#[ignore = "needs the volume-pool guest's pool and a real VMM: the guest-kit volume-pool step provisions them (prerequisite 1)"]
 #[should_panic(expected = "a VM workload that declares [vm.volume] must deploy (vol-stop-boot)")]
 async fn a_workload_stop_during_guest_boot_terminates_the_vmm_and_keeps_the_volume() {
     let journey = Journey::new();

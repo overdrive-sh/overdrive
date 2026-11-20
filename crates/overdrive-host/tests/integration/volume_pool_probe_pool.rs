@@ -61,7 +61,6 @@ fn lvm_binary() -> String {
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[test]
-#[ignore = "needs the volume-pool guest's pool: the guest-kit volume-pool step provisions it (prerequisite 1)"]
 #[should_panic(
     expected = "the labelled partition is found (a_healthy_pool_probes_clean_and_leaves_nothing_behind)"
 )]
@@ -82,7 +81,6 @@ fn a_healthy_pool_probes_clean_and_leaves_nothing_behind() {
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[test]
-#[ignore = "needs the volume-pool guest's pool: the guest-kit volume-pool step provisions it (prerequisite 1)"]
 #[should_panic(
     expected = "the labelled partition is found (a_scratch_volume_left_by_a_crashed_probe_is_removed_first)"
 )]
@@ -104,7 +102,6 @@ fn a_scratch_volume_left_by_a_crashed_probe_is_removed_first() {
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[test]
-#[ignore = "needs the volume-pool guest's pool: the guest-kit volume-pool step provisions it (prerequisite 1)"]
 #[should_panic(expected = "the labelled partition is found (the_probe_touches_no_workload_volume)")]
 fn the_probe_touches_no_workload_volume() {
     lvm_ok(&["lvcreate", "-L", "4m", "-n", "ovd-0123456789abcdef0123456789abcdef", "overdrive"]);
@@ -123,7 +120,6 @@ fn the_probe_touches_no_workload_volume() {
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[test]
-#[ignore = "needs the volume-pool guest's pool: the guest-kit volume-pool step provisions it (prerequisite 1)"]
 #[should_panic(
     expected = "the labelled partition is found (a_pool_with_no_free_extent_still_probes_clean)"
 )]
@@ -150,7 +146,6 @@ fn a_pool_with_no_free_extent_still_probes_clean() {
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[test]
-#[ignore = "needs the volume-pool guest's pool: the guest-kit volume-pool step provisions it (prerequisite 1)"]
 #[should_panic(
     expected = "a broken pool must fail its probe (sad_an_unusable_lvm_tool_fails_the_probe_tools_or_device_mapper_unusable)"
 )]
@@ -170,7 +165,6 @@ fn sad_an_unusable_lvm_tool_fails_the_probe_tools_or_device_mapper_unusable() {
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[test]
-#[ignore = "needs the volume-pool guest's pool: the guest-kit volume-pool step provisions it (prerequisite 1)"]
 #[should_panic(
     expected = "a broken pool must fail its probe (sad_a_missing_volume_group_fails_the_probe_volume_group_missing)"
 )]
@@ -190,7 +184,6 @@ fn sad_a_missing_volume_group_fails_the_probe_volume_group_missing() {
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[test]
-#[ignore = "needs the volume-pool guest's pool: the guest-kit volume-pool step provisions it (prerequisite 1)"]
 #[should_panic(
     expected = "a broken pool must fail its probe (sad_an_ambiguous_label_fails_the_probe_volume_group_missing_naming_the_ambiguity)"
 )]
@@ -222,7 +215,6 @@ fn sad_an_ambiguous_label_fails_the_probe_volume_group_missing_naming_the_ambigu
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[test]
-#[ignore = "needs the volume-pool guest's pool: the guest-kit volume-pool step provisions it (prerequisite 1)"]
 #[should_panic(
     expected = "a broken pool must fail its probe (sad_a_scratch_node_that_cannot_appear_fails_the_probe_scratch_create_or_node_failed)"
 )]
@@ -255,7 +247,6 @@ fn sad_a_scratch_node_that_cannot_appear_fails_the_probe_scratch_create_or_node_
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[test]
-#[ignore = "needs the volume-pool guest's pool: the guest-kit volume-pool step provisions it (prerequisite 1)"]
 #[should_panic(
     expected = "a broken pool must fail its probe (sad_a_scratch_volume_held_open_fails_the_probe_scratch_remove_failed)"
 )]

@@ -44,6 +44,7 @@ use crate::guest_kit::cid_bands::{FWD_GUEST_BOUNDARY, INIT_IN_GUEST_LANE};
 use crate::guest_kit::{
     DUMMY_MODULE_GUEST_PATH, GuestFile, GuestImageSpec, GuestInit, GuestKit, GuestKitError,
     LOOPBACK_MODULE_GUEST_PATH, ScriptedBootExtra, WorkDir, host_module_file,
+    prepared_volume_pool_disk,
 };
 use crate::guest_lane::{
     InGuestTests, lane_attempt, run_in_guest_cell_attempt, run_in_guest_owner_cell_attempt,
@@ -687,6 +688,13 @@ impl NestedVmGuestResources {
     const VM_COHORT: Self = Self { memory_mib: VM_COHORT_OUTER_GUEST_MIB, vcpus: 8 };
 }
 
+/// A suite guest's size and, for a `volume-pool` guest, its backing disk template.
+struct GuestSize {
+    memory_mib: u32,
+    vcpus: u8,
+    volume_pool: Option<PathBuf>,
+}
+
 struct GuestRun {
     guest: crate::guest_kit::ScriptedGuest,
     module_paths: Vec<String>,
@@ -700,9 +708,9 @@ impl GuestRun {
         slot: u32,
         extra: Vec<GuestFile>,
         module_paths: Vec<String>,
-        memory_mib: u32,
-        vcpus: u8,
+        size: &GuestSize,
     ) -> Result<Self, GuestKitError> {
+        let GuestSize { memory_mib, vcpus, volume_pool } = size;
         let staging = default_staging_root();
         let work = WorkDir::create(&staging, &format!("fwd-suite-{name}"))?;
         let image = kit.image(
@@ -715,14 +723,18 @@ impl GuestRun {
                 extra,
             },
         )?;
+        let image = match volume_pool {
+            Some(template) => image.with_volume_pool(template.clone()),
+            None => image,
+        };
         let guest = kit.boot_scripted_with(
             &image,
             FWD_GUEST_BOUNDARY.raw(slot),
             &work.path().join("run"),
             &ScriptedBootExtra {
                 cmdline: Vec::new(),
-                memory_mib: Some(memory_mib),
-                vcpus: Some(vcpus),
+                memory_mib: Some(*memory_mib),
+                vcpus: Some(*vcpus),
             },
         )?;
         Ok(Self { guest, module_paths, _work: work })
@@ -1179,6 +1191,7 @@ const NESTED_GUEST_LAUNCH_PASSWD: &str = "root:x:0:0:root:/root:/usr/bin/sh\n";
 /// lane driver (`IN_GUEST_LANE_DRIVERS`) also finds the prepared in-guest cell
 /// binary at its workspace path, as it does on the host.
 fn nested_guest_launch_support(
+    kit: &GuestKit,
     dir: &Path,
     environment: AttemptEnvironment,
     extra: &mut Vec<GuestFile>,
@@ -1210,6 +1223,9 @@ fn nested_guest_launch_support(
         guest: PathBuf::from("/etc/passwd"),
         with_shared_libraries: false,
     });
+    if environment == AttemptEnvironment::VolumePool {
+        volume_pool_guest_support(kit, dir, extra)?;
+    }
     if environment == AttemptEnvironment::NestedLaunchRustc {
         nested_guest_build_support(extra)?;
         stage_prepare_overdrive_init(extra)?;
@@ -1224,6 +1240,54 @@ fn nested_guest_launch_support(
     }
     Ok(())
 }
+
+/// The loadable modules of a volume-pool guest (the guest kernel is the metal
+/// host's own): `dm-flakey` always, `loop` when the kernel ships it as a module.
+const VOLUME_POOL_FLAKEY_MODULE: &str = "/lib/overdrive-testing/modules/dm-flakey.ko";
+const VOLUME_POOL_LOOP_MODULE: &str = "/lib/overdrive-testing/modules/loop.ko";
+
+/// What a `volume-pool` guest carries beyond `nested-launch` (ADR-0313,
+/// upstream-issues N-5): the LVM toolchain with its library closure, `sfdisk`,
+/// `flock`, `dmsetup`, `losetup` (staged with the nested substrate), the
+/// `dm-flakey` module and its loader, the loop module when the kernel ships
+/// one, and the coreutils the journeys call. The static busybox is staged for
+/// every launching guest. The backing disk itself is attached at boot.
+fn volume_pool_guest_support(
+    kit: &GuestKit,
+    dir: &Path,
+    extra: &mut Vec<GuestFile>,
+) -> Result<(), GuestKitError> {
+    for name in ["lvm", "sfdisk", "flock", "dmsetup", "insmod", "dd", "head", "printf"] {
+        extra.push(tool(name));
+    }
+    extra.push(host_module_file(
+        kit,
+        dir,
+        "drivers/md/dm-flakey",
+        Path::new(VOLUME_POOL_FLAKEY_MODULE),
+    )?);
+    let loop_module = format!("/lib/modules/{}/kernel/drivers/block/loop.ko", kit.kernel_release);
+    if Path::new(&loop_module).exists() || Path::new(&format!("{loop_module}.zst")).exists() {
+        extra.push(host_module_file(
+            kit,
+            dir,
+            "drivers/block/loop",
+            Path::new(VOLUME_POOL_LOOP_MODULE),
+        )?);
+    }
+    Ok(())
+}
+
+/// Per-guest setup of a `volume-pool` guest: the directories `lvm` writes to,
+/// and the modules a test needs loaded.
+const VOLUME_POOL_GUEST_SETUP: &str = r"
+set -eu
+mkdir -p /run/lock /run/lvm /etc/lvm
+/usr/bin/insmod /lib/overdrive-testing/modules/dm-flakey.ko
+if [ -f /lib/overdrive-testing/modules/loop.ko ]; then
+  /usr/bin/insmod /lib/overdrive-testing/modules/loop.ko
+fi
+";
 
 /// `rustc --print sysroot` on the runner: the toolchain the metal host's
 /// bodies compile with.
@@ -2030,7 +2094,7 @@ fn nested_cgroup_default_plan(
 ) -> Result<NextestGuestPlan, GuestKitError> {
     let (mut extra, module_paths) = nested_vm_test_support(kit, support_dir)?;
     if environment.launches_guests() {
-        nested_guest_launch_support(support_dir, environment, &mut extra)?;
+        nested_guest_launch_support(kit, support_dir, environment, &mut extra)?;
     }
     Ok(NextestGuestPlan {
         name: "cgroup-default",
@@ -2206,6 +2270,9 @@ fn prepare_nextest_guest(
             // creates both here, before the body makes its own directory under
             // the staging root and before it takes its baseline observation.
             guest.command(&["/usr/bin/sh", "-c", NESTED_GUEST_LAUNCH_NODE_SETUP])?;
+            if plan.environment == AttemptEnvironment::VolumePool {
+                guest.command(&["/usr/bin/sh", "-c", VOLUME_POOL_GUEST_SETUP])?;
+            }
         }
         Ok(())
     } else if plan.cgroup {
@@ -2396,14 +2463,17 @@ fn boot_group_guest(
     plan.extra =
         guest_attempt_files(plan.extra, attempt_files, &source_root, binary_id, test_name)?;
     let staged = started.elapsed();
+    let volume_pool = (plan.environment == AttemptEnvironment::VolumePool)
+        .then(prepared_volume_pool_disk)
+        .transpose()
+        .map_err(|error| kit_failure(&error))?;
     let mut guest = GuestRun::boot_with_files(
         &kit,
         &format!("nextest-{}", plan.name),
         plan.cid,
         std::mem::take(&mut plan.extra),
         std::mem::take(&mut plan.module_paths),
-        plan.memory_mib,
-        plan.vcpus,
+        &GuestSize { memory_mib: plan.memory_mib, vcpus: plan.vcpus, volume_pool },
     )
     .map_err(|error| NextestDispatchFailure::GuestExecution(format!("{error:?}")))?;
     let booted = started.elapsed();

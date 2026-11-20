@@ -291,8 +291,13 @@ impl CloudHypervisorVmm {
             .arg("--cmdline")
             .arg(config.cmdline.as_str())
             .arg("--disk")
-            .arg(DiskAttachment::new(config.rootfs.clone_dest().to_path_buf(), false).to_disk_arg())
-            .arg("--serial")
+            .arg(
+                DiskAttachment::new(config.rootfs.clone_dest().to_path_buf(), false).to_disk_arg(),
+            );
+        if let Some(volume) = &config.volume {
+            cmd.arg(DiskAttachment::volume(volume.device.clone()).to_disk_arg());
+        }
+        cmd.arg("--serial")
             .arg(format!("file={}", config.run_dir.console_log().display()))
             .arg("--console")
             .arg("off")

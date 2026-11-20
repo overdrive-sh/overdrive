@@ -32,6 +32,7 @@
 //! | the static production init binary | `<target>/<musl-triple>/release/overdrive-init` | `vm_fixture::build_overdrive_init_static` |
 //! | an in-guest libtest binary | `guest-kit/in-guest/<package>--<bin>` | `guest_lane::InGuestTests::prepared` |
 //! | the shared-guest owner | `<target>/debug/overdrive-shared-guest-owner` | `placement::attach_shared` (refused as `LaneNotPrepared` naming this path when absent) |
+//! | the volume-pool backing disk template (GPT partition `overdrive-volumes`, PV, VG `overdrive`) | `<target>/guest-kit/volume-pool/pool.img` | `guest_kit::prepared_volume_pool_disk` |
 //! | the existing Quint CLI runtime closure | `<target>/guest-kit/quint-test-runtime` | the exact active Gateway conformance-test placement |
 
 use std::os::unix::fs::PermissionsExt as _;
@@ -223,6 +224,22 @@ fn shared_guest_owner_path(target_dir: &Path) -> PathBuf {
 /// `overdrive-testing` consumes this exact target-scoped directory; it does
 /// not discover or install a tool from the selected-test wrapper.
 const QUINT_RUNTIME_DIR: &str = "guest-kit/quint-test-runtime";
+/// The volume-pool backing disk template (a contract with
+/// `overdrive_testing::guest_kit::prepared_volume_pool_disk`). A volume-pool
+/// guest boots a fresh copy of it as its second disk (ADR-0313).
+const VOLUME_POOL_DISK: &str = "guest-kit/volume-pool/pool.img";
+const VOLUME_POOL_DISK_BYTES: u64 = 4 << 30;
+const SECTOR_BYTES: u64 = 512;
+/// The partition starts at 1 MiB and spans 3 GiB; the rest of the disk is
+/// unallocated, so a test can append a further partition.
+const VOLUME_POOL_PARTITION_START_SECTORS: u64 = 2048;
+const VOLUME_POOL_PARTITION_SECTORS: u64 = (3 << 30) / SECTOR_BYTES;
+/// The partition label the node's probe discovers (kernel `PARTNAME`).
+const VOLUME_POOL_PARTITION_LABEL: &str = "overdrive-volumes";
+const VOLUME_POOL_GROUP: &str = "overdrive";
+const VOLUME_POOL_EXTENT_BYTES: u64 = 4 << 20;
+/// The GPT partition type GUID of a Linux LVM partition.
+const LINUX_LVM_PARTITION_TYPE: &str = "E6D6D379-F507-44C2-A23C-238F2A3DF928";
 const QUINT_RUNTIME_FILES_DIR: &str = "files";
 const QUINT_RUNTIME_MANIFEST: &str = "manifest.v1";
 const QUINT_RUNTIME_FORMAT: &str = "overdrive-quint-test-runtime-v1";
@@ -637,6 +654,8 @@ pub fn run(workspace_root: &Path, target_dir: &Path) -> Result<()> {
         eprintln!("guest-kit-prepare: {} {} -> {}", lane.package, lane.bin, staged.display());
     }
     let quint_runtime = prepare_quint_runtime(target_dir)?;
+    let volume_pool = prepare_volume_pool_disk(target_dir)?;
+    eprintln!("guest-kit-prepare: volume-pool backing disk template {}", volume_pool.display());
     let mut shared_guest_owner_build = Command::new("cargo");
     shared_guest_owner_build
         .args([
@@ -658,6 +677,132 @@ pub fn run(workspace_root: &Path, target_dir: &Path) -> Result<()> {
     }
     eprintln!("guest-kit-prepare: kernel {release}, target {triple}: the lane is prepared");
     Ok(())
+}
+
+/// A loop device over the pool partition's byte range, detached on drop.
+struct LoopDevice(String);
+
+impl Drop for LoopDevice {
+    fn drop(&mut self) {
+        // Detach failure leaves a loop device on the lane host; it names itself.
+        if let Err(error) = run_step(
+            Command::new("losetup").args(["-d", &self.0]),
+            &format!("detaching {}", self.0),
+        ) {
+            eprintln!("guest-kit-prepare: {error}");
+        }
+    }
+}
+
+/// Creates the volume-pool backing disk template: a sparse raw disk holding a
+/// wiped GPT partition labelled `overdrive-volumes` with a physical volume and
+/// the volume group `overdrive` (4 MiB extents). Overdrive creates none of it
+/// (ADR-0313). Every volume-pool guest boots a fresh copy.
+fn prepare_volume_pool_disk(target_dir: &Path) -> Result<PathBuf> {
+    let prepared = target_dir.join(VOLUME_POOL_DISK);
+    let dir = prepared.parent().ok_or_else(|| eyre!("no parent of {}", prepared.display()))?;
+    std::fs::create_dir_all(dir).wrap_err_with(|| format!("creating {}", dir.display()))?;
+    let staging = dir.join("pool.img.staging");
+    let lvm_dir = dir.join("lvm-system-dir");
+    for path in [&prepared, &staging] {
+        if path.exists() {
+            std::fs::remove_file(path)
+                .wrap_err_with(|| format!("clearing stale {}", path.display()))?;
+        }
+    }
+    if lvm_dir.exists() {
+        std::fs::remove_dir_all(&lvm_dir)
+            .wrap_err_with(|| format!("clearing {}", lvm_dir.display()))?;
+    }
+    std::fs::create_dir_all(&lvm_dir)
+        .wrap_err_with(|| format!("creating {}", lvm_dir.display()))?;
+    std::fs::File::create(&staging)
+        .and_then(|file| file.set_len(VOLUME_POOL_DISK_BYTES))
+        .wrap_err_with(|| format!("creating the sparse disk {}", staging.display()))?;
+
+    let script = format!(
+        "label: gpt\nstart={VOLUME_POOL_PARTITION_START_SECTORS}, size={VOLUME_POOL_PARTITION_SECTORS}, type={LINUX_LVM_PARTITION_TYPE}, name=\"{VOLUME_POOL_PARTITION_LABEL}\"\n"
+    );
+    let mut sfdisk = Command::new("sfdisk")
+        .arg(&staging)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .wrap_err("spawning sfdisk (the lane host needs util-linux)")?;
+    std::io::Write::write_all(
+        &mut sfdisk.stdin.take().ok_or_else(|| eyre!("sfdisk has no stdin"))?,
+        script.as_bytes(),
+    )
+    .wrap_err("writing the partition table script to sfdisk")?;
+    let partitioned = sfdisk.wait_with_output().wrap_err("waiting for sfdisk")?;
+    if !partitioned.status.success() {
+        bail!("sfdisk failed: {}", String::from_utf8_lossy(&partitioned.stderr));
+    }
+
+    // The loop device covers exactly the partition's byte range, so the PV
+    // label lands at the partition-relative offset the guest will read it at,
+    // with no dependence on host partition scanning or udev.
+    let partition_offset = VOLUME_POOL_PARTITION_START_SECTORS * SECTOR_BYTES;
+    let partition_bytes = VOLUME_POOL_PARTITION_SECTORS * SECTOR_BYTES;
+    let attached = run_step(
+        Command::new("losetup")
+            .args([
+                "--find",
+                "--show",
+                "--offset",
+                &partition_offset.to_string(),
+                "--sizelimit",
+                &partition_bytes.to_string(),
+            ])
+            .arg(&staging),
+        "attaching the pool partition to a loop device",
+    )?;
+    let device = LoopDevice(String::from_utf8_lossy(&attached.stdout).trim().to_owned());
+    let config = format!(
+        "devices {{ filter = [ \"a|^{}$|\", \"r|.*|\" ] use_devicesfile = 0 }} activation {{ udev_sync = 0 udev_rules = 0 monitoring = 0 }}",
+        device.0
+    );
+    let lvm = |args: &[&str], what: &str| {
+        run_step(
+            Command::new("lvm")
+                .args(args)
+                .args(["--config", &config])
+                .env("LVM_SYSTEM_DIR", &lvm_dir),
+            what,
+        )
+    };
+    lvm(&["pvcreate", "--yes", "--force", &device.0], "creating the pool physical volume")?;
+    let extent = format!("{VOLUME_POOL_EXTENT_BYTES}b");
+    lvm(
+        &["vgcreate", "--physicalextentsize", &extent, VOLUME_POOL_GROUP, &device.0],
+        "creating the pool volume group",
+    )?;
+    let reported = lvm(
+        &[
+            "vgs",
+            "--noheadings",
+            "--nosuffix",
+            "--units",
+            "b",
+            "-o",
+            "vg_extent_size",
+            VOLUME_POOL_GROUP,
+        ],
+        "reading the pool volume group's extent size",
+    )?;
+    let reported = String::from_utf8_lossy(&reported.stdout).trim().to_owned();
+    if reported != VOLUME_POOL_EXTENT_BYTES.to_string() {
+        bail!(
+            "the pool volume group has extent size {reported:?} bytes, not {VOLUME_POOL_EXTENT_BYTES}"
+        );
+    }
+    drop(device);
+    std::fs::remove_dir_all(&lvm_dir)
+        .wrap_err_with(|| format!("removing {}", lvm_dir.display()))?;
+    std::fs::rename(&staging, &prepared)
+        .wrap_err_with(|| format!("publishing {}", prepared.display()))?;
+    Ok(prepared)
 }
 
 fn prepare_quint_runtime(target_dir: &Path) -> Result<Option<(String, String, String, usize)>> {

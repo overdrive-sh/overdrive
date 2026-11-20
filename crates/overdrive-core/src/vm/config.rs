@@ -218,9 +218,7 @@ impl KernelImage {
 pub struct DiskAttachment {
     path: PathBuf,
     readonly: bool,
-    #[allow(dead_code, reason = "DISTILL RED scaffold: to_disk_arg renders serial in DELIVER")]
     serial: Option<&'static str>,
-    #[allow(dead_code, reason = "DISTILL RED scaffold: to_disk_arg renders direct in DELIVER")]
     direct: bool,
 }
 
@@ -233,9 +231,6 @@ impl DiskAttachment {
     /// The workload volume's attachment: writable, `direct` on, serial
     /// [`VOLUME_DISK_SERIAL`] (ADR-0315). The one constructor of a serial-tagged
     /// or direct attachment.
-    ///
-    /// SCAFFOLD: true — the fields are set, but `to_disk_arg` still renders the
-    /// rootfs shape until DELIVER renders `direct` and `serial`.
     #[must_use]
     pub const fn volume(device: PathBuf) -> Self {
         Self { path: device, readonly: false, serial: Some(VOLUME_DISK_SERIAL), direct: true }
@@ -249,6 +244,13 @@ impl DiskAttachment {
         let mut arg = format!("path={},image_type=raw", self.path.display());
         if self.readonly {
             arg.push_str(",readonly=on");
+        }
+        if self.direct {
+            arg.push_str(",direct=on");
+        }
+        if let Some(serial) = self.serial {
+            arg.push_str(",serial=");
+            arg.push_str(serial);
         }
         arg
     }

@@ -73,7 +73,7 @@ use overdrive_core::guest_transport::{GUEST_FORWARDER_MODULE_PATH, GuestCid};
 use overdrive_core::traits::vmm::{VmControl, Vmm, VmmExit};
 use overdrive_core::vm::config::{
     Gid, HostArch, KernelCmdline, KernelImage, MemoryPlan, OVERDRIVE_VMM_UID, RootfsPlan, VmConfig,
-    VmConfinement, VmRunDir, VmmIdentity,
+    VmConfinement, VmRunDir, VmmIdentity, VolumeAttachment,
 };
 use overdrive_host::CloudHypervisorVmm;
 
@@ -403,6 +403,20 @@ pub struct GuestImage {
     pub rootfs: PathBuf,
     /// Which PID 1 behavior this image carries.
     pub init: GuestInit,
+    /// The volume-pool backing disk template (ADR-0313): when set, every boot of
+    /// this image attaches a fresh copy of it as the guest's second disk. `None`
+    /// is a guest with no pool.
+    pub volume_pool: Option<PathBuf>,
+}
+
+impl GuestImage {
+    /// This image with the volume-pool backing disk `template` (see
+    /// [`prepared_volume_pool_disk`]) attached to every guest booted from it.
+    #[must_use]
+    pub fn with_volume_pool(mut self, template: PathBuf) -> Self {
+        self.volume_pool = Some(template);
+        self
+    }
 }
 
 /// A provisioned guest kit.
@@ -621,7 +635,7 @@ impl GuestKit {
         vm_fixture::mknod_char_device(&stage.join("dev/null"), 1, 3, 0o666)?;
         let rootfs = dir.join(format!("{name}.ext4"));
         mkfs(&stage, &rootfs)?;
-        Ok(GuestImage { rootfs, init: spec.init })
+        Ok(GuestImage { rootfs, init: spec.init, volume_pool: None })
     }
 
     /// Launches a VMM over `boot.image` at `boot.cid`, through the
@@ -681,8 +695,14 @@ impl GuestKit {
         }
         let vcpus =
             NonZeroU8::new(boot.vcpus).unwrap_or_else(|| panic!("a guest has at least one vCPU"));
+        let volume = boot
+            .image
+            .volume_pool
+            .as_deref()
+            .map(|template| fresh_volume_pool_disk(template, boot.run_dir, boot.cid))
+            .transpose()?;
         let config = VmConfig {
-            volume: None,
+            volume,
             alloc: alloc.clone(),
             kernel,
             // Keep the production FICLONE target on the caller's
@@ -1258,6 +1278,49 @@ pub(crate) fn prepared(path: PathBuf, artifact: &str) -> Result<PathBuf, GuestKi
     } else {
         Err(GuestKitError::LaneNotPrepared { artifact: artifact.to_owned(), path })
     }
+}
+
+/// The volume-pool backing disk template the lane setup step prepared.
+///
+/// A raw disk holding a wiped GPT partition labelled `overdrive-volumes` with
+/// the physical volume and the volume group `overdrive` (ADR-0313), at the
+/// `xtask::guest_kit_prepare` contract path
+/// `<target>/guest-kit/volume-pool/pool.img`.
+///
+/// # Errors
+///
+/// [`GuestKitError::LaneNotPrepared`] when the setup step left none.
+pub fn prepared_volume_pool_disk() -> Result<PathBuf, GuestKitError> {
+    let root = vm_fixture::workspace_root();
+    let disk = vm_fixture::cargo_target_dir(&root).join("guest-kit/volume-pool/pool.img");
+    prepared(disk, "volume-pool backing disk")
+}
+
+/// A fresh, private copy of the backing disk `template` for the guest at `cid`,
+/// owned by the confined VMM identity (it opens the disk after dropping to it).
+fn fresh_volume_pool_disk(
+    template: &Path,
+    run_dir: &Path,
+    cid: u32,
+) -> Result<VolumeAttachment, GuestKitError> {
+    let disk = run_dir.join(format!("volume-pool-{cid}.img"));
+    let copied = Command::new("cp")
+        .args(["--sparse=always", "--reflink=auto"])
+        .arg(template)
+        .arg(&disk)
+        .output()
+        .map_err(staging(format!("spawning cp for {}", disk.display())))?;
+    if !copied.status.success() {
+        return Err(GuestKitError::Staging {
+            detail: format!("copying {} to {}", template.display(), disk.display()),
+            source: io::Error::other(String::from_utf8_lossy(&copied.stderr).into_owned()),
+        });
+    }
+    std::os::unix::fs::chown(&disk, Some(OVERDRIVE_VMM_UID), Some(OVERDRIVE_VMM_UID))
+        .map_err(staging(format!("giving {} to the VMM identity", disk.display())))?;
+    fs::set_permissions(&disk, fs::Permissions::from_mode(0o600))
+        .map_err(staging(format!("restricting {}", disk.display())))?;
+    Ok(VolumeAttachment { device: disk })
 }
 
 /// The module the lane setup step built for `release` from this
