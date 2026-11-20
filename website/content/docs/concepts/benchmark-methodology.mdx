@@ -39,6 +39,46 @@ The histogram buckets are defined bit by bit, so two implementations produce byt
 
 The runner never drops or zero-fills a failure. A failed replicate, a failed metric and a metric that does not apply are each recorded and counted. A metric that does not apply to an arm appears as `absent` with its reason in the report, for example "no connect program is attached on this arm". A series metric can be partly measured: a VM lifecycle replicate that launches four workloads may complete a stage for three. The three values feed the statistics and the one failure is counted beside them.
 
+## The guest substrate
+
+A native number describes a component running on the test machine. A component that runs inside a workload VM in production has a different kernel, a different scheduler and a different clock, so its native number describes the wrong place. A benchmark that declares `substrate = guest` measures the component inside a guest. Every rule above applies to it unless this section says otherwise.
+
+### A guest is never nested
+
+The benchmark process launches the guest directly on the exclusively held test machine. It never runs inside another guest, because production workload VMs are not nested and a nested guest would add a virtualization layer the component never sees. The record states `guest launch: metal host (not nested)`. A family that itself launches VMs stays on the native substrate, for the same reason. Issue [#347: nested virtualization for VM workloads](https://github.com/overdrive-sh/overdrive/issues/347) tracks that case.
+
+### A fresh guest for every replicate
+
+Every replicate boots its own guest, and the guest ends with the replicate. A guest carries state a fresh fixture must not inherit: the kernel's socket tables, the page cache, and the component's own tables. Sharing one guest across replicates would make replicate 30 differ from replicate 1 for reasons the A/A control cannot separate. One guest lifecycle costs about 1.1 s on the test machine, measured with a scripted test peer in the guest, so the isolation costs about a minute over 60 replicates. The `guest-flow-forwarding` family boots the production init and also runs a workload in each guest. Its 30 replicates took 69 s, about 2.3 s each. The record states `guest boot: fresh guest per replicate`, the only value it accepts.
+
+### The host is checked before any guest boots
+
+The runner applies the full host list to the real machine first. A drifted host is refused and no guest boots. The guest's own settings are not pinned and never refuse. A guest has no frequency, boost or SMT controls to read, so the report prints each as `absent: not visible from a guest`.
+
+### What a guest cannot see
+
+A guest cannot see the host's CPU governor, SMT or boost state. It sees no BPF program statistics, because the runner's `BPF_ENABLE_STATS` descriptor covers the host kernel and not the guest's, so a guest benchmark declares no `bpf_stats` and its record states `off`. The loopback canary is a host measurement, and it says nothing about the guest. The guest's vCPUs are unpinned, so the host scheduler decides which CPUs they run on. Issue [#368: pin the benchmark guest's vCPUs to dedicated host CPUs](https://github.com/overdrive-sh/overdrive/issues/368) tracks a pinned mode, and issue [#371: read BPF program run statistics inside a guest](https://github.com/overdrive-sh/overdrive/issues/371) tracks statistics.
+
+### The guest view comes from the first reporting replicate
+
+The record states what the guest looked like in one `guest_observed` line: its kernel, clocksource, vCPU count, memory size and the digests of the staged artifacts. The runner writes the line when the first replicate reports a view, ahead of that replicate's line. It does not boot a probe guest first, and it does not compare later replicates with the first. The operator fixes the guest's kernel, artifacts and shape for the run, and the run holds the test machine exclusively, so nothing a later replicate reports can differ. The guest's vCPU count and memory size are the shape the guest kit booted, and they are fixed. Issue [#369: let a family declare the guest's vCPU count and memory size](https://github.com/overdrive-sh/overdrive/issues/369) tracks declaring another shape.
+
+### Artifacts are recorded by digest
+
+The benchmark form does not rebuild the guest artifacts. `cargo xtask guest-kit-prepare` stages the guest's init process, its test peer and the forwarding kernel module, so the commit a record names does not identify what ran. The record names each artifact by SHA-256 digest. A reader compares the digests with a fresh `guest-kit-prepare` at the record's commit. The run does not refuse on a mismatch.
+
+### The guest clock
+
+A guest duration is measured by the guest's own `CLOCK_MONOTONIC` and is never added to or subtracted from a host stamp. This is the clock rule above applied to the whole measured interval.
+
+### Failure accounting
+
+A guest that cannot boot, dies or returns no intact result is a failed replicate. The run continues and the failure is counted. An unprepared guest kit is the same failure for every replicate: no guest boots, the run exits 0, and the report shows `replicates ok: 0`. Exit status 0 does not mean any replicate was ok, so read the count. The runner writes each replicate's console beside the record in every outcome, so a failed guest can be diagnosed. Consoles are not committed.
+
+### Never compare substrates
+
+A guest record and a native record describe different places. The report tool compares only the arms of one record, and no command takes two records.
+
 ## Clocks
 
 Every instant that crosses a boundary is stamped on the host with `CLOCK_MONOTONIC_RAW`, which network time adjustments do not slew. A stage that happens inside a guest VM is a duration the guest measured. It is never added to or subtracted from a host instant, because the guest's clocks have a different zero point. A stage the guest cannot report is absent. The DNS responder's own service time uses the monotonic `Clock::now` the responder is constructed with, and the record names it. BPF program time is the kernel's per-program `run_time_ns` over `run_count`. It is reported as a separate metric and never mixed with wall time.
@@ -59,4 +99,4 @@ A family states whether it measures cold or warm behavior. A warm family runs un
 
 ## What the report does not do
 
-The report compares the arms of one record and nothing else. It does not compare two records and it does not compare a record against a baseline. Records taken in different execution environments are never compared, and the runner has no command that takes two records. The only execution environment is the native test machine.
+The report compares the arms of one record and nothing else. It does not compare two records and it does not compare a record against a baseline. Records taken in different execution environments are never compared, and the runner has no command that takes two records. There are two execution environments: the native test machine and the guest substrate.

@@ -1,0 +1,107 @@
+---
+title: "Measuring a component that runs inside a workload VM"
+description: "A native benchmark number describes the wrong place for code that runs in a guest. We added a guest substrate to the benchmark runner, and measured the guest flow owner's forwarding path with it."
+date: 2026-11-20
+author: The Overdrive team
+summary: A fresh guest for every replicate, launched directly on the test machine and never nested. This post covers what each choice cost, what the first family measured, and why we do not yet explain its two-humped result.
+---
+
+Overdrive's benchmark runner measures components on a shared test machine, a physical x86_64 server with KVM. The [first four families](/blog/measuring-hooks-vms-dns-and-mtls-on-one-runner) all ran on that machine itself, which we call the native substrate. That works for a BPF hook or a DNS responder. It does not work for code that runs inside a workload VM in production.
+
+The code we wanted to measure is the guest flow owner. It runs inside every workload VM as part of `overdrive-init`, the guest's PID 1. It pairs flows that arrive over vsock, the host-to-guest socket transport, with the workload's own sockets. A kernel module, `ovd_fwd`, then forwards bytes between each pair. A native number for that code would describe a different kernel, a different scheduler and a different clock than the ones it runs on. Until now the only way to get a guest number was a hand-written spike with its own harness, which is the situation the runner was built to end.
+
+So we added a second substrate, `guest`. A benchmark that declares `substrate = guest` measures its component inside a guest, with the same statistical protocol, record and report as a native one. The how-to is [Write and run a benchmark](/docs/how-to/write-and-run-a-benchmark), and the rules are in [Benchmark methodology](/docs/concepts/benchmark-methodology#the-guest-substrate). This post covers the choices.
+
+## Why not run the benchmark inside a test guest
+
+The repository already has a way to run code in a guest: the test guests that our integration tests run in. The shortcut was to run the whole benchmark body inside one of them.
+
+We rejected it. A test guest runs a body inside a VM on a host, and any VM the body then launches would nest inside it. Production workload VMs do not nest. They run directly on the host, so a nested guest adds a virtualization layer that the measured component never sees. The runner instead launches each replicate's guest itself, directly on the exclusively held test machine, and the record states `guest launch: metal host (not nested)`.
+
+The same reasoning keeps VM-launching families, such as the VM lifecycle family, on the native substrate. A guest that launches VMs measures nested virtualization. Issue [#347: nested virtualization for VM workloads](https://github.com/overdrive-sh/overdrive/issues/347) tracks that case.
+
+The smoke test of a guest family does run inside a test guest, with the placement `smoke(guest = "cgroup-default", profile = "nested-launch")`. The smoke test takes one replicate and asserts no timing. It keeps the benchmark from rotting between measured runs and it never produces a number.
+
+## One guest per run or a fresh guest per replicate
+
+A guest carries state. The kernel's socket tables, the page cache, the flow owner's own tables and the forwarder module's pair state all survive from one flow to the next. The runner's rule is that every replicate builds a fresh fixture, so a guest benchmark had two ways to honour it.
+
+The cheap way is one guest for the whole run, with each replicate a fixture inside it. The honest way is a fresh guest for every replicate. We measured what the honest way costs before choosing. The measurement used a guest that ran a scripted test peer, not the production init the family later boots. A whole guest lifecycle on the test machine, from building the image through boot, one command and shutdown, took a median 1.08 s and a p95 of 1.13 s over 90 cycles with no failures. Sixty fresh guests would cost about 65 s on that basis. One guest with 60 commands inside it cost about 1.2 s.
+
+We chose a fresh guest per replicate. The saving from sharing is the lifecycle floor, about 1.1 s per replicate or about 33 s over 30. The cost is that replicate 30 would differ from replicate 1 for reasons the A/A control, the second run of the reference arm that sets the noise floor, cannot separate from a real effect. Half a minute buys a result whose replicates are independent. The delivered family, which boots the production init and also runs a workload and returns its samples in each guest, took 69 s for 30 replicates, about 2.3 s each. The record states `guest boot: fresh guest per replicate`.
+
+## Console or vsock for returning the samples
+
+The in-guest program measures on the guest's own clock and must hand its samples to the host. We measured two channels through the benchmark form, in a guest with a scripted test peer. Every block arrived intact on both, with the count and a checksum recomputed on the host.
+
+| Samples | Guest console | vsock |
+|---|---|---|
+| 1,000 | 3.1 KB in 61 ms | 8 KB in 8.2 ms |
+| 100,000 | 307 KB in 5.15 s | 800 KB in 14.9 ms |
+| 1,000,000 | 3.07 MB in 52.3 s | 8 MB in 88 ms |
+
+vsock is faster at every size we measured: about 7 times at 1,000 samples, about 350 times at 100,000 and about 600 times at 1,000,000. We chose the console anyway. The console runs at about 59 KB/s and the cost lands after the timed phase, so it never enters a measured interval. Our family returns about 5,000 values per replicate, a block of about 41 KB. The console printed one in 0.65 s on the production init. We did not time that size on vsock. It moved 8 KB in 8.2 ms and 800 KB in 14.9 ms, so a 41 KB block takes somewhere between those. Over 30 replicates the console costs about 20 s of the 69 s run.
+
+In exchange, the console needs no host listener, no port handed to the program, and no thread reading the connection before the program starts. The vsock measurement showed why that last part matters. Our first 100,000-sample runs on vsock timed out, because the guest blocks once the vsock buffer fills while the host is still waiting for the program to exit. The host had to read on a thread started before the command. The console has no such coupling. Its samples are also the raw copy we keep, which matters below.
+
+## The leading newline
+
+The first console design assumed the program's block would start on its own line. We tested that with a spike program against the real guest init, not the scripted peer, over 180 replicates. Every block that arrived was complete, with no tail loss and no mismatch. But in 24 of 60 replicates run without a leading newline the host found no begin line.
+
+The guest's init process logs to the same console in unterminated fragments, and it was still writing the last flow-teardown log lines as the program printed. When a fragment had no newline yet, the program's first line glued onto it, and a parser that matches the begin line only at the start of a line missed it. The splice only ever prefixed the first line.
+
+We considered a tolerant parser that finds the begin marker anywhere in a line. It recovers every block, but it also accepts text from any unrelated line that happens to contain the marker. We chose to fix the cause instead. The program writes one newline before its block, which terminates whatever fragment is open. In the spike program's 30 replicates with the newline, none were lost. Thirty trials bound the remaining splice rate at about 10% with 95% confidence, not at zero. The delivered family's run then returned 30 of 30 intact blocks, which is a second sample and not a proof. The host-side count and checksum are the defence against a splice inside a block, and they fail the replicate rather than shortening the series.
+
+## A probe guest, or the guest's view from the replicates
+
+A guest cannot see the host's CPU governor, SMT or boost state, so the host's pinned settings cannot be checked from inside it. We apply the full host list to the real machine before any guest boots, and a drifted host is refused with no guest started. For the guest's own kernel, clocksource and artifacts, we weighed booting a probe guest after the host check to read them before the first sample.
+
+The probe costs one more boot per run, about 1.1 s on a run that took 69 s. It also needs a port, an error type and two refusal settings in the runner, all to catch a stale guest kernel. We chose to take the view from the replicates. The first replicate to report one fixes the run's guest view, and the runner writes it as one `guest_observed` line. Later replicates are not compared with it.
+
+This rests on one claim. The operator fixes the guest's kernel, artifacts and shape, and the run holds the test machine exclusively, so nothing a later replicate reports can differ. The cost shows up in one failure. An unprepared guest kit does not refuse the run. The guest kit is the test tooling that builds a guest image and boots it under Cloud Hypervisor, the virtual machine monitor Overdrive runs. We removed the staged test peer and ran the benchmark: all 30 replicates failed, each naming `cargo xtask guest-kit-prepare`, no guest booted, the run exited 0, and the report read `replicates ok: 0`. A run that exits 0 and measured nothing is a trap for a script that checks only the exit status. The docs say so.
+
+Because the commit does not identify what ran in the guest, the record also names each staged artifact by its SHA-256 digest: the guest's init, the test peer and the `ovd_fwd` module. The runner does not refuse on them. A reader compares them with a fresh `guest-kit-prepare` at the record's commit.
+
+## Where the guest launching lives
+
+Launching a guest is the guest kit's job, and the benchmark core, `overdrive-bench`, depends on the kit only for its tests. We considered a guest interface inside the core with a production implementation behind it. It would have made the core, and the `bench-report` tool that only reads records, compile the guest kit. A spike crate under `spike-scratch/` would also have had to depend on the families crate and its control-plane closure.
+
+The family launches its own guests instead. The core gains a record vocabulary and two methods on the handle each replicate's body receives. One reports the guest's view and the other hands over the replicate's console text. Neither adds a dependency, and a spike crate declares a guest benchmark by calling the same entry point as a native one.
+
+The console is also the evidence. A series metric keeps raw values only up to 1,000 per replicate and a histogram above that, so a replicate that returned 5,000 values keeps its only raw copy in its console. Every replicate's console is written beside the record, in every outcome, and git ignores it. The runner writes it after the body returns. Writing it from inside the body would have made the body hold a borrow of the record sink, and a body that holds that borrow cannot move between threads.
+
+## What the first family measures
+
+The first guest family, `guest-flow-forwarding`, boots a guest whose PID 1 is the production `overdrive-init`, with the `ovd_fwd` and vsock loopback modules loaded. A program in the guest plays two roles. It is the host's flow peer, connecting over vsock to the guest's inbound port. It is also the application, listening on the workload's address. The owner pairs one flow, and the program sends 200 unrecorded warm-up round trips and then 5,000 timed closed-loop 64-byte round trips, each a write on the vsock side and the echoed reply read on the vsock side. The family changes no production code and adds no test-only branch to `overdrive-init`.
+
+We ran 30 replicates on an AMD EPYC 8024P with Linux 7.0.0-38, a fresh guest of 2 vCPUs and 512 MiB each. The run took 69 s, about 2.3 s per replicate, with no failed replicates. Over the 150,000 pooled round trips:
+
+| p50 | p90 | p95 | p99 |
+|---|---|---|---|
+| 50.5 µs | 57.2 µs | 62.3 µs | 74.2 µs |
+
+The percentiles are histogram-derived, within 3.125% of the exact values. The run had uncommitted changes in its tree, and its record says so. The result and its report are in `benchmarks/results/guest-flow-forwarding/605495babcbab0f445b702c3/`.
+
+A second clean run, 36 minutes later on the same machine, finished 30 of 30 replicates and gave a different pooled result:
+
+| p50 | p90 | p95 | p99 |
+|---|---|---|---|
+| 40.0 µs | 54.0 µs | 60.0 µs | 71.7 µs |
+
+Its report is in `benchmarks/results/guest-flow-forwarding/62cf21ac0f4b8793e31ec89d/`. The two p50s differ by about 10 µs.
+
+We also checked the failure paths against real guests, one run each. A host with `bpf_stats_enabled` set to 1 was refused with no guest booted. A benchmark process killed with `SIGKILL` mid-run left no VMM process and no holder of `/dev/vhost-vsock`. That comes from one probe on the machine after the kill, which we report and did not commit. The record stores no vsock context ID per replicate, so reuse is an inference. The next run of 30 replicates cycled through 16 context IDs with no launch failure. A guest stopped with `SIGSTOP` failed one replicate with a no-beacon timeout after 60 s, kept its console, and the other 29 replicates finished.
+
+## What it does not prove
+
+The pooled p50 describes no replicate. The 30 per-replicate medians fall into two clusters of 15. The low cluster sits at 39.5 to 39.7 µs and the high cluster at 50.9 to 52.2 µs. The median of the medians, 45.3 µs, describes neither. The pooled p50, 50.5 µs, sits at the lower edge of the high cluster, whose lowest median is 50.9 µs, and within the 3.125% histogram error of it. Pooled medians from our earlier probe runs ranged from 40.7 to 51.3 µs, which fits the same two levels.
+
+The second run shows the same two levels with a different mix. Binning its replicate histograms, about 20 of its 30 per-replicate medians sit near the low level and about 10 near the high one. A pooled p50 follows whichever level holds half the samples. With 15 replicates at each level it lands at the lower edge of the high cluster, and with 20 at the low level it lands in the low one. We read the roughly 10 µs gap between the two runs as the same split showing through, not as a change in the component, but we have not tested that.
+
+We have not explained the split. Our hypothesis is that the guest's two vCPUs are unpinned, so the host scheduler decides where they run, and where it places them may differ from one guest to the next. We have not tested that. Issue [#368: pin the benchmark guest's vCPUs to dedicated host CPUs](https://github.com/overdrive-sh/overdrive/issues/368) tracks a pinned mode, and a pinned run is the experiment that would confirm or kill the hypothesis. Until then, read the two clusters as the finding and the pooled percentiles as a summary of both.
+
+The measured path is narrow. It covers the guest side only: the vsock leg runs over loopback inside the guest, so it excludes the host's vhost-vsock path, the host flow owner, guest-originated TCP flows and datagram flows. After the pair is attached, the number is the forwarder under an owner-established pair. The owner's accept-and-pair work is setup and is not measured. Issue [#370: benchmark the host-driven vsock leg and the other flow kinds of the guest flow owner](https://github.com/overdrive-sh/overdrive/issues/370) tracks the rest.
+
+Other limits are plain facts. The guest shape is fixed at 2 vCPUs and 512 MiB ([#369: let a family declare the guest's vCPU count and memory size](https://github.com/overdrive-sh/overdrive/issues/369)). A guest benchmark declares no BPF statistics, because the runner's statistics descriptor covers the host kernel and not the guest's ([#371: read BPF program run statistics inside a guest](https://github.com/overdrive-sh/overdrive/issues/371)). We have run the family twice cleanly, on one machine on one day, so we have no measure of how stable the medians are across days. A guest record and a native record are never compared, and the report tool compares only the arms of one record.
+
+The number is a first look at a component that had none. It tells us the forwarded round trip sits around 40 to 52 µs in a guest, and it tells us the next experiment to run.

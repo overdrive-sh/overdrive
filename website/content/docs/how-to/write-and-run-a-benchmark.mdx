@@ -38,17 +38,17 @@ The attribute takes these keys:
 | Key | Meaning |
 | --- | --- |
 | `family` | The family name, in kebab case. A family has exactly one benchmark. |
-| `substrate` | The execution environment, written as a bare identifier. The only accepted value is `native`: the test machine itself, with no namespace and no wrapper. |
+| `substrate` | The execution environment, written as a bare identifier. `native` is the test machine itself, with no namespace and no wrapper. `guest` is a guest VM that the benchmark process launches on the test machine. See [Declare a guest benchmark](#declare-a-guest-benchmark). |
 | `arms` | One or more unique arm names. The first arm is the reference arm. Other arms compare against it. |
 | `replicates` | Replicates per arm. Fewer than 9 is a build error. |
 | `profile(name = ..., preparation = ...)` | A workload variant. Repeat the key for more profiles. With none, the benchmark has one profile named `default`. |
 | `metric(name = ..., unit = ..., table = ...)` | One recorded metric. The unit is one of `ns`, `bytes`, `bytes_per_second`, `qps`, `ratio` or `count`. Add `series` for a metric that records many values per replicate. |
-| `bpf_stats` | Holds per-process BPF run statistics for the run. |
+| `bpf_stats` | Holds per-process BPF run statistics for the run. A guest benchmark declares none. |
 | `reference(...)` | A value from earlier evidence, printed under the metric's table with its label and never used as a comparison. |
-| `clock(...)` | Names the service clock (`injected_monotonic`) and guest clock (`init_elapsed_ms`) the family uses. |
+| `clock(...)` | Names the service clock (`injected_monotonic`) and guest clock (`init_elapsed_ms` or `guest_monotonic`) the family uses. |
 | `smoke(...)` | The placement of the generated smoke test. Required. |
 
-An unknown key, a repeated key, a malformed value, or a substrate other than `native` is a build error that names the key.
+An unknown key, a repeated key, a malformed value, or a substrate other than `native` or `guest` is a build error that names the key.
 
 Inside the function, build a fresh fixture, do the work, and report with these `Replicate` methods:
 
@@ -64,9 +64,52 @@ Inside the function, build a fresh fixture, do the work, and report with these `
 
 Return `Err(ReplicateFailure::fixture(..))` when the fixture cannot be built and `Err(ReplicateFailure::measurement(..))` when a measurement is invalid. A failed replicate does not stop the run. It appears in the report and never feeds a statistic.
 
+## Declare a guest benchmark
+
+A component that runs inside a workload VM in production cannot be described by a native number, because the native test machine has a different kernel state, clock and scheduler. To measure it, declare `substrate = guest`. The benchmark process launches each replicate's guest itself, directly on the test machine. The guest is never nested inside another guest. For why, see [Benchmark methodology](/docs/concepts/benchmark-methodology#the-guest-substrate).
+
+The first guest family in the repository, `guest-flow-forwarding`, declares:
+
+```rust
+#[overdrive_bench(
+    family = "guest-flow-forwarding",
+    substrate = guest,
+    arms = ["forwarding"],
+    replicates = 30,
+    metric(name = "forwarded_round_trip_ns", unit = ns, table = "forwarded-path", series),
+    clock(guest = guest_monotonic),
+    smoke(guest = "cgroup-default", profile = "nested-launch"),
+)]
+fn guest_flow_forwarding(rep: &mut Replicate) -> Result<(), ReplicateFailure> {
+    // Boot a fresh guest, run the in-guest program, read its console,
+    // report the guest view, retain the console, record the series.
+    Ok(())
+}
+```
+
+A guest benchmark differs from a native one in four places:
+
+- **The clock.** Name the guest's clock with `clock(guest = guest_monotonic)`. The in-guest program reads the guest's own `CLOCK_MONOTONIC` and returns durations. A guest duration is never combined with a host timestamp.
+- **No BPF statistics.** Do not declare `bpf_stats`. The statistics descriptor the runner holds covers the host kernel and not a guest kernel, so a guest record states `bpf stats: off`.
+- **The smoke placement.** Use `smoke(guest = "cgroup-default", profile = "nested-launch")`. The smoke test runs the body once in a test guest, and the body launches its own guest inside it. The profile stages everything the inner guest needs. The smoke test asserts no timing, and the measured run never uses this guest.
+- **The body.** The body boots one fresh guest through the guest kit in `overdrive-testing` (the test tooling that builds a guest image and boots it under Cloud Hypervisor), runs an in-guest program, and parses its console after the guest exits. It then calls two `Replicate` methods:
+
+| Method | Records |
+| --- | --- |
+| `report_guest_view(view)` | What the guest reported: its kernel, clocksource, vCPU count, memory size, and the digests of the staged artifacts. A replicate of a guest benchmark that reports no view fails. |
+| `retain_console(text)` | The replicate's guest console, written beside the record after the body returns. A second call by the same replicate fails it. |
+
+The in-guest program returns its samples on the console: two lines `guest-reading: kernel=<value>` and `guest-reading: clocksource=<value>`, then one framed block per series metric made of a line `bench-series-begin: <metric>`, lines `bench-values: <metric> <v,...>` of at most 16 values each, and a line `bench-series-end: <metric> <checksum>`, where the checksum is the SHA-256 of the values as little-endian 64-bit integers. The program writes one newline before its first line, because the guest's init process can leave an unterminated log fragment on the console, and a line glued to that fragment is not found. The host half checks the count and the checksum and fails the replicate on any mismatch.
+
+A guest that cannot boot, dies, or returns no intact block is a failed replicate. The run continues.
+
+## Declare a spike with a guest benchmark
+
+A spike crate under `spike-scratch/` can declare `substrate = guest` and call `overdrive_bench::run_main(overdrive_bench::Evidence::Spike)` as it does for a native benchmark. Run it with `--spike`, as in the next section. Its record is marked as spike evidence.
+
 ## Run the generated smoke test
 
-The attribute also generates a test named `smoke_<function>`. The test takes one replicate per arm and asserts no timing. It fails if the benchmark function fails, so a broken benchmark cannot go unnoticed between measured runs. It is gated on the `integration-tests` feature and carries the placement you gave in `smoke(...)`. Every family in the repository uses `smoke(guest = "cgroup-default")`, which boots a fresh guest. A benchmark with no node-global effect can use `smoke(host_pure)`. See [the placement forms](/docs/how-to/run-verification-on-metal#reference-placement-forms).
+The attribute also generates a test named `smoke_<function>`. The test takes one replicate per arm and asserts no timing. It fails if the benchmark function fails, so a broken benchmark cannot go unnoticed between measured runs. It is gated on the `integration-tests` feature and carries the placement you gave in `smoke(...)`. The native families use `smoke(guest = "cgroup-default")`, which boots a fresh guest. A guest family adds `profile = "nested-launch"`. A benchmark with no node-global effect can use `smoke(host_pure)`. See [the placement forms](/docs/how-to/run-verification-on-metal#reference-placement-forms).
 
 To run the smoke tests of every family, run:
 
@@ -78,6 +121,16 @@ Under the smoke test the run holds no BPF statistics descriptor, so a metric tha
 
 ## Run a benchmark
 
+A guest benchmark needs the guest kit prepared at the commit you measure. The benchmark form does not rebuild the kit. To prepare it, run:
+
+```bash
+cargo xtask metal run -- cargo xtask guest-kit-prepare
+```
+
+The command builds the BPF objects and the `ovd_fwd` forwarder module for the running kernel itself, so a clean machine needs no separate `bpf-build` or `kmod-build` step. The guest loads its own copy of the module, so `kmod-load` is not needed either.
+
+An unprepared kit does not refuse the run. Every replicate fails with a reason that names `cargo xtask guest-kit-prepare`, no guest boots, the run exits 0, and the report shows `replicates ok: 0`. Check `replicates ok` before you read any table.
+
 A benchmark runs on its own, through `cargo xtask metal run --benchmark`:
 
 ```bash
@@ -86,7 +139,7 @@ cargo xtask metal run --benchmark cgroup-connect-hook
 
 The form takes the family name and no other command. It builds the one command itself, `cargo bench -p overdrive-bench-families --bench benchmarks -- run --family <family>`, and runs it under exclusive admission. No other run, test or maintenance command shares the machine while samples are taken, because a concurrent run would change the numbers.
 
-The runner prints `OVERDRIVE_METAL_RUN_ID=<id>`, then the line `OVERDRIVE_BENCH_RESULT_DIR=<path>` with the repository-relative directory where the record goes. Before it takes any sample, it checks the machine against a pinned list. Benchmarks, verification captures and physical maintenance take exclusive admission. No test does.
+The runner prints `OVERDRIVE_METAL_RUN_ID=<id>`, then the line `OVERDRIVE_BENCH_RESULT_DIR=<path>` with the repository-relative directory where the record goes. Before it takes any sample, it checks the machine against a pinned list. A guest benchmark gets the same check on the real machine, before any guest boots. Benchmarks, verification captures and physical maintenance take exclusive admission. No test does.
 
 The family name must match `^[a-z][a-z0-9-]{0,62}$`. A malformed name refuses with `benchmark_family_invalid` and status 64. A family that no declared benchmark uses refuses with status 64 and lists the families it found.
 
@@ -139,8 +192,9 @@ cargo xtask metal pull benchmarks/results/cgroup-connect-hook/<run-id>
 
 | Line | Content |
 | --- | --- |
-| `run_started` | Methodology version, execution environment, host settings, the declaration, the seed, the commit and whether the tree was dirty |
+| `run_started` | Methodology version, execution environment, host settings, the declaration, the seed, the commit and whether the tree was dirty. A guest benchmark adds a `guest` block |
 | `canary` | Samples of loopback connect-and-close, taken at the start and the end of the run |
+| `guest_observed` | Guest benchmarks only. The guest view of the first replicate that reported one |
 | `replicate` | Profile, arm, block, outcome, metrics, notes and the commands the replicate ran |
 | `run_finished` or `run_refused` | How the run ended |
 
@@ -155,10 +209,38 @@ cargo bench-report render benchmarks/results/cgroup-connect-hook/<run-id>/record
 
 The report opens with the host settings, the clocks, the canary verdict and the replicate counts. Then it prints one table per metric group. A single-arm distribution table lists p50, p90, p95 and p99. A two-arm benchmark adds the delta, its 95% bootstrap interval, the A/A interval, the Mann-Whitney p-value and a verdict. A metric a replicate could not measure shows as `absent` with its reason. It is not zero-filled.
 
+### Read the guest lines of a report
+
+A guest report adds these lines under the host settings:
+
+| Line | Meaning |
+| --- | --- |
+| `substrate: guest` | The record is a guest record. Never compare it with a native record. |
+| `guest launch: metal host (not nested)` | The benchmark process launched the guest on the test machine. |
+| `guest boot: fresh guest per replicate` | Every replicate booted its own guest. |
+| `guest vcpu scheduling: unpinned` | The guest's vCPUs run wherever the host scheduler puts them. |
+| `guest governor`, `guest smt`, `guest boost` | Always `absent: not visible from a guest`. The host settings above them are the real ones. |
+| `guest vcpus`, `guest memory mib` | The guest's shape, which is fixed. |
+| `guest kernel`, `guest clocksource` | What the first reporting replicate's guest read. Later replicates are not compared with it. |
+| `guest artifact <name>` | The SHA-256 digest of each staged artifact (`overdrive_init`, `overdrive_guest_peer`, `ovd_fwd`). |
+| `bpf stats: off` | The guest benchmark held no BPF statistics. |
+
+Compare the digests with a fresh `guest-kit-prepare` at the record's commit to learn whether the staged artifacts match the source. The run does not refuse on a mismatch. If no replicate returned a view, each guest line reads `absent: no replicate returned a guest view`.
+
+### Find a replicate's guest console
+
+The runner writes every replicate's console, whether it succeeded or failed, to `<result dir>/artifacts/<profile>/<block>-<position>-<arm>/console.log`. The console of a failed replicate is the first place to look. A series metric keeps raw values only up to 1,000 per replicate, so the console is also the only raw copy of a longer series.
+
+`cargo xtask metal pull` of a result directory brings the consoles back with it. Git ignores `benchmarks/results/**/artifacts/` and `spike-scratch/*/results/**/artifacts/`, so consoles are never committed. Under the smoke test the runner writes no console.
+
 Retained results live in `benchmarks/results/<family>/<run-id>/`. The catalogue of families, their arms and their clock boundaries is `benchmarks/catalogue.md`, and the protocol is `benchmarks/methodology.md`.
 
 ## Limitations
 
-- Benchmarks run only on the native test machine. A component that runs inside a workload VM in production cannot be benchmarked. Issue [#362: a guest execution environment for components that run inside a workload VM](https://github.com/overdrive-sh/overdrive/issues/362) tracks lifting this.
+- A family that launches VMs stays `native`. A guest that launches VMs measures nested virtualization, which production does not have. Issue [#347: nested virtualization for VM workloads](https://github.com/overdrive-sh/overdrive/issues/347) tracks lifting this.
+- A guest benchmark declares no BPF statistics, because the runner's statistics descriptor does not cover a guest kernel. Issue [#371: read BPF program run statistics inside a guest](https://github.com/overdrive-sh/overdrive/issues/371) tracks lifting this.
+- The guest's vCPUs are unpinned. Issue [#368: pin the benchmark guest's vCPUs to dedicated host CPUs](https://github.com/overdrive-sh/overdrive/issues/368) tracks adding a pinned mode.
+- The guest shape is fixed at 2 vCPUs and 512 MiB. Issue [#369: let a family declare the guest's vCPU count and memory size](https://github.com/overdrive-sh/overdrive/issues/369) tracks declaring another shape.
+- The first guest family measures only the guest side of forwarding. Issue [#370: benchmark the host-driven vsock leg and the other flow kinds of the guest flow owner](https://github.com/overdrive-sh/overdrive/issues/370) tracks the rest.
 - The program records results and compares nothing across runs. It has no baseline and no regression gate. Issue [#361: baseline promotion and regression-gate policy](https://github.com/overdrive-sh/overdrive/issues/361) tracks both.
 - A family has one benchmark, and the run's seed always comes from the operating system. You cannot set a seed.
