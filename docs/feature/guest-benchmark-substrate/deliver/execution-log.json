@@ -232,6 +232,27 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-11-20T01:30:53Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: evidence step, no acceptance test",
+      "t": "2026-11-20T01:37:02Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-20T01:37:02Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-20T01:37:03Z"
     }
   ]
 }

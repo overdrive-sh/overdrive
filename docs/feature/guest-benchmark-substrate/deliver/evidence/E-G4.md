@@ -7,3 +7,7 @@
 - `metal collect 41a4...` returned the retained log, exit 101.
 - Clean run afterwards (E-G5 side): run 62cf21ac0f4b8793e31ec89d, 01:14:18Z-01:16:33Z, exit 0, 30 ok / 0 failed, `status: finished`, one guest_observed (kernel 7.0.0-38-generic, vcpus 2); 30 replicates over 16 CIDs, no launch failure. Pulled.
 - V-C held: KillMode=mixed unit stop left no VMM and no vhost-vsock holder; CIDs reusable (both after the wrap in the killed run and in the next run).
+
+## Verified against the record
+Checked against 41a4823eb9e8f15dcedb3622/record.jsonl and 62cf21ac0f4b8793e31ec89d/{record.jsonl,report.md}. Held: the killed record has 24 lines (run_started, 1 canary, 1 guest_observed, 21 replicates, blocks 0..20, all `outcome:ok`; blocks 17-20 are past the 16-CID wrap, and block 16 is the first reuse); no run_finished and no run_refused; no report.md in the committed directory (the "incomplete" render is box-side, reported only). The follow-up run 62cf21ac has 35 lines, run_finished `replicates_ok 30, replicates_failed 0`, report `status: finished`, an empty Failures section, one guest_observed.
+Only reported (not in the repo): the SIGKILL, the post-kill probe (no cloud-hypervisor process, no stopped process, 0 vhost-vsock holders), the `bench-report render/validate` output, and the `metal collect` exit 101. The 21 console dirs exist in the local pull but artifacts/ is gitignored, so they are not committed. "V-C held" rests on that reported probe plus the committed ok replicates after the wrap, not on a committed probe record.
