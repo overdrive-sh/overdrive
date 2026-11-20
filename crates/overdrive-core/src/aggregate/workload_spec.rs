@@ -484,7 +484,6 @@ pub struct VmInput {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[serde(deny_unknown_fields)]
 pub struct VmInputV1 {
     /// Command run INSIDE the guest.
     pub command: String,
@@ -565,7 +564,6 @@ pub enum DriverInput {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-#[serde(rename_all = "snake_case")]
 pub enum DriverInputV1 {
     Vm(VmInputV1),
 }
