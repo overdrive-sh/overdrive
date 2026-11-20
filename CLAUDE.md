@@ -124,16 +124,19 @@ Two upstream projects are vendored as git submodules under `vendors/`:
   sync. ADR-0068 (amended 2026-10-10) and `.claude/rules/testing.md`
   § "Kernel matrix" name 7.0 as the pinned kernel.
 
-### A guest reset ends the VMM — enforced in the fork
+### A guest reset ends the VMM — enforced by the launcher passing upstream's flag
 
-The fork must end the VMM when the guest resets, instead of rebooting the
-guest in place. Spike V-30 (`docs/feature/netns-density-295/spike/`) showed
-that without this, a guest PID-1 crash under `panic=1` reboots the guest
-inside the same VMM process with the same CID and launch token, invisibly to
-the driver, and a crash loop never charges a restart budget. The fix is a
-small fork change: route the guest-reset dispatch to the VMM exit path rather
-than `vm_reboot`. Do not rely on supervising the `vm/rebooting` event from the
-driver; that works but is a race.
+The VMM must end when the guest resets, instead of rebooting the guest in
+place. Spike V-30 (`docs/feature/netns-density-295/spike/`) showed that
+without this, a guest PID-1 crash under `panic=1` reboots the guest inside the
+same VMM process with the same CID and launch token, invisibly to the driver,
+and a crash loop never charges a restart budget. The fork keeps upstream's
+`--guest-reset-action` default (`reset-vm`); the fork carries no change for
+guest reset. Overdrive's launcher (`build_confined_command`,
+`crates/overdrive-host/src/vmm.rs`) passes upstream's
+`--guest-reset-action exit-vmm` on every launch, which routes the guest-reset
+dispatch to the VMM exit path rather than `vm_reboot`. Do not rely on
+supervising the `vm/rebooting` event from the driver; that works but is a race.
 
 Two related facts from the same spike:
 

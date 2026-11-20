@@ -305,6 +305,12 @@ impl CloudHypervisorVmm {
             .arg(vsock_arg)
             .arg("--api-socket")
             .arg(config.run_dir.api_socket())
+            // A guest reset ends the VMM instead of rebooting the guest in
+            // place, so a guest that crashes on every boot is a crashed VMM
+            // the supervisor sees and charges (CLAUDE.md § "A guest reset
+            // ends the VMM"). Upstream's own flag; the fork changes no default.
+            .arg("--guest-reset-action")
+            .arg("exit-vmm")
             .arg("--seccomp")
             .arg(config.confinement.seccomp_arg())
             .arg("--landlock");

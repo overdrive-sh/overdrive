@@ -435,6 +435,35 @@ fn take_lock(path: &Path) -> Result<fs::File, GuestKitError> {
     Ok(file)
 }
 
+/// Writes a launch shim into `dir` that execs `real` with `,nested=on`
+/// appended to the value of `--cpus`, and returns its path. `dir` is the
+/// guest's staging directory (traversable by the confined VMM identity and,
+/// unlike the `/run` runtime root, not mounted `noexec`); `runtime` names the
+/// shim uniquely per launch.
+fn write_nested_virt_shim(
+    dir: &Path,
+    runtime: &Path,
+    real: &Path,
+) -> Result<PathBuf, GuestKitError> {
+    let unique = runtime.file_name().map_or_else(String::new, |n| n.to_string_lossy().into_owned());
+    let shim = dir.join(format!("cloud-hypervisor-nested-{unique}"));
+    let script = format!(
+        "#!/bin/sh\n\
+         prev=\n\
+         for a in \"$@\"; do\n\
+         \x20 shift\n\
+         \x20 if [ \"$prev\" = --cpus ]; then set -- \"$@\" \"$a,nested=on\"; else set -- \"$@\" \"$a\"; fi\n\
+         \x20 prev=$a\n\
+         done\n\
+         exec '{}' \"$@\"\n",
+        real.display().to_string().replace('\'', "'\\''")
+    );
+    fs::write(&shim, script).map_err(staging(format!("writing {}", shim.display())))?;
+    fs::set_permissions(&shim, fs::Permissions::from_mode(0o755))
+        .map_err(staging(format!("making {} executable", shim.display())))?;
+    Ok(shim)
+}
+
 fn staging(detail: impl Into<String>) -> impl FnOnce(io::Error) -> GuestKitError {
     let detail = detail.into();
     move |source| GuestKitError::Staging { detail, source }
@@ -709,7 +738,15 @@ impl GuestKit {
         fs::create_dir_all(config.run_dir.path())
             .map_err(staging(format!("creating {}", config.run_dir.path().display())))?;
         let console = config.run_dir.console_log();
-        let vmm = CloudHypervisorVmm::new().with_binary(self.cloud_hypervisor_bin.clone());
+        // The kit's outer guests run `serve`, which launches workload VMs
+        // inside them, so the outer guest needs nested virtualization. Cloud
+        // Hypervisor leaves it off unless `--cpus` carries `nested=on`, and
+        // the production launcher (correctly) passes none. The kit therefore
+        // launches through a shim that adds it to the outer guest only; the
+        // production launcher and the workload VMs it launches are untouched.
+        let nested_ch =
+            write_nested_virt_shim(boot.run_dir, runtime.path(), &self.cloud_hypervisor_bin)?;
+        let vmm = CloudHypervisorVmm::new().with_binary(nested_ch);
         let launcher = vmm.clone();
         let process = run_on_kit_runtime(async move { launcher.create(&config, cid).await })
             .map_err(|e| launch(e.to_string()))?;
