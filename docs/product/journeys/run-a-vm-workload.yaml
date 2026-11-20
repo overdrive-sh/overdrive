@@ -55,7 +55,7 @@ journey:
 steps:
   - id: 1
     name: "Declare a VM workload"
-    command: "(edit render.toml — [job|service] + [vm] + [resources])"
+    command: "(edit render.toml — [job|service] + [vm] + [resources] cpu = \"500m\", memory = \"128MiB\")"
     summary: >
       The `[vm]` table names two host artifacts (kernel, rootfs) and the
       entrypoint to run inside the guest (command, args). BYO-artifact: no
@@ -177,7 +177,7 @@ integration_validation:
   shared_artifacts_summary:
     - "guest exit status — produced by the in-guest agent (overdrive-init) over vsock; the ONLY source of ExitKind::CleanExit. The host cloud-hypervisor process's exit status is never the source. Consumed by exit_observer::classify, the restart/backoff reconciler, and `workload describe`."
     - "ready beacon — produced by the in-guest agent over vsock; gates VmDriver::start's return, which is what the action shim maps to AllocState::Running. Moving honesty into start's return keeps the existing shim seam correct rather than adding a parallel readiness path."
-    - "declared resources — single source is the `[resources]` block; drives vCPU count and memory size for the guest AND is what the right-sizing reconciler (#92) converges against. `[vm]` deliberately carries neither."
+    - "declared resources — single source is the `[resources]` block (`cpu`, `memory` human-readable strings per GH #372; canonical form rendered identically by `workload describe`); drives vCPU count and memory size for the guest AND is what the right-sizing reconciler (#92) converges against. `[vm]` deliberately carries neither."
     - "rootfs artifact — the operator's file on the host is read-only truth; each launch gets a reflink copy. If the platform ever mutates the operator's artifact, restart honesty and repeatability both break."
     - "volume source directory — the operator's host path is the SINGLE destination for guest output; the guest's `target` mount and the host `source` are the same bytes. It is the one artifact in this journey that deliberately OUTLIVES the allocation (the rootfs copy is discarded; the volume is not), which is exactly why it exists."
     - "volume presence — the single source for whether `--memory shared=on` is derived ([D8b]) and whether a storage daemon is started at all. One derived field on the VmConfig value; a spec with no volume must be byte-for-byte the workload slice 01 shipped."

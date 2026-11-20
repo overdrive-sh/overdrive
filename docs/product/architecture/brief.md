@@ -2182,6 +2182,20 @@ query exists, so Event Sourcing and CQRS add nothing.
 
 ## Application Architecture
 
+### Workload resources in human-readable units (feature `workload-resources-human-readable`, GH #372, 2026-11-20) — ACCEPTED
+
+**ACCEPTED — approved by the user, 2026-11-20** (`.claude/rules/design.md` § "Surface material design decisions"). `[resources]` takes
+`cpu = "500m"` and `memory = "128MiB"` (strings) in place of `cpu_milli` and `memory_bytes`. Two `overdrive-core` value types own the grammars
+and canonical spellings: `ByteSize` (shared with the volume size, which refines it to whole GiB) and `CpuQuantity`. `Resources`, node capacity
+and the API carry them as `cpu` and `memory`; the API carries the canonical string; the archived byte layout is unchanged, so no envelope
+version is added (spike V-1 held). A workload `memory` is a whole number of MiB. No new container or component. Decisions:
+[ADR-0339](adr-0339-memory-and-volume-sizes-share-one-binary-byte-size-grammar.md),
+[ADR-0340](adr-0340-cpu-is-declared-as-a-millicore-or-decimal-core-quantity.md),
+[ADR-0341](adr-0341-workload-resources-carry-the-typed-quantities-from-spec-to-driver.md),
+[ADR-0342](adr-0342-the-api-carries-resource-quantities-as-their-canonical-string.md),
+[ADR-0343](adr-0343-a-workload-memory-is-a-whole-number-of-mib.md); ADR-0310 takes its volume size grammar from ADR-0339.
+Interface contracts: [feature delta](../../feature/workload-resources-human-readable/feature-delta.md#wave-design--ref-interface-contracts).
+
 ### Metal test placement declared on the test (feature `metal-test-placement-attribute`, 2026-11-13) — ACCEPTED
 
 **ACCEPTED — approved by the user, 2026-11-14** (`.claude/rules/design.md` § "Surface material design
