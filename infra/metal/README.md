@@ -177,9 +177,14 @@ current Git checkout to the same path in the local checkout
 (`bootstrap.sh --pull -- <path>...`). It takes that checkout's lock, so it
 cannot race a sync or a run of that checkout, and it prints one
 itemized line per transferred entry. It transfers only what is named, never
-`target/`, and never deletes local files (no `--delete`), so files removed on
-the box stay locally until you remove them. Absolute paths and paths with `..`,
-`.`, empty or `.git` components are rejected, as is anything under `target/`.
+`target/` (except a path named beneath `target/quint/`), and never deletes
+local files (no `--delete`), so files removed on the box stay locally until you
+remove them. Absolute paths and paths with `..`, `.`, empty or `.git`
+components are rejected, as is anything under `target/` other than beneath
+`target/quint/`. `cargo xtask quint check` writes each check's logs and
+counterexample traces there, so a failed check's traces come back with
+`cargo xtask metal pull target/quint/<subsystem>/<run-id>`.
+A run executes as root, so the box holds that output root-owned; pull reads that one prefix through `sudo` (unless `--no-sudo` is set).
 A missing remote path or a nonzero rsync exit fails the command with that
 status.
 

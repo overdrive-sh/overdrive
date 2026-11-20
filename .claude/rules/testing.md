@@ -1907,7 +1907,7 @@ Precedence is test, then module, then binary default. A binary with a
 native-launcher or lane record) is refused as `placement_conflict`; a module
 declaration beside such a record is not a conflict.
 
-The groups and profiles are a closed registry: 22 environments over eight
+The groups and profiles are a closed registry: 23 environments over eight
 groups (`probe`, `core`, `unload`, `ulp`, `mtls-relay`, `cgroup-default`,
 `stress`, `nested-boundary`), defined in
 `crates/overdrive-testing/src/placement/groups.rs`. A group or profile outside it
@@ -2033,7 +2033,10 @@ Outputs a metal run writes into the remote tree (recorded evidence, generated
 files) do not come back on their own. `cargo xtask metal pull <path>...`
 rsyncs the named repo-relative paths from the box's tree into the same paths
 in this checkout, under the tree lock. It never deletes local files, never
-transfers `target/`, and rejects absolute, `..`, `.` and `.git` paths.
+transfers `target/` except beneath `target/quint/`, and rejects absolute, `..`,
+`.` and `.git` paths. `target/quint/` holds only the text logs and
+counterexample traces of `cargo xtask quint check`; a failed check's traces come
+back with `cargo xtask metal pull target/quint/<subsystem>/<run-id>`.
 
 Provisioning the box itself (partitions, KVM, toolchain) is a one-time
 `infra/metal/bootstrap.sh <user@host>` (with no mode flag); see

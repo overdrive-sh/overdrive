@@ -1,0 +1,152 @@
+# Checks for specs/quint/restart-generation/: ADR-0326 (a restart generation is handled when its successor is observed),
+# ADR-0328 (a pre-driver failure writes a charged Failed row) and ADR-0329 (an admission refusal writes no row and charges
+# nothing); budget abstraction R-1 = A: the per-allocation restart count. One decision, one hazard.
+# ci = true iff the check takes under two minutes: every check here. Runs on rg_conf and rg_conf_job (REC = true) are the
+# #[quint_test] pins.
+
+[[check]]
+name = "rg-safety-tlc"
+spec = "restart_generation.qnt"
+main = "rg_ok"
+invariant = "Safety"
+backend = "tlc"
+expect = "holds"
+ci = true
+timeout_secs = 900
+
+[[check]]
+name = "rg-live-replacement"
+spec = "restart_generation.qnt"
+main = "rg_live_replacement"
+temporal = "RunIntentProgress"
+backend = "tlc"
+expect = "holds"
+ci = true
+timeout_secs = 600
+
+[[check]]
+name = "rg-live-prefail"
+spec = "restart_generation.qnt"
+main = "rg_live_prefail"
+temporal = "PreFailExhausts"
+backend = "tlc"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "rg-hazard-stamp-on-emit"
+spec = "hazard/restart_generation_hazards.qnt"
+main = "rg_bugStampOnEmit"
+temporal = "RunIntentProgress"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "rg-hazard-prefail-no-row"
+spec = "hazard/restart_generation_hazards.qnt"
+main = "rg_bugPrefailNoRow"
+temporal = "PreFailExhausts"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "rg-hazard-refusal-charged"
+spec = "hazard/restart_generation_hazards.qnt"
+main = "rg_bugRefusalCharged"
+invariant = "I_CAPACITY_WAIT_NEVER_EXHAUSTS"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "rg-run-control-plane-crash-during-restart-launch-relaunches-once"
+spec = "restart_generation.qnt"
+main = "rg_conf"
+run = "control_plane_crash_during_restart_launch_relaunches_once"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "rg-run-second-restart-loses-launch-then-one-placement"
+spec = "restart_generation.qnt"
+main = "rg_conf"
+run = "second_restart_loses_launch_then_one_placement"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "rg-run-resume-while-running-stops-and-replaces"
+spec = "restart_generation.qnt"
+main = "rg_conf"
+run = "resume_while_running_stops_and_replaces"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "rg-run-restart-of-exhausted-workload-relaunches-uncharged"
+spec = "restart_generation.qnt"
+main = "rg_conf"
+run = "restart_of_exhausted_workload_relaunches_uncharged"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "rg-run-generation-replacement-forgives-predecessor-failure"
+spec = "restart_generation.qnt"
+main = "rg_conf"
+run = "generation_replacement_forgives_predecessor_failure"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "rg-run-persistent-prelaunch-failure-ends-in-backoff-exhausted"
+spec = "restart_generation.qnt"
+main = "rg_conf"
+run = "persistent_prelaunch_failure_ends_in_backoff_exhausted"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "rg-run-transient-prelaunch-failure-recovers"
+spec = "restart_generation.qnt"
+main = "rg_conf"
+run = "transient_prelaunch_failure_recovers"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "rg-run-admission-refusal-leaves-no-row-and-waits-for-capacity"
+spec = "restart_generation.qnt"
+main = "rg_conf"
+run = "admission_refusal_leaves_no_row_and_waits_for_capacity"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+# H1 (ADR-0326 item 3): the finished Job. rg_conf_job is rg_conf with JOB = true.
+[[check]]
+name = "rg-run-restart-of-completed-job-does-nothing-and-issues-no-id"
+spec = "restart_generation.qnt"
+main = "rg_conf_job"
+run = "restart_of_completed_job_does_nothing_and_issues_no_id"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "rg-run-resume-of-stopped-job-does-nothing-and-issues-no-id"
+spec = "restart_generation.qnt"
+main = "rg_conf_job"
+run = "resume_of_stopped_job_does_nothing_and_issues_no_id"
+backend = "evaluator"
+expect = "holds"
+ci = true

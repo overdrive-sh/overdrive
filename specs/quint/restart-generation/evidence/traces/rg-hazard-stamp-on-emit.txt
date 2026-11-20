@@ -1,0 +1,25 @@
+# rg-hazard-stamp-on-emit: counterexample, 7 state(s) (from the TLC trace)
+
+State 1
+  conf_step = [Init |-> [tag |-> "UNIT"]]
+  st = [ declared |-> FALSE, stopped |-> FALSE, as |-> <<0, 0, 0>>, why |-> <<0, 0, 0>>, faults |-> 0, dg |-> 0, ig |-> <<0, 0, 0>>, cnt |-> <<0, 0, 0>>, og |-> 0, idFault |-> FALSE, capFull |-> FALSE ]
+
+State 2 [Declare]
+  st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<0, 0, 0>>, why |-> <<0, 0, 0>>, faults |-> 0, dg |-> 0, ig |-> <<0, 0, 0>>, cnt |-> <<0, 0, 0>>, og |-> 0, idFault |-> FALSE, capFull |-> FALSE ]
+
+State 3 [WlStart]
+  st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<1, 0, 0>>, why |-> <<0, 0, 0>>, faults |-> 0, dg |-> 0, ig |-> <<0, 0, 0>>, cnt |-> <<0, 0, 0>>, og |-> 0, idFault |-> FALSE, capFull |-> FALSE ]
+
+State 4 [LaunchRunning]
+  st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<2, 0, 0>>, why |-> <<0, 0, 0>>, faults |-> 0, dg |-> 0, ig |-> <<0, 0, 0>>, cnt |-> <<0, 0, 0>>, og |-> 0, idFault |-> FALSE, capFull |-> FALSE ]
+
+State 5 [WorkloadRestart]
+  st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<4, 0, 0>>, why |-> <<6, 0, 0>>, faults |-> 0, dg |-> 1, ig |-> <<0, 0, 0>>, cnt |-> <<0, 0, 0>>, og |-> 0, idFault |-> FALSE, capFull |-> FALSE ]
+
+State 6 [WlStart]
+  st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<4, 1, 0>>, why |-> <<6, 0, 0>>, faults |-> 0, dg |-> 1, ig |-> <<0, 1, 0>>, cnt |-> <<0, 0, 0>>, og |-> 1, idFault |-> FALSE, capFull |-> FALSE ]
+
+State 7 [LaunchLost]
+  st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<4, 3, 0>>, why |-> <<6, 7, 0>>, faults |-> 0, dg |-> 1, ig |-> <<0, 1, 0>>, cnt |-> <<0, 0, 0>>, og |-> 1, idFault |-> FALSE, capFull |-> FALSE ]
+
+-> stutters forever in State 7

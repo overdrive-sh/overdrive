@@ -1,0 +1,125 @@
+State 1: <Initial predicate>
+/\ rg_bugRefusalCharged_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
+/\ rg_bugRefusalCharged_restart_generation_st = [ declared |-> FALSE,
+  stopped |-> FALSE,
+  as |-> <<0, 0, 0, 0>>,
+  why |-> <<0, 0, 0, 0>>,
+  faults |-> 0,
+  dg |-> 0,
+  ig |-> <<0, 0, 0, 0>>,
+  cnt |-> <<0, 0, 0, 0>>,
+  og |-> 0,
+  idFault |-> FALSE,
+  capFull |-> FALSE ]
+
+State 2: <rg_bugRefusalCharged_restart_generation_Declare line 227, col 3 to line 231, col 44 of module rg_bugRefusalCharged>
+/\ rg_bugRefusalCharged_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
+/\ rg_bugRefusalCharged_restart_generation_st = [ declared |-> TRUE,
+  stopped |-> FALSE,
+  as |-> <<0, 0, 0, 0>>,
+  why |-> <<0, 0, 0, 0>>,
+  faults |-> 0,
+  dg |-> 0,
+  ig |-> <<0, 0, 0, 0>>,
+  cnt |-> <<0, 0, 0, 0>>,
+  og |-> 0,
+  idFault |-> FALSE,
+  capFull |-> FALSE ]
+
+State 3: <rg_bugRefusalCharged_restart_generation_WlStart line 893, col 3 to line 925, col 81 of module rg_bugRefusalCharged>
+/\ rg_bugRefusalCharged_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
+/\ rg_bugRefusalCharged_restart_generation_st = [ declared |-> TRUE,
+  stopped |-> FALSE,
+  as |-> <<1, 0, 0, 0>>,
+  why |-> <<0, 0, 0, 0>>,
+  faults |-> 0,
+  dg |-> 0,
+  ig |-> <<0, 0, 0, 0>>,
+  cnt |-> <<0, 0, 0, 0>>,
+  og |-> 0,
+  idFault |-> FALSE,
+  capFull |-> FALSE ]
+
+State 4: <rg_bugRefusalCharged_restart_generation_LaunchStartFail line 559, col 3 to line 582, col 57 of module rg_bugRefusalCharged>
+/\ rg_bugRefusalCharged_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
+/\ rg_bugRefusalCharged_restart_generation_st = [ declared |-> TRUE,
+  stopped |-> FALSE,
+  as |-> <<3, 0, 0, 0>>,
+  why |-> <<11, 0, 0, 0>>,
+  faults |-> 0,
+  dg |-> 0,
+  ig |-> <<0, 0, 0, 0>>,
+  cnt |-> <<0, 0, 0, 0>>,
+  og |-> 0,
+  idFault |-> FALSE,
+  capFull |-> FALSE ]
+
+State 5: <rg_bugRefusalCharged_restart_generation_WlStart line 893, col 3 to line 925, col 81 of module rg_bugRefusalCharged>
+/\ rg_bugRefusalCharged_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
+/\ rg_bugRefusalCharged_restart_generation_st = [ declared |-> TRUE,
+  stopped |-> FALSE,
+  as |-> <<3, 1, 0, 0>>,
+  why |-> <<11, 0, 0, 0>>,
+  faults |-> 0,
+  dg |-> 0,
+  ig |-> <<0, 0, 0, 0>>,
+  cnt |-> <<0, 1, 0, 0>>,
+  og |-> 0,
+  idFault |-> FALSE,
+  capFull |-> FALSE ]
+
+State 6: <rg_bugRefusalCharged_restart_generation_LaunchStartFail line 559, col 3 to line 582, col 57 of module rg_bugRefusalCharged>
+/\ rg_bugRefusalCharged_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
+/\ rg_bugRefusalCharged_restart_generation_st = [ declared |-> TRUE,
+  stopped |-> FALSE,
+  as |-> <<3, 3, 0, 0>>,
+  why |-> <<11, 11, 0, 0>>,
+  faults |-> 0,
+  dg |-> 0,
+  ig |-> <<0, 0, 0, 0>>,
+  cnt |-> <<0, 1, 0, 0>>,
+  og |-> 0,
+  idFault |-> FALSE,
+  capFull |-> FALSE ]
+
+State 7: <rg_bugRefusalCharged_restart_generation_WlStart line 893, col 3 to line 925, col 81 of module rg_bugRefusalCharged>
+/\ rg_bugRefusalCharged_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
+/\ rg_bugRefusalCharged_restart_generation_st = [ declared |-> TRUE,
+  stopped |-> FALSE,
+  as |-> <<3, 3, 1, 0>>,
+  why |-> <<11, 11, 0, 0>>,
+  faults |-> 0,
+  dg |-> 0,
+  ig |-> <<0, 0, 0, 0>>,
+  cnt |-> <<0, 1, 2, 0>>,
+  og |-> 0,
+  idFault |-> FALSE,
+  capFull |-> FALSE ]
+
+State 8: <rg_bugRefusalCharged_restart_generation_CapFill line 334, col 3 to line 339, col 44 of module rg_bugRefusalCharged>
+/\ rg_bugRefusalCharged_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
+/\ rg_bugRefusalCharged_restart_generation_st = [ declared |-> TRUE,
+  stopped |-> FALSE,
+  as |-> <<3, 3, 1, 0>>,
+  why |-> <<11, 11, 0, 0>>,
+  faults |-> 0,
+  dg |-> 0,
+  ig |-> <<0, 0, 0, 0>>,
+  cnt |-> <<0, 1, 2, 0>>,
+  og |-> 0,
+  idFault |-> FALSE,
+  capFull |-> TRUE ]
+
+State 9: <rg_bugRefusalCharged_restart_generation_LaunchRefused line 481, col 3 to line 503, col 57 of module rg_bugRefusalCharged>
+/\ rg_bugRefusalCharged_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
+/\ rg_bugRefusalCharged_restart_generation_st = [ declared |-> TRUE,
+  stopped |-> FALSE,
+  as |-> <<3, 3, 3, 0>>,
+  why |-> <<11, 11, 10, 0>>,
+  faults |-> 0,
+  dg |-> 0,
+  ig |-> <<0, 0, 0, 0>>,
+  cnt |-> <<0, 1, 2, 0>>,
+  og |-> 0,
+  idFault |-> FALSE,
+  capFull |-> TRUE ]

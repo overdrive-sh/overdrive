@@ -578,7 +578,10 @@ recorded key is stale, an outcome misses `expect`, or a trace is missing
 (evidence recorded without keys is verified by comparing the global input
 hashes). Git history keeps earlier runs. When the run was on the metal box, bring the
 recorded evidence back with `cargo xtask metal pull
-specs/quint/<subsystem>/evidence`. The subsystem directory holds only specs,
+specs/quint/<subsystem>/evidence`. A check that missed its `expect` leaves its
+logs and counterexample trace under `target/quint/<subsystem>/<run-id>/` on the
+box; bring them back without recording using `cargo xtask metal pull
+target/quint/<subsystem>/<run-id>`. The subsystem directory holds only specs,
 `hazard/` specs, `checks.toml`, `README.md` and the recorded `evidence/` —
 never runner scripts, copies of earlier specs, or per-round directories.
 

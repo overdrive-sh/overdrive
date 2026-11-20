@@ -387,7 +387,8 @@ if [ "$RUN_MODE" -eq 1 ] && [ "$EXCLUSIVE_MODE" -eq 0 ]; then
 fi
 # Pulled paths are validated here as well as by `cargo xtask metal pull`, so a
 # direct caller gets the same refusal: repo-relative, no `.`/`..`/`.git`/empty
-# component, and a charset that needs no shell quoting on either side.
+# component, a charset that needs no shell quoting on either side, and not under
+# target/ except beneath target/quint/ (the text logs and traces of `quint check`).
 if [ "${PULL_MODE}" -eq 1 ]; then
   for _path in "${RUN_ARGS[@]}"; do
     _norm="${_path%/}"
@@ -397,8 +398,8 @@ if [ "${PULL_MODE}" -eq 1 ]; then
       && [[ "/${_norm}/" != */./* ]] \
       && [[ "/${_norm}/" != */../* ]] \
       && [[ "/${_norm}/" != */.git/* ]] \
-      && [[ "${_norm}/" != target/* ]] || {
-      echo "FATAL: --pull path '${_path}' must be repo-relative, with no '.', '..', '.git' or empty component, not under target/, and only [A-Za-z0-9._/-]" >&2
+      && { [[ "${_norm}/" != target/* ]] || [[ "${_norm}" == target/quint/* ]]; } || {
+      echo "FATAL: --pull path '${_path}' must be repo-relative, with no '.', '..', '.git' or empty component, not under target/ (except target/quint/), and only [A-Za-z0-9._/-]" >&2
       exit 64
     }
   done
@@ -957,8 +958,8 @@ fi
 # ---------------------------------------------------------------------------
 # --pull: the reverse of the sync below, under the same per-tree lock. Copies
 # only the named paths from the remote tree into this checkout. No --delete
-# (files removed remotely stay locally), `target/` is never transferred, and
-# nothing is written to the remote tree.
+# (files removed remotely stay locally), `target/` is never transferred except a
+# path named beneath `target/quint/`, and nothing is written to the remote tree.
 REMOTE_RSYNC_READY=0
 if [ "${SYNC_ONLY}" -eq 1 ] && [ "${NO_SYNC}" -eq 0 ]; then
   ssh "${SSH_OPTS[@]}" "${TARGET}" 'command -v rsync >/dev/null' \
@@ -979,9 +980,18 @@ if [ "${PULL_MODE}" -eq 1 ]; then
   ensure_checkout_binding check
   for _path in "${RUN_ARGS[@]}"; do
     _path="${_path%/}"
+    # A run executes as root, so what it wrote under target/quint/ is root-owned
+    # and unreadable by the login user. The read of that one validated prefix goes
+    # through sudo; every other path is read as the login user.
+    _read_as=""
+    _rsync_path=()
+    if [[ "${_path}" == target/quint/* ]] && [ -n "${SUDO}" ]; then
+      _read_as="${SUDO} "
+      _rsync_path=(--rsync-path="${SUDO} rsync")
+    fi
     # shellcheck disable=SC2029
     _kind="$(ssh "${SSH_OPTS[@]}" "${TARGET}" \
-      "if [ -d ${REMOTE_DIR}/${_path} ]; then echo dir; elif [ -e ${REMOTE_DIR}/${_path} ]; then echo file; else echo missing; fi")"
+      "if ${_read_as}test -d ${REMOTE_DIR}/${_path}; then echo dir; elif ${_read_as}test -e ${REMOTE_DIR}/${_path}; then echo file; else echo missing; fi")"
     case "${_kind}" in
       dir) _src="${REMOTE_DIR}/${_path}/"; _dst="${REPO}/${_path}/"; mkdir -p "${_dst}" ;;
       file) _src="${REMOTE_DIR}/${_path}"; _dst="${REPO}/${_path}"; mkdir -p "$(dirname "${_dst}")" ;;
@@ -991,6 +1001,7 @@ if [ "${PULL_MODE}" -eq 1 ]; then
     set +e
     "${RSYNC_BIN}" -az --itemize-changes \
       --exclude='target/' \
+      ${_rsync_path[@]+"${_rsync_path[@]}"} \
       -e "ssh ${SSH_OPTS[*]}" \
       "${TARGET}:${_src}" "${_dst}"
     _rc=$?

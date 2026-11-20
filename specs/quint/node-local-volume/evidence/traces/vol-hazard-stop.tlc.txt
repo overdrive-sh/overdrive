@@ -21,9 +21,15 @@ State 1: <Initial predicate>
   charged |-> 0,
   faults |-> 0,
   slow |-> FALSE,
-  drainFail |-> FALSE ]
+  drainFail |-> FALSE,
+  sup |-> <<FALSE, FALSE>>,
+  afterSup |-> <<0, 0>>,
+  delivered |-> <<FALSE, FALSE>>,
+  chg |-> <<0, 0>>,
+  down |-> FALSE,
+  dstart |-> 0 ]
 
-State 2: <vol_bugStopDeletes_node_volume_Declare line 304, col 3 to line 308, col 44 of module vol_bugStopDeletes>
+State 2: <vol_bugStopDeletes_node_volume_Declare line 416, col 3 to line 420, col 44 of module vol_bugStopDeletes>
 /\ vol_bugStopDeletes_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ vol_bugStopDeletes_node_volume_st = [ declared |-> TRUE,
   stopped |-> FALSE,
@@ -46,9 +52,15 @@ State 2: <vol_bugStopDeletes_node_volume_Declare line 304, col 3 to line 308, co
   charged |-> 0,
   faults |-> 0,
   slow |-> FALSE,
-  drainFail |-> FALSE ]
+  drainFail |-> FALSE,
+  sup |-> <<FALSE, FALSE>>,
+  afterSup |-> <<0, 0>>,
+  delivered |-> <<FALSE, FALSE>>,
+  chg |-> <<0, 0>>,
+  down |-> FALSE,
+  dstart |-> 0 ]
 
-State 3: <vol_bugStopDeletes_node_volume_WlStart line 1151, col 3 to line 1168, col 72 of module vol_bugStopDeletes>
+State 3: <vol_bugStopDeletes_node_volume_WlStart line 1512, col 3 to line 1543, col 72 of module vol_bugStopDeletes>
 /\ vol_bugStopDeletes_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ vol_bugStopDeletes_node_volume_st = [ declared |-> TRUE,
   stopped |-> FALSE,
@@ -71,9 +83,15 @@ State 3: <vol_bugStopDeletes_node_volume_WlStart line 1151, col 3 to line 1168, 
   charged |-> 0,
   faults |-> 0,
   slow |-> FALSE,
-  drainFail |-> FALSE ]
+  drainFail |-> FALSE,
+  sup |-> <<FALSE, FALSE>>,
+  afterSup |-> <<0, 0>>,
+  delivered |-> <<FALSE, FALSE>>,
+  chg |-> <<0, 0>>,
+  down |-> FALSE,
+  dstart |-> 0 ]
 
-State 4: <vol_bugStopDeletes_node_volume_LaunchEnsureCreate line 791, col 3 to line 839, col 49 of module vol_bugStopDeletes>
+State 4: <vol_bugStopDeletes_node_volume_LaunchEnsureCreate line 938, col 3 to line 992, col 49 of module vol_bugStopDeletes>
 /\ vol_bugStopDeletes_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ vol_bugStopDeletes_node_volume_st = [ declared |-> TRUE,
   stopped |-> FALSE,
@@ -96,16 +114,22 @@ State 4: <vol_bugStopDeletes_node_volume_LaunchEnsureCreate line 791, col 3 to l
   charged |-> 0,
   faults |-> 0,
   slow |-> FALSE,
-  drainFail |-> FALSE ]
+  drainFail |-> FALSE,
+  sup |-> <<FALSE, FALSE>>,
+  afterSup |-> <<0, 0>>,
+  delivered |-> <<FALSE, FALSE>>,
+  chg |-> <<0, 0>>,
+  down |-> FALSE,
+  dstart |-> 0 ]
 
-State 5: <vol_bugStopDeletes_node_volume_OpStop line 314, col 3 to line 320, col 43 of module vol_bugStopDeletes>
+State 5: <vol_bugStopDeletes_node_volume_LaunchEnsureActivate line 998, col 3 to line 1012, col 48 of module vol_bugStopDeletes>
 /\ vol_bugStopDeletes_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ vol_bugStopDeletes_node_volume_st = [ declared |-> TRUE,
-  stopped |-> TRUE,
+  stopped |-> FALSE,
   storeUp |-> TRUE,
   spaceFree |-> TRUE,
   lv |-> TRUE,
-  active |-> FALSE,
+  active |-> TRUE,
   vid |-> 1,
   dv |-> 0,
   maxDv |-> 0,
@@ -116,14 +140,144 @@ State 5: <vol_bugStopDeletes_node_volume_OpStop line 314, col 3 to line 320, col
   orphan |-> <<FALSE, FALSE>>,
   why |-> <<0, 0>>,
   ran |-> <<FALSE, FALSE>>,
-  ph |-> <<2, 0>>,
+  ph |-> <<3, 0>>,
   waited |-> <<0, 0>>,
   charged |-> 0,
   faults |-> 0,
   slow |-> FALSE,
-  drainFail |-> FALSE ]
+  drainFail |-> FALSE,
+  sup |-> <<FALSE, FALSE>>,
+  afterSup |-> <<0, 0>>,
+  delivered |-> <<FALSE, FALSE>>,
+  chg |-> <<0, 0>>,
+  down |-> FALSE,
+  dstart |-> 0 ]
 
-State 6: <vol_bugStopDeletes_node_volume_StopAlloc line 730, col 3 to line 785, col 74 of module vol_bugStopDeletes>
+State 6: <vol_bugStopDeletes_node_volume_LaunchCheck line 1049, col 3 to line 1065, col 77 of module vol_bugStopDeletes>
+/\ vol_bugStopDeletes_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
+/\ vol_bugStopDeletes_node_volume_st = [ declared |-> TRUE,
+  stopped |-> FALSE,
+  storeUp |-> TRUE,
+  spaceFree |-> TRUE,
+  lv |-> TRUE,
+  active |-> TRUE,
+  vid |-> 1,
+  dv |-> 0,
+  maxDv |-> 0,
+  nCreated |-> 1,
+  claim |-> 0,
+  as |-> <<1, 0>>,
+  alive |-> <<FALSE, FALSE>>,
+  orphan |-> <<FALSE, FALSE>>,
+  why |-> <<0, 0>>,
+  ran |-> <<FALSE, FALSE>>,
+  ph |-> <<4, 0>>,
+  waited |-> <<0, 0>>,
+  charged |-> 0,
+  faults |-> 0,
+  slow |-> FALSE,
+  drainFail |-> FALSE,
+  sup |-> <<FALSE, FALSE>>,
+  afterSup |-> <<0, 0>>,
+  delivered |-> <<FALSE, FALSE>>,
+  chg |-> <<0, 0>>,
+  down |-> FALSE,
+  dstart |-> 0 ]
+
+State 7: <vol_bugStopDeletes_node_volume_VmmSpawn line 1409, col 3 to line 1440, col 74 of module vol_bugStopDeletes>
+/\ vol_bugStopDeletes_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
+/\ vol_bugStopDeletes_node_volume_st = [ declared |-> TRUE,
+  stopped |-> FALSE,
+  storeUp |-> TRUE,
+  spaceFree |-> TRUE,
+  lv |-> TRUE,
+  active |-> TRUE,
+  vid |-> 1,
+  dv |-> 0,
+  maxDv |-> 0,
+  nCreated |-> 1,
+  claim |-> 1,
+  as |-> <<1, 0>>,
+  alive |-> <<TRUE, FALSE>>,
+  orphan |-> <<FALSE, FALSE>>,
+  why |-> <<0, 0>>,
+  ran |-> <<TRUE, FALSE>>,
+  ph |-> <<5, 0>>,
+  waited |-> <<0, 0>>,
+  charged |-> 0,
+  faults |-> 0,
+  slow |-> FALSE,
+  drainFail |-> FALSE,
+  sup |-> <<FALSE, FALSE>>,
+  afterSup |-> <<0, 0>>,
+  delivered |-> <<FALSE, FALSE>>,
+  chg |-> <<0, 0>>,
+  down |-> FALSE,
+  dstart |-> 0 ]
+
+State 8: <vol_bugStopDeletes_node_volume_GuestReady line 1446, col 3 to line 1476, col 76 of module vol_bugStopDeletes>
+/\ vol_bugStopDeletes_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
+/\ vol_bugStopDeletes_node_volume_st = [ declared |-> TRUE,
+  stopped |-> FALSE,
+  storeUp |-> TRUE,
+  spaceFree |-> TRUE,
+  lv |-> TRUE,
+  active |-> TRUE,
+  vid |-> 1,
+  dv |-> 0,
+  maxDv |-> 0,
+  nCreated |-> 1,
+  claim |-> 1,
+  as |-> <<2, 0>>,
+  alive |-> <<TRUE, FALSE>>,
+  orphan |-> <<FALSE, FALSE>>,
+  why |-> <<0, 0>>,
+  ran |-> <<TRUE, FALSE>>,
+  ph |-> <<0, 0>>,
+  waited |-> <<0, 0>>,
+  charged |-> 0,
+  faults |-> 0,
+  slow |-> FALSE,
+  drainFail |-> FALSE,
+  sup |-> <<FALSE, FALSE>>,
+  afterSup |-> <<0, 0>>,
+  delivered |-> <<TRUE, FALSE>>,
+  chg |-> <<0, 0>>,
+  down |-> FALSE,
+  dstart |-> 0 ]
+
+State 9: <vol_bugStopDeletes_node_volume_OpStop line 426, col 3 to line 443, col 43 of module vol_bugStopDeletes>
+/\ vol_bugStopDeletes_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
+/\ vol_bugStopDeletes_node_volume_st = [ declared |-> TRUE,
+  stopped |-> TRUE,
+  storeUp |-> TRUE,
+  spaceFree |-> TRUE,
+  lv |-> TRUE,
+  active |-> TRUE,
+  vid |-> 1,
+  dv |-> 0,
+  maxDv |-> 0,
+  nCreated |-> 1,
+  claim |-> 1,
+  as |-> <<2, 0>>,
+  alive |-> <<TRUE, FALSE>>,
+  orphan |-> <<FALSE, FALSE>>,
+  why |-> <<0, 0>>,
+  ran |-> <<TRUE, FALSE>>,
+  ph |-> <<0, 0>>,
+  waited |-> <<0, 0>>,
+  charged |-> 0,
+  faults |-> 0,
+  slow |-> FALSE,
+  drainFail |-> FALSE,
+  sup |-> <<FALSE, FALSE>>,
+  afterSup |-> <<0, 0>>,
+  delivered |-> <<TRUE, FALSE>>,
+  chg |-> <<0, 0>>,
+  down |-> FALSE,
+  dstart |-> 0 ]
+
+State 10: <vol_bugStopDeletes_node_volume_StopAlloc line 881, col 3 to line 932, col 75 of module vol_bugStopDeletes>
 /\ vol_bugStopDeletes_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ vol_bugStopDeletes_node_volume_st = [ declared |-> TRUE,
   stopped |-> TRUE,
@@ -135,15 +289,21 @@ State 6: <vol_bugStopDeletes_node_volume_StopAlloc line 730, col 3 to line 785, 
   dv |-> 0,
   maxDv |-> 0,
   nCreated |-> 1,
-  claim |-> 0,
+  claim |-> 1,
   as |-> <<4, 0>>,
   alive |-> <<FALSE, FALSE>>,
   orphan |-> <<FALSE, FALSE>>,
   why |-> <<5, 0>>,
-  ran |-> <<FALSE, FALSE>>,
-  ph |-> <<2, 0>>,
+  ran |-> <<TRUE, FALSE>>,
+  ph |-> <<0, 0>>,
   waited |-> <<0, 0>>,
   charged |-> 0,
   faults |-> 0,
   slow |-> FALSE,
-  drainFail |-> FALSE ]
+  drainFail |-> FALSE,
+  sup |-> <<FALSE, FALSE>>,
+  afterSup |-> <<0, 0>>,
+  delivered |-> <<TRUE, FALSE>>,
+  chg |-> <<0, 0>>,
+  down |-> FALSE,
+  dstart |-> 0 ]

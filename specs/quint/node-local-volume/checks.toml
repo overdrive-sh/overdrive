@@ -1,9 +1,11 @@
 # Checks for specs/quint/node-local-volume/ (node-local persistent volume protocol, GH #348).
 # Decisions modelled: VD-2 (volume belongs to the workload, stop keeps it), VD-8 (launch waits for the claim, not the
-# process), VD-9 (the launch path ensures the volume: create-if-absent, activate). VD-3 (backing) has no protocol rule.
-# One hazard per decision. ci = true iff the check takes under two minutes (latest measured: vol-safety-tlc 262 s,
-# 4 workers, 1.7 GB peak; every other check under 10 s).
-# Runs on vol_conf (REC = true) are the #[quint_test] pins.
+# process), VD-9 (the launch path ensures the volume: create-if-absent, activate), SD-1 to SD-5 as one decision (ADR-0325: a
+# launch observing the lane signal, raised by an operator stop/restart or by node shutdown, abandons its waits and
+# delivers nothing). VD-3 (backing) has no protocol rule. SD-6 (the restart generation, ADR-0326) is modelled by
+# specs/quint/restart-generation/, not here.
+# One hazard per decision. ci = true iff the check takes under two minutes; vol-safety-tlc is the one exhaustive check
+# outside CI. Runs on vol_conf (REC = true) are the #[quint_test] pins.
 
 [[check]]
 name = "vol-safety-tlc"
@@ -47,6 +49,15 @@ name = "vol-hazard-stop"
 spec = "hazard/volume_hazards.qnt"
 main = "vol_bugStopDeletes"
 invariant = "I_STOP_KEEPS_VOLUME"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+[[check]]
+name = "vol-hazard-interrupt"
+spec = "hazard/volume_hazards.qnt"
+main = "vol_bugNoInterrupt"
+invariant = "I_SUPERSEDE_ABANDONS_WAITS"
 backend = "tlc"
 expect = "violation"
 ci = true
@@ -128,6 +139,33 @@ name = "vol-run-superseded-launch-result-discarded"
 spec = "node_volume.qnt"
 main = "vol_conf"
 run = "superseded_launch_result_discarded"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "vol-run-stop-during-boot-wait-terminates-vmm-and-keeps-volume"
+spec = "node_volume.qnt"
+main = "vol_conf"
+run = "stop_during_boot_wait_terminates_vmm_and_keeps_volume"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "vol-run-stop-during-ensure-lets-ensure-finish-then-abandons"
+spec = "node_volume.qnt"
+main = "vol_conf"
+run = "stop_during_ensure_lets_ensure_finish_then_abandons"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "vol-run-shutdown-abandons-every-launch-including-one-admitted-late"
+spec = "node_volume.qnt"
+main = "vol_conf"
+run = "shutdown_abandons_every_launch_including_one_admitted_late"
 backend = "evaluator"
 expect = "holds"
 ci = true

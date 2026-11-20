@@ -2,7 +2,7 @@
 
 ## Status
 
-**Accepted — approved by the user, 2026-11-14 (DDD-5 in the feature delta). The `mtls-relay` `fib-hit` profile (22 environments) was approved by the user, 2026-11-15.**
+**Accepted — approved by the user, 2026-11-14 (DDD-5 in the feature delta). The `mtls-relay` `fib-hit` profile and the `cgroup-default` `volume-pool` profile were approved by the user, 2026-11-15 and 2026-11-17.**
 
 ## Context
 
@@ -17,8 +17,9 @@ by test name) are named profiles too.
 ## Decision
 
 The guest kit holds one closed registry: the eight groups and, per group, named
-profiles (22 environments: the 20 of the inventory plus `quint` and the
-`mtls-relay` profile `fib-hit`). The attribute selects `guest = "<group>"` and an
+profiles (23 environments: the 20 of the inventory plus `quint`, the
+`mtls-relay` profile `fib-hit` and the `cgroup-default` profile `volume-pool`, which
+holds the volume pool the node-local volume tests need). The attribute selects `guest = "<group>"` and an
 optional `profile = "<profile>"` (omitted means the group's base profile),
 validated by constant evaluation against the registry, so a typo is a build
 error and the macro crate and the wrapper hold no group list. Each profile has

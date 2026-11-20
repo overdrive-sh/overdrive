@@ -33,6 +33,10 @@ engine, instead of reporting success. The pinned fork revision and its checksums
 - Positive: a failed flush is never reported to the guest as success.
 - Negative: one patch to carry across fork rebases; the pin and checksums change in the same delivery
   step as the other block-path patches (ADR-0319, ADR-0320).
+- F1 is guarded in the fork: its regression test lands in `overdrive-sh/cloud-hypervisor` with the patch
+  and asserts that a write-through request whose post-write fsync fails completes with
+  `VIRTIO_BLK_S_IOERR` on every engine. Overdrive's Tier-3 failed-flush test (S-VOL-T3-11) covers the
+  write-back attachment, where stock Cloud Hypervisor already reports a failed flush, and does not guard F1.
 
 ## Links
 

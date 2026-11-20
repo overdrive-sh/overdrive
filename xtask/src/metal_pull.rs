@@ -18,8 +18,10 @@ pub enum PullPathError {
     /// A component is empty, `.`, `..` or `.git`.
     #[error("pull path `{0}` has an empty, `.`, `..` or `.git` component")]
     ForbiddenComponent(String),
-    /// The path is under the repo-root `target/` build output, which is never pulled.
-    #[error("pull path `{0}` is under target/, which is never transferred")]
+    /// The path is under the repo-root `target/` build output, other than beneath `target/quint/`.
+    #[error(
+        "pull path `{0}` is under target/, which is never transferred except beneath target/quint/"
+    )]
     UnderTarget(String),
     /// The path has a character outside `[A-Za-z0-9._/-]`.
     #[error("pull path `{0}` has a character outside [A-Za-z0-9._/-]")]
@@ -48,10 +50,19 @@ pub fn validate_pull_path(raw: &str) -> Result<String, PullPathError> {
     if path.split('/').any(|component| matches!(component, "" | "." | ".." | ".git")) {
         return Err(PullPathError::ForbiddenComponent(raw.to_owned()));
     }
-    if path == "target" || path.starts_with("target/") {
+    if is_build_output(path) {
         return Err(PullPathError::UnderTarget(raw.to_owned()));
     }
     Ok(path.to_owned())
+}
+
+/// `target/` is remote build output and is never pulled. The one exception is
+/// `target/quint/`, which holds only the text logs and counterexample traces of
+/// `cargo xtask quint check`. A path must name something beneath it.
+fn is_build_output(path: &str) -> bool {
+    let under_target = path == "target" || path.starts_with("target/");
+    let under_quint_out = path.starts_with("target/quint/");
+    under_target && !under_quint_out
 }
 
 fn absolute(raw: &str) -> PullPathError {
@@ -101,6 +112,36 @@ mod tests {
         assert_eq!(validate_pull_path(""), Err(PullPathError::Empty));
         assert!(matches!(validate_pull_path("a b"), Err(PullPathError::Charset(_))));
         assert!(matches!(validate_pull_path("a;b"), Err(PullPathError::Charset(_))));
+    }
+
+    #[test]
+    fn quint_run_output_beneath_target_quint_is_accepted() {
+        assert_eq!(
+            validate_pull_path("target/quint/node-local-volume/0123abcd").as_deref(),
+            Ok("target/quint/node-local-volume/0123abcd")
+        );
+        assert_eq!(
+            validate_pull_path("target/quint/sub/run/").as_deref(),
+            Ok("target/quint/sub/run")
+        );
+    }
+
+    #[test]
+    fn the_rest_of_target_stays_refused() {
+        for bad in [
+            "target",
+            "target/",
+            "target/debug",
+            "target/debug/x",
+            "target/quintx/a",
+            "target/quint",
+        ] {
+            assert!(matches!(validate_pull_path(bad), Err(PullPathError::UnderTarget(_))), "{bad}");
+        }
+        assert!(matches!(
+            validate_pull_path("target/quint/../debug"),
+            Err(PullPathError::ForbiddenComponent(_))
+        ));
     }
 
     #[test]

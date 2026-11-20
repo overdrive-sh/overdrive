@@ -256,6 +256,54 @@ fn pull_uses_binding_after_local_source_changes_and_repeated_sync_preserves_targ
     assert_eq!(snapshot(&remote), before);
 }
 
+/// CONTRACT_SHAPE: bounded-change (a quint run's output beneath `target/quint/` is
+/// pulled; the rest of `target/` is refused by the bootstrap before any transfer,
+/// and the remote tree is unchanged).
+#[test]
+fn pull_accepts_target_quint_run_output_and_refuses_the_rest_of_target() {
+    let fixture = Fixture::new();
+    success(&fixture.sync(&fixture.source));
+    let remote = fixture.checkout();
+    let run = remote.join("target/quint/subsystem/0123abcd");
+    fs::create_dir_all(run.join("check")).expect("quint run dir");
+    fs::write(run.join("check/trace.itf.json"), "counterexample\n").expect("trace");
+    fs::create_dir_all(remote.join("target/debug")).expect("debug dir");
+    fs::write(remote.join("target/debug/artifact"), "binary").expect("artifact");
+    let before = snapshot(&remote);
+
+    let output = fixture
+        .bootstrap(&fixture.source, &["--pull", "--", "target/quint/subsystem/0123abcd"])
+        .output()
+        .expect("pull quint run output");
+    success(&output);
+    assert_eq!(
+        text(&fixture.source.join("target/quint/subsystem/0123abcd/check/trace.itf.json")),
+        "counterexample\n"
+    );
+    assert_eq!(snapshot(&remote), before);
+
+    for refused in [
+        "target",
+        "target/debug",
+        "target/debug/artifact",
+        "target/quintx/a",
+        "target/quint/../debug",
+    ] {
+        let output = fixture
+            .bootstrap(&fixture.source, &["--pull", "--", refused])
+            .output()
+            .expect("refused pull path");
+        assert_eq!(output.status.code(), Some(64), "{refused}");
+        assert!(
+            String::from_utf8_lossy(&output.stderr)
+                .contains("not under target/ (except target/quint/)"),
+            "{refused}"
+        );
+    }
+    assert!(!fixture.source.join("target/debug").exists(), "nothing under target/debug is pulled");
+    assert_eq!(snapshot(&remote), before);
+}
+
 /// CONTRACT_SHAPE: bounded-change (missing transfer prerequisite is a preparation
 /// refusal; no host package install or source/retained-run mutation is allowed).
 #[test]

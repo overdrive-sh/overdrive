@@ -1031,3 +1031,41 @@ incrementing them. Retry/backoff never scans historical values. Exec retains
 its existing per-allocation semantics. `AllocStatusRow.restart_count` and
 `LastTerminated` remain per-physical-allocation facts under ADR-0078 and are not
 copied to a new row.
+
+## Accepted amendment 2026-11-18 — a generation is handled when its successor is observed (user ruling, option A; [ADR-0326](adr-0326-a-restart-generation-is-handled-when-its-successor-is-observed.md))
+
+**Context.** A launch can end without writing an allocation row: it is superseded by a stop, a restart or node shutdown (ADR-0325), or it dies
+with the control plane (reachable on `main` before ADR-0325). The reconciler stamped `observed_generation = desired.generation` on the tick
+that emitted the replacement placement, and the runtime persists the View before it dispatches. After such a launch the next evaluation read
+`restart_pending == false` beside the old operator-stopped or replaced row, the current-instance veto and the restartable filter emitted
+nothing, and the workload stayed down while the intent said run. The stamp recorded that the reconciler emitted, not that a successor exists;
+`.claude/rules/reconcilers.md` § "A View decides when to act, never whether an effect is in place" is the rule it broke.
+
+**Decision.** The generation gate stays: a restart advances `desired.generation` monotonically, placement coalesces to one fresh instance
+for the latest generation, the veto is scoped to the current instance, and R1-crash, R2 and R5 are unchanged. What changes is how
+`restart_pending` is decided. The reconciler's View records, for each allocation id it issues, the generation that id serves
+(`issued_generation`, an input); `restart_pending` holds while the **observed** current allocation (the highest id that has a row) serves a
+generation below the desired one, unless that allocation is a Job's row that carries a terminal claim: a finished Job is never replaced
+(the action shim's own rule for a Job row), so its generation is not pending and `workload restart` of it issues nothing (user ruling
+2026-11-19; ADR-0326). A generation therefore stops being pending only when the allocation issued for it has a row. The View
+field `observed_generation` and the stamp on the R3/R4 placement tick are removed. No `AllocStatusRow` field is added, so there is no
+envelope bump. The shapes are pinned in the feature delta of the node-local persistent volume
+(§ "Restart generation is handled when its successor is observed").
+
+**Consequences.** An abandoned launch leaves the generation pending and the next evaluation issues one new allocation for it, charging nothing
+(the generation-replacement path carries the predecessor's budget, unchanged); an abandoned crash-restart launch is relaunched with the same
+count its abandoned issue assigned, so it is not charged twice. A launch failure that precedes the driver (SVID issuance, an empty driver
+registry in the restart arm) writes a `Failed` row and is charged like any start failure (a Job's row is final), so an unobserved successor
+is always a supersession, an admission refusal or a fence, never a failure that retries every tick (ADR-0328 for the recorded failure,
+[ADR-0329](adr-0329-an-admission-refusal-by-the-guest-network-pool-writes-no-row-and-charges-nothing.md) for the admission refusal; ADR-0326). The lane exclusivity of ADR-0102 and the dispatch awaited inside the tick
+guarantee that no launch is in flight when the next evaluation hydrates, so one generation is never launched twice. The persisted View shape
+changes (a single cut on a greenfield node), and the tests that seed `observed_generation` are rewritten.
+
+**Superseded text of this ADR.**
+
+| Earlier statement | Now |
+|---|---|
+| § 5 View: "`observed_generation` ... stamps `observed_generation = desired.generation` once it does" and the R3/R4 column "**stamped** `= desired.generation` (placement is happening this tick)" | No tick stamps. R3 and R4 issue the successor id with its `issued_generation` entry equal to the desired generation; the generation stops being pending on the first evaluation that observes that id's row. |
+| § 5: `restart_pending = view.observed_generation < desired.generation` (in the gate, R1 to R5 and the three walks) | `restart_pending` is true iff the observed current allocation's `issued_generation` entry (absent reads 0) is below `desired.generation` and the current allocation is not a Job row carrying a terminal claim; with no row there is nothing to replace. |
+| "stamping on R2 would let `observed == desired` re-arm the veto before the fresh instance exists" | No stamp exists on any tick; the veto is overridden until the successor's row exists, and a successor that never gets a row never re-arms it. |
+| Coalescing: "the reconciler places ONCE and stamps `observed = desired = 2`; the next tick sees `observed == desired`" | The reconciler places once, issued for generation 2; the next evaluation sees the successor's row serving generation 2, so nothing is pending. Sequential restarts still each cycle the workload. |

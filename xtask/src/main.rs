@@ -489,7 +489,9 @@ enum MetalAction {
     ///
     /// Brings back outputs a metal run produced, such as
     /// `specs/quint/<subsystem>/evidence` after `metal run -- cargo xtask
-    /// quint check --record`. Pulls only what is named, never `target/`, and
+    /// quint check --record`, or `target/quint/<subsystem>/<run-id>` (a quint
+    /// check's logs and traces). Pulls only what is named, never `target/`
+    /// except beneath `target/quint/`, and
     /// never deletes local files (no `--delete`). Rejects absolute paths and
     /// `..`, `.` or `.git` components. Takes the checkout's lock, so it
     /// cannot race a sync or run of that checkout, and prints each transferred

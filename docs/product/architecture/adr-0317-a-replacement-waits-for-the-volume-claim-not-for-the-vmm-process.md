@@ -52,8 +52,9 @@ so a free claim implies a free lock.
 - Positive: a replacement attaches as soon as the old VMM's I/O drains, with no budget spent, and an
   unreleased volume produces a named failure.
 - Negative: a launch may hold its convergence lane up to 30 s for the claim wait, in addition to the
-  `ensure` deadline and the existing boot wait (ADR-0102), so a `workload stop` or `restart` for that
-  workload is evaluated only after the launch ends. A claim that never drains charges each of the
+  `ensure` deadline and the existing boot wait (ADR-0102). A `workload stop` or `restart` for that workload
+  supersedes the launch and ends the claim wait at once ([ADR-0325](adr-0325-a-superseding-stop-or-restart-interrupts-an-in-flight-launchs-waits.md);
+  node shutdown does the same). A claim that never drains charges each of the
   restart-limit attempts and ends the workload as `BackoffExhausted` with the `Held` cause as the last
   reason.
 

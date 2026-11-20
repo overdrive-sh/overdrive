@@ -1,0 +1,37 @@
+# rg-hazard-prefail-no-row: counterexample, 11 state(s) (from the TLC trace)
+
+State 1
+  conf_step = [Init |-> [tag |-> "UNIT"]]
+  st = [ declared |-> FALSE, stopped |-> FALSE, as |-> <<0, 0, 0, 0>>, why |-> <<0, 0, 0, 0>>, faults |-> 0, dg |-> 0, ig |-> <<0, 0, 0, 0>>, cnt |-> <<0, 0, 0, 0>>, og |-> 0, idFault |-> TRUE, capFull |-> FALSE ]
+
+State 2 [Declare]
+  st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<0, 0, 0, 0>>, why |-> <<0, 0, 0, 0>>, faults |-> 0, dg |-> 0, ig |-> <<0, 0, 0, 0>>, cnt |-> <<0, 0, 0, 0>>, og |-> 0, idFault |-> TRUE, capFull |-> FALSE ]
+
+State 3 [WlStart]
+  st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<1, 0, 0, 0>>, why |-> <<0, 0, 0, 0>>, faults |-> 0, dg |-> 0, ig |-> <<0, 0, 0, 0>>, cnt |-> <<0, 0, 0, 0>>, og |-> 0, idFault |-> TRUE, capFull |-> FALSE ]
+
+State 4 [LaunchPreFail]
+  st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<3, 0, 0, 0>>, why |-> <<9, 0, 0, 0>>, faults |-> 0, dg |-> 0, ig |-> <<0, 0, 0, 0>>, cnt |-> <<0, 0, 0, 0>>, og |-> 0, idFault |-> TRUE, capFull |-> FALSE ]
+
+State 5 [WlStart]
+  st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<3, 1, 0, 0>>, why |-> <<9, 0, 0, 0>>, faults |-> 0, dg |-> 0, ig |-> <<0, 0, 0, 0>>, cnt |-> <<0, 0, 0, 0>>, og |-> 0, idFault |-> TRUE, capFull |-> FALSE ]
+
+State 6 [WorkloadRestart]
+  st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<3, 1, 0, 0>>, why |-> <<9, 0, 0, 0>>, faults |-> 0, dg |-> 1, ig |-> <<0, 0, 0, 0>>, cnt |-> <<0, 0, 0, 0>>, og |-> 0, idFault |-> TRUE, capFull |-> FALSE ]
+
+State 7 [LaunchPreFail]
+  st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<3, 3, 0, 0>>, why |-> <<9, 9, 0, 0>>, faults |-> 0, dg |-> 1, ig |-> <<0, 0, 0, 0>>, cnt |-> <<0, 0, 0, 0>>, og |-> 0, idFault |-> TRUE, capFull |-> FALSE ]
+
+State 8 [WlStart]
+  st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<3, 3, 1, 0>>, why |-> <<9, 9, 0, 0>>, faults |-> 0, dg |-> 1, ig |-> <<0, 0, 1, 0>>, cnt |-> <<0, 0, 0, 0>>, og |-> 0, idFault |-> TRUE, capFull |-> FALSE ]
+
+State 9 [LaunchPreFail]
+  st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<3, 3, 3, 0>>, why |-> <<9, 9, 9, 0>>, faults |-> 0, dg |-> 1, ig |-> <<0, 0, 1, 0>>, cnt |-> <<0, 0, 0, 0>>, og |-> 0, idFault |-> TRUE, capFull |-> FALSE ]
+
+State 10 [WlStart]
+  st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<3, 3, 3, 1>>, why |-> <<9, 9, 9, 0>>, faults |-> 0, dg |-> 1, ig |-> <<0, 0, 1, 1>>, cnt |-> <<0, 0, 0, 0>>, og |-> 0, idFault |-> TRUE, capFull |-> FALSE ]
+
+State 11 [LaunchPreFail]
+  st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<3, 3, 3, 3>>, why |-> <<9, 9, 9, 9>>, faults |-> 0, dg |-> 1, ig |-> <<0, 0, 1, 1>>, cnt |-> <<0, 0, 0, 0>>, og |-> 0, idFault |-> TRUE, capFull |-> FALSE ]
+
+-> stutters forever in State 11
