@@ -109,7 +109,16 @@ pub mod subcommand {
     /// module with `finit_module` (already loaded is success), then execs
     /// the program. The in-guest test lane's launcher (`guest_lane`).
     pub const RUN_WITH_MODULES: &str = "run-with-modules";
+    /// `forwarding-bench <workload-addr> <launch-token> <port> <warmup> <timed>`: the
+    /// guest-flow-forwarding benchmark program. Pairs one flow through the guest flow owner's
+    /// vsock wire seam, drives `warmup` unrecorded then `timed` timed 64-byte closed-loop round
+    /// trips, and prints the [`super::print_program_return`] text. Exits [`super::exit::OK`] when
+    /// it ran to the end, [`super::exit::FLOW_DRIVE`] when a flow could not be driven.
+    pub const FORWARDING_BENCH: &str = "forwarding-bench";
 }
+
+/// The metric the `forwarding-bench` program returns as its series block.
+pub const FORWARDING_BENCH_METRIC: &str = "forwarded_round_trip_ns";
 
 /// The program's exit codes.
 pub mod exit {
@@ -130,6 +139,8 @@ pub mod exit {
     /// A churn send failed (the guest refused a datagram: a slot not
     /// released).
     pub const CHURN_SEND: i32 = 30;
+    /// A benchmark program could not drive its flow.
+    pub const FLOW_DRIVE: i32 = 40;
     /// The arguments did not parse.
     pub const USAGE: i32 = 64;
     /// A module failed to load.

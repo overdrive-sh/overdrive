@@ -27,6 +27,7 @@ integration-tests = []
 async-trait.workspace    = true
 aya.workspace            = true
 futures.workspace        = true
+hex.workspace            = true
 hickory-proto.workspace  = true
 libc.workspace           = true
 overdrive-bench          = { path = "../overdrive-bench" }
@@ -42,6 +43,7 @@ overdrive-worker         = { path = "../overdrive-worker" }
 parking_lot.workspace    = true
 rcgen.workspace          = true
 rustls                   = { workspace = true, features = ["std"] }
+sha2.workspace           = true
 socket2.workspace        = true
 tempfile.workspace       = true
 tokio.workspace          = true

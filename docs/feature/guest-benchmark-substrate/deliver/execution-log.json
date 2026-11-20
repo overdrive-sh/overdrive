@@ -169,6 +169,27 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-11-19T23:05:40Z"
+    },
+    {
+      "sid": "01-08",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: implementation present from interrupted dispatch of this step; all 32 family tests passed on first Metal run",
+      "t": "2026-11-20T00:18:02Z"
+    },
+    {
+      "sid": "01-08",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-20T00:18:02Z"
+    },
+    {
+      "sid": "01-08",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-20T00:18:02Z"
     }
   ]
 }

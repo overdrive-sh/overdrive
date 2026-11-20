@@ -93,14 +93,19 @@ mod linux {
         use std::net::{
             Ipv4Addr, Shutdown, SocketAddrV4, TcpListener, TcpStream, ToSocketAddrs, UdpSocket,
         };
-        use std::os::fd::{AsRawFd as _, FromRawFd as _};
+        use std::os::fd::{AsFd as _, AsRawFd as _, FromRawFd as _};
         use std::os::unix::process::CommandExt as _;
         use std::process::Command;
         use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
         use std::sync::{Arc, Mutex};
         use std::thread;
-        use std::time::Duration;
+        use std::time::{Duration, Instant};
 
+        use overdrive_core::guest_transport::wire::{FlowId, FlowOrigin, FlowRequest};
+        use overdrive_core::guest_transport::{
+            GUEST_INBOUND_PORT, GUEST_NODE_GATEWAY, LaunchToken,
+        };
+        use overdrive_core::net::ListenPort;
         use overdrive_testing::guest_app::{
             BOUND_PREFIX, Direction, FLOOD_REPORT_PERIOD_MS, FLOOD_WRITTEN_PREFIX, FLOWING_LINE,
             HOLD_FLOWING_BYTES, LISTENING_PREFIX, ListenConnEnd, STREAM_CHUNK, StreamCheck,
@@ -111,6 +116,10 @@ mod linux {
             datagram_response, exit, flood_hello, hold_hello, subcommand, tag_is_valid,
             tcp_request, tcp_response,
         };
+        use overdrive_testing::guest_app::{
+            FORWARDING_BENCH_METRIC, GuestReading, print_program_return,
+        };
+        use overdrive_testing::vsock::{VMADDR_CID_LOCAL, VsockStream};
 
         fn usage(detail: &str) -> i32 {
             eprintln!("overdrive-guest-peer: usage: {detail}");
@@ -217,8 +226,11 @@ mod linux {
                     }
                 }
                 [cmd, rest @ ..] if *cmd == subcommand::RUN_WITH_MODULES => run_with_modules(rest),
+                [cmd, rest @ ..] if *cmd == subcommand::FORWARDING_BENCH => {
+                    forwarding_bench_command(rest)
+                }
                 _ => usage(
-                    "<round-trip|hold|flood|udp-churn|idle|bind|listen|listen-ignoring-stop|run-with-modules> …",
+                    "<round-trip|hold|flood|udp-churn|idle|bind|listen|listen-ignoring-stop|run-with-modules|forwarding-bench> …",
                 ),
             }
         }
@@ -1119,6 +1131,189 @@ mod linux {
                 }
                 Err(code) => code,
             }
+        }
+
+        /// Bytes of one benchmark request and of its echoed reply.
+        const BENCH_MESSAGE_BYTES: usize = 64;
+        /// How long one benchmark read or write may block before the flow counts as undrivable.
+        const BENCH_IO_BOUND: Duration = Duration::from_secs(10);
+
+        /// A guest reading of `path`: its trimmed text, absent when the file does not exist,
+        /// unreadable on any other error.
+        fn read_guest_reading(path: &str) -> GuestReading {
+            match std::fs::read_to_string(path) {
+                Ok(text) => GuestReading::Text(text.trim().to_owned()),
+                Err(e) if e.kind() == io::ErrorKind::NotFound => {
+                    GuestReading::Absent(format!("{path} does not exist"))
+                }
+                Err(e) => GuestReading::Unreadable(format!("{path}: {e}")),
+            }
+        }
+
+        /// Echoes `BENCH_MESSAGE_BYTES` records on `app` until the peer closes it.
+        fn bench_echo(mut app: TcpStream) -> Result<(), String> {
+            let mut record = [0u8; BENCH_MESSAGE_BYTES];
+            loop {
+                match app.read_exact(&mut record) {
+                    Ok(()) => app.write_all(&record).map_err(|e| format!("app echo write: {e}"))?,
+                    Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => return Ok(()),
+                    Err(e) => return Err(format!("app read: {e}")),
+                }
+            }
+        }
+
+        /// Pairs one flow through the guest flow owner's inbound vsock seam and returns the vsock
+        /// side and the application's accepted side.
+        fn bench_pair_flow(
+            listener: &TcpListener,
+            launch: LaunchToken,
+            port: u16,
+        ) -> Result<(VsockStream, TcpStream), String> {
+            let request = FlowRequest::TcpAccept {
+                flow: FlowId::new(FlowOrigin::Host, 1).map_err(|e| format!("flow id: {e:?}"))?,
+                peer: GUEST_NODE_GATEWAY,
+                listen_port: port
+                    .to_string()
+                    .parse::<ListenPort>()
+                    .map_err(|e| format!("listen port: {e:?}"))?,
+                launch,
+            };
+            let vsock = VsockStream::connect(VMADDR_CID_LOCAL, GUEST_INBOUND_PORT.as_u32(), None)
+                .map_err(|e| format!("connect inbound: {e}"))?;
+            set_io_bound(&vsock)?;
+            (&vsock).write_all(&request.encode()).map_err(|e| format!("write request: {e}"))?;
+            let (app, _) = listener.accept().map_err(|e| format!("accept: {e}"))?;
+            app.set_nodelay(true).map_err(|e| format!("app nodelay: {e}"))?;
+            app.set_read_timeout(Some(BENCH_IO_BOUND)).map_err(|e| format!("app timeout: {e}"))?;
+            app.set_write_timeout(Some(BENCH_IO_BOUND)).map_err(|e| format!("app timeout: {e}"))?;
+            Ok((vsock, app))
+        }
+
+        fn set_io_bound(vsock: &VsockStream) -> Result<(), String> {
+            let length = libc::socklen_t::try_from(std::mem::size_of::<libc::timeval>())
+                .map_err(|e| format!("timeval size: {e}"))?;
+            let bound = libc::timeval {
+                tv_sec: BENCH_IO_BOUND.as_secs().try_into().unwrap_or(libc::time_t::MAX),
+                tv_usec: 0,
+            };
+            for option in [libc::SO_RCVTIMEO, libc::SO_SNDTIMEO] {
+                // SAFETY: `vsock` owns a valid socket fd and `bound` is a live `timeval` of the
+                // stated size for the call.
+                let status = unsafe {
+                    libc::setsockopt(
+                        vsock.as_fd().as_raw_fd(),
+                        libc::SOL_SOCKET,
+                        option,
+                        (&raw const bound).cast(),
+                        length,
+                    )
+                };
+                if status != 0 {
+                    return Err(format!("vsock timeout: {}", io::Error::last_os_error()));
+                }
+            }
+            Ok(())
+        }
+
+        /// The closed-loop round trips: `warmup` unrecorded, then `timed` recorded nanoseconds
+        /// from the write on the vsock side to the echoed reply read on the vsock side.
+        fn bench_round_trips(
+            vsock: &VsockStream,
+            warmup: usize,
+            timed: usize,
+        ) -> Result<Vec<u64>, String> {
+            let mut values = Vec::with_capacity(timed);
+            let mut request = [0u8; BENCH_MESSAGE_BYTES];
+            let mut reply = [0u8; BENCH_MESSAGE_BYTES];
+            for index in 0..warmup + timed {
+                for (offset, byte) in request.iter_mut().enumerate() {
+                    *byte = index.to_le_bytes()[0].wrapping_add(offset.to_le_bytes()[0]);
+                }
+                let began = Instant::now();
+                (&*vsock).write_all(&request).map_err(|e| format!("vsock write {index}: {e}"))?;
+                (&*vsock).read_exact(&mut reply).map_err(|e| format!("vsock read {index}: {e}"))?;
+                let elapsed = u64::try_from(began.elapsed().as_nanos()).unwrap_or(u64::MAX);
+                if request != reply {
+                    return Err(format!("reply {index} differs from its request"));
+                }
+                if index >= warmup {
+                    values.push(elapsed);
+                }
+            }
+            Ok(values)
+        }
+
+        /// Parses the `forwarding-bench` arguments and runs the program.
+        fn forwarding_bench_command(args: &[&str]) -> i32 {
+            const SYNTAX: &str =
+                "forwarding-bench <workload-addr> <launch-token> <port> <warmup> <timed>";
+            let [workload, launch, port, warmup, timed] = args else {
+                return usage(SYNTAX);
+            };
+            match (
+                workload.parse::<Ipv4Addr>(),
+                launch.parse::<LaunchToken>(),
+                port.parse::<u16>(),
+                warmup.parse::<usize>(),
+                timed.parse::<usize>(),
+            ) {
+                (Ok(workload), Ok(launch), Ok(port), Ok(warmup), Ok(timed))
+                    if port != 0 && timed != 0 =>
+                {
+                    forwarding_bench(workload, launch, port, warmup, timed)
+                }
+                _ => usage(SYNTAX),
+            }
+        }
+
+        /// `forwarding-bench`: the guest-flow-forwarding benchmark program.
+        fn forwarding_bench(
+            workload: Ipv4Addr,
+            launch: LaunchToken,
+            port: u16,
+            warmup: usize,
+            timed: usize,
+        ) -> i32 {
+            let driven = (|| {
+                let listener = TcpListener::bind((workload, port))
+                    .map_err(|e| format!("bind {workload}:{port}: {e}"))?;
+                let (vsock, app) = bench_pair_flow(&listener, launch, port)?;
+                let echo = thread::spawn(move || bench_echo(app));
+                let values = bench_round_trips(&vsock, warmup, timed)?;
+                drop(vsock);
+                // Every timed round trip already returned its verified echo, so the application
+                // side's end is not a measurement: the owner may abort the flow when the vsock
+                // side closes, and the echo thread then reads a reset. It is reported, not failed.
+                match echo.join() {
+                    Ok(Ok(())) => {}
+                    Ok(Err(detail)) => {
+                        eprintln!("forwarding-bench: application side ended: {detail}");
+                    }
+                    Err(_) => eprintln!("forwarding-bench: the echo thread panicked"),
+                }
+                Ok::<_, String>(values)
+            })();
+            let values = match driven {
+                Ok(values) => values,
+                Err(detail) => {
+                    eprintln!("forwarding-bench: {detail}");
+                    return exit::FLOW_DRIVE;
+                }
+            };
+            let text = print_program_return(
+                &read_guest_reading("/proc/sys/kernel/osrelease"),
+                &read_guest_reading(
+                    "/sys/devices/system/clocksource/clocksource0/current_clocksource",
+                ),
+                FORWARDING_BENCH_METRIC,
+                &values,
+            );
+            let mut console = io::stdout().lock();
+            if let Err(e) = console.write_all(text.as_bytes()).and_then(|()| console.flush()) {
+                eprintln!("forwarding-bench: writing the return: {e}");
+                return exit::FLOW_DRIVE;
+            }
+            exit::OK
         }
 
         fn run_with_modules(args: &[&str]) -> i32 {
