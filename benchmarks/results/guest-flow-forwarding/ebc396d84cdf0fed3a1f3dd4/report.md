@@ -1,0 +1,41 @@
+# Benchmark report: guest-flow-forwarding / guest_flow_forwarding
+
+- run id: ebc396d84cdf0fed3a1f3dd4
+- family: guest-flow-forwarding
+- benchmark: guest_flow_forwarding
+- evidence: maintained
+- substrate: guest
+- commit: 36618cba7a86588dce3608ed3f898890017b9ef4
+- dirty: true
+- methodology: 1
+- seed: 1828168295935480066
+- debug_assertions: false
+- kernel: 7.0.0-38-generic
+- cpu_model: AMD EPYC 8024P 8-Core Processor
+- cpu_count: 16
+- governor: schedutil
+- smt: on
+- boost: on
+- bpf_stats_enabled: 1
+- clocksource: tsc
+- irq_time_accounting: n
+- guest launch: metal host (not nested)
+- guest boot: fresh guest per replicate
+- guest vcpu scheduling: unpinned
+- guest governor: absent: not visible from a guest
+- guest smt: absent: not visible from a guest
+- guest boost: absent: not visible from a guest
+- guest vcpus: absent: no replicate returned a guest view
+- guest memory mib: absent: no replicate returned a guest view
+- guest kernel: absent: no replicate returned a guest view
+- guest clocksource: absent: no replicate returned a guest view
+- guest artifact overdrive_init: absent: no replicate returned a guest view
+- guest artifact overdrive_guest_peer: absent: no replicate returned a guest view
+- guest artifact ovd_fwd: absent: no replicate returned a guest view
+- bpf stats: off
+- clock: host CLOCK_MONOTONIC_RAW; service none; guest CLOCK_MONOTONIC (in-guest Instant, 1 ns)
+- canary: not run
+- replicates ok: 0
+- replicates failed: 0
+- status: refused
+- refused: bpf_stats_enabled found 1 pinned 0

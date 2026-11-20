@@ -1,0 +1,9 @@
+# E-G4 receipt: benchmark process SIGKILLed after the CID wrap (V-C)
+- 01:01:07Z `metal run --benchmark guest-flow-forwarding` run 41a4823eb9e8f15dcedb3622 (included a 2 min recompile first). exit_code=101 (signal 9). Result dir benchmarks/results/guest-flow-forwarding/41a4823eb9e8f15dcedb3622, pulled right after (before any other metal command).
+- Signal (direct ssh, `sudo -n kill -KILL 3336570`) at 01:08:27Z, benchmark binary `deps/benchmarks-e9746f1ebe8a1f41 run --family guest-flow-forwarding` at 47 s elapsed since it was first seen; a cloud-hypervisor VMM (pid 3339223, kit dir /run/ovd-gk/41a4823e...) was alive at that moment. Nothing else was signalled.
+- Record: 24 lines, replicates blocks 0..20 all `outcome:ok` (21 ok, 0 failed; blocks 16-20 reused CIDs of blocks 0-4, no launch failure); no run_finished / run_refused; no report.md written. Artifacts: 21 console dirs.
+- Probe 01:13:05Z (exclusive run 72ac3793a7706319365813bb, ~35 s after the kill): `pgrep -af "^/usr/local/bin/cloud-hypervisor"` -> none; stopped (state T) procs -> none; processes holding /dev/vhost-vsock (scan of /proc/*/fd) -> holders=0.
+- Render on the box (`bench-report render`): `- replicates ok: 21`, `- replicates failed: 0`, `- status: incomplete (no run_finished or run_refused)`; `bench-report validate` exit 0.
+- `metal collect 41a4...` returned the retained log, exit 101.
+- Clean run afterwards (E-G5 side): run 62cf21ac0f4b8793e31ec89d, 01:14:18Z-01:16:33Z, exit 0, 30 ok / 0 failed, `status: finished`, one guest_observed (kernel 7.0.0-38-generic, vcpus 2); 30 replicates over 16 CIDs, no launch failure. Pulled.
+- V-C held: KillMode=mixed unit stop left no VMM and no vhost-vsock holder; CIDs reusable (both after the wrap in the killed run and in the next run).

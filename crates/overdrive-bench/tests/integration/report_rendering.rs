@@ -1100,8 +1100,9 @@ fn a_native_report_prints_no_guest_line_and_states_substrate_native() {
 
 /// Every committed record that retains a `report.md` re-renders to exactly those bytes: the
 /// change adds nothing to a native report (K4, DDD-2 "A native report is byte-identical"), and
-/// every committed native record states substrate native with no guest block and no
-/// `guest_observed` line. GREEN guard.
+/// every committed native record (every record under a native family directory, and any record
+/// stating substrate native) has no guest block and no `guest_observed` line. Guest records are
+/// admitted and re-render byte-identical too. GREEN guard.
 /// CONTRACT_SHAPE: unbounded-preservation (retained bytes against a fresh render).
 #[test]
 fn every_committed_native_report_re_renders_byte_identical() {
@@ -1120,16 +1121,33 @@ fn every_committed_native_report_re_renders_byte_identical() {
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../benchmarks/results");
     let mut found = Vec::new();
     records(&root, &mut found);
+    let native_families = ["cgroup-connect-hook", "dns-responder", "mtls-path", "vm-lifecycle"];
     let mut compared = 0;
+    let mut native_compared = 0;
     for record in &found {
         let text = std::fs::read_to_string(record).expect("read the record");
+        let in_native_family = record
+            .strip_prefix(&root)
+            .ok()
+            .and_then(|rel| rel.components().next())
+            .is_some_and(|family| native_families.iter().any(|n| family.as_os_str() == *n));
+        let mut substrate = None;
         for line in text.lines() {
             let value: serde_json::Value = serde_json::from_str(line).expect("a record line");
             if value["t"] == "run_started" {
-                assert_eq!(value["substrate"], "native", "{} is native", record.display());
-                assert!(value.get("guest").is_none(), "{} has no guest block", record.display());
+                substrate = Some(value["substrate"].clone());
+                if in_native_family || value["substrate"] == "native" {
+                    assert_eq!(value["substrate"], "native", "{} is native", record.display());
+                    assert!(
+                        value.get("guest").is_none(),
+                        "{} has no guest block",
+                        record.display()
+                    );
+                }
             }
-            assert_ne!(value["t"], "guest_observed", "{} has no guest view", record.display());
+            if in_native_family || substrate.as_ref().is_some_and(|s| s == "native") {
+                assert_ne!(value["t"], "guest_observed", "{} has no guest view", record.display());
+            }
         }
         let report = record.with_file_name("report.md");
         if let Ok(retained) = std::fs::read(&report) {
@@ -1140,7 +1158,11 @@ fn every_committed_native_report_re_renders_byte_identical() {
                 record.display()
             );
             compared += 1;
+            if substrate.is_some_and(|s| s == "native") {
+                native_compared += 1;
+            }
         }
     }
     assert!(compared > 0, "at least one committed record retains a report to compare");
+    assert!(native_compared > 0, "at least one native report is compared");
 }

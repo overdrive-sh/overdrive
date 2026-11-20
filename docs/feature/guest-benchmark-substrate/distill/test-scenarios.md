@@ -84,7 +84,7 @@ The existing GREEN guard `every_retained_record_still_validates` (every record u
 | GP5 | a_one_arm_guest_report_shows_the_distribution_of_the_retained_samples | US-GBS-01 AC (a); parent R18 | series row values 27 / replicates 9 / failures 0; no comparison, no A/A | pure-function | RED |
 | GP6 | rendering_a_guest_record_twice_is_byte_identical_and_leaves_the_record_untouched | ADR-0301; C4a | identical bytes; record unchanged | unbounded-preservation | RED |
 | GP7 | a_native_report_prints_no_guest_line_and_states_substrate_native | US-GBS-01 AC (d); US-GBS-02 AC (e) | no `- guest ` line; substrate `native` | pure-function | GREEN guard |
-| GP8 | every_committed_native_report_re_renders_byte_identical | K4; DDD-2 "a native report is byte-identical" | every committed `record.jsonl` states substrate `native`, has no `guest` block and no `guest_observed`; every one with a `report.md` re-renders to exactly those bytes (at least one compared) | unbounded-preservation | GREEN guard (observed passing on the Metal host; 12 s) |
+| GP8 | every_committed_native_report_re_renders_byte_identical | K4; DDD-2 "a native report is byte-identical" | every committed `record.jsonl` under a native family directory (cgroup-connect-hook, dns-responder, mtls-path, vm-lifecycle) states substrate `native`; every native record has no `guest` block and no `guest_observed`; guest records (guest-flow-forwarding) are admitted; every record with a `report.md` re-renders to exactly those bytes (at least one native report compared) | unbounded-preservation | GREEN guard (observed passing on the Metal host; 12 s) |
 
 ## Documents (`tests/integration/methodology_documents.rs`)
 
