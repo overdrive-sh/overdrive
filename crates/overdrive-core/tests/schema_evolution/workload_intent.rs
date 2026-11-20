@@ -146,13 +146,7 @@ fn schedule_v2() -> Schedule {
             id: WorkloadId::new("svc-v1-schedule").expect("valid workload id"),
             replicas: NonZeroU32::new(1).expect("non-zero replicas"),
             resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
-            driver: WorkloadDriver::Vm(Vm {
-                command: "/usr/local/bin/cleanup".to_string(),
-                args: vec![ARGS.to_string()],
-                kernel: KERNEL.to_string(),
-                rootfs: ROOTFS.to_string(),
-                volume: None,
-            }),
+            driver: vm_v2("/usr/local/bin/cleanup", None),
         },
         cron_expr: CronExpr::new("0 2 * * *").expect("valid cron expr"),
     }

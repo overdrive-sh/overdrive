@@ -1742,9 +1742,20 @@ fn quint_vol_shutdown_abandons_every_launch_including_one_admitted_late() -> imp
 }
 
 /// Randomized `vol_conf` traces (seed printed on failure).
+///
+/// The seed is pinned while the driver is pending: an unpinned run draws a fresh seed, and each
+/// seed's first failing step is a different launch action, so no single marker could name the
+/// semantic RED. Seed 1 first fails at `LaunchSuperseded` (step 19). The activation step removes
+/// the `seed` argument together with the marker.
 /// CONTRACT_SHAPE: bounded-change.
-#[quint_run(spec = "../../specs/quint/node-local-volume/node_volume.qnt", main = "vol_conf")]
-#[should_panic(expected = "the step did not settle within the settle bound")]
+#[quint_run(
+    spec = "../../specs/quint/node-local-volume/node_volume.qnt",
+    main = "vol_conf",
+    seed = "1"
+)]
+#[should_panic(
+    expected = "LaunchSuperseded: the step did not settle within the settle bound: the superseded launch's dispatch returns"
+)]
 fn quint_vol_randomized() -> impl Driver {
     NodeVolumeDriver::new()
 }

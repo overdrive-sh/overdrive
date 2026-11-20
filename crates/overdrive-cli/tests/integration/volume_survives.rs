@@ -217,22 +217,17 @@ fn running_alloc(out: &WorkloadDescribeOutput) -> String {
 /// volumes of the boot probe, `overdrive-ovd--probe--<x>`, are not 32 hex and are excluded).
 fn volume_device() -> PathBuf {
     let nodes: Vec<PathBuf> = std::fs::read_dir("/dev/mapper")
-        .map(|entries| {
-            entries
-                .flatten()
-                .filter(|entry| {
-                    let name = entry.file_name().to_string_lossy().into_owned();
-                    name.strip_prefix(VOLUME_NODE_PREFIX).is_some_and(|hash| {
-                        hash.len() == 32
-                            && hash
-                                .bytes()
-                                .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
-                    })
-                })
-                .map(|entry| entry.path())
-                .collect()
+        .expect("read /dev/mapper")
+        .map(|entry| entry.expect("read a /dev/mapper entry"))
+        .filter(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            name.strip_prefix(VOLUME_NODE_PREFIX).is_some_and(|hash| {
+                hash.len() == 32
+                    && hash.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+            })
         })
-        .unwrap_or_default();
+        .map(|entry| entry.path())
+        .collect();
     assert_eq!(nodes.len(), 1, "exactly one volume node: {nodes:?}");
     nodes.into_iter().next().expect("one node")
 }

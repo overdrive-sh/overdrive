@@ -87,6 +87,7 @@ stop earlier and the marker text they stop on; "Moves" names the activation row.
 
 ### `overdrive-cli/tests/integration/volume_survives.rs` (`volume-pool`, `kvm-tests`)
 - Fails today: ignored until the pool exists (row 1). Once run, every test stops at a precondition: "a VM workload that declares [vm.volume] must deploy (vol-restart | vol-killed | vol-stop | vol-drain | vol-flush | vol-stop-held)", because the parser refuses `[vm.volume]`. After row 2 the next RED is the first read of the volume's device node (for example `wait_for_records` on `volume_device()`), because no launch ensures a volume until row 7.
+- Fixture change: the restart test's workload is a Service. The acceptance designer changed it at the orchestrator's request on 2026-11-20, because a crashed Job is a natural exit and is never restarted (J-1/H1). The crafter did not author this change.
 - Moves: row 1 removes the `#[ignore]`; row 2 moves the marker as above; rows 7 and 8 turn the tests GREEN (`a_workload_stop_during_a_held_claim_returns_promptly_with_no_failed_row` needs row 8, the stop interrupting the claim wait).
 
 ### `overdrive-host/tests/integration/volume_pool_backing.rs` and `volume_pool_probe_pool.rs` (`volume-pool`)
@@ -162,6 +163,7 @@ stop earlier and the marker text they stop on; "Moves" names the activation row.
 
 ### `overdrive-control-plane/src/quint_node_volume.rs`
 - Fails today: every trace passes `Init` and diverges at step 2, `Declare`: "the production spec parser must accept the [vm.volume] declaration: [vm]: unknown field `volume`" (the real parser text). Precondition stop for all; every handler after `Declare` is compile-checked only.
+- `quint_vol_randomized` pins `seed = "1"` while pending: an unpinned run draws a fresh seed and each seed first fails at a different launch action, so no single marker could name the RED. The activation step removes the seed with the marker.
 - Moves: row 2 moves each marker to its next divergence (the specs' runs go `Declare`, `WlStart(1)`, `LaunchEnsureCreate(1)`: the first projection that reads the volume the launch's `ensure` creates, expected at row 7 over row 5's sim; confirmed at activation); the markers come off progressively as rows 5, 7 and 8 land (row 11).
 
 ### `overdrive-control-plane/src/quint_restart_generation.rs`
