@@ -1358,7 +1358,7 @@ fn fresh_volume_pool_disk(
 /// `$OVERDRIVE_KMOD_DIR` in a mutation run; the
 /// `xtask::guest_kit_prepare` contract path, see
 /// [`crate::forwarder_module`]).
-fn prepared_forwarder_module(release: &str) -> Result<PathBuf, GuestKitError> {
+pub(crate) fn prepared_forwarder_module(release: &str) -> Result<PathBuf, GuestKitError> {
     let nested_prebuilt = PathBuf::from(GUEST_FORWARDER_MODULE_PATH);
     if nested_prebuilt.is_file() {
         return Ok(nested_prebuilt);
@@ -1370,7 +1370,7 @@ fn prepared_forwarder_module(release: &str) -> Result<PathBuf, GuestKitError> {
 
 /// The static scripted peer the lane setup step built for the host's musl
 /// target (`<target>/<musl-triple>/release/overdrive-guest-peer`).
-fn prepared_guest_peer() -> Result<PathBuf, GuestKitError> {
+pub(crate) fn prepared_guest_peer() -> Result<PathBuf, GuestKitError> {
     let nested_prebuilt = PathBuf::from(GUEST_PEER_GUEST_PATH);
     if nested_prebuilt.is_file() {
         return Ok(nested_prebuilt);

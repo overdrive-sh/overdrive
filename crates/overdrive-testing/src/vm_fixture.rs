@@ -117,8 +117,14 @@ use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use overdrive_core::guest_transport::GUEST_FORWARDER_MODULE_PATH;
 use overdrive_core::vm::beacon::{GUEST_VSOCK_MODULE_DIR, GUEST_VSOCK_MODULE_FILES};
 use overdrive_core::vm::config::{HostArch, KERNEL_MAGIC_WINDOW, KernelFormatError, KernelImage};
+
+use crate::guest_kit::{
+    DUMMY_MODULE_GUEST_PATH, OVERDRIVE_INIT_GUEST_PATH, prepared_forwarder_module,
+    prepared_guest_peer,
+};
 
 /// The in-guest absolute path the kernel's own no-`init=` fallback
 /// search finds FIRST.
@@ -659,11 +665,12 @@ pub(crate) fn host_kernel_release() -> Result<String, VmFixtureError> {
 }
 
 /// Stages (or re-verifies) the ext4 rootfs at
-/// `<staging_root>/rootfs.ext4`, with a freshly-built static-musl
-/// `overdrive-init` baked in at BOTH [`GUEST_INIT_SBIN_PATH`] (`/sbin/
-/// init` — the path a no-`init=` boot actually reaches, D1) and
-/// [`GUEST_INIT_PATH`] (`/init` — reached only under an explicit
-/// `init=/init` cmdline).
+/// `<staging_root>/rootfs.ext4`: the guest-kit PID 1 baked in at BOTH
+/// [`GUEST_INIT_SBIN_PATH`] (`/sbin/init` — the path a no-`init=` boot
+/// actually reaches, D1) and [`GUEST_INIT_PATH`] (`/init` — reached only
+/// under an explicit `init=/init` cmdline), the freshly-built static-musl
+/// `overdrive-init` it `exec`s, and the kernel modules the production
+/// guest transport needs (see [`GuestPrograms`]).
 ///
 /// # Errors
 ///
@@ -671,13 +678,13 @@ pub(crate) fn host_kernel_release() -> Result<String, VmFixtureError> {
 /// [`VmFixtureError::RootfsStagingFailed`],
 /// [`VmFixtureError::RootfsBuildFailed`], or [`VmFixtureError::Spawn`].
 fn stage_rootfs(staging_root: &Path) -> Result<PathBuf, VmFixtureError> {
-    let init_bin = build_overdrive_init_static()?;
     // The SAME `uname -r` used both to derive the invalidation
     // signature below AND to locate the `.ko.zst` sources
     // `build_staging_tree` stages (ADR-0082 §D4 amendment 2026-08-14) —
     // computed once here so the two can never skew against each other.
     let kernel_release = host_kernel_release()?;
-    let signature = format!("{}:{kernel_release}", compute_init_signature(&init_bin)?);
+    let programs = GuestPrograms::prepared(&kernel_release)?;
+    let signature = format!("{}:{kernel_release}", programs.signature()?);
 
     let rootfs_path = staging_root.join("rootfs.ext4");
     let marker_path = staging_root.join(".rootfs-built-from");
@@ -701,7 +708,7 @@ fn stage_rootfs(staging_root: &Path) -> Result<PathBuf, VmFixtureError> {
     }
 
     let stage_dir = staging_root.join("rootfs-stage");
-    build_staging_tree(&stage_dir, &init_bin, &kernel_release)?;
+    build_staging_tree(&stage_dir, &programs, &kernel_release)?;
     mkfs_rootfs_image(&stage_dir, &rootfs_path)?;
 
     fs::write(&marker_path, &signature).map_err(|source| {
@@ -760,12 +767,70 @@ fn rootfs_image_is_valid(path: &Path) -> bool {
     file.read_exact(&mut magic).is_ok() && magic == EXT4_SUPERBLOCK_MAGIC
 }
 
+/// The programs a fixture rootfs carries, each one prepared before the
+/// lane runs (`cargo xtask guest-kit-prepare`, or the outer guest's staged
+/// copy of it).
+///
+/// A VM the production `serve` launches runs `overdrive-init`'s guest
+/// transport setup before READY: it creates a `dummy` link and loads
+/// `ovd_fwd.ko`. The stock kernel the lane boots builds the dummy driver as a
+/// module and nothing in the guest would load it, so PID 1 is the guest-kit
+/// peer — the same test-only PID 1 every [`crate::guest_kit::GuestKit`] image
+/// carries — which loads the fixture's modules and `exec`s `overdrive-init`,
+/// which remains PID 1 and performs the production setup unchanged.
+struct GuestPrograms {
+    /// The static `overdrive-init`.
+    init_bin: PathBuf,
+    /// The static guest-kit peer, PID 1 of the image.
+    peer_bin: PathBuf,
+    /// `ovd_fwd.ko` built for the kernel the image boots.
+    forwarder_module: PathBuf,
+}
+
+impl GuestPrograms {
+    /// Locates the prepared programs for `kernel_release`.
+    ///
+    /// # Errors
+    ///
+    /// [`VmFixtureError::OverdriveInitBuildFailed`] when `overdrive-init`
+    /// cannot be built, and [`VmFixtureError::RootfsStagingFailed`] naming the
+    /// setup command when the peer or the module was not prepared.
+    fn prepared(kernel_release: &str) -> Result<Self, VmFixtureError> {
+        let not_prepared = |error: crate::guest_kit::GuestKitError| {
+            VmFixtureError::rootfs_staging_failed(
+                "locating the guest programs the fixture rootfs carries",
+                io::Error::other(error.to_string()),
+            )
+        };
+        Ok(Self {
+            init_bin: build_overdrive_init_static()?,
+            peer_bin: prepared_guest_peer().map_err(not_prepared)?,
+            forwarder_module: prepared_forwarder_module(kernel_release).map_err(not_prepared)?,
+        })
+    }
+
+    /// The idempotency signature [`stage_rootfs`] compares against the
+    /// persisted marker (before the kernel release is appended): each
+    /// program's own [`compute_init_signature`], so a rebuilt program
+    /// invalidates the image.
+    fn signature(&self) -> Result<String, VmFixtureError> {
+        Ok(format!(
+            "{}:{}:{}",
+            compute_init_signature(&self.init_bin)?,
+            compute_init_signature(&self.peer_bin)?,
+            compute_init_signature(&self.forwarder_module)?,
+        ))
+    }
+}
+
 /// Clears and rebuilds the staging tree `mkfs.ext4 -d` will populate the
-/// image from: the kernel-required empty mountpoints, `overdrive-init`
-/// baked in at both in-guest init paths (D1), the guest vsock transport
-/// modules `overdrive-init` `finit_module`-loads before dialing the
-/// beacon (ADR-0082 §D4 amendment 2026-08-14, DISTILL DWD-21), and the
-/// two static device nodes PID 1 needs before devtmpfs is up.
+/// image from: the kernel-required empty mountpoints, the guest-kit PID 1
+/// baked in at both in-guest init paths (D1) with `overdrive-init` beside it
+/// at [`OVERDRIVE_INIT_GUEST_PATH`], the guest vsock transport modules
+/// `overdrive-init` `finit_module`-loads before dialing the beacon
+/// (ADR-0082 §D4 amendment 2026-08-14, DISTILL DWD-21), the dummy-link
+/// driver and `ovd_fwd.ko` the guest transport setup needs, and the two
+/// static device nodes PID 1 needs before devtmpfs is up.
 ///
 /// `kernel_release` is the SAME `uname -r` [`stage_kernel`] copied
 /// `/boot/vmlinuz-<release>` from (computed once, by [`stage_rootfs`],
@@ -777,7 +842,7 @@ fn rootfs_image_is_valid(path: &Path) -> bool {
 /// note warns against.
 fn build_staging_tree(
     stage_dir: &Path,
-    init_bin: &Path,
+    programs: &GuestPrograms,
     kernel_release: &str,
 ) -> Result<(), VmFixtureError> {
     if stage_dir.exists() {
@@ -788,7 +853,8 @@ fn build_staging_tree(
             )
         })?;
     }
-    for sub in ["proc", "sys", "dev", "tmp", "sbin"] {
+    for sub in ["proc", "sys", "dev", "tmp", "sbin", "lib/overdrive", "lib/overdrive-testing/modules"]
+    {
         fs::create_dir_all(stage_dir.join(sub)).map_err(|source| {
             VmFixtureError::rootfs_staging_failed(
                 format!("creating {sub} under {}", stage_dir.display()),
@@ -797,18 +863,73 @@ fn build_staging_tree(
         })?;
     }
 
-    // D1: bake overdrive-init in at BOTH reachable paths -- /sbin/init is
-    // the load-bearing one (what a no-`init=` boot's kernel fallback
-    // search finds first); /init is kept for an explicit `init=/init`
-    // cmdline (every spike boot's shape). See the module doc's "Design
-    // decisions" section.
-    install_guest_init(stage_dir, init_bin, GUEST_INIT_SBIN_PATH)?;
-    install_guest_init(stage_dir, init_bin, GUEST_INIT_PATH)?;
+    // D1: bake the PID 1 in at BOTH reachable paths -- /sbin/init is the
+    // load-bearing one (what a no-`init=` boot's kernel fallback search
+    // finds first); /init is kept for an explicit `init=/init` cmdline
+    // (every spike boot's shape). The peer finds `overdrive-init` at its
+    // pinned path and `exec`s it after loading the fixture's modules. See
+    // the module doc's "Design decisions" section.
+    install_guest_init(stage_dir, &programs.peer_bin, GUEST_INIT_SBIN_PATH)?;
+    install_guest_init(stage_dir, &programs.peer_bin, GUEST_INIT_PATH)?;
+    install_guest_init(stage_dir, &programs.init_bin, OVERDRIVE_INIT_GUEST_PATH)?;
 
     stage_vsock_modules(stage_dir, kernel_release)?;
+    stage_dummy_module(stage_dir, kernel_release)?;
+    let forwarder = stage_dir.join(GUEST_FORWARDER_MODULE_PATH.trim_start_matches('/'));
+    fs::copy(&programs.forwarder_module, &forwarder).map_err(|source| {
+        VmFixtureError::rootfs_staging_failed(
+            format!("installing ovd_fwd.ko at {}", forwarder.display()),
+            source,
+        )
+    })?;
 
     mknod_char_device(&stage_dir.join("dev/console"), 5, 1, 0o600)?;
     mknod_char_device(&stage_dir.join("dev/null"), 1, 3, 0o666)?;
+    Ok(())
+}
+
+/// Stages the stock kernel's dummy-link driver at [`DUMMY_MODULE_GUEST_PATH`],
+/// zstd-decompressed from `/lib/modules/<kernel_release>/kernel/drivers/net/
+/// dummy.ko[.zst]` — the SAME release the kernel was copied from. The guest
+/// transport setup creates a `dummy` link, and the stock kernel builds that
+/// driver as a module the guest loads before `overdrive-init` runs.
+///
+/// A kernel that ships no such file builds the driver in (the appliance
+/// kernel's floor, ADR-0068): nothing to stage, and the peer loads nothing.
+///
+/// # Errors
+///
+/// [`VmFixtureError::Spawn`] / [`VmFixtureError::RootfsStagingFailed`] when
+/// a source that exists cannot be decompressed or copied.
+fn stage_dummy_module(stage_dir: &Path, kernel_release: &str) -> Result<(), VmFixtureError> {
+    let base = format!("/lib/modules/{kernel_release}/kernel/drivers/net/dummy.ko");
+    let compressed = PathBuf::from(format!("{base}.zst"));
+    let plain = PathBuf::from(&base);
+    let dest = stage_dir.join(DUMMY_MODULE_GUEST_PATH.trim_start_matches('/'));
+    if compressed.exists() {
+        let status = Command::new("zstd")
+            .args(["-d", "-f", "-q"])
+            .arg(&compressed)
+            .arg("-o")
+            .arg(&dest)
+            .status()
+            .map_err(|source| {
+                VmFixtureError::spawn(format!("zstd -d {}", compressed.display()), source)
+            })?;
+        if !status.success() {
+            return Err(VmFixtureError::rootfs_staging_failed(
+                format!("zstd -d {} exited {:?}", compressed.display(), status.code()),
+                io::Error::other(format!("zstd -d {} failed", compressed.display())),
+            ));
+        }
+    } else if plain.exists() {
+        fs::copy(&plain, &dest).map_err(|source| {
+            VmFixtureError::rootfs_staging_failed(
+                format!("copying {} to {}", plain.display(), dest.display()),
+                source,
+            )
+        })?;
+    }
     Ok(())
 }
 

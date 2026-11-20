@@ -1151,6 +1151,10 @@ const NESTED_GUEST_LAUNCH_NODE_SETUP: &str = r#"
 set -eu
 mkdir -p /srv/vm/overdrive-testing
 chmod 0711 /srv/vm/overdrive-testing
+# The metal host mounts a tmpfs at /dev/shm; a body that needs a directory the
+# staging root's reflink probe refuses (tmpfs) finds it here as on the host.
+mkdir -p /dev/shm
+mount -t tmpfs tmpfs /dev/shm
 # The image is staged under the runner's restrictive umask; the metal host's
 # system directories are world-readable, and a body that drops to the confined
 # VMM uid executes tools and loads libraries from them.
