@@ -18,9 +18,12 @@
 #![allow(clippy::unwrap_used)]
 
 mod acceptance {
+    // workload-resources-human-readable (GH #372).
+    mod deploy_workload_resources;
     mod insecure_rejected;
     mod render_cluster_and_node;
     mod render_workload_describe;
+    mod render_workload_resources;
     mod render_workload_stop;
     mod render_workload_submit;
 

@@ -149,6 +149,10 @@ pub mod wall_clock;
 // `docs/feature/cli-submit-vs-deploy-and-alloc-status/distill/wave-decisions.md`
 // DWD-03.
 pub mod transition_reason;
+// Workload resource value types (GH #372, ADR-0339 / ADR-0340): the shared
+// binary byte-size grammar and the CPU quantity grammar.
+pub mod byte_size;
+pub mod cpu_quantity;
 // Node-local persistent volume value types (GH #348).
 pub mod volume;
 // `vm::config` — `VmConfig`'s pure value family for the Cloud Hypervisor

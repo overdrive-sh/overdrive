@@ -38,9 +38,16 @@ mod acceptance {
     mod observation_row_display;
     mod reconciler_trait_surface;
     mod vm_volume_size;
+    // workload-resources-human-readable (GH #372) — the shared byte-size and CPU quantity
+    // grammars and the workload `[resources]` spec / admission contract.
+    mod byte_size_grammar;
+    mod cpu_quantity_grammar;
     mod vm_volume_spec;
     mod volume_unavailable_reason;
     mod volume_value_types;
+    mod workload_resources_examples;
+    mod workload_resources_projections;
+    mod workload_resources_spec;
 
     // reconciler-framework-improvements step 02-01 (ADR-0084 §2 / §5 step 3,
     // 2026-08-23 lean amendment, GH #266) — Piece B complete discriminant:

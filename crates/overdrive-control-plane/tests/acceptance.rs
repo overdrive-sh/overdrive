@@ -139,7 +139,9 @@ mod acceptance {
     mod launch_lane_supersession;
 
     mod api_type_shapes;
+    // workload-resources-human-readable (GH #372).
     mod cluster_status_lists_both_reconcilers;
+    mod workload_resources_wire;
 
     // GH #266 (ADR-0084 §5, Piece B) — the interest-router fan-out behaviour
     // (S-266-08/09/12/14/15/16/22 + the single-cut migration scenarios
@@ -487,6 +489,8 @@ mod acceptance {
     mod service_stream_recorded_verdict;
     #[cfg(feature = "integration-tests")]
     mod service_stream_support;
+    #[cfg(feature = "integration-tests")]
+    mod workload_resources_submit_refusal;
 
     // udp-service-support US-01 / S-01-F (ADR-0060 D1a) — RED scaffold.
     // IPv6 VIP rejected at the action-shim as an operator-visible Failed

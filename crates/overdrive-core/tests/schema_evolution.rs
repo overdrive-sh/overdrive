@@ -36,6 +36,9 @@ mod schema_evolution {
     mod service_backend_row;
     mod service_spec;
     mod workload_intent;
+    // workload-resources-human-readable (GH #372, DD-5): the existing fixtures decode unchanged
+    // through the new `ByteSize` / `CpuQuantity` types.
+    mod workload_resources_fixtures;
     mod workload_svid_issue_status_row;
 
     // built-in-ca (GH #28) — DISTILL RED scaffolds for the two new rkyv

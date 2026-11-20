@@ -25,7 +25,7 @@ The state is real on the production path: `overdrive deploy <SPEC>` parses `[res
 | Persisted form | workload intent rkyv envelope; golden fixtures reference the fields (`crates/overdrive-core/tests/schema_evolution/workload_intent.rs`, `service_spec.rs`) |
 | Wire / OpenAPI | `ResourcesBody` (`overdrive-control-plane/src/api.rs`), three schemas in `api/openapi.yaml`; describe wire `core/src/api/describe.rs` |
 | Operator rendering | `render::workload_describe` prints `Memory:        134217728` raw bytes (`overdrive-cli/src/render.rs`); CPU is not rendered at all |
-| Examples / docs | 35 files under `examples/`; `website/content/docs/how-to/deploy-a-workload.mdx`; `website/app/(home)/page.tsx` |
+| Examples / docs | 33 TOML specs plus `examples/service-kind-vm-workloads-v2/run-example.sh` under `examples/`; `website/content/docs/how-to/deploy-a-workload.mdx`; `website/app/(home)/page.tsx` |
 
 Historical evidence under `verification/expectations/*/evidence/`, `benchmarks/results/` and `docs/evolution/` carries the old names and is immutable record: not edited.
 
@@ -38,12 +38,12 @@ Historical evidence under `verification/expectations/*/evidence/`, `benchmarks/r
 | ID | Decision |
 |---|---|
 | D-1 | `[resources]` takes `cpu` and `memory`, both TOML strings. `cpu_milli` and `memory_bytes` are removed with no alias and no fallback. Their rejection is the existing `deny_unknown_fields` refusal; the operator sees which key is unknown and which are expected. |
-| D-2 | Each value is a validated `overdrive-core` newtype: constructor validates and returns `Result`, `FromStr`, `Display` (canonical form), serde string matching `Display`/`FromStr` (`rust.md` Newtypes). Memory and CPU render through the same `Display` everywhere. |
+| D-2 | Each value is a validated `overdrive-core` newtype: constructor validates and returns `Result`, `FromStr`, `Display` (canonical form), serde string matching `Display`/`FromStr` (`rust.md` Newtypes). Memory and CPU render through the same `Display` on every operator-visible and wire surface (Cloud Hypervisor and cgroup receive raw bytes). |
 | D-3 | One canonical form per value. Whatever an operator writes, `describe`, deploy output, error text and the API wire show the canonical form. `parse(display(x)) == x`. |
 | D-4 | A unit-less bare number for `memory` (`memory = 134217728`) is refused with a message naming the expected form. Silently interpreting a bare number is the exact error class this feature removes. |
 | D-5 | The type change leaves the persisted workload intent's archived layout unchanged, so no envelope version is added: the existing golden fixtures decode unchanged through the new types, and their hex literals are untouched. |
 | D-6 | Scope is the workload `[resources]` table for all three kinds (Job, Service, Schedule share `ResourcesInput`) and node capacity (R-2). Examples and `website/content/docs` change in the same slice as the field they describe. |
-| D-7 | Zero memory stays refused (today's behaviour). Zero CPU is accepted (DD-3). |
+| D-7 | Zero memory stays refused (today's behaviour). A workload `memory` that is not a whole number of MiB is refused at `deploy` (DD-8). Zero CPU is accepted (DD-3). |
 | D-8 | Greenfield single-cut: no migration of stored intent, no dual-read. |
 
 ## Wave: DISCUSS / [REF] User rulings (2026-11-20)
@@ -91,26 +91,31 @@ Decision enabled: Ana confirms the declared size matches her intent, or corrects
 
 ### Elevator Pitch
 Before: Ana expresses CPU in raw milli-units and cannot tell `500` from `0.5` cores at a glance.
-After: run `overdrive deploy dev-box.toml` with `[resources] cpu = "500m"` → the spec is admitted and the guest gets 1 vCPU (floor); a malformed `cpu = "five hundred"` is refused with the expected form named; `overdrive workload describe dev-box` shows `CPU:           500m`.
+After: run `overdrive deploy dev-box.toml` with `[resources] cpu = "500m"` → the spec is admitted; a malformed `cpu = "five hundred"` is refused with the expected form named; `overdrive workload describe dev-box` shows `CPU:           500m`.
 Decision enabled: Ana picks a core fraction without unit arithmetic and knows at deploy time whether it was understood.
 
 **Domain examples.**
-1. Happy: `cpu = "500m"` admitted; vCPU count unchanged from `cpu_milli = 500` (1).
-2. Whole cores: `cpu = "2"` admitted as 2000 milli; vCPU count 2.
+1. Happy: `cpu = "500m"` admitted; `describe` shows `CPU:           500m`; the intent carries 500 millicores, the value `cpu_milli = 500` carried.
+2. Whole cores: `cpu = "2"` admitted as 2000 millicores; `describe` shows `CPU:           2`; `cpu = "0.5"` reads back `500m`.
 3. Rejection: `cpu = "500mm"`, `cpu = "1.0005"` (more than three fractional digits), `cpu = ""`, the removed `cpu_milli = 500`, each fail at `deploy`, nothing stored.
 
 **Acceptance criteria.**
 - AC-2.1: A spec with `[resources] cpu = "500m"` is admitted and the intent `Resources` CPU equals 500 milli-CPU.
 - AC-2.2: `cpu_milli` in `[resources]` is refused at parse time, naming `cpu_milli` as unknown.
 - AC-2.3: Malformed values (empty, unknown suffix, negative, more than three fractional digits, above the `u32` milli ceiling, a bare TOML number) are rejected with an error naming the expected grammar.
-- AC-2.4: `vcpus_for` result for every previously expressible `cpu_milli` value `n` equals the result for the equivalent `cpu` string (vCPU derivation is unchanged; only the spelling changes).
+- AC-2.4: A `cpu` string parses to the millicores the operator meant (`"500m"` and `"0.5"` are 500, `"2"` is 2000), pinned by the CPU grammar tests. `vcpus_for` itself is unchanged and stays covered by the existing `vm_resources_derivation` tests.
 - AC-2.5: `parse(display(v)) == v` for every accepted value (proptest); equal quantities spelled differently produce the same spec digest.
 - AC-2.6: Fixtures (AC-1.6), openapi regeneration (AC-1.7) and the examples/docs sweep (AC-1.8) hold for the `cpu` field.
-- AC-2.7: After this feature no `cpu_milli` or `memory_bytes` identifier remains in the operator-facing spec, the wire types, `api/openapi.yaml` or the grep-gate surfaces (§ Technology choices), except the `memory_bytes` metric label in `mtls_path.rs`.
+- AC-2.7: After this feature no `cpu_milli` or `memory_bytes` identifier remains in the operator-facing spec, the wire types, `api/openapi.yaml` or the grep-gate surfaces (`cpu_milli|memory_bytes` across `crates/`, `tests/`, `examples/`, `verification/**/runner.sh`, `benchmarks/catalogue.md`, `website/`, `api/`), except the `memory_bytes` metric label in `crates/overdrive-bench-families/src/families/mtls_path.rs`.
+- AC-2.8: `overdrive workload describe` prints a `CPU:` line with the canonical quantity for every workload kind, under the same presence guard as `Memory:`; zero CPU renders as its canonical zero form `0`.
+
+### Node capacity (R-2)
+
+- AC-1.10: Node capacity (`NodeSpecInput`) carries `cpu` and `memory` as the same typed quantities (`CpuQuantity`, `ByteSize`) with unit-free names; the field types are compiler-enforced, so a raw integer cannot be assigned. Zero memory is refused. The whole-MiB rule applies to workloads only, so a sub-MiB node capacity is admitted.
 
 ## Wave: DISCUSS / [REF] Definition of Done
 
-1. Both AC sets green through the production composition (`overdrive deploy` handler and `workload describe` renderer called as library functions, per `overdrive-cli/CLAUDE.md`).
+1. Both AC sets green through the production composition (`overdrive deploy` handler and `workload describe` renderer called as library functions, per `overdrive-cli/CLAUDE.md`). Scenario specifications: [`distill/test-scenarios.md`](distill/test-scenarios.md).
 2. Old keys refused; no alias path exists in source.
 3. Existing golden fixtures decode unchanged through the new types; their hex literals are byte-identical.
 4. `api/openapi.yaml` regenerated; check passes.
@@ -132,14 +137,14 @@ Brownfield. Walking skeleton: not needed. `overdrive deploy` -> parse -> intent 
 
 ## Wave: DISCUSS / [REF] Pre-requisites
 
-- GH #348 (node-local volume) is not a prerequisite: `ByteSize` is created here (R-1) and `VolumeSize` follows it when #348 resumes (§ Corrections).
+- GH #348 (node-local volume) is not a prerequisite: `ByteSize` is created here (R-1) and `VolumeSize` follows it when #348 resumes.
 - Rust: `rust.md` Newtypes; no `.expect()` in library code.
 
 ## Wave: DISCUSS / [REF] Outcome KPIs
 
 | KPI | Target | Measured by |
 |---|---|---|
-| Specs and docs using unit-in-name fields | 0 occurrences of `cpu_milli`/`memory_bytes` on the grep-gate surfaces (§ Technology choices), except the `memory_bytes` metric label in `mtls_path.rs` | grep gate at DELIVER and in review |
+| Specs and docs using unit-in-name fields | 0 occurrences of `cpu_milli`/`memory_bytes` on the grep-gate surfaces (`crates/`, `tests/`, `examples/`, `verification/**/runner.sh`, `benchmarks/catalogue.md`, `website/`, `api/`), except the `memory_bytes` metric label in `crates/overdrive-bench-families/src/families/mtls_path.rs` | grep gate at DELIVER and in review |
 | Declared size readable in `describe` | 100% of rendered memory values are canonical strings, 0 raw byte counts | live-path render tests |
 | Grammar soundness | round trip holds for all accepted inputs; every rejection class in AC-1.3/AC-2.3 has a test | proptest + acceptance tests; mutation kill rate >= 80% on both parsers |
 | Silent mis-size on mistyped value | 0 inputs of the rejected classes admitted | acceptance tests |
@@ -544,3 +549,120 @@ Adversarial review (A), subtractive review (S) and verification review (R2), per
 | R2-3 | Applied: the byte-granule alternative is dropped from `node-local-persistent-volume/design/wave-decisions.md` VD-1 |
 | R2-4 | Applied: AC-2.7 and the KPI name the `mtls_path.rs` metric label exception the grep gate carries |
 | R2-5 | Applied: the sub-MiB paragraph covers proptest strategies drawing arbitrary `u64` memory |
+
+## Wave: DISTILL / [REF] Status and scope
+
+DISTILL, 2026-11-20, revised after review round 1. No `.feature` files (`.claude/rules/testing.md`): every scenario is a Rust test with a complete executable body. A pending test is marked `#[should_panic(expected = "<semantic RED>")]` and runs on every run; DELIVER removes the marker and the test must then pass unchanged (`.claude/rules/testing.md` § "RED acceptance scaffolds and activation"). No DEVOPS wave exists (warning logged; the Metal substrate and the default lanes are the environment). Reconciliation passed: 0 contradictions between DISCUSS and DESIGN. No production field is renamed; the tests are written against surface that exists today (TOML text, JSON text, typed errors, rendered text), so they compile before the rename and fail on their own assertions. 54 tests in 9 files, all in the default lane (host-pure); 33 are error or edge scenarios (61%); no `.feature` file; no new dependency. Per-test RED classification: [`distill/red-classification.md`](distill/red-classification.md).
+
+## Wave: DISTILL / [REF] Scenario list
+
+Lane: **L1** = default lane unit/property, **L2** = default lane in-memory acceptance; every test is host-pure. Error = sad path or boundary. Every test carries `CONTRACT_SHAPE: pure-function`, except the submit-handler test (`unbounded-preservation`). Files are under `crates/`; the RED reason of each test is in `red-classification.md`.
+
+| File | Tests | AC / DD | Lane | Error |
+|---|---|---|---|---|
+| `overdrive-core/tests/acceptance/byte_size_grammar.rs` | `the_pinned_accept_table_parses_to_the_pinned_size_and_canonical_form`, `display_is_canonical_and_round_trips`, `any_count_in_any_unit_and_case_parses_to_count_times_unit`, `serde_json_is_the_quoted_canonical_text_and_round_trips` | AC-1.1, AC-1.4, AC-1.9, DD-1 | L1 (256 cases for the three proptests) | no |
+| same | `sad_decimal_units_are_decimal_unit`, `sad_fractional_counts_are_fractional`, `sad_text_outside_the_grammar_is_malformed`, `sad_a_value_above_u64_bytes_is_overflow`, `sad_structure_outranks_overflow`, `sad_every_rejection_names_its_remedy_and_the_five_messages_differ`, `sad_serde_refuses_a_bare_number_and_names_the_expected_form`, `a_digit_run_without_a_unit_is_always_missing_unit`, `text_without_a_leading_digit_is_always_malformed`, `the_u64_boundary_is_exact_in_every_unit` | AC-1.3, D-4, DD-1 classification order | L1 | yes |
+| same | `the_volume_size_is_the_shared_grammar_refined_to_whole_gib` | DD-2 | L1 | yes |
+| `overdrive-core/tests/acceptance/cpu_quantity_grammar.rs` | `the_pinned_accept_table_parses_to_the_pinned_quantity_and_canonical_form`, `display_is_canonical_and_round_trips`, `every_spelling_of_one_quantity_is_the_same_value`, `serde_json_is_the_quoted_canonical_text_and_round_trips` | AC-2.1, AC-2.4, AC-2.5, DD-3 | L1 | no |
+| same | `sad_text_outside_the_grammar_is_malformed`, `sad_an_unknown_suffix_is_named`, `sad_a_value_above_u32_millicores_is_overflow`, `sad_every_rejection_names_its_remedy_and_the_messages_differ`, `sad_serde_refuses_a_bare_number`, `four_or_more_fractional_digits_are_always_too_many_decimals`, `text_without_a_leading_digit_is_always_malformed`, `the_u32_boundary_is_exact` | AC-2.3, DD-3 | L1 | yes |
+| `overdrive-core/tests/acceptance/workload_resources_spec.rs` | `a_non_canonical_spelling_is_read_back_canonically` (every kind), `an_admitted_workload_carries_the_declared_size_in_its_intent_resources`, `equal_sizes_in_different_spellings_have_the_same_spec_digest`, `describe_reads_back_the_canonical_form` | AC-1.1, AC-1.5, AC-1.9, AC-2.1, AC-2.5, DD-6 | L1/L2 | no |
+| same | `sad_the_removed_keys_are_refused_naming_the_unknown_key_and_the_expected_ones`, `sad_a_missing_cpu_or_memory_is_refused_naming_it`, `sad_each_malformed_memory_is_refused_at_parse_time_naming_the_grammar`, `sad_each_malformed_cpu_is_refused_at_parse_time_naming_the_grammar`, `sad_admission_follows_the_non_zero_and_whole_mib_rules_at_both_sites` (zero CPU admitted, `1048575B` / `1048577B`), `sad_the_wire_refuses_the_removed_keys` | AC-1.2, AC-1.3, AC-2.2, AC-2.3, D-1, D-4, D-7, DD-8 | L1/L2 | yes |
+| `overdrive-core/tests/acceptance/workload_resources_projections.rs` | `no_capacity_prose_renders_the_canonical_quantities` (the persisted `NoCapacity` cause text pinned by DESIGN; no production emit site today, GH #261) | DD-4 | L1 | no |
+| `overdrive-core/tests/acceptance/workload_resources_examples.rs` | `every_example_spec_parses_with_the_human_readable_resources` | AC-1.8, AC-2.6, D-6 | L1, reads checked-in files | no |
+| `overdrive-core/tests/schema_evolution/workload_resources_fixtures.rs` | `the_workload_intent_fixture_decodes_unchanged_and_reads_back_canonically`, `the_service_spec_fixture_decodes_unchanged_and_reads_back_canonically` | AC-1.6, AC-2.6, D-5, DD-5 | L1 | no |
+| `overdrive-cli/tests/acceptance/deploy_workload_resources.rs` | `a_spec_in_the_new_shape_passes_local_validation` | AC-1.1, AC-2.1 | L2 | no |
+| same | `sad_deploy_refuses_the_removed_keys_naming_the_unknown_key`, `sad_deploy_refuses_malformed_memory_naming_the_expected_form`, `sad_deploy_refuses_malformed_cpu_naming_the_expected_grammar`, `sad_deploy_refuses_zero_and_sub_mib_aligned_memory_naming_the_memory_field` | AC-1.2, AC-1.3, AC-2.2, AC-2.3, D-1, D-4, DD-8 | L2 (`[job]`, `[service]`, flat `id =` shapes; flat is live, `examples/coinflip.toml`) | yes |
+| `overdrive-cli/tests/acceptance/render_workload_resources.rs` | `describe_prints_the_canonical_memory_and_cpu_lines_for_every_kind` (Job, Service, Schedule; no raw byte count), `describe_prints_the_size_once_for_a_multi_replica_workload` | AC-1.5, AC-2.8, DD-7, D-2 | L2 | no |
+| same | `describe_prints_a_zero_cpu_as_the_canonical_zero` (`CPU:           0`), `describe_omits_both_size_lines_without_a_resolved_size` | AC-2.8, DD-7 presence guard | L2 | yes |
+| `overdrive-control-plane/tests/acceptance/workload_resources_wire.rs` | `the_resources_block_is_emitted_as_canonical_strings`, `openapi_describes_cpu_and_memory_as_strings_in_the_three_schemas` | AC-1.7, DD-6 | L1 | no |
+| same | `sad_the_resources_block_refuses_the_removed_keys`, `sad_memory_that_is_not_a_whole_number_of_mib_is_refused_and_nothing_is_stored` (real submit handler: `400 validation` on `memory`, store unchanged, describe 404) | AC-1.2, AC-1.3, DD-8 | L1 / L2 | yes |
+
+AC trace (every DISCUSS acceptance criterion): AC-1.1 and AC-2.1 admission rows in the spec matrix, the deploy control and the grammar accept tables; AC-1.2 and AC-2.2 removed-key tests at parse, wire, deploy and the API body; AC-1.3 and AC-2.3 the grammar rejection classes plus the parse, deploy and handler refusals; AC-1.4 the byte-size round-trip proptests; AC-1.5 the describe tests; AC-1.6 the two fixtures; AC-1.7 the API body and OpenAPI tests; AC-1.8 the examples test; AC-1.9 the digest test, the canonical read-back and the accept tables; **AC-1.10** compiler-enforced field types, and the zero-memory refusal in the existing `aggregate_validation.rs` (see § AC-1.10 coverage); AC-2.4 the CPU accept table (`500m` and `0.5` are 500, `2` is 2000); AC-2.5 the CPU round-trip proptests and the digest test; AC-2.6 fixtures, API body and examples; AC-2.7 the grep gate named in AC-2.7 itself, run at FINALIZE (no test); **AC-2.8** `describe_prints_a_zero_cpu_as_the_canonical_zero` and the `CPU:` lines of the every-kind test.
+
+Not tested here, by design: the vCPU and `memory.max` derivations downstream of the typed fields (`vcpus_for` stays covered by the existing `vm_resources_derivation` tests, AC-2.4); the operator docs (gated by FINALIZE and the AC-2.7 grep gate); GH #348 volume scenarios beyond the pinned refinement row (see § DELIVER obligations).
+
+## Wave: DISTILL / [REF] WS strategy
+
+Brownfield, extend in place (DISCUSS § WS strategy): no walking-skeleton scenario. The existing end-to-end path (`deploy` -> parse -> intent store -> `GET /v1/allocs` -> `workload describe`) is covered at its seams: parser (`workload_resources_spec`), command handler (`deploy_workload_resources`), submit handler, wire and OpenAPI (`workload_resources_wire`), renderer (`render_workload_resources`). Architecture of Reference: the driving ports are real (command handler, submit handler through the production router, the renderer); there is no driven external port in this feature, so nothing is faked beyond the `Sim*` composition the existing `service_stream_support` harness already provides.
+
+## Wave: DISTILL / [REF] Adapter coverage
+
+No driven adapter is added or changed (DESIGN § Driven ports): the parsers are pure functions. The examples test reads the real checked-in files and the OpenAPI test the real generator. No guest-placed or integration-lane test is added: a server round trip through `serve` adds no coverage the submit-handler test and the digest test do not hold, and the guest group cannot boot on the current Metal box.
+
+## Wave: DISTILL / [REF] Scaffolds
+
+| File | Scaffold | Behaviour today |
+|---|---|---|
+| `crates/overdrive-core/src/byte_size.rs` (`// SCAFFOLD: true`) | `ByteSize(u64)` with `new`, `bytes` (real, total), `ByteSizeParseError { Malformed, MissingUnit, DecimalUnit, Fractional, Overflow }` (each `{ input }`), `FromStr`, `Display`, `Serialize`, `Deserialize`; derives exactly as pinned | `FromStr` returns `Malformed` for every input; `Display` renders nothing; serde follows `Display` / `FromStr` |
+| `crates/overdrive-core/src/cpu_quantity.rs` (`// SCAFFOLD: true`) | `CpuQuantity(u32)` with `from_millis`, `millis` (real, total), `CpuQuantityParseError { Malformed, UnknownSuffix { input, suffix }, TooManyDecimals, Overflow }`, `FromStr`, `Display`, `Serialize`, `Deserialize`; derives as pinned | same shape: refuses every input, renders nothing |
+| `crates/overdrive-core/src/lib.rs` | `pub mod byte_size; pub mod cpu_quantity;` (two lines; no re-export, none is pinned) | |
+
+Both follow the `volume.rs` precedent (file-level `#![allow(...)]` for the scaffold lints). `VolumeSize` and `ByteCount` are untouched; the volume refinement test is RED against the existing `VolumeSize` scaffold. No production field is renamed. Scaffold grep: `grep -rn "SCAFFOLD: true" crates/overdrive-core/src/byte_size.rs crates/overdrive-core/src/cpu_quantity.rs`.
+
+## Wave: DISTILL / [REF] Test placement
+
+| Where | Why (precedent) |
+|---|---|
+| `overdrive-core/tests/acceptance/*.rs`, wired in `tests/acceptance.rs` | `aggregate_validation.rs`, `vm_volume_size.rs`; the binary already carries `overdrive_test_default!(host_pure)` |
+| `overdrive-core/tests/schema_evolution/workload_resources_fixtures.rs`, wired in `tests/schema_evolution.rs` | `.claude/rules/testing.md` § "Archive schema-evolution roundtrip"; the hex literals are read out of the owning fixture files with `include_str!`, never copied or edited |
+| `overdrive-cli/tests/acceptance/*.rs`, `placement!(host_pure)` | `render_workload_describe.rs`; `crates/overdrive-cli/CLAUDE.md` § "What to write in `tests/acceptance`" (handler called as a library function, no subprocess); the deploy refusal needs no server because validation precedes `ApiClient::from_config` |
+| `overdrive-control-plane/tests/acceptance/workload_resources_wire.rs`, `placement!(host_pure)` | `openapi_gate.rs` and `guest_listeners_http_rejection.rs` (same `placement!` form; the submit-handler test uses the same `Node::boot` harness) |
+
+`cargo xtask placement-lint`: clean. No guest-placed and no `native_launcher` test.
+
+## Wave: DISTILL / [REF] Driving adapter coverage
+
+| Driving port (DESIGN § Driving ports) | Scenario |
+|---|---|
+| `overdrive deploy <SPEC>` (`commands::deploy::deploy`) | `deploy_workload_resources.rs`: accepted and refused specs, three spec shapes (`[job]`, `[service]`, flat) |
+| submit handler (`POST /v1/workloads`) | `workload_resources_submit_refusal.rs::sad_memory_that_is_not_a_whole_number_of_mib_is_refused_and_nothing_is_stored` (integration-gated) (real handler through the router), `workload_resources_spec.rs::sad_the_wire_refuses_...` (the wire decode) |
+| `overdrive workload describe` (`render::workload_describe`) | `render_workload_resources.rs`; `workload_resources_spec.rs::describe_reads_back_the_canonical_form` (the projection it renders from) |
+| `api/openapi.yaml` | `workload_resources_wire.rs` (generator output; the existing OpenAPI gate holds the checked-in file equal to it) |
+
+The deploy tests call the handler as a library function (`overdrive-cli/CLAUDE.md`: no subprocess). `deploy_streaming` (the TTY lane) shares the same parser and admission calls and is not exercised separately.
+
+## Wave: DISTILL / [REF] Pre-requisites
+
+DESIGN driving ports above; `cargo xtask metal run -- env OVERDRIVE_BPF_NATIVE=1 cargo xtask bpf-build` before any compile on a fresh checkout. No guest kit is needed: every test runs in the default lane.
+
+## Wave: DISTILL / [REF] Fault and boundary obligations (testing.md § DISTILL)
+
+This is a parser, admission and rendering feature: no concurrency, ordering, retry, timing, kernel or reconciler behaviour, no protocol, no Quint model (DESIGN § Formal protocol model: not applicable). No Tier 1 simulation, no seeded `overdrive-sim` invariant and no Tier 3 kernel evidence is owed. The composed-system obligation reduces to one contract:
+
+| Contract | Owner path | Fault stimulus | Oracle | Tier |
+|---|---|---|---|---|
+| A refused size leaves no record, and an equal size in another spelling is the same spec | `POST /v1/workloads` (real submit handler) -> `WorkloadSpecInput` -> `from_submit` -> intent store | memory that is not a whole number of MiB, against the whole-MiB acceptance rows of the admission matrix | `400 validation` on `memory`; intent store unchanged; `describe` answers 404; `1024MiB` and `1GiB` give one digest (digest test) | default lane (handler and library) |
+
+Bounds: each case is one request or one pure call, no duration or restoration obligation. The proptests carry the input-space boundary (`u64` / `u32` ceilings, drawn within two of the boundary in every unit, and case and unit permutations). Mutation target: the two parsers and the admission check (kill rate at least 80%, DESIGN § Technology choices); the should_panic bodies are the oracle the gate runs against.
+
+## Wave: DISTILL / [REF] EDD expectation
+
+One expectation is authored, not captured: `verification/expectations/O08-workload-resources-human-readable-refusal-and-describe/README.md` (indexed in `INDEX.md`, status `pending`). The claim is narrowed to what no assertion holds: a refusal "names the remedy" to a reader who has never seen the grammar, and `describe` reads the declared size back in canonical units on the built binary, from a handful of contrasting inputs. Grammar, admission, digest and rendering rules are covered by the test tiers and are not duplicated there. Evidence is captured at DELIVER or DEVOPS by a different agent from the implementer.
+
+## Wave: DISTILL / [REF] AC-1.10 coverage
+
+AC-1.10 (node capacity carries `CpuQuantity` and `ByteSize`) has no new test. The field types are compiler-enforced: a raw integer cannot be assigned once DELIVER renames `NodeSpecInput` and `Resources`. The zero-memory refusal is already covered by `aggregate_validation.rs`, which DELIVER's rename sweep updates mechanically. `NodeSpecInput` has no serde form, so no compile-stable test can pin "a sub-MiB node capacity is admitted" without naming the renamed fields; that half of AC-1.10 rests on `Node::new` keeping only the non-zero check (DD-8). The gated `node_capacity_resources.rs` of the first DISTILL cut was deleted.
+
+## Wave: DISTILL / [REF] DELIVER obligations surfaced
+
+1. Remove the `#[should_panic]` marker of each pending test when its behaviour lands, and run the body unchanged. The tests whose RED is the string wire (`red-classification.md` § "Tests whose RED is the string wire") are unreachable past the decode until the rename step; DELIVER removes their markers in that step and confirms the next semantic RED, if any, before changing production code.
+2. Existing assertions made stale by DD-7 and the renames, to be updated in DELIVER with the fixtures sweep: the `Memory:        1024` goldens in `overdrive-cli/tests/acceptance/render_workload_describe.rs` (`ND295_SERVICE_GOLDEN`, `ND295_JOB_GOLDEN` gain a `CPU:` line and a canonical memory), the `Memory:` line in `guest_stack_mtls_egress.rs`, and the `memory_bytes` assertion in `vm_resources_sizing.rs`.
+3. Reconcile `overdrive-core/tests/acceptance/vm_volume_size.rs` (GH #348, DESIGN § Corrections item 3): its `text_outside_the_grammar_is_rejected` strategy draws `[0-9]{0,6}MiB`, and `1024MiB` is now an accepted volume size; `the_volume_size_is_the_shared_grammar_refined_to_whole_gib` here pins the refinement rows.
+4. The refusal text assertions are stated at the wording DESIGN pins and no further: `Malformed` names the grammar (the five units for a byte size; no wording is pinned for a CPU quantity), a decimal unit names the binary units, `Fractional` says "smaller", `UnknownSuffix` for `M` says "lowercase", `TooManyDecimals` says "three", `Overflow` says "too large", the whole-MiB refusal says "whole number of MiB" and the received canonical value. Wrapped surfaces (TOML, deploy, JSON) assert the key or field name and the class keyword only.
+
+## Wave: DISTILL / [REF] Review dispositions, round 1
+
+| Finding | Disposition |
+|---|---|
+| S-H1 shared decode RED | Applied: one named test (`a_non_canonical_spelling_is_read_back_canonically`) is RED on the TOML parser; the other string-wire tests share the helper text `string cpu/memory resources are not accepted yet`, recorded per test in `red-classification.md`; no probe added |
+| S-H2 / Eclipse node capacity | Applied: `node_capacity_resources.rs` deleted; AC-1.10 coverage recorded above (compiler plus `aggregate_validation.rs`); no compile-stable sub-MiB test exists, stated as the residual |
+| S-H3 pinned wording only | Applied across the grammar, spec, deploy, wire tests and the rejection-text tests |
+| S-M4 boundary windows | Applied to the `u64` boundary proptest, and to the `u32` one, which had the same flaw |
+| S-M5 canonical unit choice | Applied: `any_count_in_any_unit...` asserts the independent model's canonical text |
+| S-M6 `NoCapacity` | Applied: one prose test kept; the file header records that the text is pinned by DESIGN and has no production emit site today (GH #261); the other tests dropped |
+| Subtractive 1 + S-M7 | Applied: the guest-placed round-trip file replaced by one host-pure submit-handler test; the respelling case is held by the digest test and the existing `idempotent_resubmit.rs` |
+| Removals 2-10, L8-L10 | Applied: vCPU test and helpers, bare-memory-number test, merged parse tests, two-spellings, fixed-point and ordering tests, missing-unit and too-many-decimals example tests, OpenAPI and docs name checks, how-to page test removed |
+| Trims 12-19, S-L11, S-L12 | Applied: serde spelling tests, bare-number loops of the struct-level tests, malformed matrices on one kind, deploy malformed loops to one representative per shape, admission tests merged (zero CPU folded in; `1048575B` / `1048577B` added), OpenAPI on the generated document only, render tests merged; the flat deploy shape is live (`examples/coinflip.toml`) and kept |
+| O08 | Applied: narrowed to the refusal-text and describe read-back claims |
+| Docs | Applied: `red-classification.md` keeps the table and the notes only; the scenario table above is trimmed |
+| DISCUSS delta (AC-1.10, AC-2.8, AC-2.4 narrowed) | Applied: AC trace above; `describe_prints_a_zero_cpu_as_the_canonical_zero` covers AC-2.8; the vCPU test is removed per the narrowed AC-2.4 |
