@@ -2,7 +2,7 @@
 
 Specification only. Nothing here is parsed or executed (`.claude/rules/testing.md` § "Testing"). The executable tests are Rust,
 named in each row. There is no DISCUSS and no DEVOPS wave for this feature: acceptance criteria derive from the approved design
-(`feature-delta.md`, ADR-0310 to ADR-0320, ADR-0325 to ADR-0329, VD-1 to VD-10, SD-1 to SD-6, P-1 to P-3) and the issue's "Required
+(`feature-delta.md`, ADR-0310 to ADR-0320, ADR-0334 to ADR-0338, VD-1 to VD-10, SD-1 to SD-6, P-1 to P-3) and the issue's "Required
 behavior" as reduced by VD-10 (deletion and reclaim belong to #211). Rewritten 2026-11-19 to describe exactly what is in the tree.
 Contracts, boundaries and invariants are in `feature-delta.md` and the ADRs and are not restated here; a row names the contract it
 checks, the owner path, the stimulus, the oracle, the test and its status.
@@ -100,7 +100,7 @@ All PENDING except BOOT-6.
 | S-VOL-65 (boundary 2) | a launch held past its bound writes a `Failed` row with `VmVolumeUnavailable { Held }` and the restart budget is charged (read from `view_for_workload_lifecycle`) | `crates/overdrive-control-plane/src/node_volume_boundaries.rs::a_launch_held_past_its_bound_writes_the_typed_failed_row_and_charges_the_restart_budget` | PENDING |
 | S-VOL-66 | replaced by S-SUP-37 (boundary 4), S-SUP-26..28 (a stop or restart while a launch waits) and S-VOL-T3-12 | | replaced |
 
-## D. Launch supersession (ADR-0325; boundaries 4 and 4a; Gate G-3)
+## D. Launch supersession (ADR-0334; boundaries 4 and 4a; Gate G-3)
 
 **D1. `VmDriver::start` observation points** — `crates/overdrive-worker/tests/acceptance/launch_supersession.rs`, Tier 1 layer 2. Owner path:
 `Driver::start(&spec, &dyn LaunchSupersession)` over `VmDriver` composed as the node composes it. Fault stimulus: a `SimLaunchSupersession` the test raises at the
@@ -156,7 +156,7 @@ drive the production `serve` composition of the volume conformance driver; the `
 | S-SUP-36 | shutdown leaves a `Running` allocation and a non-launch evaluation alone | `loop_shutdown::shutdown_leaves_a_running_allocation_and_a_non_launch_evaluation_alone` | GUARD |
 | S-SUP-37 | boundary 4: a stop interrupts the start and its result is never used (no VMM attached or left alive, the volume kept, no row, no charge). Kept beside S-SUP-27: it runs a volume-launching `VmDriver` with a held claim, a composition distinct from S-SUP-27's parked `SimDriver`, and its unique oracles are `attached` empty and the claim staying `Held` | `a_stop_interrupts_the_start_and_its_result_is_never_used` | PENDING |
 
-## E. Restart generation and the launch outcomes before the driver (ADR-0326, ADR-0328, ADR-0329; boundaries 5 and 7)
+## E. Restart generation and the launch outcomes before the driver (ADR-0335, ADR-0337, ADR-0338; boundaries 5 and 7)
 
 **E1. The one definition of `restart_pending` and the reconcile behaviour** (Tier 1 layer 1, `crates/overdrive-reconcilers/tests/acceptance/`).
 
@@ -168,7 +168,7 @@ drive the production `serve` composition of the volume conformance driver; the `
 **E2. The action shim's launch outcomes** — `crates/overdrive-control-plane/src/action_shim/prelaunch_outcome_acceptance.rs`, Tier 1 layer 2. Owner path: the shim's pinned
 driving port (`dispatch_with_guest_network_provisioner_for_test`) or the real `WorkloadLifecycle` tick, over the production `GuestAddressPool`, `IdentityMgr` and `MtlsInterceptWorker` on sim
 ports and `SimObservationStore`. Fault stimulus: a `Ca` double whose `issue_svid` fails, a `Driver` double returning `StartSuperseded`, `SimDriver` scripts, the owner's provision and
-teardown refusals, an observation wrapper whose point read fails or whose point-read hook takes the pool's last slot between hydration and admission (the lost race of ADR-0329). The
+teardown refusals, an observation wrapper whose point read fails or whose point-read hook takes the pool's last slot between hydration and admission (the lost race of ADR-0338). The
 `Failed` predecessor rows of the refusal and teardown tests are written in the exit observer's shape; every other row is authored by production.
 
 | Id | Contract (work-order item) | Test | Status |
@@ -218,7 +218,7 @@ create (the orphan's claim drained), the successor attaches the volume, no `Fail
 | S-M7-1 | the crash leaves no row (`DiscardStrandedArtifacts`) | `boot_reclamation_ends_a_mid_boot_vmm_before_any_launch_for_its_workload` | PENDING |
 | S-M7-2 | the crash leaves a `Running` row (`ReclaimAllocation`) | `boot_reclamation_ends_a_mid_boot_vmm_when_the_crash_left_a_running_row` | PENDING |
 
-## F. A workload waiting for guest-network capacity (ADR-0327, ADR-0329; W-3 = A)
+## F. A workload waiting for guest-network capacity (ADR-0336, ADR-0338; W-3 = A)
 
 | Id | Contract / oracle | Owner path (fault) | Tier | Test and file | Status |
 |---|---|---|---|---|---|
@@ -272,9 +272,9 @@ row with no model label, with one further unheld tick after the Job restart or r
 | S-Q-16 | `resume_while_running_stops_and_replaces` | `quint_rg_resume_while_running_stops_and_replaces` | `RunIntentProgress` | GUARD |
 | S-Q-17 | `restart_of_exhausted_workload_relaunches_uncharged` (R-1) | `quint_rg_restart_of_exhausted_workload_relaunches_uncharged` | `I_CAPACITY_WAIT_NEVER_EXHAUSTS` | PENDING (step 5 projection) |
 | S-Q-18 | `generation_replacement_forgives_predecessor_failure` (R-1, RA9) | `quint_rg_generation_replacement_forgives_predecessor_failure` | the carried count (`cnt` compared through `attempt_index_for_alloc`) | PENDING (step 5) |
-| S-Q-19 | `persistent_prelaunch_failure_ends_in_backoff_exhausted` (ADR-0328) | `quint_rg_persistent_prelaunch_failure_ends_in_backoff_exhausted` | `PreFailExhausts` | PENDING (step 5) |
-| S-Q-20 | `transient_prelaunch_failure_recovers` (ADR-0328) | `quint_rg_transient_prelaunch_failure_recovers` | `PreFailExhausts`, `RunIntentProgress` | PENDING (step 5) |
-| S-Q-21 | `admission_refusal_leaves_no_row_and_waits_for_capacity` (D-1, ADR-0329) | `quint_rg_admission_refusal_leaves_no_row_and_waits_for_capacity` | `I_CAPACITY_WAIT_NEVER_EXHAUSTS` | GUARD |
+| S-Q-19 | `persistent_prelaunch_failure_ends_in_backoff_exhausted` (ADR-0337) | `quint_rg_persistent_prelaunch_failure_ends_in_backoff_exhausted` | `PreFailExhausts` | PENDING (step 5) |
+| S-Q-20 | `transient_prelaunch_failure_recovers` (ADR-0337) | `quint_rg_transient_prelaunch_failure_recovers` | `PreFailExhausts`, `RunIntentProgress` | PENDING (step 5) |
+| S-Q-21 | `admission_refusal_leaves_no_row_and_waits_for_capacity` (D-1, ADR-0338) | `quint_rg_admission_refusal_leaves_no_row_and_waits_for_capacity` | `I_CAPACITY_WAIT_NEVER_EXHAUSTS` | GUARD |
 | S-Q-22 | `restart_of_completed_job_does_nothing_and_issues_no_id` (H1, `rg_conf_job`) | `quint_rg_restart_of_completed_job_does_nothing_and_issues_no_id` | `I_FINISHED_JOB_ISSUES_NO_ID` | GUARD |
 | S-Q-23 | `resume_of_stopped_job_does_nothing_and_issues_no_id` (H1, `rg_conf_job`). Was a guard in the earlier cut; the stricter Job projection showed that production gives a resumed operator-stopped Job a new allocation id, so the guard was vacuous | `quint_rg_resume_of_stopped_job_does_nothing_and_issues_no_id` | `I_FINISHED_JOB_ISSUES_NO_ID` | PENDING (`the Job issued allocation id`) |
 | S-Q-24 | randomized `rg_conf` traces | `quint_rg_randomized` | the whole `Safety` conjunction | PENDING (the first divergence a seed hits) |
@@ -394,7 +394,7 @@ The seeded invariants and their seeds: S-VOL-48..50, seeds 1..=8; S-INV-01, seed
 Each is verified against the code. Calls s, t and u were blockers B-2, B-3 and B-1 and are resolved below.
 
 - **(a) A compat rule stands where a panicking helper would break the reconciler.** `generation_replacement_pending` panics (RED scaffold), so the reconciler cannot call it. The reconciler
-  keeps its pre-ADR-0326 decision through the private `restart_pending_until_successor_observed` (pending iff the largest `issued_generation` entry is below `desired.generation`;
+  keeps its pre-ADR-0335 decision through the private `restart_pending_until_successor_observed` (pending iff the largest `issued_generation` entry is below `desired.generation`;
   `workload_lifecycle.rs`), restated inline in `ReconcilerRuntime::restart_status_for_alloc`; the inline copy is marked "compat copy ... delete with the helper in DELIVER step 9". DELIVER adopts the
   helper at the four sites and deletes both rules. The field rename `observed_generation` -> `issued_generation` is mechanical in the existing tests and the trajectory golden; the only
   remaining uses of the old name are prose in `generation_read_coupling.rs` and a test-helper parameter with its doc comment in `reconciler_runtime.rs`.

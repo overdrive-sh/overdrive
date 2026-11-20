@@ -97,7 +97,7 @@ impl EvaluationSubmission<'_> {
     }
 
     /// The convergence lane's supersession signal for the workload `workload`
-    /// (ADR-0325). The standalone broker has no lanes: an unraised signal.
+    /// (ADR-0334). The standalone broker has no lanes: an unraised signal.
     fn lane_supersession(&self, workload: &WorkloadId) -> Arc<dyn LaunchSupersession> {
         match self {
             Self::Runtime(runtime) => match TargetResource::new(&format!("workload/{workload}")) {
@@ -1884,7 +1884,7 @@ async fn dispatch_single(
                 return Err(issue_error);
             }
             let supersession = broker.lane_supersession(&workload_id);
-            // RED scaffold (ADR-0325, N-SUP): DELIVER maps StartSuperseded to no row
+            // RED scaffold (ADR-0334, N-SUP): DELIVER maps StartSuperseded to no row
             let start_outcome: Result<AllocationHandle, DriverError> =
                 match drivers.get(driver_kind) {
                     Some(driver) => driver.start(&spec, &*supersession).await,
@@ -2346,7 +2346,7 @@ async fn dispatch_single(
 
                     // Route the supplied successor payload to its composed driver.
                     let supersession = broker.lane_supersession(&prior_row.workload_id);
-                    // RED scaffold (ADR-0325, N-SUP): DELIVER maps StartSuperseded to no row
+                    // RED scaffold (ADR-0334, N-SUP): DELIVER maps StartSuperseded to no row
                     let start_outcome = match drivers.get(driver_kind) {
                         Some(driver) => driver.start(&spec, &*supersession).await,
                         None => Err(DriverError::StartRejected {
@@ -3292,7 +3292,7 @@ mod guest_activation_acceptance;
 #[cfg(all(test, feature = "integration-tests"))]
 mod replacement_acceptance;
 
-/// Launch outcomes that precede the driver (ADR-0325, ADR-0328, ADR-0329).
+/// Launch outcomes that precede the driver (ADR-0334, ADR-0337, ADR-0338).
 /// Source-local: the cap is reached through the pool's crate-private `assign`.
 #[cfg(test)]
 mod prelaunch_outcome_acceptance;

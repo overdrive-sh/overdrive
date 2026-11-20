@@ -1,5 +1,5 @@
 //! `GET /v1/allocs?job=<id>` reports a workload that is waiting for
-//! guest-network capacity (node-local persistent volume, GH #348; ADR-0327,
+//! guest-network capacity (node-local persistent volume, GH #348; ADR-0336,
 //! feature delta § "Operator surface: a workload waiting for capacity"): the
 //! handler-layer half of the operator's `Waiting` line, the cheap half.
 //!

@@ -1,8 +1,8 @@
 # Checks for specs/quint/node-local-volume/ (node-local persistent volume protocol, GH #348).
 # Decisions modelled: VD-2 (volume belongs to the workload, stop keeps it), VD-8 (launch waits for the claim, not the
-# process), VD-9 (the launch path ensures the volume: create-if-absent, activate), SD-1 to SD-5 as one decision (ADR-0325: a
+# process), VD-9 (the launch path ensures the volume: create-if-absent, activate), SD-1 to SD-5 as one decision (ADR-0334: a
 # launch observing the lane signal, raised by an operator stop/restart or by node shutdown, abandons its waits and
-# delivers nothing). VD-3 (backing) has no protocol rule. SD-6 (the restart generation, ADR-0326) is modelled by
+# delivers nothing). VD-3 (backing) has no protocol rule. SD-6 (the restart generation, ADR-0335) is modelled by
 # specs/quint/restart-generation/, not here.
 # One hazard per decision. ci = true iff the check takes under two minutes; vol-safety-tlc is the one exhaustive check
 # outside CI. Runs on vol_conf (REC = true) are the #[quint_test] pins.

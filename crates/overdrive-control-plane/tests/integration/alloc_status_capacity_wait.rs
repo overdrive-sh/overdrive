@@ -1,5 +1,5 @@
 //! `GET /v1/allocs?job=<id>` on a node whose guest-network attachment pool is
-//! full (node-local persistent volume, GH #348; ADR-0327, feature delta
+//! full (node-local persistent volume, GH #348; ADR-0336, feature delta
 //! § "Operator surface: a workload waiting for capacity"): the handler-layer
 //! half of the operator's `Waiting` line that needs a full node.
 //!

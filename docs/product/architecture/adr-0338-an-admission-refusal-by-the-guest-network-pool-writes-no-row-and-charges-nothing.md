@@ -1,9 +1,9 @@
-# ADR-0329 — An admission refusal by the guest-network pool writes no row and charges nothing
+# ADR-0338 — An admission refusal by the guest-network pool writes no row and charges nothing
 
 ## Status
 
 **Accepted** 2026-11-18 (decision D-1 of the node-local persistent volume feature, GH #348; user ruling of 2026-11-18, option A). This ADR is
-not implemented and is stated in the present tense. It is separate from [ADR-0327](adr-0327-a-workload-waiting-for-guest-network-capacity-is-derived-at-read-time.md),
+not implemented and is stated in the present tense. It is separate from [ADR-0336](adr-0336-a-workload-waiting-for-guest-network-capacity-is-derived-at-read-time.md),
 which decides how a wait is shown: the refusal rule could be reversed (a charged `Failed` row) while a view of a placement withheld at the cap
 would still be useful, and the view could be dropped without changing what a refusal does.
 
@@ -28,7 +28,7 @@ occupancy is at the cap the reconciler emits no placement, and when a slot frees
    stopped) it emits again and may succeed. The ids this workload issues are therefore bounded by the number of lost races, each of which is
    another target's admission, and never grow per tick while the pool stays at the cap. For a restart the next evaluation after a refusal is
    expected to emit once more, because its own predecessor released a slot.
-4. The operator-visible wait is ADR-0327.
+4. The operator-visible wait is ADR-0336.
 
 ## Alternatives considered
 
@@ -50,6 +50,6 @@ occupancy is at the cap the reconciler emits no placement, and when a slot frees
 - [Feature delta](../../feature/node-local-persistent-volume/feature-delta.md) § Launch outcomes (N-ADM) and § Decisions on the waiting state
 - Formal model: `specs/quint/restart-generation/` (action `LaunchRefused`; hazard `refusalCharged`, invariant
   `I_CAPACITY_WAIT_NEVER_EXHAUSTS`; run `admission_refusal_leaves_no_row_and_waits_for_capacity`)
-- [ADR-0326](adr-0326-a-restart-generation-is-handled-when-its-successor-is-observed.md),
-  [ADR-0327](adr-0327-a-workload-waiting-for-guest-network-capacity-is-derived-at-read-time.md),
+- [ADR-0335](adr-0335-a-restart-generation-is-handled-when-its-successor-is-observed.md),
+  [ADR-0336](adr-0336-a-workload-waiting-for-guest-network-capacity-is-derived-at-read-time.md),
   [ADR-0134](adr-0134-placement-reads-held-attachment-count-through-read-port.md), `.claude/rules/reconcilers.md`

@@ -1,5 +1,5 @@
 /**
- * Restart generation (SD-6, ADR-0326, amends ADR-0073; launch outcomes ADR-0328, ADR-0329): a restart generation is handled
+ * Restart generation (SD-6, ADR-0335, amends ADR-0073; launch outcomes ADR-0337, ADR-0338): a restart generation is handled
  * when its successor is OBSERVED (the allocation issued for it has a row), never when it is emitted. Models
  * `WorkloadLifecycle`'s restart rules over abstract launches; there is no volume, no claim and no VMM (those are
  * specs/quint/node-local-volume/).
@@ -10,8 +10,8 @@
  * lane opens, the View records the issued id) and the allocation is PENDING, which stands for "a launch holds the lane"
  * (production writes no row before the dispatch resolves). One later action resolves it, chosen by the environment flags
  * at that instant, in the order the shim runs: ADMISSION, then IDENTITY issuance, then the DRIVER. Resolutions:
- *   LaunchRefused    capFull                       no row, no charge (the guest-network pool refused; ADR-0329)
- *   LaunchPreFail    not capFull, idFault          a Failed row (SVID issuance or a non-start driver error; ADR-0328)
+ *   LaunchRefused    capFull                       no row, no charge (the guest-network pool refused; ADR-0338)
+ *   LaunchPreFail    not capFull, idFault          a Failed row (SVID issuance or a non-start driver error; ADR-0337)
  *   LaunchRunning    no flag                       a Running row
  *   LaunchStartFail  no flag                       a Failed row (any typed start failure, volume causes included)
  *   LaunchLost       environment event (OPS "lost") no row, no charge: a launch superseded by a stop, a restart or shutdown,
@@ -31,7 +31,7 @@
  * LIMIT = CEILING + 1 in these terms. `charged` and `exhausted` are DERIVED, not state; a lost or refused launch has no row,
  * so it changes nothing.
  *
- * Workload kind (H1, ADR-0326 item 3; RA11): the constant `JOB` (false in every main except `rg_conf_job`). A finished Job row
+ * Workload kind (H1, ADR-0335 item 3; RA11): the constant `JOB` (false in every main except `rg_conf_job`). A finished Job row
  * (`jobTerm`: a row with a terminal claim) never has a generation pending against it and a Job is placed once (`canStart`
  * needs no current row, so any row, a pre-driver `Failed` row included, ends the Job), so `workload restart` of a finished
  * Job bumps the generation and issues no id.
@@ -53,14 +53,14 @@ module restart_generation_conf {
 
 module restart_generation {
   import restart_generation_conf.ConfStep from "./restart_generation"
-  const OFF: Set[str]   // rules off: "stampOnEmit" (ADR-0326), "prefailNoRow" (ADR-0328), "refusalCharged" (ADR-0329)
+  const OFF: Set[str]   // rules off: "stampOnEmit" (ADR-0335), "prefailNoRow" (ADR-0337), "refusalCharged" (ADR-0338)
   const REC: bool       // true on the runs' main: conf_step records the action taken
   const OPS: Set[str]   // enabled operator / environment actions: "stop" "restart" "lost" "idFault" (toggles IdFaultOn/Off) "idFaultHeld" (idFault true from init, never toggled) "capFull" (toggles CapFill/CapDrain)
   const NA: int         // allocation ids 1..NA (an id is minted once)
   const FB: int         // fault budget (VmmCrash, CpCrash, NodeReboot together)
   const LIMIT: int      // failures in a chain before BackoffExhausted (= production's ceiling + 1; abstracted)
   const DGMAX: int      // bound on the desired generation
-  const JOB: bool       // the workload kind (H1, ADR-0326 item 3): true = a Job (run once; a finished row is never replaced), false = a service
+  const JOB: bool       // the workload kind (H1, ADR-0335 item 3): true = a Job (run once; a finished row is never replaced), false = a service
 
   val AL = 1.to(NA)
 
@@ -118,8 +118,8 @@ module restart_generation {
   def nonTerminal(s: S): bool = AL.exists(a => s.as.get(a) == PENDING or s.as.get(a) == RUNNING)
   def mintedIds(s: S): int = AL.filter(a => s.as.get(a) != UNMINTED).size()
   // "an allocation row exists for a": a PENDING allocation and a lost or refused launch have none; a pre-launch failure
-  // (W_PREFAIL) has one. Hazard "prefailNoRow" (ADR-0328): a pre-driver failure writes no row. Hazard "refusalCharged"
-  // (ADR-0329): an admission refusal writes a (charged) row.
+  // (W_PREFAIL) has one. Hazard "prefailNoRow" (ADR-0337): a pre-driver failure writes no row. Hazard "refusalCharged"
+  // (ADR-0338): an admission refusal writes a (charged) row.
   def hasRow(s: S, a: int): bool = and {
     s.as.get(a) == RUNNING or s.as.get(a) == FAILED or s.as.get(a) == TERMINATED,
     s.why.get(a) != W_LOST,
@@ -128,7 +128,7 @@ module restart_generation {
   }
   // production `current_alloc` over the observed rows: the highest id with a row, 0 when none
   def curA(s: S): int = AL.fold(0, (m, a) => if (hasRow(s, a) and a > m) a else m)
-  // H1 (ADR-0326 item 3): the row of `a` is a finished Job row (every ended Job row carries a terminal claim: Completed,
+  // H1 (ADR-0335 item 3): the row of `a` is a finished Job row (every ended Job row carries a terminal claim: Completed,
   // Failed from a natural exit, or Stopped{Operator} from a stop). The action shim's own immutability test.
   def jobTerm(s: S, a: int): bool = and { JOB, hasRow(s, a), s.as.get(a) == TERMINATED or s.as.get(a) == FAILED }
   // a generation is pending until the allocation issued for it has a row, and never against a finished Job row (H1).
@@ -203,7 +203,7 @@ module restart_generation {
     not(JOB) or curA(s) == 0,
     s.as.get(a) == UNMINTED, AL.forall(x => s.as.get(x) != UNMINTED or a <= x),
   }
-  // the evaluation's placement (the occupancy check at hydration: not while the pool is at its cap, ADR-0329)
+  // the evaluation's placement (the occupancy check at hydration: not while the pool is at its cap, ADR-0338)
   def canWlStart(s: S, a: int): bool = canStart(s, a) and not(s.capFull)
   action WlStart(a: int): bool = all {
     canWlStart(cur, a),
@@ -309,13 +309,13 @@ module restart_generation {
   }
 
   // ---------------------------------------------------------------- invariants (SD-6)
-  // ADR-0329 / D-1: a node held at the guest-network cap never exhausts a healthy workload's budget: a workload that is
+  // ADR-0338 / D-1: a node held at the guest-network cap never exhausts a healthy workload's budget: a workload that is
   // exhausted ended by a charged cause (a crash, a typed start failure or a pre-driver failure), never by a refusal or a lost launch
   val I_CAPACITY_WAIT_NEVER_EXHAUSTS = exhausted(st) implies and {
     curA(st) != 0,
     st.why.get(curA(st)) == W_CRASH or st.why.get(curA(st)) == W_STARTFAIL or st.why.get(curA(st)) == W_PREFAIL,
   }
-  // H1 (ADR-0326 item 3): a Job is placed once and never replaced after it ends: at most one allocation id has a row, and
+  // H1 (ADR-0335 item 3): a Job is placed once and never replaced after it ends: at most one allocation id has a row, and
   // once the current row is finished no further id is minted (ids that end with no row, a supersession or a refusal, are not
   // counted: they leave no row). Vacuous for JOB = false.
   val I_FINISHED_JOB_ISSUES_NO_ID = not(JOB) or and {

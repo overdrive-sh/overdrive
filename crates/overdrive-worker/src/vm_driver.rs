@@ -1585,7 +1585,7 @@ impl Driver for VmDriver {
         DriverType::Vm
     }
 
-    // RED scaffold (ADR-0325): DELIVER reads the signal at observation points 1-6
+    // RED scaffold (ADR-0334): DELIVER reads the signal at observation points 1-6
     async fn start(
         &self,
         spec: &AllocationSpec,

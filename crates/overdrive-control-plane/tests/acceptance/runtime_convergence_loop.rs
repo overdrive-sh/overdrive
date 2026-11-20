@@ -1109,7 +1109,7 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
         last_failure_seen_at: last_failure_seen_at_persisted.clone(),
         released_for_deletion: ::std::collections::BTreeSet::new(),
         // `issued_generation` is a persisted input with the lifetime of
-        // `restart_counts` (ADR-0326): it rehydrates with them.
+        // `restart_counts` (ADR-0335): it rehydrates with them.
         issued_generation: view_pre.issued_generation.clone(),
         reclaim_attempts: std::collections::BTreeMap::new(),
         reclaim_emitted_at: std::collections::BTreeMap::new(),

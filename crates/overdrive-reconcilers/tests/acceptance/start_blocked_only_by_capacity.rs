@@ -1,6 +1,6 @@
 //! `start_blocked_only_by_capacity` — the one predicate the reconciler's rules
 //! and `overdrive workload describe` share for "this workload waits for
-//! guest-network capacity" (ADR-0327, node-local persistent volume, GH #348;
+//! guest-network capacity" (ADR-0336, node-local persistent volume, GH #348;
 //! scenario family S-WAIT-PRED).
 //!
 //! CONTRACT_SHAPE: pure-function (the table), plus three unbounded-preservation
@@ -73,7 +73,7 @@ const WORKLOAD: &str = "payments";
 /// The payload of the production scaffold's panic, matched exactly: only this
 /// panic is the pending state; any other panic is a real failure and propagates.
 const SCAFFOLD_PANIC: &str =
-    "RED scaffold: start_blocked_only_by_capacity is not implemented (ADR-0327)";
+    "RED scaffold: start_blocked_only_by_capacity is not implemented (ADR-0336)";
 
 const CAP: u32 = MAX_GUEST_NETWORK_ATTACHMENTS;
 

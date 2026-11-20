@@ -1,5 +1,5 @@
 //! `overdrive workload describe` shows a workload waiting for guest-network
-//! capacity (node-local persistent volume, GH #348; ADR-0327, feature delta
+//! capacity (node-local persistent volume, GH #348; ADR-0336, feature delta
 //! § "Operator surface: a workload waiting for capacity").
 //!
 //! Scenario. The server's alloc-status response carries

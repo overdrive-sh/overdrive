@@ -2,15 +2,15 @@
 
 The DESIGN wave pins contracts, boundary scenarios and named seeded invariants in `../feature-delta.md`; everything executable, every
 placement and every re-sync list lives here. DISTILL applies it after the modeler has re-recorded both specs. User rulings of 2026-11-19: J-1
-(a Job's failure before the driver is final), DE-1 (non-start driver errors are not a decision of this feature), one hazard each for ADR-0328
-and ADR-0329, P-3a (option A: S-VOL-T3-11 tests the production write-back flush, not fork fix F1), and the subtractive ruling that dropped the
+(a Job's failure before the driver is final), DE-1 (non-start driver errors are not a decision of this feature), one hazard each for ADR-0337
+and ADR-0338, P-3a (option A: S-VOL-T3-11 tests the production write-back flush, not fork fix F1), and the subtractive ruling that dropped the
 Tier-3 stop-during-boot test (S-VOL-T3-13, restored by B-2). No deferral language is written and no GitHub issue is created by this file. Where DISTILL
 deviated from an obligation or took a decision, the obligation is followed by a **Deviation** or **Decision** note; an obligation met as written has none.
 The scenario tables are `test-scenarios.md`; the failure each pending test shows today and the activation order are `red-classification.md`.
 
 ## DISTILL input from the DESIGN of 2026-11-19 (executable obligations, mutation targets and re-sync lists)
 
-### Restart generation (ADR-0326, ADR-0328, ADR-0329)
+### Restart generation (ADR-0335, ADR-0337, ADR-0338)
 
 1. *Seeded invariant* `restart_generation_is_placed_exactly_once_across_supersession_and_crash`, through the real
    `WorkloadLifecycle`, `ReconcilerRuntime` (tick, lane table, View persistence), the real action shim and `VmDriver` over `SimVmm` /
@@ -74,7 +74,7 @@ The scenario tables are `test-scenarios.md`; the failure each pending test shows
    **Deviation:** the field is renamed `issued_generation` mechanically; prose in `generation_read_coupling.rs` and a test-helper parameter with its doc comment in `reconciler_runtime.rs` still say
    `observed_generation`. The inline restatement of the compat rule in `reconciler_runtime.rs` is marked for deletion with the helper.
 
-### Launch path, lane table and shutdown (ADR-0325)
+### Launch path, lane table and shutdown (ADR-0334)
 
 - *`VmDriver::start` observation points* 1 to 6 (§ Superseding a launch of the feature delta): a signal raised at each point, with the volume
   steps first; superseded wins over a typed failure found at the same point; a teardown failure is `StartRejected`.
@@ -93,7 +93,7 @@ The scenario tables are `test-scenarios.md`; the failure each pending test shows
   **Decision (subtractive ruling, then B-2):** the Tier-3 stop-during-boot test (S-VOL-T3-13) was dropped and is restored by the user's B-2 ruling of 2026-11-19 as the twin of the `alive[a]` arbiter read. The stop-during-held-claim test (S-VOL-T3-12) is kept and
   carries its `#[should_panic]` marker.
 
-### Waiting state (ADR-0327, ADR-0329)
+### Waiting state (ADR-0336, ADR-0338)
 
 1. *Unit and proptest, `start_blocked_only_by_capacity`:* a table over the class of the current row, each with and without a pending generation
    and with the pool at `cap - 1`, `cap` and `cap + 1`: no row (true); a crashed row under budget (true); a row at the ceiling (false, true once

@@ -1,5 +1,5 @@
 //! Launch outcomes that precede the driver: every one writes a row, or is a
-//! named no-row outcome (ADR-0328, ADR-0329, ADR-0325 item 5; feature delta
+//! named no-row outcome (ADR-0337, ADR-0338, ADR-0334 item 5; feature delta
 //! § "Launch outcomes: every one writes a row or is a named no-row outcome").
 //!
 //! # Scenario family
@@ -38,7 +38,7 @@
 //! teardown refusals, an observation-store wrapper whose point read fails, and
 //! the same wrapper's point-read hook, which takes the pool's last slot between
 //! the reconciler's hydration and the shim's admission (another target's
-//! concurrent admission, the lost race ADR-0329 names).
+//! concurrent admission, the lost race ADR-0338 names).
 //!
 //! The `Failed` predecessor rows of the restart-arm refusal test and the
 //! teardown scenarios are written with the same shape the exit observer writes
@@ -1611,7 +1611,7 @@ async fn a_job_identity_failure_is_final_and_never_relaunched() {
 
 // ---------------------------------------------------------------------------
 // Named no-row and early-return outcomes that stay as they are: S1, R2, R6,
-// R9, S10 and R14 (ADR-0328 launch-outcome table). S7, S9 and R11 are covered
+// R9, S10 and R14 (ADR-0337 launch-outcome table). S7, S9 and R11 are covered
 // by `tests/acceptance/lifecycle_broadcast.rs`,
 // `tests/acceptance/action_shim_running_write_failure_stops_alloc.rs` and
 // `tests/integration/mtls_install_fail_closed.rs`.

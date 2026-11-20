@@ -1,19 +1,19 @@
-# ADR-0326 — A restart generation is handled when its successor is observed
+# ADR-0335 — A restart generation is handled when its successor is observed
 
 ## Status
 
 **Accepted** 2026-11-18 (decision SD-6 of the node-local persistent volume feature, GH #348; user ruling of 2026-11-18, option A). The
 finished-Job rule (Decision, item 3) is **Accepted** 2026-11-19 by user ruling (H1, option A). ADR-0073 is implemented, so its amendment
 section links here; this ADR is not implemented and is stated in the present tense. Two neighbouring rules are their own decisions: the
-recording of a failure before the driver runs ([ADR-0328](adr-0328-a-launch-failure-before-the-driver-runs-is-a-recorded-charged-failed-row.md))
-and the handling of an admission refusal ([ADR-0329](adr-0329-an-admission-refusal-by-the-guest-network-pool-writes-no-row-and-charges-nothing.md)).
+recording of a failure before the driver runs ([ADR-0337](adr-0337-a-launch-failure-before-the-driver-runs-is-a-recorded-charged-failed-row.md))
+and the handling of an admission refusal ([ADR-0338](adr-0338-an-admission-refusal-by-the-guest-network-pool-writes-no-row-and-charges-nothing.md)).
 
 ## Context
 
 `WorkloadLifecycle` places a restart's or a resume's replacement allocation, and it must decide on every evaluation whether the generation the
 operator committed (`workloads/<id>/generation`) has been handled. ADR-0073 answered with a marker the reconciler stamped on the tick that
 emitted the placement, and the runtime persists the View before it dispatches. A launch can end without writing an allocation row: it is
-superseded by a stop, a restart or node shutdown (ADR-0325), or it dies with the control plane (reachable on `main` today). The next evaluation
+superseded by a stop, a restart or node shutdown (ADR-0334), or it dies with the control plane (reachable on `main` today). The next evaluation
 then read the generation as handled beside the old operator-stopped or replaced row, the veto and the restartable filter emitted nothing,
 and the workload stayed down while intent said run. The marker records what the reconciler emitted, not a fact about the resource it
 manages (`.claude/rules/reconcilers.md` § "A View decides when to act, never whether an effect is in place").
@@ -47,7 +47,7 @@ has an allocation row, and a generation that the shim cannot honour is not pendi
    tick mean no launch is in flight when the next evaluation hydrates, so one generation is never launched twice.
 5. **Bounds.** The View's per-id entries are never pruned (true on `main` for `restart_counts`). An id is issued only when the observed state
    changed since the last issue: a launch that wrote a row, a supersession (one per operator commit or shutdown), an admission refusal
-   (ADR-0329), a stale-dispatch fence (one per observed state change). No outcome issues an id on every tick while the observed state is
+   (ADR-0338), a stale-dispatch fence (one per observed state change). No outcome issues an id on every tick while the observed state is
    unchanged.
 
 Exact shapes and the exhaustive table of launch outcomes with their code citations: feature delta § "Restart generation is handled when its
@@ -86,8 +86,8 @@ successor is observed". The test obligations: `distill/upstream-issues.md` of th
 - Formal model: `specs/quint/restart-generation/` (one hazard, `stampOnEmit`); feature delta § Formal protocol model
 - [ADR-0073](adr-0073-backend-instance-replacement-workload-restart-generation-precursor.md) (amended),
   [ADR-0102](adr-0102-bounded-convergence-evaluation-ownership.md),
-  [ADR-0325](adr-0325-a-superseding-stop-or-restart-interrupts-an-in-flight-launchs-waits.md),
+  [ADR-0334](adr-0334-a-superseding-stop-or-restart-interrupts-an-in-flight-launchs-waits.md),
   [ADR-0087](adr-0087-single-restart-authority-workload-lifecycle-owns-crash-and-liveness.md),
-  [ADR-0328](adr-0328-a-launch-failure-before-the-driver-runs-is-a-recorded-charged-failed-row.md),
-  [ADR-0329](adr-0329-an-admission-refusal-by-the-guest-network-pool-writes-no-row-and-charges-nothing.md),
-  [ADR-0327](adr-0327-a-workload-waiting-for-guest-network-capacity-is-derived-at-read-time.md), `.claude/rules/reconcilers.md`
+  [ADR-0337](adr-0337-a-launch-failure-before-the-driver-runs-is-a-recorded-charged-failed-row.md),
+  [ADR-0338](adr-0338-an-admission-refusal-by-the-guest-network-pool-writes-no-row-and-charges-nothing.md),
+  [ADR-0336](adr-0336-a-workload-waiting-for-guest-network-capacity-is-derived-at-read-time.md), `.claude/rules/reconcilers.md`

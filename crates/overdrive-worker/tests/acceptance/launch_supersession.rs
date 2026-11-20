@@ -1,4 +1,4 @@
-//! Node-local persistent volume (GH #348, ADR-0325): a launch is superseded.
+//! Node-local persistent volume (GH #348, ADR-0334): a launch is superseded.
 //!
 //! Scenario: a `workload stop`, a `workload restart` or node shutdown raises the convergence
 //! lane's supersession signal while `VmDriver::start` is waiting. The launch abandons its wait

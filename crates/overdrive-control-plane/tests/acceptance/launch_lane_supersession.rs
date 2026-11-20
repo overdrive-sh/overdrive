@@ -1,4 +1,4 @@
-//! launch_lane_supersession — the convergence lane's supersession signal (ADR-0325, GH #348).
+//! launch_lane_supersession — the convergence lane's supersession signal (ADR-0334, GH #348).
 //!
 //! Scenarios: the lane table's use through the real convergence tick (boundary scenarios 4 and 4a of
 //! the feature delta, Gate G-3): `ReconcilerRuntime::{supersede_lane, supersede_all_lanes,

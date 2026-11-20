@@ -1437,7 +1437,7 @@ impl<'de> Deserialize<'de> for RgState {
 // ----- named runs (critical scenarios, one per `rg_conf` / `rg_conf_job` run) ----------
 
 /// Named run `control_plane_crash_during_restart_launch_relaunches_once`.
-/// PENDING (SD-6, ADR-0326): the restart generation is stamped when emitted, so after the control plane lost the replacement launch (step 7) the next evaluation (step 8) places nothing; it waits for "a generation is handled when its successor is observed".
+/// PENDING (SD-6, ADR-0335): the restart generation is stamped when emitted, so after the control plane lost the replacement launch (step 7) the next evaluation (step 8) places nothing; it waits for "a generation is handled when its successor is observed".
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/restart-generation/restart_generation.qnt",
@@ -1453,7 +1453,7 @@ fn quint_rg_control_plane_crash_during_restart_launch_relaunches_once() -> impl 
 }
 
 /// Named run `second_restart_loses_launch_then_one_placement`.
-/// PENDING (ADR-0325): `ReconcilerRuntime::supersede_lane` is a scaffold; it waits for the convergence lane table (step 10). SD-6 (the steps after the loss) is unobserved until it lands.
+/// PENDING (ADR-0334): `ReconcilerRuntime::supersede_lane` is a scaffold; it waits for the convergence lane table (step 10). SD-6 (the steps after the loss) is unobserved until it lands.
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/restart-generation/restart_generation.qnt",
@@ -1482,7 +1482,7 @@ fn quint_rg_resume_while_running_stops_and_replaces() -> impl QuintDriver {
 }
 
 /// Named run `restart_of_exhausted_workload_relaunches_uncharged`.
-/// PENDING (ADR-0328): a pre-driver failure (identity issuance) returns `Err` and writes no row (step 5); it waits for the charged `Failed` row. Later steps (SD-6 replacement of an exhausted row) are unobserved until it lands.
+/// PENDING (ADR-0337): a pre-driver failure (identity issuance) returns `Err` and writes no row (step 5); it waits for the charged `Failed` row. Later steps (SD-6 replacement of an exhausted row) are unobserved until it lands.
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/restart-generation/restart_generation.qnt",
@@ -1498,7 +1498,7 @@ fn quint_rg_restart_of_exhausted_workload_relaunches_uncharged() -> impl QuintDr
 }
 
 /// Named run `generation_replacement_forgives_predecessor_failure`.
-/// PENDING (ADR-0328): as above (step 5). Later steps (the carried count of a generation replacement) are unobserved until it lands.
+/// PENDING (ADR-0337): as above (step 5). Later steps (the carried count of a generation replacement) are unobserved until it lands.
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/restart-generation/restart_generation.qnt",
@@ -1514,7 +1514,7 @@ fn quint_rg_generation_replacement_forgives_predecessor_failure() -> impl QuintD
 }
 
 /// Named run `persistent_prelaunch_failure_ends_in_backoff_exhausted`.
-/// PENDING (ADR-0328): as above (step 5); `BackoffExhausted` after the pre-driver failures is unobserved until it lands.
+/// PENDING (ADR-0337): as above (step 5); `BackoffExhausted` after the pre-driver failures is unobserved until it lands.
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/restart-generation/restart_generation.qnt",
@@ -1530,7 +1530,7 @@ fn quint_rg_persistent_prelaunch_failure_ends_in_backoff_exhausted() -> impl Qui
 }
 
 /// Named run `transient_prelaunch_failure_recovers`.
-/// PENDING (ADR-0328): as above (step 5).
+/// PENDING (ADR-0337): as above (step 5).
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/restart-generation/restart_generation.qnt",
@@ -1546,7 +1546,7 @@ fn quint_rg_transient_prelaunch_failure_recovers() -> impl QuintDriver {
 }
 
 /// Named run `admission_refusal_leaves_no_row_and_waits_for_capacity`.
-/// GUARD: passes against production today (the refusal already writes no row and charges nothing, ADR-0329); keeps passing once the occupancy gate lands.
+/// GUARD: passes against production today (the refusal already writes no row and charges nothing, ADR-0338); keeps passing once the occupancy gate lands.
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/restart-generation/restart_generation.qnt",
@@ -1559,7 +1559,7 @@ fn quint_rg_admission_refusal_leaves_no_row_and_waits_for_capacity() -> impl Qui
 }
 
 /// Named run `restart_of_completed_job_does_nothing_and_issues_no_id`.
-/// GUARD: passes against production today (a finished Job's row is final and a restart issues no id, ADR-0326 item 3).
+/// GUARD: passes against production today (a finished Job's row is final and a restart issues no id, ADR-0335 item 3).
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/restart-generation/restart_generation.qnt",

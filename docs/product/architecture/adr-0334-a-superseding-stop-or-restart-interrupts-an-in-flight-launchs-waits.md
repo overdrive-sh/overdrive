@@ -1,4 +1,4 @@
-# ADR-0325 — A stop, a restart or node shutdown interrupts an in-flight launch's waits
+# ADR-0334 — A stop, a restart or node shutdown interrupts an in-flight launch's waits
 
 ## Status
 
@@ -6,7 +6,7 @@
 the user's approval of the exact decisions, including node shutdown as a producer). ADR-0102 is implemented, so this ADR amends it explicitly:
 the amendment is stated below and is recorded in ADR-0102's own amendment section. This ADR is not implemented, so its text is stated in the
 present tense. It depends on one rule it does not own: a launch abandoned by supersession leaves its generation pending until its successor
-is observed ([ADR-0326](adr-0326-a-restart-generation-is-handled-when-its-successor-is-observed.md)).
+is observed ([ADR-0335](adr-0335-a-restart-generation-is-handled-when-its-successor-is-observed.md)).
 
 ## Context
 
@@ -37,7 +37,7 @@ charges nothing. An effect already running is never interrupted: an `lvm` comman
   already succeeded is an ordinary success.
 - The volume steps run before the first host artifact.
 - A launch superseded by shutdown is torn down through the same path as one superseded by a stop and writes nothing. An abandoned launch
-  leaves its generation pending until its successor is observed (ADR-0326), and a first placement is placed again because no allocation is
+  leaves its generation pending until its successor is observed (ADR-0335), and a first placement is placed again because no allocation is
   running.
 - A superseded restart successor still runs the exact-old predecessor cleanup (ADR-0106) through the restart arm's result path; a superseded
   launch never skips it.
@@ -91,7 +91,7 @@ the launch ends" is replaced by this ADR.
   window costs one extra evaluation per operator commit; a teardown failure while abandoning is reported as an ordinary start failure.
 - Negative: a launch abandoned by shutdown is lost work (the clone and the boot are redone by the next boot); it never wrote a row, so nothing
   is repaired: the next evaluation places one allocation again from the observed rows (a pending generation, or no running allocation;
-  ADR-0326).
+  ADR-0335).
 - Accepted cost: an evaluation signalled before its launch starts still provisions the guest network and mints the SVID, then tears both
   down; no shim pre-check is added.
 - Bound: shutdown raises the signal when the convergence stage begins, after the gateway stage of `ServerHandle::shutdown` (bounded by its
@@ -100,8 +100,8 @@ the launch ends" is replaced by this ADR.
 ## Links
 
 - [Feature delta](../../feature/node-local-persistent-volume/feature-delta.md) § Superseding a launch, § Node shutdown raises the signal, § Gate G-3, § Formal protocol model
-- Formal model: `specs/quint/node-local-volume/` (one hazard, `noInterrupt`); the restart-generation model (ADR-0326) is the separate `specs/quint/restart-generation/`
+- Formal model: `specs/quint/node-local-volume/` (one hazard, `noInterrupt`); the restart-generation model (ADR-0335) is the separate `specs/quint/restart-generation/`
 - [ADR-0102](adr-0102-bounded-convergence-evaluation-ownership.md), [ADR-0317](adr-0317-a-replacement-waits-for-the-volume-claim-not-for-the-vmm-process.md),
   [ADR-0104](adr-0104-vm-recreation-fresh-allocation-identity.md),
-  [ADR-0326](adr-0326-a-restart-generation-is-handled-when-its-successor-is-observed.md), `.claude/rules/reconcilers.md`,
+  [ADR-0335](adr-0335-a-restart-generation-is-handled-when-its-successor-is-observed.md), `.claude/rules/reconcilers.md`,
   `docs/research/orchestration/stop-during-start-comprehensive-research.md`

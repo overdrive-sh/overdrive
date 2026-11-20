@@ -1,6 +1,6 @@
 /**
  * Node-local persistent volume protocol (GH #348; decisions VD-2 (ADR-0311), VD-3 (ADR-0312, backing choice: no
- * protocol rule), VD-8 (ADR-0317), VD-9 (ADR-0318), SD-1 to SD-5 (ADR-0325, one decision)).
+ * protocol rule), VD-8 (ADR-0317), VD-9 (ADR-0318), SD-1 to SD-5 (ADR-0334, one decision)).
  *
  * ONE node, ONE workload (`replicas = 1`) with one declared volume, NA allocation ids (each minted once).
  * The volume size is abstracted away: "free >= size" is the boolean `spaceFree`.
@@ -21,7 +21,7 @@
  *   workload-lifecycle       mints a successor only when no allocation row is non-terminal (ADR-0109); it does not wait
  *                            for cleanup or claim release (ADR-0106). Operator stop, `workload restart`.
  *
- * Lane signal (SD-1..SD-5, ADR-0325): a PENDING allocation stands for "a launch holds the lane" (production writes no row
+ * Lane signal (SD-1..SD-5, ADR-0334): a PENDING allocation stands for "a launch holds the lane" (production writes no row
  * before `driver.start` returns). `sup[a]` is raised by OpStop, WorkloadRestart (on a PENDING allocation) and Shutdown
  * (`down`); a launch that observes it abandons (`LaunchSuperseded`): no row result, no charge, the VMM terminated, the
  * volume kept. `ensure` (`LaunchEnsureActivate`) and the VMM create are never interrupted. VmmSpawn leaves the allocation

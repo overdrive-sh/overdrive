@@ -1293,7 +1293,7 @@ impl IntentKey {
     ///
     /// A monotonic `u64` bumped by `overdrive workload restart` (ADR-0073
     /// item 4); the `WorkloadLifecycle` reconciler places a fresh instance
-    /// until the generation's successor allocation row is observed (ADR-0326). The value is
+    /// until the generation's successor allocation row is observed (ADR-0335). The value is
     /// 8-byte big-endian; an absent key decodes as generation `0`. Stored
     /// as a separate intent record (sibling-key precedent:
     /// `workloads/<id>/stop` is an empty-byte sentinel, `workloads/<id>/kind`

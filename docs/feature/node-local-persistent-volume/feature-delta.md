@@ -2,7 +2,7 @@
 
 **Status:** the design is approved by the user; rulings run through 2026-11-19. The decision table (VD-1 to VD-10, SD-1 to SD-6, J-1, DE-1, D-1,
 H1, H2, W-1 to W-4, R-1, VB-1, B-1 to B-3, P-1 to P-3) and the scope-limitation table (L1 to L9) are owned by
-[`design/wave-decisions.md`](design/wave-decisions.md); each ADR (0310 to 0320, 0325 to 0329) holds one decision. This file owns the interface
+[`design/wave-decisions.md`](design/wave-decisions.md); each ADR (0310 to 0320, 0334 to 0338) holds one decision. This file owns the interface
 contracts, the boundary scenarios and the model's boundary. Executable test obligations, mutation targets and test re-sync lists are DISTILL's
 input in [`distill/upstream-issues.md`](distill/upstream-issues.md). The model is two Quint specs, `specs/quint/node-local-volume/` and
 `specs/quint/restart-generation/`; their verdicts are in each spec's `evidence/summary.md`, not in this document.
@@ -294,7 +294,7 @@ claim and before `create_run_dir`, the cgroup scope, the index link, the rootfs 
 step has therefore created nothing on the host (its only state is the supervision claim, which the shim releases), and the claim wait never
 holds a run directory or a scope the reclamation sweep would have to consider.
 
-### Superseding a launch (SD-1 to SD-5; ADR-0325)
+### Superseding a launch (SD-1 to SD-5; ADR-0334)
 
 The signal's whole path, with its owner at each hop:
 
@@ -384,7 +384,7 @@ Claim wait or boot wait: the teardown. Then the lane is released and the stop's 
 "eight stalled launches fill every slot" is unchanged for a stop of a workload that is **not** itself launching, and no longer applies to a stop
 of a launching workload, whose own launch releases its slot at once.
 
-### Node shutdown raises the signal (SD-5; ADR-0325)
+### Node shutdown raises the signal (SD-5; ADR-0334)
 
 **Today** (`crates/overdrive-control-plane/src/lib.rs`): `spawn_convergence_loop` (`:5126`) owns the admitted evaluations in a `FuturesUnordered`;
 its `select!` arm `shutdown.cancelled()` (`:5237`) closes admission and the loop then drains `active` to completion (`:5220`). Three graceful
@@ -421,7 +421,7 @@ process death; it is unchanged. So an admitted launch that is waiting runs on to
 **Not changed:** `kill_for_test`; the convergence loop's drain of admitted evaluations to their result (ADR-0102 § Timing); admission closing;
 the broker; the `run_convergence_tick` and `spawn_convergence_loop` signatures.
 
-### Restart generation is handled when its successor is observed (SD-6; ADR-0326, which amends ADR-0073, with ADR-0328 and ADR-0329)
+### Restart generation is handled when its successor is observed (SD-6; ADR-0335, which amends ADR-0073, with ADR-0337 and ADR-0338)
 
 **Decision.** Whether a generation has been handled is derived from observation: a generation is handled once the allocation issued for it **has
 an allocation row**. The View records only what was issued (an input), never that a launch happened. Today `WorkloadLifecycle` stamps
@@ -496,7 +496,7 @@ happens. Bug 3 stays: a same-spec `deploy` bumps nothing. R1-crash stays. The Jo
 Discharged by the seeded invariant `restart_generation_is_placed_exactly_once_across_supersession_and_crash` (`overdrive-sim`) **only, pending
 DISTILL**: the spec's `canStart` builds in the no-`PENDING` guard (RA2), the premise of A10, so checking A10 against the spec would be circular.
 
-#### Launch outcomes: every one writes a row or is a named no-row outcome (ADR-0328, ADR-0329)
+#### Launch outcomes: every one writes a row or is a named no-row outcome (ADR-0337, ADR-0338)
 
 A pending generation skips the backoff gate (`:1288`), carries the predecessor's attempts, and the runtime requeues `Immediate` after any tick
 that emitted an action (`reconciler_runtime.rs:1537-1539`, `:1653-1659`), whatever the dispatch returned. An outcome that returns an error and
@@ -508,10 +508,10 @@ supersession arm of § Superseding a launch is added).
 |---|---|---|---|
 | S0 | Start `:1756` | `find_prior_alloc_row(..).await?` fails: `ShimError::Observation`, `Err`, no row, no effect taken yet | **N-REC (read side)** |
 | S1 | Start `:1757-1763` | prior row `NoChange` (a finalised Job row): `Ok(())` | a row exists for the id; not a no-row outcome |
-| S2 | Start `:1791-1793` | admission refusal from `provision_and_inject_netns`: `Err`, no row | **N-ADM** (ADR-0329): no row, uncharged, the wait visible in `describe` |
+| S2 | Start `:1791-1793` | admission refusal from `provision_and_inject_netns`: `Err`, no row | **N-ADM** (ADR-0338): no row, uncharged, the wait visible in `describe` |
 | S3 | Start `:1800-1844` | any other `GuestNetwork` error: lease retired, torn down, `Failed` row `WorkloadNetnsProvisionFailed { stage: "guest_network" }` | unchanged (row, charged for a Service; a Job's row is final) |
 | S4 | Start `:1813` | provision error that is not `GuestNetwork`: `Err`, no row | **N-UNR**: `provision_and_inject_netns` returns only `ShimError::GuestNetwork` (`:1156-1175`) |
-| S5 | Start `:1857-1871` | `ensure_intercept_identity` fails (CA signing, audit write, unrecorded failure; `issue_svid.rs:44-70`): lease retired and torn down, `Err`, no row | **`Failed` row** (ADR-0328), reason `MtlsInterceptInstallFailed { stage: "identity_issue", detail }`. A Service: charged, backed off, relaunched. **A Job: final** (S5-J) |
+| S5 | Start `:1857-1871` | `ensure_intercept_identity` fails (CA signing, audit write, unrecorded failure; `issue_svid.rs:44-70`): lease retired and torn down, `Err`, no row | **`Failed` row** (ADR-0337), reason `MtlsInterceptInstallFailed { stage: "identity_issue", detail }`. A Service: charged, backed off, relaunched. **A Job: final** (S5-J) |
 | S5-J | Start, a Job | as S5 (and S3, S6): the Job's row is `Failed` | the Job natural-exit branch finalises any ended Job row (`workload_lifecycle.rs:1091-1113`; `is_natural_exit` `:1757-1775`); `classify_natural_exit_terminal` reaches its default arm (`:1793`) for these reasons, so the Job ends `Failed { exit_code: Some(0) }`, and a Job is placed only while it has no row, so it is never relaunched (J-1). A Job whose start is rejected ends the same way today; the `exit_code: Some(0)` is equally misleading there |
 | S6 | Start `:1872-1900` | no driver of the kind composed: synthesised `StartRejected`, `Failed` row `DriverInternalError` | unchanged (row; charged for a Service, final for a Job) |
 | S7 | Start `:1904-1910`, `:1936-1940` | duplicate VM owner (`AllocationAlreadyOwned`): `Ok(())`, no new row | **N-IDEM**: unreachable for a freshly issued id; stays an idempotent no-op |
@@ -523,10 +523,10 @@ supersession arm of § Superseding a launch is added).
 | R1 | Restart `:2200-2202` | predecessor row absent: `HandleMissing`, no row | **N-UNR**: the arm is emitted only for the current allocation of the observed rows, under the lane, and no code deletes an allocation row |
 | R2 | Restart `:2203-2210` | predecessor `NoChange` (a Job row with a terminal), or not `Failed`/`Terminated`: `Ok(())`, no successor | **N-STALE**: not reached through the reconciler for a finished Job (H1: a reconciler-side no-emit); the fence fires only when the row changed between hydration and dispatch |
 | R3 | Restart `:2216-2218` | empty driver set: `HandleMissing`, no row (a node that booted without the VM driver while a VM workload's intent persists) | the guard is removed; the arm follows the missing-driver path (R8): `Failed` successor row; charged for a Service, final for a Job |
-| R4 | Restart `:2229-2239` | admission refusal: `finish_restart(Err)`, predecessor's cleanup runs, no successor row | **N-ADM** (ADR-0329) |
+| R4 | Restart `:2229-2239` | admission refusal: `finish_restart(Err)`, predecessor's cleanup runs, no successor row | **N-ADM** (ADR-0338) |
 | R5 | Restart `:2240-2262` | provision error that is not `GuestNetwork` | **N-UNR**, as S4 |
 | R6 | Restart `:2263-2291` | any other `GuestNetwork` error: `Failed` successor row `WorkloadNetnsProvisionFailed` | unchanged |
-| R7 | Restart `:2293-2330` | `ensure_intercept_identity` fails: successor unwound, `finish_restart(Err)`, no successor row | **`Failed` successor row** (ADR-0328), reason as S5, then `finish_restart`; a Job's row is final (S5-J) |
+| R7 | Restart `:2293-2330` | `ensure_intercept_identity` fails: successor unwound, `finish_restart(Err)`, no successor row | **`Failed` successor row** (ADR-0337), reason as S5, then `finish_restart`; a Job's row is final (S5-J) |
 | R8 | Restart `:2332-2344` | no driver of the kind composed: synthesised `StartRejected`, `Failed` row | unchanged |
 | R9 | Restart `:2349-2364` | duplicate owner: `finish_restart(Ok)` | **N-IDEM**, as S7 |
 | R10 | Restart `:2419-2439` | `Err(other)` from `driver.start`: `finish_restart(Err)`, no row | **N-UNR**, as S8 |
@@ -539,7 +539,7 @@ The no-row outcomes and their handling:
 
 - **N-SUP (supersession).** Caused only by an operator commit or by shutdown. Relaunched by the next evaluation, uncharged. One id per commit or
   shutdown.
-- **N-ADM (admission refusal; ADR-0329).** The pool refuses an admission that the reconciler's occupancy check, made at hydration, had allowed
+- **N-ADM (admission refusal; ADR-0338).** The pool refuses an admission that the reconciler's occupancy check, made at hydration, had allowed
   (`guest_network.rs:541-591`; the cap comparison at `:569`). `AdmissionCapReached` is reachable: other targets admit concurrently up to the cap
   (16,384). `LeaseRetiring` is not reachable for a freshly issued id (the pool is keyed by allocation id, `:548-566`); `PoolExhausted` is not
   reachable in production (the guest prefix is a /16, `guest_transport/mod.rs:594`, with up to 65,533 usable offsets, `guest_network.rs:487-515`).
@@ -590,7 +590,7 @@ by `handlers::alloc_status` from the workload intent. `render::workload_describe
 (guest disk: virtio serial ovd-volume)`, the serial being static text. A volume failure is visible through the existing allocation reason
 rendering of the new `TransitionReason`. OpenAPI regenerated.
 
-### Operator surface: a workload waiting for capacity (D-1, W-1, W-2, W-4, H2; ADR-0329 for the admission handling, ADR-0327 for the view)
+### Operator surface: a workload waiting for capacity (D-1, W-1, W-2, W-4, H2; ADR-0338 for the admission handling, ADR-0336 for the view)
 
 **What the operator sees.** While intent says run, no allocation is running or launching, and the node's guest-network attachments are full,
 `overdrive workload describe <id>` says so (the analogue of a Kubernetes pod `Pending` with `PodScheduled=False`). The same state holds for a
@@ -652,7 +652,7 @@ It is true iff all hold, in the order of the reconciler's own rules (`workload_l
 4. `current = current_alloc(rows)`. With no row (a first placement) the predicate is true. Otherwise `current` holds no lease in
    `observation.leases`: a leased predecessor at the cap is the reconciler's row-neutral reclaim pass (`:1295-1297`), already shown as
    `network_cleanup_pending`; that is progress, not a wait.
-5. `pending = generation_replacement_pending(view, desired_generation, Some(current))` (ADR-0326, with the finished-Job exception).
+5. `pending = generation_replacement_pending(view, desired_generation, Some(current))` (ADR-0335, with the finished-Job exception).
 6. By the class of `current`, mirroring the reconciler's order:
    - a Job and **any** row `is_natural_exit` (the Job natural-exit branch scans every active row, `:1091-1104`; it finalises or idles and never
      starts): false;
@@ -673,7 +673,7 @@ pending, and an operator-stopped row with no generation pending. Waiting at the 
 for_workload_generation(&id))` decoded with `TxnOp::decode_counter` (absent reads 0), the same read `hydrate_desired` does
 (`workload_lifecycle.rs:667-678`); (2) `state.runtime.view_for_workload_lifecycle(&target)` (`reconciler_runtime.rs:486`, an existing `pub`
 accessor returning an owned `WorkloadLifecycleView`, the default when absent), `target` being `workload/<id>`. Both go into the predicate
-unchanged; the handler computes no pending flag itself, so the one `<` of ADR-0326 lives in `generation_replacement_pending` alone. The View is
+unchanged; the handler computes no pending flag itself, so the one `<` of ADR-0335 lives in `generation_replacement_pending` alone. The View is
 read whole because the predicate also needs `restart_counts`. The rows, the pool, the stop key, the generation and the View are separate reads,
 so one `describe` can combine adjacent instants; the next `describe` is correct.
 
@@ -691,7 +691,7 @@ observation row changes for it), so the line can persist up to one period after 
 
 **Source: derived at read time, not persisted (chosen).** "Waiting now" is current state: it holds exactly while the inputs say so and cannot be
 stale, because nothing is stored ("Persist inputs, not derived state"). It adds no action, row, envelope, wake or View field, and reads the same
-fact (`at_cap`) the reconciler gates on. A durable condition row is rejected (ADR-0327). A refusal that has cleared leaves nothing: it charged
+fact (`at_cap`) the reconciler gates on. A durable condition row is rejected (ADR-0336). A refusal that has cleared leaves nothing: it charged
 nothing, lost nothing, and the workload was then placed; the log event `guest_network.admission_refusal` stays for diagnosis.
 
 **Read-port.** Existing: `overdrive_core::traits::GuestAttachmentView::observe(&self, allocs: &[AllocationId]) -> GuestAttachmentObservation`
@@ -706,7 +706,7 @@ charged `Failed` row an operator must resolve by provisioning; a held claim wait
 
 ### Decisions on the waiting state
 
-W-1, W-2, W-4 and H2 are recorded in ADR-0327 and in [`design/wave-decisions.md`](design/wave-decisions.md); W-3 (the fill-the-pool test's
+W-1, W-2, W-4 and H2 are recorded in ADR-0336 and in [`design/wave-decisions.md`](design/wave-decisions.md); W-3 (the fill-the-pool test's
 composition) is a test decision owned by DISTILL (`distill/upstream-issues.md`).
 
 ### Composition root
@@ -872,7 +872,7 @@ prove it.
 | volume claim and lock | the kernel and the VMM | exactly one writer holds the device | CH's own open | allocation row state |
 | allocation `Failed` with a pre-driver reason (`MtlsInterceptInstallFailed { identity_issue }`, `DriverInternalError`) | the action shim's `StartAllocation` / `RestartAllocation` arms | this dispatch could not bring the allocation to the driver; it is recorded; a Service's is charged like any start failure and a Job's is final | the identity issuer and the driver registry | the predecessor's terminal state and cleanup, other workloads' allocations, the restart-budget policy |
 | "generation pending" (derived) | `WorkloadLifecycle`, from the observed current allocation and the View's issuance record | the committed generation has no observed successor | allocation rows, `issued_generation` | the shim's dispatch outcome, any View marker of what was emitted |
-| lane supersession signal | the convergence owner's lane for `workload/<id>` (ADR-0102 as amended by ADR-0325); its token is a child of the lane table's one shutdown token. Raised by `stop_workload` / `restart_workload` (the lane's own token) and by node shutdown (`supersede_all_lanes`, the parent) | an operator stop or restart committed, or the node began shutting down, while this evaluation held the lane | those two handlers' commits and the convergence loop's shutdown arm | the restart budget, any allocation row, any other evaluation of the lane (`ServiceLifecycle`, `SvidLifecycle`), probes, a `Running` allocation, readiness, reclamation, the pre-feature path of a driver that ignores it |
+| lane supersession signal | the convergence owner's lane for `workload/<id>` (ADR-0102 as amended by ADR-0334); its token is a child of the lane table's one shutdown token. Raised by `stop_workload` / `restart_workload` (the lane's own token) and by node shutdown (`supersede_all_lanes`, the parent) | an operator stop or restart committed, or the node began shutting down, while this evaluation held the lane | those two handlers' commits and the convergence loop's shutdown arm | the restart budget, any allocation row, any other evaluation of the lane (`ServiceLifecycle`, `SvidLifecycle`), probes, a `Running` allocation, readiness, reclamation, the pre-feature path of a driver that ignores it |
 
 ### Gate G-1 — `VolumeEnsure`
 
@@ -1000,14 +1000,14 @@ in-flight write replacement; the `Held`/`Free`/inactive pairing test; a broken-s
 exceeded the validation budget. Each spec's `README.md` states its abstraction; its `evidence/summary.md` holds every verdict, timing and memory
 figure; `cargo xtask quint verify-evidence` is the authority on whether the recorded evidence matches the spec.
 
-| Item | `node-local-volume` (ADR-0310 to 0320, 0325) | `restart-generation` (ADR-0326, 0328, 0329) |
+| Item | `node-local-volume` (ADR-0310 to 0320, 0334) | `restart-generation` (ADR-0335, 0337, 0338) |
 |---|---|---|
 | Decisions modelled | VD-2, VD-8, VD-9, SD-1 to SD-5 | SD-6, SD-6b/J-1, D-1, H1, R-1 |
 | State | the volume and claim, the launch phases, `alive`, `orphan`; the lane signal `sup` and `down`; ghosts `afterSup`, `delivered`, `chg`; a running restart count `charged` that is exact because nothing here replaces a generation | the generation `dg`, the issued generation `ig` and count `cnt` per id (the View's `restart_counts` at issue; `charged` and `exhausted` are derived), ghost `gl`, hazard marker `og`, environment flags `idFault` and `capFull`, the constants `JOB` and `LIMIT` (= the production ceiling + 1). **No lane signal**: for the generation rule a superseded launch and a lost launch are identical (no row, no charge) |
 | The launch | phases `LP_*`: `ensure`, the claim poll, the VMM spawn, the boot wait; outcomes `LaunchSuperseded`, `LaunchHeldFail`, `LaunchUnavailable`, `LaunchCmdFail`, `VmmSpawnFail`, `GuestReady` | one held dispatch, resolved by one of: `LaunchRunning`, `LaunchStartFail` (the one charged start-failure class, volume causes included), `LaunchPreFail` (a row, `W_PREFAIL`), `LaunchRefused` (no row, `W_REFUSED`), `LaunchLost` (no row, `W_LOST`, no charge: a launch superseded by a stop, a restart or shutdown, or lost with the control plane); `CpCrash` and `NodeReboot` also lose a pending launch |
 | Invariants (`Safety`) | `I_SINGLE_WRITER`, `I_DATA_SURVIVES_RESTART`, `I_ENSURE_IDEMPOTENT_UNDER_CRASH`, `I_NO_DRAIN_FAILURE_CHARGES_BUDGET`, `I_STOP_KEEPS_VOLUME`, `I_SUPERSEDE_ABANDONS_WAITS`, `I_SUPERSEDED_LAUNCH_DELIVERS_NOTHING`, `I_SIGNAL_NEVER_LEAKS_ACROSS_ALLOCATIONS`; "a typed failure never attaches" and "shutdown signals every launch" are asserted by named runs, not invariants (2026-11-19) | `I_FINISHED_JOB_ISSUES_NO_ID`, `I_CAPACITY_WAIT_NEVER_EXHAUSTS` (`exhausted` implies the current row ended by a charged cause: `W_CRASH`, `W_STARTFAIL` or `W_PREFAIL`) |
 | Temporal | `EveryStartLiveness` | `RunIntentProgress`, `PreFailExhausts` |
-| Hazards, one per decision | `noWait` (VD-8), `recreate` (VD-9), `stopDeletes` (VD-2), `noInterrupt` (SD-1 to SD-5) | `stampOnEmit` (ADR-0326: the stamp on emit decides, violates `RunIntentProgress`), `prefailNoRow` (ADR-0328: a pre-driver failure writes no row, so an id is issued per tick, violates `PreFailExhausts`), `refusalCharged` (ADR-0329: an admission refusal is charged, so a node held at the cap exhausts a healthy workload's budget, violates `I_CAPACITY_WAIT_NEVER_EXHAUSTS`) |
+| Hazards, one per decision | `noWait` (VD-8), `recreate` (VD-9), `stopDeletes` (VD-2), `noInterrupt` (SD-1 to SD-5) | `stampOnEmit` (ADR-0335: the stamp on emit decides, violates `RunIntentProgress`), `prefailNoRow` (ADR-0337: a pre-driver failure writes no row, so an id is issued per tick, violates `PreFailExhausts`), `refusalCharged` (ADR-0338: an admission refusal is charged, so a node held at the cap exhausts a healthy workload's budget, violates `I_CAPACITY_WAIT_NEVER_EXHAUSTS`) |
 | Checks | `vol-safety-tlc` (~271 s, the only check outside CI, VB-1), `vol-live-start`, one `vol-hazard-*` per hazard, one `vol-run-*` per run | `rg-safety-tlc` (~65 s), `rg-live-replacement` (~29 s), `rg-live-prefail`, one `rg-hazard-*` per hazard, one `rg-run-*` per run; all `ci = true` under the two-minute rule |
 
 Boundary scenarios 3 (unrelated state) and 6 (feature disabled) are not protocol behaviour and have no model run: seeded simulation and Tier 3

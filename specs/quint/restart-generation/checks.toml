@@ -1,5 +1,5 @@
-# Checks for specs/quint/restart-generation/: ADR-0326 (a restart generation is handled when its successor is observed),
-# ADR-0328 (a pre-driver failure writes a charged Failed row) and ADR-0329 (an admission refusal writes no row and charges
+# Checks for specs/quint/restart-generation/: ADR-0335 (a restart generation is handled when its successor is observed),
+# ADR-0337 (a pre-driver failure writes a charged Failed row) and ADR-0338 (an admission refusal writes no row and charges
 # nothing); budget abstraction R-1 = A: the per-allocation restart count. One decision, one hazard.
 # ci = true iff the check takes under two minutes: every check here. Runs on rg_conf and rg_conf_job (REC = true) are the
 # #[quint_test] pins.
@@ -132,7 +132,7 @@ backend = "evaluator"
 expect = "holds"
 ci = true
 
-# H1 (ADR-0326 item 3): the finished Job. rg_conf_job is rg_conf with JOB = true.
+# H1 (ADR-0335 item 3): the finished Job. rg_conf_job is rg_conf with JOB = true.
 [[check]]
 name = "rg-run-restart-of-completed-job-does-nothing-and-issues-no-id"
 spec = "restart_generation.qnt"

@@ -11,7 +11,7 @@
 //! the lane runs them.
 //!
 //! A stop recorded during a launch does not wait behind it: the operator handler raises the
-//! lane's supersession signal (ADR-0325) and the launch ends with `StartSuperseded`. Each
+//! lane's supersession signal (ADR-0334) and the launch ends with `StartSuperseded`. Each
 //! evaluation here is a spawned single tick; the order of the stop's evaluation after the
 //! launch's is the test's, as in the driver. ADR-0102's own tests cover the broker's
 //! active-target exclusivity.
@@ -221,7 +221,7 @@ impl Rig {
     }
 }
 
-/// Boundary 4 (late success, ADR-0325): a stop recorded while a launch waits on a held claim
+/// Boundary 4 (late success, ADR-0334): a stop recorded while a launch waits on a held claim
 /// interrupts it. The launch ends at once with `StartSuperseded` (no simulated time passes, so
 /// it does not wait for its 30 s claim bound): no row, no VMM, nothing charged to the restart
 /// budget, the predecessor's claim untouched, and the volume kept. The stop's own evaluation,

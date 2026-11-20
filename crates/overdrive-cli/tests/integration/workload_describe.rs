@@ -1157,7 +1157,7 @@ fn failing_probe_renders_no_fabricated_failure_ratio() {
 
 // ===========================================================================
 // Waiting for guest-network capacity: the empty-state hint is suppressed
-// (node-local persistent volume, GH #348; ADR-0327; feature-delta § "Operator
+// (node-local persistent volume, GH #348; ADR-0336; feature-delta § "Operator
 // surface: a workload waiting for capacity", Human rendering).
 //
 // Scenario: a workload's start is blocked only by the node's full guest-network

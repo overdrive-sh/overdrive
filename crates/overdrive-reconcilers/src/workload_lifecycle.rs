@@ -1709,7 +1709,7 @@ fn restart_allocation_action(
     }
 }
 
-/// Whether the committed generation still has no observed successor (ADR-0326).
+/// Whether the committed generation still has no observed successor (ADR-0335).
 ///
 /// True iff `current` is `Some(row)`, `row` is not a finished Job row
 /// (`row.kind == WorkloadKind::Job && row.terminal.is_some()`, H1), and
@@ -1727,11 +1727,11 @@ pub fn generation_replacement_pending(
     current: Option<&AllocStatusRow>,
 ) -> bool {
     let _ = (view, desired_generation, current);
-    panic!("RED scaffold: generation_replacement_pending is not implemented (ADR-0326)")
+    panic!("RED scaffold: generation_replacement_pending is not implemented (ADR-0335)")
 }
 
 /// Whether this workload's start is blocked only by guest-network capacity
-/// (ADR-0327, H2): the one predicate the reconciler's rules and
+/// (ADR-0336, H2): the one predicate the reconciler's rules and
 /// `overdrive workload describe` share.
 ///
 /// True iff the kind is not a Schedule, the workload is to run, no active row
@@ -1751,13 +1751,13 @@ pub fn start_blocked_only_by_capacity(
     observation: &overdrive_core::traits::GuestAttachmentObservation,
 ) -> bool {
     let _ = (kind, run_desired, rows, view, desired_generation, observation);
-    panic!("RED scaffold: start_blocked_only_by_capacity is not implemented (ADR-0327)")
+    panic!("RED scaffold: start_blocked_only_by_capacity is not implemented (ADR-0336)")
 }
 
 /// The stamp-on-emit restart rule the reconciler decides with today: a
 /// generation is pending until some issued allocation serves it.
 ///
-/// SCAFFOLD: true — DISTILL keeps the pre-ADR-0326 decision (the largest
+/// SCAFFOLD: true — DISTILL keeps the pre-ADR-0335 decision (the largest
 /// `issued_generation` entry equals the old `issued_generation` stamp) so the
 /// existing reconciler behaviour is unchanged until DELIVER switches every call
 /// site to [`generation_replacement_pending`].
@@ -2245,7 +2245,7 @@ pub struct WorkloadLifecycleView {
     /// evolution"); the semantics are unchanged.
     #[serde(default, alias = "released_for_terminal")]
     pub released_for_deletion: BTreeSet<overdrive_core::id::ContentHash>,
-    /// The desired generation each issued allocation id serves (ADR-0326).
+    /// The desired generation each issued allocation id serves (ADR-0335).
     /// Written at the two issuing sites (the restart arm and the placement
     /// arm) in the same `next_view` as the id's `restart_counts` entry and with
     /// the same lifetime; the value is `desired.generation` at issue in every

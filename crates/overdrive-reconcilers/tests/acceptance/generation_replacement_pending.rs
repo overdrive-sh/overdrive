@@ -1,5 +1,5 @@
 //! `generation_replacement_pending` — the one definition of `restart_pending`
-//! (ADR-0326, node-local persistent volume, GH #348; scenario family
+//! (ADR-0335, node-local persistent volume, GH #348; scenario family
 //! S-BIR-PENDING).
 //!
 //! CONTRACT_SHAPE: pure-function. Owner path:
@@ -104,7 +104,7 @@ fn view_with(entries: &[(&str, u64)]) -> WorkloadLifecycleView {
 /// The payload of the production scaffold's panic, matched exactly: only this
 /// panic is the pending state; any other panic is a real failure and propagates.
 const SCAFFOLD_PANIC: &str =
-    "RED scaffold: generation_replacement_pending is not implemented (ADR-0326)";
+    "RED scaffold: generation_replacement_pending is not implemented (ADR-0335)";
 
 fn panic_text(payload: &(dyn Any + Send)) -> Option<&str> {
     payload

@@ -353,7 +353,7 @@ paths:
         throughout (distinct from #211 job removal). The verb bumps a
         monotonic desired-run generation; the `WorkloadLifecycle` reconciler
         places a fresh instance while the committed generation has no observed
-        successor allocation row (ADR-0326; the placement decision lives in the reconciler, NOT this handler).
+        successor allocation row (ADR-0335; the placement decision lives in the reconciler, NOT this handler).
 
         404 contract: a restart against an `<id>` that was never deployed (no
         `IntentKey::for_workload(<id>)` row) returns HTTP 404 with the same
@@ -515,7 +515,7 @@ components:
           - $ref: '#/components/schemas/CapacityWait'
             description: |-
               Present while this workload's start is blocked only by a node capacity
-              limit (ADR-0327): the guest-network attachment pool is full, so the
+              limit (ADR-0336): the guest-network attachment pool is full, so the
               workload has no allocation row yet and placement resumes when a slot
               frees. Derived at read time from the workload's rows, the reconciler's
               View and the pool's occupancy; never persisted. Additive: absent when
@@ -819,7 +819,7 @@ components:
     CapacityWait:
       type: object
       description: |-
-        The capacity limit a workload's start is waiting on (ADR-0327).
+        The capacity limit a workload's start is waiting on (ADR-0336).
 
         `held` counts retiring leases, which still occupy the cap (ADR-0133);
         `cap` is `MAX_GUEST_NETWORK_ATTACHMENTS`. There is no start time and no

@@ -609,9 +609,9 @@ boot bulk-load of the same reservation. The independent review obligation was
 satisfied by DESIGN review iteration 2 APPROVED for commit
 `a0f9bda8cd4f2377c1a709e77e8c05850e7adaa2`.
 
-## Accepted amendment 2026-11-18 — a stop, a restart or node shutdown interrupts a launch's waits (ADR-0325)
+## Accepted amendment 2026-11-18 — a stop, a restart or node shutdown interrupts a launch's waits (ADR-0334)
 
-[ADR-0325](adr-0325-a-superseding-stop-or-restart-interrupts-an-in-flight-launchs-waits.md) amends this ADR's statement that a duplicate
+[ADR-0334](adr-0334-a-superseding-stop-or-restart-interrupts-an-in-flight-launchs-waits.md) amends this ADR's statement that a duplicate
 submission "never cancels an active effect" (§ Admission, coalescing and fairness contract) and the statement "a requeue never cancels an
 active effect". A duplicate submission and a requeue still never cancel one. The convergence owner opens a per-evaluation lane signal
 before hydration; the `stop_workload` and `restart_workload` handlers raise it after their intent commit, and node shutdown raises it on
@@ -624,6 +624,6 @@ the superseded outcome writes no row, so the evaluation that follows must not tr
 evaluation hydrates only after the lane is released, and the tick's persist-then-dispatch order with the dispatch awaited inside the lane,
 are what make that safe: when an evaluation hydrates, the previous launch for the target has returned, so a generation whose issued
 allocation has no row is abandoned, never in flight, and exactly one new allocation is placed for it. The reconciler derives that from the
-observed rows and the View's record of what it issued (ADR-0073, amended the same day; ADR-0326). This ADR's retry table and View-field
+observed rows and the View's record of what it issued (ADR-0073, amended the same day; ADR-0335). This ADR's retry table and View-field
 semantics are unchanged except that the View's generation marker `observed_generation`, stamped when the placement was emitted, no longer
 exists.

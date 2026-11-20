@@ -144,7 +144,7 @@ struct RegistryEntry {
     views: Mutex<AnyViewMap>,
 }
 
-/// A supersession signal that is never raised (ADR-0325 scaffold: DELIVER
+/// A supersession signal that is never raised (ADR-0334 scaffold: DELIVER
 /// replaces it with the lane's token).
 pub(crate) struct UnraisedSupersession;
 
@@ -567,7 +567,7 @@ impl ReconcilerRuntime {
     }
 
     /// The generation the view stamped on `alloc_id` when it issued that
-    /// allocation, `None` when the view holds no stamp for it (ADR-0325).
+    /// allocation, `None` when the view holds no stamp for it (ADR-0334).
     #[must_use]
     pub fn issued_generation_for_alloc(
         &self,
@@ -579,18 +579,18 @@ impl ReconcilerRuntime {
     }
 
     /// Raise the open convergence lane's supersession signal for `target`
-    /// (ADR-0325). A target with no open lane is a no-op.
+    /// (ADR-0334). A target with no open lane is a no-op.
     #[allow(clippy::unused_self, reason = "DISTILL RED scaffold: DELIVER's lane table reads self")]
     pub fn supersede_lane(&self, target: &TargetResource) {
-        // RED scaffold (ADR-0325): DELIVER owns the lane table.
+        // RED scaffold (ADR-0334): DELIVER owns the lane table.
         let _ = target;
     }
 
     /// Raise the supersession signal of every open lane (node shutdown,
-    /// ADR-0325).
+    /// ADR-0334).
     #[allow(clippy::unused_self, reason = "DISTILL RED scaffold: DELIVER's lane table reads self")]
     pub fn supersede_all_lanes(&self) {
-        // RED scaffold (ADR-0325): DELIVER owns the lane table.
+        // RED scaffold (ADR-0334): DELIVER owns the lane table.
     }
 
     /// The open lane's supersession signal for `target`; with no open lane, an
@@ -598,7 +598,7 @@ impl ReconcilerRuntime {
     #[must_use]
     #[allow(clippy::unused_self, reason = "DISTILL RED scaffold: DELIVER's lane table reads self")]
     pub fn lane_supersession(&self, target: &TargetResource) -> Arc<dyn LaunchSupersession> {
-        // RED scaffold (ADR-0325): DELIVER owns the lane table.
+        // RED scaffold (ADR-0334): DELIVER owns the lane table.
         let _ = target;
         Arc::new(UnraisedSupersession)
     }

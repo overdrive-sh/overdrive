@@ -1,6 +1,6 @@
 //! restart_generation_is_placed_exactly_once_across_supersession_and_crash — the seeded
-//! restart-generation invariant of the node-local persistent volume feature (GH #348, ADR-0326,
-//! ADR-0328, ADR-0329; assumption A10, RA2, RA10, RA11).
+//! restart-generation invariant of the node-local persistent volume feature (GH #348, ADR-0335,
+//! ADR-0337, ADR-0338; assumption A10, RA2, RA10, RA11).
 //!
 //! # Placement
 //!
@@ -169,7 +169,7 @@ const QUIESCENT_YIELDS: u32 = 16;
 const NODE: &str = "local";
 const WORKLOAD: &str = "rg-w";
 const CA_CAUSE: &str = "identity issuer unavailable (seeded fault)";
-const LANE_SIGNAL_MESSAGE: &str = "the interruption must raise the supersession signal of the held launch's lane, ending it with StartSuperseded (ADR-0325)";
+const LANE_SIGNAL_MESSAGE: &str = "the interruption must raise the supersession signal of the held launch's lane, ending it with StartSuperseded (ADR-0334)";
 
 // ---------------------------------------------------------------------------
 // Seeded schedule
@@ -1105,7 +1105,7 @@ async fn check_cell(w: &World, obs: &Observed, cell: Cell) {
     if !obs.launch_reached_driver {
         if cell.pre == Pre::Transient {
             w.fail(
-                "a transient identity_issue failure must write a charged Failed row and be relaunched until a launch reaches the driver (ADR-0328)",
+                "a transient identity_issue failure must write a charged Failed row and be relaunched until a launch reaches the driver (ADR-0337)",
             )
             .await;
         }
@@ -1256,25 +1256,25 @@ async fn run_cell(origin: Origin, interruption: Interruption, pre: Pre, label: &
 // Matrix tests, a Service with a healthy CA
 // ---------------------------------------------------------------------------
 
-/// PENDING (lane table, ADR-0325): a restart of a `Running` workload whose replacement launch is
+/// PENDING (lane table, ADR-0334): a restart of a `Running` workload whose replacement launch is
 /// held is interrupted by `stop_workload`. The signal ends the launch, the workload stays down
 /// until the next restart, and that restart places once for the new generation.
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]
 #[should_panic(
-    expected = "the interruption must raise the supersession signal of the held launch's lane, ending it with StartSuperseded (ADR-0325)"
+    expected = "the interruption must raise the supersession signal of the held launch's lane, ending it with StartSuperseded (ADR-0334)"
 )]
 async fn restart_of_a_running_workload_interrupted_by_stop_places_exactly_once() {
     run_cell(Origin::RunningRestart, Interruption::Stop, Pre::None, "running-restart/stop").await;
 }
 
-/// PENDING (lane table, ADR-0325): a restart of a `Running` workload whose replacement launch is
+/// PENDING (lane table, ADR-0334): a restart of a `Running` workload whose replacement launch is
 /// held is overridden by a second `restart_workload`: the first launch is abandoned, the new
 /// generation is placed once, the first generation is not relaunched.
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]
 #[should_panic(
-    expected = "the interruption must raise the supersession signal of the held launch's lane, ending it with StartSuperseded (ADR-0325)"
+    expected = "the interruption must raise the supersession signal of the held launch's lane, ending it with StartSuperseded (ADR-0334)"
 )]
 async fn restart_of_a_running_workload_overridden_by_a_second_restart_places_exactly_once() {
     run_cell(
@@ -1286,20 +1286,20 @@ async fn restart_of_a_running_workload_overridden_by_a_second_restart_places_exa
     .await;
 }
 
-/// PENDING (lane table, ADR-0325): a restart of a `Running` workload whose replacement launch is
+/// PENDING (lane table, ADR-0334): a restart of a `Running` workload whose replacement launch is
 /// held is abandoned by node shutdown (`supersede_all_lanes`); the next boot relaunches the same
 /// generation once, uncharged.
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]
 #[should_panic(
-    expected = "the interruption must raise the supersession signal of the held launch's lane, ending it with StartSuperseded (ADR-0325)"
+    expected = "the interruption must raise the supersession signal of the held launch's lane, ending it with StartSuperseded (ADR-0334)"
 )]
 async fn restart_of_a_running_workload_abandoned_by_shutdown_is_relaunched_on_the_next_boot() {
     run_cell(Origin::RunningRestart, Interruption::Shutdown, Pre::None, "running-restart/shutdown")
         .await;
 }
 
-/// PENDING (ADR-0326): a restart of a `Running` workload whose replacement launch is held when the
+/// PENDING (ADR-0335): a restart of a `Running` workload whose replacement launch is held when the
 /// control plane dies. The View was persisted before the dispatch and records the issued id; the
 /// launch left no row. The next boot must relaunch the generation (it is handled only when its
 /// successor is observed). Today the generation is stamped on emit and the workload stays down.
@@ -1313,23 +1313,23 @@ async fn restart_of_a_running_workload_lost_with_the_control_plane_is_relaunched
     run_cell(Origin::RunningRestart, Interruption::Crash, Pre::None, "running-restart/crash").await;
 }
 
-/// PENDING (lane table, ADR-0325): the resume of an operator-stopped workload whose launch is
+/// PENDING (lane table, ADR-0334): the resume of an operator-stopped workload whose launch is
 /// held is interrupted by `stop_workload`; the workload stays down until the next restart.
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]
 #[should_panic(
-    expected = "the interruption must raise the supersession signal of the held launch's lane, ending it with StartSuperseded (ADR-0325)"
+    expected = "the interruption must raise the supersession signal of the held launch's lane, ending it with StartSuperseded (ADR-0334)"
 )]
 async fn resume_of_a_stopped_workload_interrupted_by_stop_places_exactly_once() {
     run_cell(Origin::StoppedResume, Interruption::Stop, Pre::None, "stopped-resume/stop").await;
 }
 
-/// PENDING (lane table, ADR-0325): the resume of an operator-stopped workload whose launch is held
+/// PENDING (lane table, ADR-0334): the resume of an operator-stopped workload whose launch is held
 /// is overridden by a second `restart_workload`.
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]
 #[should_panic(
-    expected = "the interruption must raise the supersession signal of the held launch's lane, ending it with StartSuperseded (ADR-0325)"
+    expected = "the interruption must raise the supersession signal of the held launch's lane, ending it with StartSuperseded (ADR-0334)"
 )]
 async fn resume_of_a_stopped_workload_overridden_by_a_second_restart_places_exactly_once() {
     run_cell(
@@ -1341,19 +1341,19 @@ async fn resume_of_a_stopped_workload_overridden_by_a_second_restart_places_exac
     .await;
 }
 
-/// PENDING (lane table, ADR-0325): the resume of an operator-stopped workload whose launch is held
+/// PENDING (lane table, ADR-0334): the resume of an operator-stopped workload whose launch is held
 /// is abandoned by node shutdown; the next boot relaunches it.
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]
 #[should_panic(
-    expected = "the interruption must raise the supersession signal of the held launch's lane, ending it with StartSuperseded (ADR-0325)"
+    expected = "the interruption must raise the supersession signal of the held launch's lane, ending it with StartSuperseded (ADR-0334)"
 )]
 async fn resume_of_a_stopped_workload_abandoned_by_shutdown_is_relaunched_on_the_next_boot() {
     run_cell(Origin::StoppedResume, Interruption::Shutdown, Pre::None, "stopped-resume/shutdown")
         .await;
 }
 
-/// PENDING (ADR-0326): the resume of an operator-stopped workload whose launch is lost with the
+/// PENDING (ADR-0335): the resume of an operator-stopped workload whose launch is lost with the
 /// control plane. The operator-stop veto must not fire while the generation is pending: today the
 /// stamp-on-emit marks the generation handled, the veto re-arms against the old stopped row, and
 /// the workload stays down although the operator resumed it.
@@ -1370,14 +1370,14 @@ async fn resume_of_a_stopped_workload_lost_with_the_control_plane_is_relaunched_
 // The matrix with a transient identity fault ahead of the interrupted launch
 // ---------------------------------------------------------------------------
 
-/// PENDING (ADR-0328): after a restart of a `Running` workload, or the resume of an
+/// PENDING (ADR-0337): after a restart of a `Running` workload, or the resume of an
 /// operator-stopped one, the identity issuer fails the first launches and recovers. Each failure
 /// is a charged `Failed` row, the launch that reaches the driver is a crash-restart successor, and
 /// it is interrupted by each of the four interruptions; its relaunch re-assigns the same count.
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]
 #[should_panic(
-    expected = "a transient identity_issue failure must write a charged Failed row and be relaunched until a launch reaches the driver (ADR-0328)"
+    expected = "a transient identity_issue failure must write a charged Failed row and be relaunched until a launch reaches the driver (ADR-0337)"
 )]
 async fn a_transient_identity_fault_then_an_interrupted_launch_places_once() {
     for (origin, label) in [
@@ -1472,7 +1472,7 @@ async fn check_persistent(run: &PreRun, held_clock: bool) {
     let failed = w.failed().await;
     if failed.is_empty() || !failed.iter().all(is_identity_issue) {
         w.fail(
-            "a persistent identity_issue failure must write a charged Failed row naming MtlsInterceptInstallFailed { stage: \"identity_issue\" } (ADR-0328)",
+            "a persistent identity_issue failure must write a charged Failed row naming MtlsInterceptInstallFailed { stage: \"identity_issue\" } (ADR-0337)",
         )
         .await;
     }
@@ -1548,7 +1548,7 @@ async fn check_transient(run: &PreRun) {
     }
 }
 
-/// PENDING (ADR-0328): after a restart of a `Running` workload, the resume of an operator-stopped
+/// PENDING (ADR-0337): after a restart of a `Running` workload, the resume of an operator-stopped
 /// one, or a first placement (`deploy`, the start arm), a persistent identity failure writes
 /// charged `Failed` rows and the Service ends `BackoffExhausted` within the restart ceiling plus
 /// the one uncharged generation replacement (the first launch, for a first placement). The clock
@@ -1570,7 +1570,7 @@ async fn a_persistent_identity_failure_ends_backoff_exhausted() {
     }
 }
 
-/// PENDING (ADR-0328): with `SimClock` held within one backoff window a persistent failure does
+/// PENDING (ADR-0337): with `SimClock` held within one backoff window a persistent failure does
 /// not launch on every evaluation: the failed launch writes its row, and the backoff gate bounds
 /// the rest. The schedule does not enter this path, so one seed serves every origin.
 /// Contract shape: bounded-change.
@@ -1609,7 +1609,7 @@ async fn a_persistent_identity_failure_launches_a_bounded_number_of_times_within
     }
 }
 
-/// PENDING (ADR-0328): after a restart of a `Running` workload, the resume of an operator-stopped
+/// PENDING (ADR-0337): after a restart of a `Running` workload, the resume of an operator-stopped
 /// one, or a first placement, a transient identity failure recovers to `Running`; the failed
 /// launches present as `Failed` rows with the pinned reason and `issued_generation` and
 /// `restart_counts` gain no more entries than there were launches. The seed picks how many
@@ -1652,7 +1652,7 @@ async fn running_job(seed: u64, label: &str) -> World {
     w
 }
 
-/// PENDING (ADR-0326 item 3, H1): a restart of a running Job ends it and issues nothing after.
+/// PENDING (ADR-0335 item 3, H1): a restart of a running Job ends it and issues nothing after.
 /// Today the stop of the running instance leaves the generation pending and the reconciler issues
 /// an id for it that the shim fences.
 /// Contract shape: bounded-change.
@@ -1724,7 +1724,7 @@ async fn job_identity_failure(seed: u64, label: &str) {
     }
 }
 
-/// PENDING (ADR-0328, J-1): persistent identity failure of a Job.
+/// PENDING (ADR-0337, J-1): persistent identity failure of a Job.
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]
 #[should_panic(
@@ -1806,11 +1806,11 @@ async fn a_crash_restart_successor_lost_with_the_control_plane_is_relaunched_wit
     }
 }
 
-/// PENDING (lane table, ADR-0325): the same for a launch abandoned by node shutdown.
+/// PENDING (lane table, ADR-0334): the same for a launch abandoned by node shutdown.
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]
 #[should_panic(
-    expected = "the interruption must raise the supersession signal of the held launch's lane, ending it with StartSuperseded (ADR-0325)"
+    expected = "the interruption must raise the supersession signal of the held launch's lane, ending it with StartSuperseded (ADR-0334)"
 )]
 async fn a_crash_restart_successor_abandoned_by_shutdown_is_relaunched_with_the_same_count() {
     for seed in SEEDS {

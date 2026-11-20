@@ -1,9 +1,9 @@
-# ADR-0327 — A workload waiting for guest-network capacity is derived at read time
+# ADR-0336 — A workload waiting for guest-network capacity is derived at read time
 
 ## Status
 
 **Accepted** 2026-11-18 (decisions W-1, W-2 and W-4 of the node-local persistent volume feature, GH #348; user rulings of 2026-11-18: option A
-for W-1 and W-2 and option 2 for W-4; the visible waiting state is the user's ruling of the same day on the admission handling of ADR-0329).
+for W-1 and W-2 and option 2 for W-4; the visible waiting state is the user's ruling of the same day on the admission handling of ADR-0338).
 The derivation of item 1 is **Accepted** 2026-11-19 by user ruling (H2, option A). This ADR is not implemented and is stated in the present
 tense.
 
@@ -11,7 +11,7 @@ tense.
 
 The guest-network pool caps the node at 16,384 attached guests. When the pool is full, `WorkloadLifecycle` emits no placement for a first
 placement or a restart (the occupancy gate), and an admission that races past the gate is refused with no allocation row and no charge
-(ADR-0329, which states what a refusal does; this ADR states how the wait is shown). In both cases the workload has no allocation row, no
+(ADR-0338, which states what a refusal does; this ADR states how the wait is shown). In both cases the workload has no allocation row, no
 shim runs, and the only signal is the `guest_network.admission_refusal` log event, fired for the race alone. On the appliance there is no operator shell, so the operator cannot see
 why a workload that intent says should run is not running. Kubernetes keeps such a pod `Pending` with a named reason.
 
@@ -24,7 +24,7 @@ the pool's occupancy; nothing is persisted for it.**
 1. **Derivation.** The wait holds iff the workload's start is blocked **only** by capacity: intent says run, nothing is running or launching,
    the current allocation holds no guest-network lease, the pool is at its cap, and the reconciler would otherwise emit a placement or a
    restart. "Would otherwise emit" is one pure predicate, shared with the reconciler's own rules and built from the same helpers
-   (`current_alloc`, the restart decision, the generation-pending rule of ADR-0326 with its finished-Job exception, the operator-stop veto and
+   (`current_alloc`, the restart decision, the generation-pending rule of ADR-0335 with its finished-Job exception, the operator-stop veto and
    the Job natural-exit fence), so the display cannot call a workload waiting that the reconciler has finished with, or the reverse. Blocked for
    good, and never a wait: a Job whose rows carry a terminal claim, a `BackoffExhausted` workload, and an operator-stopped workload, each
    with no generation pending. Waiting at the cap: a restarted workload (a generation is pending), `Stopped{LivenessProbe}`,
@@ -92,7 +92,7 @@ Exact wire, rendering, derivation and test obligations: feature delta § "Operat
 ## Links
 
 - [Feature delta](../../feature/node-local-persistent-volume/feature-delta.md) § Operator surface: a workload waiting for capacity
-- [ADR-0329](adr-0329-an-admission-refusal-by-the-guest-network-pool-writes-no-row-and-charges-nothing.md) (the admission handling this makes visible),
-  [ADR-0326](adr-0326-a-restart-generation-is-handled-when-its-successor-is-observed.md) (the generation-pending rule the predicate reuses),
+- [ADR-0338](adr-0338-an-admission-refusal-by-the-guest-network-pool-writes-no-row-and-charges-nothing.md) (the admission handling this makes visible),
+  [ADR-0335](adr-0335-a-restart-generation-is-handled-when-its-successor-is-observed.md) (the generation-pending rule the predicate reuses),
   [ADR-0134](adr-0134-placement-reads-held-attachment-count-through-read-port.md) (the `GuestAttachmentView` read port),
   `.claude/rules/reconcilers.md`

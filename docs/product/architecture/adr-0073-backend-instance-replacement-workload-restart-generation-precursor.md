@@ -1032,10 +1032,10 @@ its existing per-allocation semantics. `AllocStatusRow.restart_count` and
 `LastTerminated` remain per-physical-allocation facts under ADR-0078 and are not
 copied to a new row.
 
-## Accepted amendment 2026-11-18 — a generation is handled when its successor is observed (user ruling, option A; [ADR-0326](adr-0326-a-restart-generation-is-handled-when-its-successor-is-observed.md))
+## Accepted amendment 2026-11-18 — a generation is handled when its successor is observed (user ruling, option A; [ADR-0335](adr-0335-a-restart-generation-is-handled-when-its-successor-is-observed.md))
 
-**Context.** A launch can end without writing an allocation row: it is superseded by a stop, a restart or node shutdown (ADR-0325), or it dies
-with the control plane (reachable on `main` before ADR-0325). The reconciler stamped `observed_generation = desired.generation` on the tick
+**Context.** A launch can end without writing an allocation row: it is superseded by a stop, a restart or node shutdown (ADR-0334), or it dies
+with the control plane (reachable on `main` before ADR-0334). The reconciler stamped `observed_generation = desired.generation` on the tick
 that emitted the replacement placement, and the runtime persists the View before it dispatches. After such a launch the next evaluation read
 `restart_pending == false` beside the old operator-stopped or replaced row, the current-instance veto and the restartable filter emitted
 nothing, and the workload stayed down while the intent said run. The stamp recorded that the reconciler emitted, not that a successor exists;
@@ -1047,7 +1047,7 @@ for the latest generation, the veto is scoped to the current instance, and R1-cr
 (`issued_generation`, an input); `restart_pending` holds while the **observed** current allocation (the highest id that has a row) serves a
 generation below the desired one, unless that allocation is a Job's row that carries a terminal claim: a finished Job is never replaced
 (the action shim's own rule for a Job row), so its generation is not pending and `workload restart` of it issues nothing (user ruling
-2026-11-19; ADR-0326). A generation therefore stops being pending only when the allocation issued for it has a row. The View
+2026-11-19; ADR-0335). A generation therefore stops being pending only when the allocation issued for it has a row. The View
 field `observed_generation` and the stamp on the R3/R4 placement tick are removed. No `AllocStatusRow` field is added, so there is no
 envelope bump. The shapes are pinned in the feature delta of the node-local persistent volume
 (§ "Restart generation is handled when its successor is observed").
@@ -1056,8 +1056,8 @@ envelope bump. The shapes are pinned in the feature delta of the node-local pers
 (the generation-replacement path carries the predecessor's budget, unchanged); an abandoned crash-restart launch is relaunched with the same
 count its abandoned issue assigned, so it is not charged twice. A launch failure that precedes the driver (SVID issuance, an empty driver
 registry in the restart arm) writes a `Failed` row and is charged like any start failure (a Job's row is final), so an unobserved successor
-is always a supersession, an admission refusal or a fence, never a failure that retries every tick (ADR-0328 for the recorded failure,
-[ADR-0329](adr-0329-an-admission-refusal-by-the-guest-network-pool-writes-no-row-and-charges-nothing.md) for the admission refusal; ADR-0326). The lane exclusivity of ADR-0102 and the dispatch awaited inside the tick
+is always a supersession, an admission refusal or a fence, never a failure that retries every tick (ADR-0337 for the recorded failure,
+[ADR-0338](adr-0338-an-admission-refusal-by-the-guest-network-pool-writes-no-row-and-charges-nothing.md) for the admission refusal; ADR-0335). The lane exclusivity of ADR-0102 and the dispatch awaited inside the tick
 guarantee that no launch is in flight when the next evaluation hydrates, so one generation is never launched twice. The persisted View shape
 changes (a single cut on a greenfield node), and the tests that seed `observed_generation` are rewritten.
 

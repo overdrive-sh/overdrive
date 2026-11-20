@@ -268,7 +268,7 @@ pub enum DriverError {
     #[error("allocation {alloc} has no guest transport assignment for the VMM")]
     GuestTransportMissing { alloc: AllocationId },
     /// A launch abandoned because an operator `stop` or `restart`, or node
-    /// shutdown, raised its lane's [`LaunchSupersession`] signal (ADR-0325).
+    /// shutdown, raised its lane's [`LaunchSupersession`] signal (ADR-0334).
     ///
     /// A typed outcome, not a failure: it has no [`DriverStartFailure`], no
     /// `TransitionReason`, and so no representation that could be written as a
@@ -278,7 +278,7 @@ pub enum DriverError {
     StartSuperseded,
 }
 
-/// The convergence lane's supersession signal, as a launch sees it (ADR-0325).
+/// The convergence lane's supersession signal, as a launch sees it (ADR-0334).
 ///
 /// The convergence owner opens a lane for the target of every tick and raises
 /// its signal when an operator `workload stop` or `workload restart` commits,
@@ -683,7 +683,7 @@ pub trait Driver: Send + Sync + 'static {
     /// do not need to override [`Driver::release_for_exit_emission`];
     /// the default no-op is correct for them.
     ///
-    /// # Supersession (ADR-0325)
+    /// # Supersession (ADR-0334)
     ///
     /// `supersession` is the convergence lane's signal for this launch. A driver
     /// with an interruptible wait reads it at its step boundaries and inside the

@@ -360,7 +360,7 @@ pub struct AllocStatusResponse {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub probe_results: Vec<ProbeResultRowJson>,
     /// Present while this workload's start is blocked only by a node capacity
-    /// limit (ADR-0327): the guest-network attachment pool is full, so the
+    /// limit (ADR-0336): the guest-network attachment pool is full, so the
     /// workload has no allocation row yet and placement resumes when a slot
     /// frees. Derived at read time from the workload's rows, the reconciler's
     /// View and the pool's occupancy; never persisted. Additive: absent when
@@ -369,7 +369,7 @@ pub struct AllocStatusResponse {
     pub capacity_wait: Option<CapacityWait>,
 }
 
-/// The capacity limit a workload's start is waiting on (ADR-0327).
+/// The capacity limit a workload's start is waiting on (ADR-0336).
 ///
 /// `held` counts retiring leases, which still occupy the cap (ADR-0133);
 /// `cap` is `MAX_GUEST_NETWORK_ATTACHMENTS`. There is no start time and no

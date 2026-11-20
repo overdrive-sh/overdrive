@@ -53,7 +53,7 @@ so a free claim implies a free lock.
   unreleased volume produces a named failure.
 - Negative: a launch may hold its convergence lane up to 30 s for the claim wait, in addition to the
   `ensure` deadline and the existing boot wait (ADR-0102). A `workload stop` or `restart` for that workload
-  supersedes the launch and ends the claim wait at once ([ADR-0325](adr-0325-a-superseding-stop-or-restart-interrupts-an-in-flight-launchs-waits.md);
+  supersedes the launch and ends the claim wait at once ([ADR-0334](adr-0334-a-superseding-stop-or-restart-interrupts-an-in-flight-launchs-waits.md);
   node shutdown does the same). A claim that never drains charges each of the
   restart-limit attempts and ends the workload as `BackoffExhausted` with the `Held` cause as the last
   reason.

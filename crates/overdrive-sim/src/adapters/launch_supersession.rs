@@ -1,5 +1,5 @@
 //! `SimLaunchSupersession` — the sim twin of the convergence lane's launch
-//! supersession signal (ADR-0325).
+//! supersession signal (ADR-0334).
 //!
 //! A test raises the signal; `superseded()` parks on a watch channel and
 //! never auto-resolves (the `SimClock::sleep` shape). `raise()` makes

@@ -1,5 +1,5 @@
 //! A workload waiting for guest-network capacity, composed end to end
-//! (node-local persistent volume, GH #348; ADR-0327 the view, ADR-0329 the
+//! (node-local persistent volume, GH #348; ADR-0336 the view, ADR-0338 the
 //! admission handling; feature delta § "Operator surface: a workload waiting
 //! for capacity"; DISTILL ruling W-3 = A).
 //!

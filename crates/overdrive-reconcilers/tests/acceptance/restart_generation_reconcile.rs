@@ -1,5 +1,5 @@
-//! Restart generation at `WorkloadLifecycle::reconcile` (ADR-0326, ADR-0328,
-//! ADR-0329; node-local persistent volume, GH #348; scenario family
+//! Restart generation at `WorkloadLifecycle::reconcile` (ADR-0335, ADR-0337,
+//! ADR-0338; node-local persistent volume, GH #348; scenario family
 //! S-BIR-GENERATION).
 //!
 //! A generation is handled once the allocation issued for it has an allocation

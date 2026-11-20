@@ -906,7 +906,7 @@ pub async fn stop_workload(
 /// throughout (distinct from #211 job removal). The verb bumps a
 /// monotonic desired-run generation; the `WorkloadLifecycle` reconciler
 /// places a fresh instance while the committed generation has no observed
-/// successor allocation row (ADR-0326; the placement decision lives in the reconciler, NOT this handler).
+/// successor allocation row (ADR-0335; the placement decision lives in the reconciler, NOT this handler).
 ///
 /// 404 contract: a restart against an `<id>` that was never deployed (no
 /// `IntentKey::for_workload(<id>)` row) returns HTTP 404 with the same
