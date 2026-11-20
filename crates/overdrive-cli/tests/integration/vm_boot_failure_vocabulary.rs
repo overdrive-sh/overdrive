@@ -542,7 +542,7 @@ fn no_cloud_hypervisor_process_running() -> bool {
 /// that is absent at allocation start reaches the operator as
 /// `Failed/VmRootfsNotFound`, names the exact configured path, remains distinct
 /// from `VmKernelNotFound`, and leaves no allocation-scoped VM resources.
-#[overdrive_test(guest = "cgroup-default")]
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn missing_configured_rootfs_is_named_precisely_and_leaks_no_vm_resources() {
@@ -664,7 +664,7 @@ async fn missing_configured_rootfs_is_named_precisely_and_leaks_no_vm_resources(
 /// capability never compose and no allocation is ever created. Valid at
 /// composition, absent at this allocation's start is the only reachable
 /// producer of this row.
-#[overdrive_test(guest = "cgroup-default")]
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn kernel_deleted_after_composition_is_named_precisely_and_spawns_no_hypervisor() {
@@ -776,7 +776,7 @@ async fn kernel_deleted_after_composition_is_named_precisely_and_spawns_no_hyper
 /// per-deploy re-probe exists. A host with no hypervisor at boot is instead
 /// S-VM-12 — rejected at admission with no allocation created at all, which
 /// cannot satisfy this scenario's `Failed`-row assertion.
-#[overdrive_test(guest = "cgroup-default")]
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn hypervisor_removed_after_composition_names_every_searched_path() {
@@ -906,7 +906,7 @@ async fn hypervisor_removed_after_composition_names_every_searched_path() {
 /// comes from the live `VmmDiagnostics` read handle — deliberately NOT from
 /// `VmmExit.stderr_tail`, which is available only after termination and so
 /// cannot supply the deadline arm at all (ADR-0082 §D1.1).
-#[overdrive_test(guest = "cgroup-default")]
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn guest_that_never_beacons_reports_the_boot_deadline_and_console_tail() {
@@ -1059,7 +1059,7 @@ async fn guest_that_never_beacons_reports_the_boot_deadline_and_console_tail() {
 /// S-VM-33 (DWD-24, checkpoint `3222f030`): booting `serve` against the bad
 /// image fails before any allocation exists, which cannot satisfy this
 /// scenario's `Failed`-row assertion.
-#[overdrive_test(guest = "cgroup-default")]
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn kernel_replaced_with_an_incompatible_image_reads_as_a_format_problem() {
@@ -1340,7 +1340,7 @@ fn assert_reads_as_unclassified_carrying(
 ///    unclassified-capable override, asserting the outcome stays
 ///    `VmKernelFormatUnsupported`. The fallthrough must not be able to claim
 ///    a failure a named cause already covers.
-#[overdrive_test(guest = "cgroup-default")]
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn unmapped_start_failure_reads_as_unclassified_and_preserves_its_verbatim_cause() {
@@ -1587,7 +1587,7 @@ async fn unmapped_start_failure_reads_as_unclassified_and_preserves_its_verbatim
 /// serialized test's `/proc` scan. This is the lesson S-VM-05 learned on the
 /// metal box (walking skeleton, fourth pass), applied here up front. Test
 /// hygiene, not an additional acceptance claim.
-#[overdrive_test(guest = "cgroup-default")]
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn job_plus_vm_spec_is_accepted_and_its_allocation_reaches_running() {
@@ -2023,7 +2023,7 @@ const RECORDED_REASON_POINTER: &str = "driver.vm.not_composed";
 /// error. The class stays `DriverInternalError` (no variant minted); only
 /// the registry-miss `detail` text gains the capability naming and the
 /// boot-log pointer (ADR-0083 §D3d, DWD-25).
-#[overdrive_test(guest = "cgroup-default")]
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test]
 #[serial(cgroup, env)]
 async fn absent_vm_capability_names_what_is_missing_not_an_internal_platform_error() {
@@ -2285,7 +2285,7 @@ async fn absent_vm_capability_names_what_is_missing_not_an_internal_platform_err
 /// NOT an unclassified cause. The same-filesystem `EOPNOTSUPP` (a genuinely
 /// non-reflink data partition) path is owned by S-VM-94
 /// (`vmm_ficlone_per_launch.rs`) at the adapter layer.
-#[overdrive_test(guest = "cgroup-default")]
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn unservable_rootfs_directory_names_the_directory_and_the_clone_requirement() {

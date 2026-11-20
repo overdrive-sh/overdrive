@@ -1056,6 +1056,7 @@ fn nested_vm_test_support(
         "cp",
         "ethtool",
         "ip",
+        "kill",
         "ln",
         "losetup",
         "mkdir",
@@ -1066,9 +1067,11 @@ fn nested_vm_test_support(
         "prlimit",
         "setpriv",
         "setsid",
+        "sha256sum",
         "sh",
         "ss",
         "stat",
+        "strace",
         "sysctl",
         "true",
         "uname",
@@ -1401,7 +1404,11 @@ fn nested_guest_build_support(extra: &mut Vec<GuestFile>) -> Result<(), GuestKit
     extra.push(GuestFile { host: magic.clone(), guest: magic, with_shared_libraries: false });
 
     let root = workspace_root();
-    for relative in ["examples/public-ingress-gateway", "tests/conformance/guest"] {
+    for relative in [
+        "examples/public-ingress-gateway",
+        "examples/service-kind-vm-workloads",
+        "tests/conformance/guest",
+    ] {
         let mut sources = Vec::new();
         stage_tree(&root.join(relative), &mut sources)?;
         extra.extend(sources);

@@ -1663,7 +1663,7 @@ async fn durable_alloc_snapshot(
 ///
 /// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
-#[overdrive_test(guest = "cgroup-default")]
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn the_same_guest_reaches_a_non_mesh_destination_in_the_clear() {
@@ -1758,7 +1758,7 @@ async fn the_same_guest_reaches_a_non_mesh_destination_in_the_clear() {
 ///
 /// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
-#[overdrive_test(guest = "cgroup-default")]
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn the_operator_sees_the_microvm_workloads_own_mesh_address_not_its_transit_hop() {
@@ -2380,7 +2380,7 @@ where
 /// refused VMM spawn at the `Vmm` driven port: the capture-ready cut is
 /// abandoned without acknowledgement, so the production driver's spawn fails.
 /// CONTRACT_SHAPE: bounded-change (an early observation failure still awaits every fixture owner).
-#[overdrive_test(guest = "cgroup-default")]
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
 async fn early_observation_failure_awaits_every_cleanup_owner_before_reporting() {
@@ -2463,7 +2463,7 @@ async fn early_observation_failure_awaits_every_cleanup_owner_before_reporting()
 /// S-GTI-08b — status 78 after READY and EXEC is an ordinary Job result.
 /// Outcome anchor: DISCUSS Elevator Pitch
 /// CONTRACT_SHAPE: bounded-change.
-#[overdrive_test(guest = "cgroup-default")]
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
 async fn operator_exit_78_after_ready_is_an_ordinary_result() {

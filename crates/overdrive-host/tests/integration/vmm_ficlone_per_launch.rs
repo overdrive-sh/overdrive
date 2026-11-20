@@ -61,7 +61,7 @@ fn confirm_non_reflink(dir: &Path) -> bool {
     write_ok && reflink_result.is_err()
 }
 
-#[overdrive_test(guest = "cgroup-default")]
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch")]
 #[tokio::test]
 async fn ficlone_fails_closed_on_a_real_non_reflink_target() {
     // /dev/shm is unambiguously tmpfs on every Linux distro (unlike

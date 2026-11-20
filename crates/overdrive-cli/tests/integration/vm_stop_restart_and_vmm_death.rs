@@ -938,7 +938,7 @@ fn build_marker_or_spin_binary(tmp: &Path) -> PathBuf {
 /// Then the allocation is Failed with TransitionReason::VmGuestExitUnreported
 /// And the allocation is NOT Terminated with a completed condition
 /// ```
-#[overdrive_test(guest = "cgroup-default")]
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn guest_exit_without_agent_report_is_unreported_crash_never_completed() {
@@ -1049,7 +1049,7 @@ async fn guest_exit_without_agent_report_is_unreported_crash_never_completed() {
 /// treated identically to a crashed process Job — Failed,
 /// `WorkloadCrashedImmediately`, `restart_count == 0` — through the SAME
 /// classifier and reconciler, with no VM-specific exit path.
-#[overdrive_test(guest = "cgroup-default")]
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn host_killed_hypervisor_is_a_crash_treated_like_a_crashed_process() {
@@ -1175,7 +1175,7 @@ async fn host_killed_hypervisor_is_a_crash_treated_like_a_crashed_process() {
 /// `@mandatory:mutation_target` on §105's join (module doc), whose COMPLEMENT
 /// S-VM-42 (un-reported death is Failed) and S-VM-02 (a non-zero report is
 /// Failed) assert.
-#[overdrive_test(guest = "cgroup-default")]
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn agent_reported_exit_zero_reaches_the_completed_terminal() {
@@ -1236,7 +1236,7 @@ async fn agent_reported_exit_zero_reaches_the_completed_terminal() {
 /// Then the allocation is Terminated as operator-stopped
 /// And no restart budget is consumed
 /// ```
-#[overdrive_test(guest = "cgroup-default")]
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn operator_stop_is_terminated_and_consumes_no_restart_budget() {
@@ -1348,7 +1348,7 @@ async fn operator_stop_is_terminated_and_consumes_no_restart_budget() {
 ///   connection
 /// And the allocation reaches Terminated as operator-stopped
 /// ```
-#[overdrive_test(guest = "cgroup-default")]
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn stopping_a_vm_reaches_the_operator_stop_terminal_like_a_process() {
@@ -1458,7 +1458,7 @@ async fn stopping_a_vm_reaches_the_operator_stop_terminal_like_a_process() {
 ///   grace period
 /// And it is NOT classified as a crash
 /// ```
-#[overdrive_test(guest = "cgroup-default")]
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn unresponsive_guest_is_stopped_within_bounded_grace_never_a_crash() {
@@ -1596,7 +1596,7 @@ async fn unresponsive_guest_is_stopped_within_bounded_grace_never_a_crash() {
 /// And the operator's artifact file on the host is byte-unchanged
 /// ```
 /// CONTRACT_SHAPE: bounded-change.
-#[overdrive_test(guest = "cgroup-default")]
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test]
 #[serial(cgroup)]
 #[expect(
@@ -2159,7 +2159,7 @@ fn assert_strace_ownership(
 /// removes only old artifacts; the second real VMM reaches Running; final
 /// operator cleanup removes both allocation families.
 /// CONTRACT_SHAPE: bounded-change.
-#[overdrive_test(guest = "cgroup-default")]
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test]
 #[serial(cgroup)]
 #[expect(
@@ -2525,7 +2525,7 @@ async fn stop_and_shutdown(handle: ServeHandle, cfg: &Path, workload_id: &str) {
     clippy::doc_markdown,
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
 )]
-#[overdrive_test(guest = "cgroup-default")]
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn hypervisor_runs_bounded_nonroot_and_landlock_confined() {
@@ -2594,7 +2594,7 @@ async fn hypervisor_runs_bounded_nonroot_and_landlock_confined() {
 /// Then the VM boots successfully
 /// And the hypervisor can reach the declared kernel and rootfs and nothing else
 /// ```
-#[overdrive_test(guest = "cgroup-default")]
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn confinement_ruleset_follows_declared_rootfs_path_not_a_hardcoded_dir() {
@@ -2670,7 +2670,7 @@ async fn confinement_ruleset_follows_declared_rootfs_path_not_a_hardcoded_dir() 
     clippy::doc_markdown,
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
 )]
-#[overdrive_test(guest = "cgroup-default")]
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn vm_landlock_rules_are_exactly_the_exclusive_run_dir_write() {
@@ -2771,7 +2771,7 @@ fn path_mode(path: &Path) -> u32 {
 /// Then her kernel and rootfs files, and their directories, are unchanged in
 ///   both bytes and permission mode
 /// ```
-#[overdrive_test(guest = "cgroup-default")]
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn confined_deploy_leaves_operator_kernel_and_rootfs_mode_and_bytes_unchanged() {
@@ -2894,7 +2894,7 @@ async fn confined_deploy_leaves_operator_kernel_and_rootfs_mode_and_bytes_unchan
 ///   naming the unavailable ConfinementControl
 /// And the hypervisor is NEVER started unconfined
 /// ```
-#[overdrive_test(guest = "cgroup-default")]
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn host_that_cannot_confine_refuses_the_workload_and_never_starts_unconfined() {
@@ -3017,7 +3017,7 @@ async fn host_that_cannot_confine_refuses_the_workload_and_never_starts_unconfin
 /// Then no new flag, table or verb is required
 /// And the terminal state and exit code she reads are unchanged
 /// ```
-#[overdrive_test(guest = "cgroup-default")]
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn confinement_adds_no_new_operator_surface() {
@@ -4581,7 +4581,7 @@ fn duration_distribution(samples: &[Duration], label: &str) -> DurationDistribut
     clippy::too_many_lines,
     reason = "exact per-test contract declaration; one bounded fixture keeps the serialized schema reviewable in one place"
 )]
-#[overdrive_test(guest = "cgroup-default")]
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch")]
 #[test]
 fn native_benchmark_report_retains_synthetic_ledger_and_replaces_atomically() {
     fn event(
@@ -4797,7 +4797,7 @@ fn assert_normal_vmm_reap(events: &Arc<Mutex<Vec<CapturedLifecycleEvent>>>, allo
 /// Observe guest-recorded process-group/reap status, exact direct-child EXIT
 /// once, normal/forced VMM exit and complete allocation artifact complement.
 #[allow(clippy::doc_markdown, reason = "exact per-test contract declaration")]
-#[overdrive_test(guest = "cgroup-default")]
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn guest_supervisor_reaps_its_command_group_and_preserves_direct_child_status() {
@@ -5050,7 +5050,7 @@ async fn guest_supervisor_reaps_its_command_group_and_preserves_direct_child_sta
 /// cannot lose direct status. Real accepted host/init control path, not a
 /// second guest supervisor.
 #[allow(clippy::doc_markdown, reason = "exact per-test contract declaration")]
-#[overdrive_test(guest = "cgroup-default")]
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn guest_control_stream_errors_keep_bounded_teardown_and_original_error() {
@@ -5159,7 +5159,7 @@ async fn guest_control_stream_errors_keep_bounded_teardown_and_original_error() 
     clippy::print_stderr,
     reason = "exact per-test contract declaration; the long-running native benchmark prints its retained artifact receipt and summaries"
 )]
-#[overdrive_test(guest = "cgroup-default")]
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test]
 #[serial(cgroup)]
 async fn native_lifecycle_profiles_meet_stage_targets_without_dropping_trials() {

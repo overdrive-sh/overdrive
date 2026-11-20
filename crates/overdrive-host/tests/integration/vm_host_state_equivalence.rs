@@ -173,7 +173,7 @@ async fn vm_host_state_equivalence_sim() {
 }
 
 /// `CONTRACT_SHAPE`: bounded-change.
-#[overdrive_test(guest = "cgroup-default")]
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch")]
 #[tokio::test]
 #[serial(vm_host_state_real_cgroup)]
 async fn vm_host_state_equivalence_real() {
