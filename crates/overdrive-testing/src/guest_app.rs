@@ -1236,9 +1236,9 @@ fn parse_block(lines: &[&str], metric: &str) -> Result<(Vec<u64>, String), Progr
             }
         } else if let Some(checksum) = line.strip_prefix(end_prefix.as_str()) {
             return Ok((values, checksum.to_owned()));
-        } else {
-            return Err(ProgramReturnError::BlockMalformed);
         }
+        // Any other whole console line (a kernel message, an `overdrive-init` line) is not part
+        // of the grammar and is ignored; count and checksum still guarantee the block's integrity.
     }
     Err(ProgramReturnError::BlockMalformed)
 }
@@ -1249,6 +1249,27 @@ mod program_return_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_whole_foreign_console_line_between_two_value_lines_is_ignored() {
+        let values: Vec<u64> = (1..=20).collect();
+        let printed = print_program_return(
+            &GuestReading::Text("7.0.0".to_owned()),
+            &GuestReading::Text("tsc".to_owned()),
+            "m",
+            &values,
+        );
+        let mut console = String::new();
+        for line in printed.lines() {
+            console.push_str(line);
+            console.push('\n');
+            if line.starts_with("bench-values: ") {
+                console.push_str("[    3.141592] a kernel message in the middle of the block\n");
+            }
+        }
+        let parsed = parse_program_return(&console, "m", values.len());
+        assert_eq!(parsed.map(|returned| returned.values).ok(), Some(values));
+    }
 
     #[test]
     fn a_stream_verifies_against_its_own_generator_and_rejects_the_other_direction() {

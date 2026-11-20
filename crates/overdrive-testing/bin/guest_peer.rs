@@ -93,7 +93,7 @@ mod linux {
         use std::net::{
             Ipv4Addr, Shutdown, SocketAddrV4, TcpListener, TcpStream, ToSocketAddrs, UdpSocket,
         };
-        use std::os::fd::{AsFd as _, AsRawFd as _, FromRawFd as _};
+        use std::os::fd::{AsRawFd as _, FromRawFd as _};
         use std::os::unix::process::CommandExt as _;
         use std::process::Command;
         use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -1135,8 +1135,6 @@ mod linux {
 
         /// Bytes of one benchmark request and of its echoed reply.
         const BENCH_MESSAGE_BYTES: usize = 64;
-        /// How long one benchmark read or write may block before the flow counts as undrivable.
-        const BENCH_IO_BOUND: Duration = Duration::from_secs(10);
 
         /// A guest reading of `path`: its trimmed text, absent when the file does not exist,
         /// unreadable on any other error.
@@ -1150,16 +1148,26 @@ mod linux {
             }
         }
 
-        /// Echoes `BENCH_MESSAGE_BYTES` records on `app` until the peer closes it.
+        /// Echoes `BENCH_MESSAGE_BYTES` records on `app` until the flow ends: the owner closes or
+        /// resets the application side once the vsock side shuts down, which is the expected end.
         fn bench_echo(mut app: TcpStream) -> Result<(), String> {
             let mut record = [0u8; BENCH_MESSAGE_BYTES];
             loop {
                 match app.read_exact(&mut record) {
                     Ok(()) => app.write_all(&record).map_err(|e| format!("app echo write: {e}"))?,
-                    Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => return Ok(()),
+                    Err(e) if flow_ended(&e) => return Ok(()),
                     Err(e) => return Err(format!("app read: {e}")),
                 }
             }
+        }
+
+        fn flow_ended(error: &io::Error) -> bool {
+            matches!(
+                error.kind(),
+                io::ErrorKind::UnexpectedEof
+                    | io::ErrorKind::ConnectionReset
+                    | io::ErrorKind::BrokenPipe
+            )
         }
 
         /// Pairs one flow through the guest flow owner's inbound vsock seam and returns the vsock
@@ -1167,52 +1175,20 @@ mod linux {
         fn bench_pair_flow(
             listener: &TcpListener,
             launch: LaunchToken,
-            port: u16,
+            listen_port: ListenPort,
         ) -> Result<(VsockStream, TcpStream), String> {
             let request = FlowRequest::TcpAccept {
                 flow: FlowId::new(FlowOrigin::Host, 1).map_err(|e| format!("flow id: {e:?}"))?,
                 peer: GUEST_NODE_GATEWAY,
-                listen_port: port
-                    .to_string()
-                    .parse::<ListenPort>()
-                    .map_err(|e| format!("listen port: {e:?}"))?,
+                listen_port,
                 launch,
             };
             let vsock = VsockStream::connect(VMADDR_CID_LOCAL, GUEST_INBOUND_PORT.as_u32(), None)
                 .map_err(|e| format!("connect inbound: {e}"))?;
-            set_io_bound(&vsock)?;
             (&vsock).write_all(&request.encode()).map_err(|e| format!("write request: {e}"))?;
             let (app, _) = listener.accept().map_err(|e| format!("accept: {e}"))?;
             app.set_nodelay(true).map_err(|e| format!("app nodelay: {e}"))?;
-            app.set_read_timeout(Some(BENCH_IO_BOUND)).map_err(|e| format!("app timeout: {e}"))?;
-            app.set_write_timeout(Some(BENCH_IO_BOUND)).map_err(|e| format!("app timeout: {e}"))?;
             Ok((vsock, app))
-        }
-
-        fn set_io_bound(vsock: &VsockStream) -> Result<(), String> {
-            let length = libc::socklen_t::try_from(std::mem::size_of::<libc::timeval>())
-                .map_err(|e| format!("timeval size: {e}"))?;
-            let bound = libc::timeval {
-                tv_sec: BENCH_IO_BOUND.as_secs().try_into().unwrap_or(libc::time_t::MAX),
-                tv_usec: 0,
-            };
-            for option in [libc::SO_RCVTIMEO, libc::SO_SNDTIMEO] {
-                // SAFETY: `vsock` owns a valid socket fd and `bound` is a live `timeval` of the
-                // stated size for the call.
-                let status = unsafe {
-                    libc::setsockopt(
-                        vsock.as_fd().as_raw_fd(),
-                        libc::SOL_SOCKET,
-                        option,
-                        (&raw const bound).cast(),
-                        length,
-                    )
-                };
-                if status != 0 {
-                    return Err(format!("vsock timeout: {}", io::Error::last_os_error()));
-                }
-            }
-            Ok(())
         }
 
         /// The closed-loop round trips: `warmup` unrecorded, then `timed` recorded nanoseconds
@@ -1253,13 +1229,11 @@ mod linux {
             match (
                 workload.parse::<Ipv4Addr>(),
                 launch.parse::<LaunchToken>(),
-                port.parse::<u16>(),
+                port.parse::<u16>().map_err(drop).and_then(|raw| ListenPort::new(raw).map_err(drop)),
                 warmup.parse::<usize>(),
                 timed.parse::<usize>(),
             ) {
-                (Ok(workload), Ok(launch), Ok(port), Ok(warmup), Ok(timed))
-                    if port != 0 && timed != 0 =>
-                {
+                (Ok(workload), Ok(launch), Ok(port), Ok(warmup), Ok(timed)) if timed != 0 => {
                     forwarding_bench(workload, launch, port, warmup, timed)
                 }
                 _ => usage(SYNTAX),
@@ -1270,27 +1244,19 @@ mod linux {
         fn forwarding_bench(
             workload: Ipv4Addr,
             launch: LaunchToken,
-            port: u16,
+            port: ListenPort,
             warmup: usize,
             timed: usize,
         ) -> i32 {
             let driven = (|| {
-                let listener = TcpListener::bind((workload, port))
+                let listener = TcpListener::bind((workload, port.get()))
                     .map_err(|e| format!("bind {workload}:{port}: {e}"))?;
                 let (vsock, app) = bench_pair_flow(&listener, launch, port)?;
                 let echo = thread::spawn(move || bench_echo(app));
                 let values = bench_round_trips(&vsock, warmup, timed)?;
-                drop(vsock);
-                // Every timed round trip already returned its verified echo, so the application
-                // side's end is not a measurement: the owner may abort the flow when the vsock
-                // side closes, and the echo thread then reads a reset. It is reported, not failed.
-                match echo.join() {
-                    Ok(Ok(())) => {}
-                    Ok(Err(detail)) => {
-                        eprintln!("forwarding-bench: application side ended: {detail}");
-                    }
-                    Err(_) => eprintln!("forwarding-bench: the echo thread panicked"),
-                }
+                // Ending the vsock side's writes ends the flow; the echo thread reads that end.
+                vsock.shutdown(Shutdown::Write).map_err(|e| format!("vsock shutdown: {e}"))?;
+                echo.join().map_err(|_| "the echo thread panicked".to_owned())??;
                 Ok::<_, String>(values)
             })();
             let values = match driven {

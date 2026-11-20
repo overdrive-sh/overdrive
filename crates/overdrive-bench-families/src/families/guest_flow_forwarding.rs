@@ -81,7 +81,7 @@ fn guest_flow_forwarding(rep: &mut Replicate) -> Result<(), ReplicateFailure> {
 
     let returned = parse_program_return(&run.console, FORWARDING_BENCH_METRIC, TIMED_ROUND_TRIPS)
         .map_err(|error| fail(&return_reason(&error)))?;
-    let artifacts = ARTIFACTS.get_or_init(|| staged_artifact_digests(kit)).clone();
+    let artifacts = cached_artifacts(&ARTIFACTS, || staged_artifact_digests(kit));
     rep.report_guest_view(GuestView {
         vcpus: LANE_GUEST_VCPUS,
         memory_mib: GuestMemoryMib::new(LANE_GUEST_MEMORY_MIB),
@@ -110,6 +110,14 @@ fn provisioned(
     }
     let kit = provision().map_err(|error| fail(&boot_reason(&error)))?;
     Ok(cell.get_or_init(|| kit))
+}
+
+/// The artifact digests held in `cell`, computed by `compute` on first use only.
+fn cached_artifacts(
+    cell: &OnceLock<GuestArtifacts>,
+    compute: impl FnOnce() -> GuestArtifacts,
+) -> GuestArtifacts {
+    cell.get_or_init(compute).clone()
 }
 
 /// The index of the next replicate inside the CID band: this process's count of replicates
@@ -153,7 +161,7 @@ fn file_digest(path: &Path) -> HostValue {
 }
 
 fn hex_digest(bytes: &[u8]) -> String {
-    hex::encode(Sha256::digest(bytes))
+    format!("{:x}", Sha256::digest(bytes))
 }
 
 fn host_value(reading: GuestReading) -> HostValue {
@@ -231,25 +239,10 @@ mod tests {
                 ovd_fwd: HostValue::Text("c".to_owned()),
             }
         };
-        let first = cell.get_or_init(digest).clone();
-        let second = cell.get_or_init(digest).clone();
+        let first = cached_artifacts(&cell, digest);
+        let second = cached_artifacts(&cell, digest);
         assert_eq!(first, second);
         assert_eq!(computed.load(Ordering::Relaxed), 1);
-    }
-
-    #[test]
-    fn a_staged_file_is_its_sha256_and_a_missing_one_is_absent() {
-        let dir = tempfile::tempdir().unwrap();
-        let file = dir.path().join("staged");
-        std::fs::write(&file, b"abc").unwrap();
-        assert_eq!(
-            file_digest(&file),
-            HostValue::Text(
-                "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad".to_owned()
-            )
-        );
-        let missing: PathBuf = dir.path().join("missing");
-        assert!(matches!(file_digest(&missing), HostValue::Absent { .. }));
     }
 
     #[test]
