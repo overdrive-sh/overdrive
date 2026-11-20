@@ -4,15 +4,13 @@
 //! Scenarios: the grammar `<uint><unit>` accepts `GiB` and `TiB` in any case,
 //! rejects everything else with a typed error, round-trips through its
 //! canonical text and through serde, and renders canonically (`GiB` unless an
-//! exact `TiB` multiple). Every test here is pending: the value type is a RED
-//! scaffold (`overdrive_core::volume`), so each body panics at the missing
-//! grammar. DELIVER removes the pending marker one test at a time.
+//! exact `TiB` multiple).
 //!
-//! Every test here is about the grammar, so each one fails on its own accept or reject
-//! property while the scaffold refuses every input. The tests that reject text carry a
-//! positive control (a valid size the grammar must accept), so a scaffold that refuses
-//! everything cannot satisfy them. The one test about `Display` builds its sizes through
-//! `testing::volume`, so it fails on the rendering, not on the parser.
+//! Every test here is about the grammar. The tests that reject text carry a
+//! positive control (a valid size the grammar must accept), so a parser that
+//! refuses everything cannot satisfy them. The one test about `Display` builds
+//! its sizes through `testing::volume`, so it fails on the rendering, not on
+//! the parser.
 //!
 //! Evidence tier: unit/property (layer 1, PBT). Production owner: the
 //! `VolumeSize` value, reached through `FromStr`/`Display`/serde, which is

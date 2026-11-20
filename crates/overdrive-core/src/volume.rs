@@ -1,17 +1,8 @@
 //! Node-local persistent volume value types (GH #348, ADR-0310, ADR-0317).
 //!
-//! RED scaffold (DISTILL): the shapes below are the ones
-//! `docs/feature/node-local-persistent-volume/feature-delta.md` pins; every
-//! grammar refuses every input and renders nothing until DELIVER implements it.
-//! Only the types the design names are scaffolded (feature delta § Port).
-
-#![allow(
-    clippy::panic,
-    clippy::missing_panics_doc,
-    clippy::doc_markdown,
-    clippy::needless_pass_by_value,
-    reason = "DISTILL RED scaffold: bodies panic until DELIVER implements the volume value types"
-)]
+//! The grammars (`VolumeSize`, `ByteCount`), the operation label and the
+//! unavailability cause the volume contract carries across the port, the
+//! operator wire and the VMM argument.
 
 use std::fmt;
 use std::str::FromStr;
@@ -19,8 +10,6 @@ use std::str::FromStr;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use utoipa::ToSchema;
 
-/// SCAFFOLD: true
-///
 /// A validated volume size in bytes. Grammar `<uint><unit>`, unit
 /// case-insensitive `GiB` or `TiB`, value at least 1. `Display` emits `GiB`
 /// unless the value is an exact `TiB` multiple (ADR-0310).
@@ -52,36 +41,28 @@ const BYTES_PER_TIB: u64 = 1 << 40;
 fn split_count_and_unit(s: &str) -> Option<(u64, &str)> {
     let digits_end = s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len());
     let (digits, unit) = s.split_at(digits_end);
-    if digits.is_empty() {
-        return None;
-    }
     digits.parse::<u64>().ok().map(|count| (count, unit))
-}
-
-impl VolumeSize {
-    fn parse_bytes(s: &str) -> Result<u64, &'static str> {
-        let (count, unit) = split_count_and_unit(s).ok_or("expected <uint>GiB or <uint>TiB")?;
-        let multiple = if unit.eq_ignore_ascii_case("GiB") {
-            BYTES_PER_GIB
-        } else if unit.eq_ignore_ascii_case("TiB") {
-            BYTES_PER_TIB
-        } else {
-            return Err("the unit must be GiB or TiB");
-        };
-        if count == 0 {
-            return Err("the size must be at least 1");
-        }
-        count.checked_mul(multiple).ok_or("the size in bytes overflows")
-    }
 }
 
 impl FromStr for VolumeSize {
     type Err = VolumeSizeParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Self::parse_bytes(s)
-            .map(Self)
-            .map_err(|reason| VolumeSizeParseError { input: s.to_owned(), reason: reason.to_owned() })
+        let reject =
+            |reason: &str| VolumeSizeParseError { input: s.to_owned(), reason: reason.to_owned() };
+        let (count, unit) =
+            split_count_and_unit(s).ok_or_else(|| reject("expected <uint>GiB or <uint>TiB"))?;
+        let multiple = if unit.eq_ignore_ascii_case("GiB") {
+            BYTES_PER_GIB
+        } else if unit.eq_ignore_ascii_case("TiB") {
+            BYTES_PER_TIB
+        } else {
+            return Err(reject("the unit must be GiB or TiB"));
+        };
+        if count == 0 {
+            return Err(reject("the size must be at least 1"));
+        }
+        count.checked_mul(multiple).map(Self).ok_or_else(|| reject("the size in bytes overflows"))
     }
 }
 
