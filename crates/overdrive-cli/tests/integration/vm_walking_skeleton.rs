@@ -243,7 +243,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::ErrorKind;
-use std::net::{Ipv4Addr, SocketAddr};
+use std::net::SocketAddr;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -264,6 +264,8 @@ use overdrive_testing::overdrive_test;
 use overdrive_testing::vm_fixture::VmFixture;
 use serial_test::serial;
 use tempfile::TempDir;
+
+use super::vsock_support::vsock_cid;
 
 // ---------------------------------------------------------------------
 // Fixture staging — real kernel/rootfs + a per-test injected guest
@@ -736,13 +738,6 @@ pub(super) fn hypervisor_argv_for_alloc(alloc: &AllocationId) -> String {
 // GH #295 native observation helpers.
 // ---------------------------------------------------------------------
 
-/// The managed host TAP name the shared guest-network owner derives from a
-/// guest address (`ovd-tp-<low 16 bits, hex>`).
-fn managed_tap_name(address: Ipv4Addr) -> String {
-    let octets = address.octets();
-    format!("ovd-tp-{:04x}", u16::from_be_bytes([octets[2], octets[3]]))
-}
-
 /// The pid and NUL-joined argv of the live `cloud-hypervisor` process
 /// serving `alloc`, located by the allocation's own [`VmRunDir`] path (the
 /// same `argv[0]` rule as [`hypervisor_argv_for_alloc`]).
@@ -772,24 +767,6 @@ fn hypervisor_process_for_alloc(alloc: &AllocationId) -> (u32, String) {
         }
     }
     panic!("no live cloud-hypervisor process found whose argv references {needle}")
-}
-
-/// The administrative (`IFF_UP`) state of a host interface from
-/// `/sys/class/net/<name>/flags`; `Ok(None)` when the interface is absent.
-/// Never panics, so the supervisor trace layer can call it from inside the
-/// emitting task.
-fn tap_admin_up(name: &str) -> std::io::Result<Option<bool>> {
-    let path = Path::new("/sys/class/net").join(name).join("flags");
-    match std::fs::read_to_string(&path) {
-        Ok(flags) => {
-            let flags = u32::from_str_radix(flags.trim().trim_start_matches("0x"), 16)
-                .map_err(|error| std::io::Error::new(ErrorKind::InvalidData, error))?;
-            let up = u32::try_from(libc::IFF_UP).expect("IFF_UP is a positive flag bit");
-            Ok(Some(flags & up != 0))
-        }
-        Err(error) if error.kind() == ErrorKind::NotFound => Ok(None),
-        Err(error) => Err(error),
-    }
 }
 
 // ---------------------------------------------------------------------
@@ -1225,15 +1202,32 @@ fn thread_status_number(vmm_pid: u32, tid: &str, field: &str) -> u32 {
     )
 }
 
-/// The `Seccomp_filters` count D-295-R22 pins for one Cloud Hypervisor v53
-/// thread: CH's own filter count for that thread plus the one launch filter
-/// every thread inherits from the launch child (increment-aa control table,
-/// FD § "[REF] Evidence-lane matrix (charter §4 and §5)" (row E21, case (e))). CH never filters its thread-group leader, so the leader's
-/// count is the discriminating check.
+/// The `Seccomp_filters` count one Cloud Hypervisor thread carries: the one
+/// launch filter every thread inherits from the launch child, plus the filters
+/// Cloud Hypervisor installs on that thread itself (increment-aa control table,
+/// FD § "[REF] Evidence-lane matrix (charter §4 and §5)" (row E21, case (e))).
+///
+/// - The thread-group leader carries 2: Cloud Hypervisor now applies a main
+///   thread filter (`cloud-hypervisor/src/main.rs:994`, upstream commit
+///   `ea4353254` "main: Apply new seccomp filter to main thread", an ancestor
+///   of the pinned `vendors/cloud-hypervisor`), after spawning its workers so
+///   they do not inherit it. The retired claim that CH never filters its
+///   leader no longer holds; a leader at 1 means the launch filter is absent
+///   from it, a leader at 0 means no filter at all.
+/// - `vmm` and `http-server` carry 2: the launch filter plus their own.
+/// - The kernel vhost-vsock worker (`vhost-<tid>`) carries 2. The kernel creates
+///   it with `copy_process` from the thread that issued `VHOST_SET_OWNER`
+///   (`kernel/vhost_task.c:119-146`, `drivers/vhost/vhost.c:841` @ v7.0), which
+///   copies that thread's filters (`kernel/fork.c:1749-1762` @ v7.0). Cloud
+///   Hypervisor opens the device on the `vmm` thread (`<tid>` is the `vmm`
+///   thread's tid), which carries 2, and installs no filter in the worker.
+/// - Every other thread carries 3: the audited Cloud Hypervisor build's own
+///   count of 2 for those threads, plus the launch filter.
 fn expected_launch_filter_count(vmm_pid: u32, tid: &str, name: &str) -> u32 {
-    if tid == vmm_pid.to_string() {
-        1
-    } else if matches!(name, "vmm" | "http-server") {
+    if tid == vmm_pid.to_string()
+        || name.starts_with("vhost-")
+        || matches!(name, "vmm" | "http-server")
+    {
         2
     } else {
         3
@@ -1242,8 +1236,8 @@ fn expected_launch_filter_count(vmm_pid: u32, tid: &str, name: &str) -> u32 {
 
 /// Reads every thread of `vmm_pid` and asserts D-295-R22's per-thread table:
 /// `NoNewPrivs: 1`, `Seccomp: 2`, and the pinned `Seccomp_filters` count.
-/// Requires the leader, `vmm`, `http-server`, and `vcpu0` threads so each of
-/// the three filter-count classes is observed, never vacuously absent.
+/// Requires the leader, `vmm`, `http-server`, `vcpu0`, and vhost-vsock worker
+/// threads so each filter-count class is observed, never vacuously absent.
 fn assert_every_thread_carries_the_launch_filter(vmm_pid: u32, phase: &str) {
     let names = thread_names(vmm_pid);
     let leader = vmm_pid.to_string();
@@ -1257,6 +1251,11 @@ fn assert_every_thread_carries_the_launch_filter(vmm_pid: u32, phase: &str) {
             "{phase}: Cloud Hypervisor runs a thread named {required}; observed threads: {names:?}"
         );
     }
+    assert!(
+        names.values().any(|name| name.starts_with("vhost-")),
+        "{phase}: the kernel vhost-vsock worker runs in the VMM's thread group; observed \
+         threads: {names:?}"
+    );
     let observed: BTreeMap<&String, (&String, u32, u32, u32, u32)> = names
         .iter()
         .map(|(tid, name)| {
@@ -1287,72 +1286,45 @@ fn assert_every_thread_carries_the_launch_filter(vmm_pid: u32, phase: &str) {
     );
 }
 
-/// A counter of `/sys/class/net/<tap>/statistics/<counter>`.
-fn tap_statistic(tap: &str, counter: &str) -> u64 {
-    let path = Path::new("/sys/class/net").join(tap).join("statistics").join(counter);
-    let value =
-        std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
-    value.trim().parse::<u64>().unwrap_or_else(|e| panic!("parse {}: {e}", path.display()))
-}
+/// The guest port the host connects to in [`drive_vsock_round_trip`]. Nothing
+/// in the guest listens on it.
+const UNLISTENED_GUEST_VSOCK_PORT: u32 = 40_295;
 
-/// Sends `count` broadcast ARP probes for `guest` onto `tap` from the host
-/// through an `AF_PACKET` socket (an ARP probe carries sender address
-/// 0.0.0.0, so it seeds no ARP cache). A frame the TAP transmits is read by
-/// the VMM's network queue, which is what `tx_packets` counts, so this is
-/// host-to-guest traffic through the Cloud Hypervisor network device.
-fn send_host_broadcast_arp_probes(tap: &str, guest: Ipv4Addr, count: usize) {
-    const ETH_P_ARP: u16 = 0x0806;
-    let name = std::ffi::CString::new(tap).expect("TAP name has no NUL");
-    // SAFETY: `name` is a live NUL-terminated string for this call.
-    let ifindex = unsafe { libc::if_nametoindex(name.as_ptr()) };
-    assert_ne!(ifindex, 0, "host-to-guest traffic TAP {tap} exists");
-    // SAFETY: a send-only AF_PACKET raw socket (protocol 0 registers no
-    // receive hook); ownership moves into the OwnedFd immediately.
-    let raw = unsafe { libc::socket(libc::AF_PACKET, libc::SOCK_RAW | libc::SOCK_CLOEXEC, 0) };
-    assert!(raw >= 0, "open AF_PACKET sender: {}", std::io::Error::last_os_error());
+/// Drives one host-to-guest and one guest-to-host virtio-vsock packet through
+/// the VMM's vhost-vsock queues, and returns once the guest has answered.
+///
+/// The host connects an `AF_VSOCK` stream socket to `cid` on a port the guest
+/// does not listen on. The connection request is a host-to-guest packet; the
+/// guest kernel answers it with a reset, which is a guest-to-host packet, so
+/// `connect` fails `ECONNRESET` exactly when both directions crossed the
+/// queues. The guest NIC no longer exists (ADR-0145: the guest is NIC-less and
+/// vsock-only), so this is the traffic the VMM serves.
+fn drive_vsock_round_trip(cid: u32) -> std::io::Result<()> {
+    // SAFETY: a plain socket(2) call; ownership moves into the OwnedFd at once.
+    let raw = unsafe { libc::socket(libc::AF_VSOCK, libc::SOCK_STREAM | libc::SOCK_CLOEXEC, 0) };
+    if raw < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
     // SAFETY: `raw` is a freshly created descriptor owned by nothing else.
     let socket = unsafe { OwnedFd::from_raw_fd(raw) };
-    let source_mac = [0x02, 0x95, 0x02, 0x95, 0x00, 0x45];
-    let mut frame = Vec::with_capacity(42);
-    frame.extend_from_slice(&[0xff; 6]);
-    frame.extend_from_slice(&source_mac);
-    frame.extend_from_slice(&ETH_P_ARP.to_be_bytes());
-    frame.extend_from_slice(&1_u16.to_be_bytes());
-    frame.extend_from_slice(&0x0800_u16.to_be_bytes());
-    frame.extend_from_slice(&[6, 4]);
-    frame.extend_from_slice(&1_u16.to_be_bytes());
-    frame.extend_from_slice(&source_mac);
-    frame.extend_from_slice(&[0, 0, 0, 0]);
-    frame.extend_from_slice(&[0; 6]);
-    frame.extend_from_slice(&guest.octets());
-    // SAFETY: zero is a valid initialization for sockaddr_ll before fields are populated.
-    let mut address: libc::sockaddr_ll = unsafe { std::mem::zeroed() };
-    address.sll_family = u16::try_from(libc::AF_PACKET).expect("AF_PACKET fits u16");
-    address.sll_protocol = ETH_P_ARP.to_be();
-    address.sll_ifindex = i32::try_from(ifindex).expect("ifindex fits i32");
-    address.sll_halen = 6;
-    address.sll_addr[..6].copy_from_slice(&[0xff; 6]);
-    for _ in 0..count {
-        // SAFETY: `frame` and `address` are live, fully initialized buffers of the
-        // supplied lengths, and `socket` is an owned open descriptor.
-        let sent = unsafe {
-            libc::sendto(
-                socket.as_raw_fd(),
-                frame.as_ptr().cast(),
-                frame.len(),
-                0,
-                std::ptr::from_ref(&address).cast(),
-                libc::socklen_t::try_from(std::mem::size_of::<libc::sockaddr_ll>())
-                    .expect("sockaddr_ll length fits socklen_t"),
-            )
-        };
-        assert_eq!(
-            usize::try_from(sent).ok(),
-            Some(frame.len()),
-            "send host broadcast ARP probe on {tap}: {}",
-            std::io::Error::last_os_error()
-        );
+    // SAFETY: zero is a valid initialization for sockaddr_vm before fields are populated.
+    let mut address: libc::sockaddr_vm = unsafe { std::mem::zeroed() };
+    address.svm_family = u16::try_from(libc::AF_VSOCK).expect("AF_VSOCK fits u16");
+    address.svm_cid = cid;
+    address.svm_port = UNLISTENED_GUEST_VSOCK_PORT;
+    // SAFETY: `address` is a live, fully initialized sockaddr_vm of the supplied length.
+    let connected = unsafe {
+        libc::connect(
+            socket.as_raw_fd(),
+            std::ptr::from_ref(&address).cast(),
+            libc::socklen_t::try_from(std::mem::size_of::<libc::sockaddr_vm>())
+                .expect("sockaddr_vm length fits socklen_t"),
+        )
+    };
+    if connected == 0 {
+        return Ok(());
     }
+    Err(std::io::Error::last_os_error())
 }
 
 /// Outcome anchor: OUT-ND295-BORN-CAPTURED
@@ -1368,18 +1340,14 @@ fn send_host_broadcast_arp_probes(tap: &str, guest: Ipv4Addr, count: usize) {
 /// other thread 3. D-295-R22 makes the retired S-VM-09 claim (the leader
 /// reports `SECCOMP_MODE_DISABLED`) false.
 ///
-/// The body activates at DELIVER step 05-03, not 05-02 where the launch
-/// filter lands: its precondition is a guest that reaches Running, which the
-/// 05-03 descriptor handoff makes possible (before it, the named-TAP launch
-/// fails with `Failed to open taps` / `EPERM`).
-///
 /// The table is read at READY (the allocation reports `Running` only after
-/// the guest's READY beacon) and again after traffic, as E21 (e) requires:
-/// the guest program transmits frames on its NIC and the host sends
-/// broadcast ARP probes onto the TAP, and the read repeats only once the
-/// TAP's `rx_packets` (guest to host) and `tx_packets` (host to guest, read
-/// by the VMM's queue) have both advanced. Traffic delivery itself is
-/// S-ND295-01's oracle.
+/// the guest's READY beacon) and again after traffic, as E21 (e) requires.
+/// The guest is NIC-less and vsock-only (ADR-0145), so the traffic is vsock:
+/// the host connects to a guest port nobody listens on, and the read repeats
+/// only once the guest's reset has come back, which proves a host-to-guest and
+/// a guest-to-host packet both crossed the VMM's vsock queues. The guest
+/// program is a plain long-lived spin binary; the table does not depend on
+/// what the guest runs.
 #[expect(
     clippy::doc_markdown,
     reason = "CONTRACT_SHAPE is an exact repository-mandated machine-read declaration"
@@ -1395,18 +1363,16 @@ async fn every_cloud_hypervisor_thread_carries_the_launch_filter_under_its_own_f
         .prefix("nd295-s45-")
         .tempdir_in(shared_staging_root())
         .expect("tempdir on the XFS-backed reflink-capable staging root (never tmpfs -- cloud-hypervisor disk I/O needs O_DIRECT, which tmpfs cannot support)");
-    // A long-lived guest that keeps transmitting frames on its NIC, so the
-    // after-traffic read has guest-to-host traffic to wait for.
-    let traffic = build_identifiable_datagram_emitter(tmp.path(), Ipv4Addr::new(100, 95, 0, 1));
-    let rootfs =
-        stage_rootfs_with_extra_binary(tmp.path(), &fixture, &traffic, "nd295-s45-traffic");
+    // A long-lived guest: the allocation stays Running while the table is read.
+    let spin = build_spin_binary(tmp.path());
+    let rootfs = stage_rootfs_with_extra_binary(tmp.path(), &fixture, &spin, "nd295-s45-spin");
 
     let (handle, server_tmp) = spawn_vm_server_mtls_composed().await;
     let cfg = config_path(server_tmp.path());
     let spec_path = write_toml(
         server_tmp.path(),
         "nd295-s45.toml",
-        &vm_job_toml("nd295-s45", "/sbin/nd295-s45-traffic", &[], &fixture.kernel_path, &rootfs),
+        &vm_job_toml("nd295-s45", "/sbin/nd295-s45-spin", &[], &fixture.kernel_path, &rootfs),
     );
     let submit = deploy(DeployArgs { spec: spec_path, config_path: cfg.clone() })
         .await
@@ -1414,38 +1380,25 @@ async fn every_cloud_hypervisor_thread_carries_the_launch_filter_under_its_own_f
     let running = poll_until_running(&cfg, &submit.workload_id, Duration::from_secs(90)).await;
     let row = running.snapshot.rows.first().expect("one Running allocation row");
     let alloc = AllocationId::new(&row.alloc_id).expect("server-echoed alloc_id parses");
-    let guest = row.workload_addr.expect("a Running VM publishes its address");
-    let tap = managed_tap_name(guest);
-    let (vmm_pid, _) = hypervisor_process_for_alloc(&alloc);
+    let (vmm_pid, argv) = hypervisor_process_for_alloc(&alloc);
+    let cid = vsock_cid(&argv);
 
     assert_every_thread_carries_the_launch_filter(vmm_pid, "at READY");
 
-    // Traffic: wait for the owner's activation to raise the TAP, then drive
-    // host-to-guest frames until both directions have crossed the VMM queue.
-    let activation_deadline = Instant::now() + Duration::from_secs(30);
-    while tap_admin_up(&tap).expect("read managed TAP flags") != Some(true) {
-        assert!(
-            Instant::now() < activation_deadline,
-            "the managed TAP {tap} is raised by activation within 30 s of Running"
-        );
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-    let rx_before = tap_statistic(&tap, "rx_packets");
-    let tx_before = tap_statistic(&tap, "tx_packets");
+    // Traffic: drive host-to-guest connection requests until the guest has
+    // answered one, so frames have crossed the VMM's vsock queues in both
+    // directions.
     let traffic_deadline = Instant::now() + Duration::from_secs(30);
     loop {
-        send_host_broadcast_arp_probes(&tap, guest, 3);
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        let rx = tap_statistic(&tap, "rx_packets");
-        let tx = tap_statistic(&tap, "tx_packets");
-        if rx > rx_before && tx > tx_before {
-            break;
+        match drive_vsock_round_trip(cid) {
+            Err(error) if error.raw_os_error() == Some(libc::ECONNRESET) => break,
+            outcome => assert!(
+                Instant::now() < traffic_deadline,
+                "the guest at CID {cid} answers a host vsock connection request within 30 s \
+                 (last outcome: {outcome:?})"
+            ),
         }
-        assert!(
-            Instant::now() < traffic_deadline,
-            "guest-to-host (rx_packets {rx_before} -> {rx}) and host-to-guest (tx_packets \
-             {tx_before} -> {tx}) frames both cross {tap} within 30 s"
-        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
     }
     let (vmm_pid_after_traffic, _) = hypervisor_process_for_alloc(&alloc);
     assert_eq!(
@@ -1498,161 +1451,6 @@ pub(super) fn build_spin_binary(tmp: &Path) -> PathBuf {
         .status()
         .expect("spawn rustc for the long-lived spinmtls binary");
     assert!(status.success(), "rustc must build the long-lived spinmtls binary");
-    out
-}
-
-#[allow(
-    clippy::too_many_lines,
-    reason = "the emitted guest program is one inline source template; splitting the template across helpers would obscure the exact frames the native bodies count"
-)]
-pub(super) fn build_identifiable_datagram_emitter(
-    tmp: &Path,
-    target: std::net::Ipv4Addr,
-) -> PathBuf {
-    let src = tmp.join("shared-guest-network-emitter.rs");
-    let target = target.octets();
-    std::fs::write(
-        &src,
-        format!(
-            r#"use std::ffi::CString;
-use std::mem::size_of;
-use std::thread;
-use std::time::Duration;
-
-#[repr(C)]
-struct SockaddrLl {{
-    family: u16,
-    protocol: u16,
-    ifindex: i32,
-    hatype: u16,
-    pkttype: u8,
-    halen: u8,
-    addr: [u8; 8],
-}}
-
-extern "C" {{
-    fn if_nametoindex(name: *const i8) -> u32;
-    fn socket(domain: i32, kind: i32, protocol: i32) -> i32;
-    fn sendto(
-        fd: i32,
-        bytes: *const u8,
-        length: usize,
-        flags: i32,
-        address: *const SockaddrLl,
-        address_length: u32,
-    ) -> isize;
-}}
-
-fn ipv4_udp(source_mac: [u8; 6], source_ip: [u8; 4], target_ip: [u8; 4]) -> Vec<u8> {{
-    let marker = b"ND295-S37-IDENTIFIABLE";
-    let total = 20 + 8 + marker.len();
-    let mut frame = Vec::with_capacity(14 + total);
-    frame.extend_from_slice(&[0x02, 0x00, {t0}, {t1}, {t2}, {t3}]);
-    frame.extend_from_slice(&source_mac);
-    frame.extend_from_slice(&0x0800_u16.to_be_bytes());
-    frame.extend_from_slice(&[0x45, 0]);
-    frame.extend_from_slice(&(total as u16).to_be_bytes());
-    frame.extend_from_slice(&[0, 0, 0, 0, 64, 17, 0, 0]);
-    frame.extend_from_slice(&source_ip);
-    frame.extend_from_slice(&target_ip);
-    frame.extend_from_slice(&40_037_u16.to_be_bytes());
-    frame.extend_from_slice(&19_037_u16.to_be_bytes());
-    frame.extend_from_slice(&((8 + marker.len()) as u16).to_be_bytes());
-    frame.extend_from_slice(&[0, 0]);
-    frame.extend_from_slice(marker);
-    frame
-}}
-
-fn arp_spoof(source_mac: [u8; 6], source_ip: [u8; 4], target_ip: [u8; 4]) -> Vec<u8> {{
-    let mut frame = Vec::new();
-    frame.extend_from_slice(&[0xff; 6]);
-    frame.extend_from_slice(&source_mac);
-    frame.extend_from_slice(&0x0806_u16.to_be_bytes());
-    frame.extend_from_slice(&1_u16.to_be_bytes());
-    frame.extend_from_slice(&0x0800_u16.to_be_bytes());
-    frame.extend_from_slice(&[6, 4]);
-    frame.extend_from_slice(&1_u16.to_be_bytes());
-    frame.extend_from_slice(&source_mac);
-    frame.extend_from_slice(&source_ip);
-    frame.extend_from_slice(&[0_u8; 6]);
-    frame.extend_from_slice(&target_ip);
-    frame.extend_from_slice(b"ND295-S37-IDENTIFIABLE");
-    frame
-}}
-
-fn main() {{
-    const AF_PACKET: i32 = 17;
-    const SOCK_RAW: i32 = 3;
-    const ETH_P_ALL: u16 = 0x0003;
-    let interface = CString::new("eth0").unwrap();
-    let ifindex = unsafe {{ if_nametoindex(interface.as_ptr()) }};
-    assert_ne!(ifindex, 0);
-    let fd = unsafe {{ socket(AF_PACKET, SOCK_RAW, i32::from(ETH_P_ALL.to_be())) }};
-    assert!(fd >= 0);
-    let destination = [0x02, 0x00, {t0}, {t1}, {t2}, {t3}];
-    let good_mac = [0x02, 0x00, 100, 95, 0, 3];
-    let good_ip = [100, 95, 0, 3];
-    let mut mac_spoof = ipv4_udp([0x02, 0, 1, 2, 3, 4], good_ip, [{t0}, {t1}, {t2}, {t3}]);
-    let ip_spoof = ipv4_udp(good_mac, [100, 95, 0, 99], [{t0}, {t1}, {t2}, {t3}]);
-    let udp_bypass = ipv4_udp(good_mac, good_ip, [{t0}, {t1}, {t2}, {t3}]);
-    let arp_source_spoof = arp_spoof(good_mac, [100, 95, 0, 99], [{t0}, {t1}, {t2}, {t3}]);
-    let mut non_ipv4 = udp_bypass.clone();
-    non_ipv4[12..14].copy_from_slice(&0x86dd_u16.to_be_bytes());
-    let malformed = udp_bypass[..18].to_vec();
-    // Make the MAC-spoof case carry a byte-distinct marker copy while retaining
-    // a well-formed IPv4/UDP envelope.
-    mac_spoof.extend_from_slice(b"-MAC");
-    let frames = [mac_spoof, ip_spoof, udp_bypass, arp_source_spoof, non_ipv4, malformed];
-    let address = SockaddrLl {{
-        family: AF_PACKET as u16,
-        protocol: ETH_P_ALL.to_be(),
-        ifindex: ifindex as i32,
-        hatype: 0,
-        pkttype: 0,
-        halen: 6,
-        addr: [destination[0], destination[1], destination[2], destination[3], destination[4], destination[5], 0, 0],
-    }};
-    thread::sleep(Duration::from_secs(5));
-    loop {{
-        for frame in &frames {{
-            let sent = unsafe {{
-                sendto(
-                    fd,
-                    frame.as_ptr(),
-                    frame.len(),
-                    0,
-                    &address,
-                    size_of::<SockaddrLl>() as u32,
-                )
-            }};
-            assert_eq!(sent, frame.len() as isize);
-        }}
-        thread::sleep(Duration::from_millis(10));
-    }}
-}}"#,
-            t0 = target[0],
-            t1 = target[1],
-            t2 = target[2],
-            t3 = target[3],
-        ),
-    )
-    .expect("write identifiable guest emitter source");
-    let out = tmp.join("shared-guest-network-emitter");
-    let status = Command::new("rustc")
-        .arg("--edition")
-        .arg("2021")
-        .arg("-C")
-        .arg("opt-level=0")
-        .arg("-C")
-        .arg("target-feature=+crt-static")
-        .arg("--target")
-        .arg("x86_64-unknown-linux-musl")
-        .arg("-o")
-        .arg(&out)
-        .arg(&src)
-        .status()
-        .expect("spawn rustc for identifiable guest emitter");
-    assert!(status.success(), "rustc builds the identifiable guest emitter");
     out
 }
 
