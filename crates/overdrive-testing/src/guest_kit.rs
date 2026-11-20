@@ -403,20 +403,6 @@ pub struct GuestImage {
     pub rootfs: PathBuf,
     /// Which PID 1 behavior this image carries.
     pub init: GuestInit,
-    /// The volume-pool backing disk template (ADR-0313): when set, every boot of
-    /// this image attaches a fresh copy of it as the guest's second disk. `None`
-    /// is a guest with no pool.
-    pub volume_pool: Option<PathBuf>,
-}
-
-impl GuestImage {
-    /// This image with the volume-pool backing disk `template` (see
-    /// [`prepared_volume_pool_disk`]) attached to every guest booted from it.
-    #[must_use]
-    pub fn with_volume_pool(mut self, template: PathBuf) -> Self {
-        self.volume_pool = Some(template);
-        self
-    }
 }
 
 /// A provisioned guest kit.
@@ -635,7 +621,7 @@ impl GuestKit {
         vm_fixture::mknod_char_device(&stage.join("dev/null"), 1, 3, 0o666)?;
         let rootfs = dir.join(format!("{name}.ext4"));
         mkfs(&stage, &rootfs)?;
-        Ok(GuestImage { rootfs, init: spec.init, volume_pool: None })
+        Ok(GuestImage { rootfs, init: spec.init })
     }
 
     /// Launches a VMM over `boot.image` at `boot.cid`, through the
@@ -696,10 +682,8 @@ impl GuestKit {
         let vcpus =
             NonZeroU8::new(boot.vcpus).unwrap_or_else(|| panic!("a guest has at least one vCPU"));
         let volume = boot
-            .image
             .volume_pool
-            .as_deref()
-            .map(|template| fresh_volume_pool_disk(template, boot.run_dir, boot.cid))
+            .map(|template| fresh_volume_pool_disk(template, boot.run_dir))
             .transpose()?;
         let config = VmConfig {
             volume,
@@ -798,6 +782,7 @@ impl GuestKit {
             memory_mib: extra.memory_mib.unwrap_or(256),
             vcpus: extra.vcpus.unwrap_or(2),
             run_dir,
+            volume_pool: extra.volume_pool.as_deref(),
         })?;
         match control.accept_peer(cid, SCRIPTED_BOOT_BOUND) {
             Ok(peer) => Ok(ScriptedGuest { peer: Some(peer), vm }),
@@ -821,6 +806,10 @@ pub struct ScriptedBootExtra {
     pub memory_mib: Option<u32>,
     /// vCPUs; 2 when `None`.
     pub vcpus: Option<u8>,
+    /// The volume-pool backing disk template (ADR-0313; see
+    /// [`prepared_volume_pool_disk`]): when set, the guest boots with a fresh
+    /// copy of it as its second disk. `None` is a guest with no pool.
+    pub volume_pool: Option<PathBuf>,
 }
 
 /// One VMM launch.
@@ -841,6 +830,9 @@ pub struct GuestBoot<'a> {
     /// are created under it. The fixture keeps the API socket and other
     /// per-launch runtime artifacts on a separate bounded private path.
     pub run_dir: &'a Path,
+    /// The volume-pool backing disk template: a fresh copy becomes the guest's
+    /// second disk. `None` boots the rootfs alone.
+    pub volume_pool: Option<&'a Path>,
 }
 
 /// A running VMM. Dropping it kills the VMM and reaps it.
@@ -1296,14 +1288,14 @@ pub fn prepared_volume_pool_disk() -> Result<PathBuf, GuestKitError> {
     prepared(disk, "volume-pool backing disk")
 }
 
-/// A fresh, private copy of the backing disk `template` for the guest at `cid`,
-/// owned by the confined VMM identity (it opens the disk after dropping to it).
+/// A fresh, private copy of the backing disk `template` for the guest whose
+/// run directory is `run_dir`, owned by the confined VMM identity (it opens the
+/// disk after dropping to it).
 fn fresh_volume_pool_disk(
     template: &Path,
     run_dir: &Path,
-    cid: u32,
 ) -> Result<VolumeAttachment, GuestKitError> {
-    let disk = run_dir.join(format!("volume-pool-{cid}.img"));
+    let disk = run_dir.join("volume-pool.img");
     let copied = Command::new("cp")
         .args(["--sparse=always", "--reflink=auto"])
         .arg(template)

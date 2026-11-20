@@ -525,6 +525,7 @@ fn exchange_with_production_guest(
         memory_mib: LANE_GUEST_MEMORY_MIB.get(),
         vcpus: LANE_GUEST_VCPUS.get(),
         run_dir: &run.run_dir,
+        volume_pool: None,
     })?;
     let exit = converse(&vm, &beacon, run);
     let exit = settle_vmm(&mut vm, exit);
@@ -764,6 +765,7 @@ pub fn boot_to_ready(
         memory_mib: 256,
         vcpus: 1,
         run_dir: &run_dir,
+        volume_pool: None,
     })?;
     let deadline = Instant::now() + READY_BOUND;
     let mut conn: Option<VsockStream> = None;
@@ -866,7 +868,12 @@ pub fn run_scripted_in_guest_cell(
         &image,
         cid,
         &work.join(format!("{name}-run")),
-        &ScriptedBootExtra { cmdline: Vec::new(), memory_mib: Some(memory_mib), vcpus: Some(16) },
+        &ScriptedBootExtra {
+            cmdline: Vec::new(),
+            memory_mib: Some(memory_mib),
+            vcpus: Some(16),
+            volume_pool: None,
+        },
     )?;
     let module_paths: Vec<&Path> = modules.iter().map(|m| m.guest.as_path()).collect();
     let argv = cell_argv(cell, &module_paths);
@@ -1285,6 +1292,7 @@ pub(crate) fn run_in_guest_owner_cell_attempt<R>(
             cmdline: vec![token, format!("{LANE_SCRIPT_PARAM}{}", script_listener.port())],
             memory_mib: Some(memory_mib),
             vcpus: Some(2),
+            volume_pool: None,
         },
     )?;
     let argv = attempt.map_or_else(

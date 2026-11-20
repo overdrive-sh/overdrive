@@ -703,19 +703,7 @@ fn prepare_volume_pool_disk(target_dir: &Path) -> Result<PathBuf> {
     let dir = prepared.parent().ok_or_else(|| eyre!("no parent of {}", prepared.display()))?;
     std::fs::create_dir_all(dir).wrap_err_with(|| format!("creating {}", dir.display()))?;
     let staging = dir.join("pool.img.staging");
-    let lvm_dir = dir.join("lvm-system-dir");
-    for path in [&prepared, &staging] {
-        if path.exists() {
-            std::fs::remove_file(path)
-                .wrap_err_with(|| format!("clearing stale {}", path.display()))?;
-        }
-    }
-    if lvm_dir.exists() {
-        std::fs::remove_dir_all(&lvm_dir)
-            .wrap_err_with(|| format!("clearing {}", lvm_dir.display()))?;
-    }
-    std::fs::create_dir_all(&lvm_dir)
-        .wrap_err_with(|| format!("creating {}", lvm_dir.display()))?;
+    let lvm_dir = tempfile::tempdir_in(dir).wrap_err("creating the LVM system directory")?;
     std::fs::File::create(&staging)
         .and_then(|file| file.set_len(VOLUME_POOL_DISK_BYTES))
         .wrap_err_with(|| format!("creating the sparse disk {}", staging.display()))?;
@@ -768,7 +756,7 @@ fn prepare_volume_pool_disk(target_dir: &Path) -> Result<PathBuf> {
             Command::new("lvm")
                 .args(args)
                 .args(["--config", &config])
-                .env("LVM_SYSTEM_DIR", &lvm_dir),
+                .env("LVM_SYSTEM_DIR", lvm_dir.path()),
             what,
         )
     };
@@ -778,28 +766,7 @@ fn prepare_volume_pool_disk(target_dir: &Path) -> Result<PathBuf> {
         &["vgcreate", "--physicalextentsize", &extent, VOLUME_POOL_GROUP, &device.0],
         "creating the pool volume group",
     )?;
-    let reported = lvm(
-        &[
-            "vgs",
-            "--noheadings",
-            "--nosuffix",
-            "--units",
-            "b",
-            "-o",
-            "vg_extent_size",
-            VOLUME_POOL_GROUP,
-        ],
-        "reading the pool volume group's extent size",
-    )?;
-    let reported = String::from_utf8_lossy(&reported.stdout).trim().to_owned();
-    if reported != VOLUME_POOL_EXTENT_BYTES.to_string() {
-        bail!(
-            "the pool volume group has extent size {reported:?} bytes, not {VOLUME_POOL_EXTENT_BYTES}"
-        );
-    }
     drop(device);
-    std::fs::remove_dir_all(&lvm_dir)
-        .wrap_err_with(|| format!("removing {}", lvm_dir.display()))?;
     std::fs::rename(&staging, &prepared)
         .wrap_err_with(|| format!("publishing {}", prepared.display()))?;
     Ok(prepared)

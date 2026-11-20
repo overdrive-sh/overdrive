@@ -6,11 +6,10 @@
 //! driver and its three cases below are the paired Tier-3 test (S-VOL-T3-04).
 //!
 //! Driving port: `VolumePoolProbe::probe` -> the returned `Arc<dyn VolumeBacking>` ->
-//! `VolumeBacking`. Sad paths are named example tests (Mandate 11). Pending until the
-//! guest-kit volume-pool step and `LvmVolumeBacking` exist. Every test is `#[ignore]`d for the
-//! one missing resource, the guest's pool; once the guest carries it, the probe scaffold still
-//! reports no pool, so each test fails at "the guest's pool is found" (the precondition the
-//! scaffold's body denies it). The `lvm` contract test uses no Overdrive code and is a guard
+//! `VolumeBacking`. Sad paths are named example tests (Mandate 11). Every test runs in the
+//! volume-pool guest and is pending on its `should_panic` marker until `LvmVolumeBacking`
+//! exists: the probe scaffold still reports no pool, so each test fails at "the guest's pool
+//! is found" (the precondition the scaffold's body denies it). The `lvm` contract test uses no Overdrive code and is a guard
 //! once the pool exists.
 //!
 //! Evidence tier: Tier 3, real guest kernel and real `lvm`, example-only.

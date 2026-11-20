@@ -688,13 +688,6 @@ impl NestedVmGuestResources {
     const VM_COHORT: Self = Self { memory_mib: VM_COHORT_OUTER_GUEST_MIB, vcpus: 8 };
 }
 
-/// A suite guest's size and, for a `volume-pool` guest, its backing disk template.
-struct GuestSize {
-    memory_mib: u32,
-    vcpus: u8,
-    volume_pool: Option<PathBuf>,
-}
-
 struct GuestRun {
     guest: crate::guest_kit::ScriptedGuest,
     module_paths: Vec<String>,
@@ -708,9 +701,8 @@ impl GuestRun {
         slot: u32,
         extra: Vec<GuestFile>,
         module_paths: Vec<String>,
-        size: &GuestSize,
+        boot: &ScriptedBootExtra,
     ) -> Result<Self, GuestKitError> {
-        let GuestSize { memory_mib, vcpus, volume_pool } = size;
         let staging = default_staging_root();
         let work = WorkDir::create(&staging, &format!("fwd-suite-{name}"))?;
         let image = kit.image(
@@ -723,19 +715,11 @@ impl GuestRun {
                 extra,
             },
         )?;
-        let image = match volume_pool {
-            Some(template) => image.with_volume_pool(template.clone()),
-            None => image,
-        };
         let guest = kit.boot_scripted_with(
             &image,
             FWD_GUEST_BOUNDARY.raw(slot),
             &work.path().join("run"),
-            &ScriptedBootExtra {
-                cmdline: Vec::new(),
-                memory_mib: Some(*memory_mib),
-                vcpus: Some(*vcpus),
-            },
+            boot,
         )?;
         Ok(Self { guest, module_paths, _work: work })
     }
@@ -2473,7 +2457,12 @@ fn boot_group_guest(
         plan.cid,
         std::mem::take(&mut plan.extra),
         std::mem::take(&mut plan.module_paths),
-        &GuestSize { memory_mib: plan.memory_mib, vcpus: plan.vcpus, volume_pool },
+        &ScriptedBootExtra {
+            cmdline: Vec::new(),
+            memory_mib: Some(plan.memory_mib),
+            vcpus: Some(plan.vcpus),
+            volume_pool,
+        },
     )
     .map_err(|error| NextestDispatchFailure::GuestExecution(format!("{error:?}")))?;
     let booted = started.elapsed();

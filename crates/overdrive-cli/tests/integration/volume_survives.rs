@@ -16,12 +16,11 @@
 //! the device back from the host with direct I/O (the volume is only read there; the VMM holds
 //! the writer claim), so what survives is observed in the volume itself, never in guest-reported state.
 //!
-//! Pending until the guest-kit volume-pool step (the profile's provisioning) and the launch
-//! path land. Every test is `#[ignore]`d for the one missing resource, the guest's pool, which
-//! the profile does not carry until prerequisite 1. Once it does, the spec carries an unknown
-//! key and the deploy is refused, so each test fails at "a VM workload that declares
-//! [vm.volume] must deploy" until the spec surface lands; its marker then moves to the
-//! assertion the journey makes (the records read back from the device).
+//! Every test runs in the volume-pool guest and is pending on its `should_panic` marker until
+//! the spec surface and launch path land. The spec carries an unknown key and the deploy is
+//! refused, so each test fails at "a VM workload that declares [vm.volume] must deploy"; its
+//! marker then moves to the assertion the journey makes (the records read back from the
+//! device).
 //!
 //! Evidence tier: Tier 3, real guest kernel, real VMM, example-only, one named test per
 //! scenario (Mandate 11). Placement: `guest = "cgroup-default", profile = "volume-pool"`.
