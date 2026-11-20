@@ -646,6 +646,25 @@ async fn convergence_owner_defers_no_action_retry_before_deadline() {
     server.shutdown(Duration::from_secs(1)).await.unwrap();
 }
 
+/// Wait for the boot resync pass to finish before an effect window opens.
+/// The convergence loop admits `vm-reclamation` / `node/local` on its first
+/// iteration, after `run_server_with_obs_and_driver` has already returned; a
+/// trace cursor taken earlier would count that admission as part of the effect.
+async fn settle_boot_resync(clock: &SimClock, seed: u64, boot_cursor: usize) {
+    for _ in 0..100 {
+        advance(clock, seed).await;
+        let completed =
+            evaluation_keys(&trace_since(boot_cursor), "convergence.evaluation.completed");
+        if completed
+            .iter()
+            .any(|(reconciler, target, _)| reconciler == "vm-reclamation" && target == "node/local")
+        {
+            return;
+        }
+    }
+    panic!("seed={seed}: boot resync pass for vm-reclamation node/local never completed");
+}
+
 /// Drive the existing production owner with distinct public workload targets.
 /// The semaphore substitutes only external Driver latency; admission, pending
 /// coalescing, storage, HTTP owners, and shutdown are the real composition.
@@ -674,6 +693,7 @@ async fn capacity_case(effect: Effect, held: usize, close_admission: bool) {
         vsock_ports: NodeVsockPortConfig::kernel_assigned(),
         ..ServerConfig::new()
     };
+    let boot_cursor = trace_cursor();
     let boot = sim_boot(&config, &clock, obs.clone());
     let wiring = overdrive_core::guest_network::GuestNetworkExecWiring::new(clock.clone());
     let server = run_server_with_obs_and_driver(
@@ -687,6 +707,7 @@ async fn capacity_case(effect: Effect, held: usize, close_admission: bool) {
     .unwrap();
     let base = format!("https://localhost:{}", server.local_addr().await.unwrap().port());
     let client = client(&config_dir);
+    settle_boot_resync(&clock, seed, boot_cursor).await;
     let trace_before_effect = (effect == Effect::Start).then(trace_cursor);
     for index in 0..held {
         submit(&client, &base, &format!("slow{index}")).await;
