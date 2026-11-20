@@ -33,6 +33,7 @@ use crate::traits::driver::{
     ConfinementControl, DriverStartClass, DriverStartFailure, VmStartFailure,
 };
 use crate::traits::observation_store::{AllocState, AllocStatusRow};
+use crate::volume::VolumeUnavailableCause;
 
 /// Structured reason for a lifecycle transition.
 ///
@@ -260,7 +261,7 @@ pub enum TransitionReason {
     /// the allocation reached Running.
     VmGuestCommandDispatchFailed { detail: String },
     /// The workload's volume could not be attached (ADR-0317, ADR-0318).
-    VmVolumeUnavailable { cause: crate::volume::VolumeUnavailableCause },
+    VmVolumeUnavailable { cause: VolumeUnavailableCause },
 }
 
 /// The total, pure driver-start conversion (ADR-0032 §4, ADR-0083 §D5).
@@ -320,9 +321,8 @@ impl From<&DriverStartFailure> for TransitionReason {
                 VmStartFailure::GuestCommandDispatchFailed { detail } => {
                     Self::VmGuestCommandDispatchFailed { detail: detail.clone() }
                 }
-                // RED scaffold: the typed mapping lands in DELIVER (ADR-0318).
-                VmStartFailure::VolumeUnavailable { .. } => {
-                    Self::DriverInternalError { detail: failure.detail.clone() }
+                VmStartFailure::VolumeUnavailable { cause } => {
+                    Self::VmVolumeUnavailable { cause: cause.clone() }
                 }
             },
             // The ONLY unknown fallback, for both an unmapped driver and
@@ -330,6 +330,31 @@ impl From<&DriverStartFailure> for TransitionReason {
             DriverStartClass::Unclassified { .. } => {
                 Self::DriverInternalError { detail: failure.detail.clone() }
             }
+        }
+    }
+}
+
+/// Operator wording for a volume-unavailable cause: the volume, the cause and the remedy.
+fn volume_unavailable_wording(cause: &VolumeUnavailableCause) -> String {
+    match cause {
+        VolumeUnavailableCause::PoolAbsent => {
+            "VM volume unavailable: no volume pool is composed on this node; \
+             create the volume pool on the node, then redeploy"
+                .to_owned()
+        }
+        VolumeUnavailableCause::InsufficientSpace { needed, free } => format!(
+            "VM volume unavailable: the volume needs {needed} but the pool has only {free} free; \
+             free pool space or declare a smaller volume size, then redeploy",
+        ),
+        VolumeUnavailableCause::PoolCommandFailed { operation } => format!(
+            "VM volume unavailable: the volume pool {} operation failed; \
+             check the pool's health on the node, then redeploy",
+            operation.as_str(),
+        ),
+        VolumeUnavailableCause::Held => {
+            "VM volume unavailable: the volume is still held by another launch past the wait bound; \
+             stop the workload holding the volume, then redeploy"
+                .to_owned()
         }
     }
 }
@@ -975,8 +1000,7 @@ impl TransitionReason {
             Self::VmGuestCommandDispatchFailed { detail } => {
                 format!("VM guest command dispatch failed: {detail}")
             }
-            // RED scaffold: the operator wording (volume, cause, remedy) lands in DELIVER.
-            Self::VmVolumeUnavailable { .. } => "VM volume unavailable".to_owned(),
+            Self::VmVolumeUnavailable { cause } => volume_unavailable_wording(cause),
         }
     }
 

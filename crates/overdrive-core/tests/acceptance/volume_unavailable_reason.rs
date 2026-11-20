@@ -25,7 +25,6 @@ fn failure(cause: VolumeUnavailableCause) -> DriverStartFailure {
 /// No volume pool on the node is recorded as the typed volume reason.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "a pool-absent start failure must map to VmVolumeUnavailable")]
 fn pool_absent_maps_to_the_typed_volume_reason() {
     let reason = TransitionReason::from(&failure(VolumeUnavailableCause::PoolAbsent));
     assert!(
@@ -40,7 +39,6 @@ fn pool_absent_maps_to_the_typed_volume_reason() {
 /// A claim held past the bound maps to the typed volume reason.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "a held-claim start failure must map to VmVolumeUnavailable")]
 fn held_maps_to_the_typed_volume_reason() {
     let reason = TransitionReason::from(&failure(VolumeUnavailableCause::Held));
     assert!(
@@ -55,7 +53,6 @@ fn held_maps_to_the_typed_volume_reason() {
 /// The operator reads the volume, the cause and the remedy.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "the volume wording must name the cause")]
 fn the_operator_wording_names_the_volume_the_cause_and_the_remedy() {
     let held = TransitionReason::VmVolumeUnavailable { cause: VolumeUnavailableCause::Held };
     let absent =
@@ -83,7 +80,6 @@ fn guard_a_volume_failure_is_a_failure() {
 /// declared size and the free space the operator needs to compare.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "an insufficient-space start failure must map to VmVolumeUnavailable")]
 fn insufficient_space_maps_to_the_typed_volume_reason_keeping_both_figures() {
     let needed = volume_size_gib(40);
     let free = ByteCount::new(4 * 1024 * 1024);
@@ -108,7 +104,6 @@ proptest! {
     /// S-VOL-26: a command failure keeps the operation that was in progress, whichever it was.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[should_panic(expected = "a command-failure start failure must map to VmVolumeUnavailable")]
     fn a_command_failure_maps_to_the_typed_volume_reason_keeping_the_operation(
         operation in prop_oneof![
             Just(VolumeOperation::Report),
@@ -132,7 +127,6 @@ proptest! {
 /// causes name the figures or the operation the operator acts on.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "the space cause wording must name the declared size and the free bytes")]
 fn the_space_and_command_causes_name_their_figures_and_operation() {
     let space = TransitionReason::VmVolumeUnavailable {
         cause: VolumeUnavailableCause::InsufficientSpace {
