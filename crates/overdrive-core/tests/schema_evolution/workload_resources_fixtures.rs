@@ -51,9 +51,9 @@ fn intent_resources(latest: &WorkloadIntentLatest) -> Value {
 #[test]
 #[should_panic(expected = "the archived resources must read back as canonical strings")]
 fn the_workload_intent_fixture_decodes_unchanged_and_reads_back_canonically() {
-    // Only the fixture its owning file still asserts byte-for-byte against the current layout is
-    // decoded; the older `FIXTURE_V1*` consts there are `#[allow(dead_code)]` history.
-    let name = "CURRENT_LAYOUT_V1_SERVICE_GUEST_LISTENERS";
+    // The frozen V1 fixture of a service with guest listeners is decoded through the current
+    // envelope (V1 is up-converted to the latest payload), so old stored bytes are what is checked.
+    let name = "FIXTURE_V1_SERVICE_GUEST_LISTENERS";
     let hex = literal(WORKLOAD_INTENT_FIXTURES, name);
     let latest = decode_envelope_v_latest::<WorkloadIntentEnvelope>(&hex);
     assert_eq!(
@@ -68,7 +68,7 @@ fn the_workload_intent_fixture_decodes_unchanged_and_reads_back_canonically() {
 #[test]
 #[should_panic(expected = "the archived resources must read back as canonical strings")]
 fn the_service_spec_fixture_decodes_unchanged_and_reads_back_canonically() {
-    let hex = literal(SERVICE_SPEC_FIXTURES, "CURRENT_LAYOUT_V1_GUEST_LISTENERS");
+    let hex = literal(SERVICE_SPEC_FIXTURES, "FIXTURE_V1_GUEST_LISTENERS");
     let latest = decode_envelope_v_latest::<ServiceSpecEnvelope>(&hex);
     assert_eq!(
         serde_json::to_value(&latest.resources).expect("the decoded resources serialise"),
