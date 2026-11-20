@@ -259,6 +259,8 @@ pub enum TransitionReason {
     /// READY arrived but the guest command could not be delivered before
     /// the allocation reached Running.
     VmGuestCommandDispatchFailed { detail: String },
+    /// The workload's volume could not be attached (ADR-0317, ADR-0318).
+    VmVolumeUnavailable { cause: crate::volume::VolumeUnavailableCause },
 }
 
 /// The total, pure driver-start conversion (ADR-0032 §4, ADR-0083 §D5).
@@ -317,6 +319,10 @@ impl From<&DriverStartFailure> for TransitionReason {
                 }
                 VmStartFailure::GuestCommandDispatchFailed { detail } => {
                     Self::VmGuestCommandDispatchFailed { detail: detail.clone() }
+                }
+                // RED scaffold: the typed mapping lands in DELIVER (ADR-0318).
+                VmStartFailure::VolumeUnavailable { .. } => {
+                    Self::DriverInternalError { detail: failure.detail.clone() }
                 }
             },
             // The ONLY unknown fallback, for both an unmapped driver and
@@ -969,6 +975,8 @@ impl TransitionReason {
             Self::VmGuestCommandDispatchFailed { detail } => {
                 format!("VM guest command dispatch failed: {detail}")
             }
+            // RED scaffold: the operator wording (volume, cause, remedy) lands in DELIVER.
+            Self::VmVolumeUnavailable { .. } => "VM volume unavailable".to_owned(),
         }
     }
 
@@ -1007,7 +1015,8 @@ impl TransitionReason {
             | Self::VmKernelFormatUnsupported { .. }
             | Self::VmConfinementUnavailable { .. }
             | Self::VmGuestExitUnreported { .. }
-            | Self::VmGuestCommandDispatchFailed { .. } => true,
+            | Self::VmGuestCommandDispatchFailed { .. }
+            | Self::VmVolumeUnavailable { .. } => true,
         }
     }
 }

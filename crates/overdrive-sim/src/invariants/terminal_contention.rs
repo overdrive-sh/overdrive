@@ -332,6 +332,7 @@ fn vm_spec(alloc: &AllocationId, workload: &WorkloadId) -> AllocationSpec {
         alloc: alloc.clone(),
         identity: SpiffeId::for_allocation(workload, alloc),
         driver: DriverPayload::Vm(VmPayload {
+            volume: None,
             command: "/bin/true".to_owned(),
             args: Vec::new(),
             kernel: PathBuf::from("/sim/kernel"),
@@ -440,7 +441,7 @@ async fn drive(seed: u64) -> Result<Evidence, String> {
     let driver = Arc::new(SimDriver::with_clock(DriverType::Vm, clock.clone()));
     let spec = vm_spec(&alloc, &workload);
     driver
-        .start(&spec)
+        .start(&spec, &crate::adapters::SimLaunchSupersession::new())
         .await
         .map_err(|error| format!("seed supervised SimDriver allocation: {error}"))?;
     driver.inject_exit_after(

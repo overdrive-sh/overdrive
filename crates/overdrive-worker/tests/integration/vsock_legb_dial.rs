@@ -450,6 +450,7 @@ pub(super) mod node {
             alloc: alloc.clone(),
             identity: SERVER_SPIFFE.parse().expect("valid spiffe id"),
             driver: DriverPayload::Vm(VmPayload {
+                volume: None,
                 command: "/bin/true".to_owned(),
                 args: vec![],
                 kernel: "/nonexistent/kernel".into(),

@@ -44,7 +44,7 @@ use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::reconcilers::{Action, TickContext};
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverStartClass,
-    DriverStartFailure, DriverType, Resources, VmStartFailure,
+    DriverStartFailure, DriverType, LaunchSupersession, Resources, VmStartFailure,
 };
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore,
@@ -72,7 +72,11 @@ impl Driver for AlwaysOkDriver {
         DriverType::Vm
     }
 
-    async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
+    async fn start(
+        &self,
+        spec: &AllocationSpec,
+        _supersession: &dyn LaunchSupersession,
+    ) -> Result<AllocationHandle, DriverError> {
         Ok(AllocationHandle { alloc: spec.alloc.clone(), pid: None })
     }
 
@@ -113,7 +117,11 @@ impl Driver for BarrieredOwnerDriver {
         DriverType::Vm
     }
 
-    async fn start(&self, _spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
+    async fn start(
+        &self,
+        _spec: &AllocationSpec,
+        _supersession: &dyn LaunchSupersession,
+    ) -> Result<AllocationHandle, DriverError> {
         if self.phase.compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
             self.entered.notify_one();
             self.release.acquire().await.expect("barrier remains open").forget();
@@ -164,7 +172,11 @@ impl Driver for FailingDriver {
         DriverType::Vm
     }
 
-    async fn start(&self, _spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
+    async fn start(
+        &self,
+        _spec: &AllocationSpec,
+        _supersession: &dyn LaunchSupersession,
+    ) -> Result<AllocationHandle, DriverError> {
         Err(DriverError::StartRejected { failure: self.failure.clone() })
     }
 
@@ -214,6 +226,7 @@ fn build_spec(alloc_id: &AllocationId, workload_id: &WorkloadId) -> AllocationSp
         identity,
         driver: overdrive_core::traits::driver::DriverPayload::Vm(
             overdrive_core::traits::driver::VmPayload {
+                volume: None,
                 command: "/bin/true".to_owned(),
                 args: vec![],
                 kernel: PathBuf::from("/nonexistent/kernel"),

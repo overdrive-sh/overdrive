@@ -206,4 +206,10 @@ mod acceptance {
     // drain/force-abort runs over `SimGatewayRelay` (pending DELIVER
     // kernel-relay-exchange-driver).
     mod gateway_relay_exchange;
+
+    // node-local-persistent-volume (GH #348): the VolumeBacking port contract on the sim twin.
+    mod sim_volume_backing_contract;
+    // node-local-persistent-volume (GH #348): the three seeded volume launch invariants through
+    // the DST harness (pending DELIVER: the volume launch path and `SimVolumeBacking`).
+    mod volume_launch_invariants;
 }

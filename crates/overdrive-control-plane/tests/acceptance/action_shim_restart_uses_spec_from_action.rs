@@ -32,8 +32,8 @@ use overdrive_core::UnixInstant;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::reconcilers::{Action, TickContext};
 use overdrive_core::traits::driver::{
-    AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverType, Resources,
-    VmPayload,
+    AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverType,
+    LaunchSupersession, Resources, VmPayload,
 };
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore,
@@ -69,7 +69,11 @@ impl Driver for RecordingDriver {
         DriverType::Vm
     }
 
-    async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
+    async fn start(
+        &self,
+        spec: &AllocationSpec,
+        _supersession: &dyn LaunchSupersession,
+    ) -> Result<AllocationHandle, DriverError> {
         self.spawned_specs.lock().expect("mutex").push(spec.clone());
         Ok(AllocationHandle { alloc: spec.alloc.clone(), pid: None })
     }
@@ -150,6 +154,7 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
         alloc: successor_id,
         identity,
         driver: overdrive_core::traits::driver::DriverPayload::Vm(VmPayload {
+            volume: None,
             command: "/opt/x/y".to_string(),
             args: vec!["--mode=fast".to_string()],
             kernel: PathBuf::from("/nonexistent/kernel"),

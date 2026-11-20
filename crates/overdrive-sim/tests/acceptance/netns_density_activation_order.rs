@@ -411,8 +411,12 @@ impl Driver for RecordingDriver {
         self.inner.r#type()
     }
 
-    async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
-        self.inner.start(spec).await
+    async fn start(
+        &self,
+        spec: &AllocationSpec,
+        supersession: &dyn overdrive_core::traits::LaunchSupersession,
+    ) -> Result<AllocationHandle, DriverError> {
+        self.inner.start(spec, supersession).await
     }
 
     async fn release_for_exit_emission(&self, handle: &AllocationHandle) {
@@ -704,6 +708,7 @@ impl Fixture {
             ))
             .expect("SPIFFE ID"),
             driver: DriverPayload::Vm(VmPayload {
+                volume: None,
                 command: "/bin/sleep".to_owned(),
                 args: vec!["3600".to_owned()],
                 kernel: PathBuf::from("/nd295/kernel"),

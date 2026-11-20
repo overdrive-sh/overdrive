@@ -9,7 +9,7 @@ use overdrive_core::aggregate::{
     IntentKey, Job, Listener, Node, NodeSpecInput, ProbeDescriptor, Vm, WorkloadDriver,
     WorkloadIntent, WorkloadKind,
 };
-use overdrive_core::guest_network::{GuestAttachmentOccupancy, MAX_GUEST_NETWORK_ATTACHMENTS};
+use overdrive_core::guest_network::GuestAttachmentOccupancy;
 use overdrive_core::id::{AllocationId, ContentHash, CorrelationKey, NodeId, WorkloadId};
 use overdrive_core::observation::{ProbeIdx, ProbeRole, ProbeStatus};
 use overdrive_core::reconcilers::{HydrateError, HydrationContext};
@@ -38,7 +38,7 @@ pub const RESTART_BACKOFF_CEILING: u32 = 5;
 /// generation_replacement` (RESTART-SSOT, GH #324). `attempts` is
 /// `view.restart_counts[failed.alloc_id]` (0 when absent); `platform_reclaimed`
 /// is [`is_platform_reclaimed`] of the failed row; `generation_replacement` is
-/// `view.observed_generation < desired.generation`. `true`: the reconciler
+/// [`generation_replacement_pending`]. `true`: the reconciler
 /// places a successor (backoff and the guest-attachment cap may delay it, never
 /// change it). `false`: the restart budget is spent and the reconciler
 /// finalizes the allocation. This is the only place the ceiling is compared.
@@ -363,7 +363,8 @@ impl Reconciler for WorkloadLifecycle {
             }
             let _job = desired.job.as_ref()?;
             let allocs: Vec<&AllocStatusRow> = actual.allocations.values().collect();
-            let restart_pending = view.observed_generation < desired.generation;
+            let restart_pending =
+                restart_pending_until_successor_observed(view, desired.generation);
 
             if desired.workload_kind == WorkloadKind::Job
                 && !restart_pending
@@ -448,7 +449,7 @@ fn pending_restart_owner<'a>(
 
     let allocations: Vec<&AllocStatusRow> = actual.allocations.values().collect();
     let current = current_alloc(&allocations)?;
-    let generation_replacement = view.observed_generation < desired.generation;
+    let generation_replacement = restart_pending_until_successor_observed(view, desired.generation);
     if desired.workload_kind == WorkloadKind::Job
         && !generation_replacement
         && matches!(
@@ -472,7 +473,7 @@ fn pending_restart_owner<'a>(
             .last_failure_seen_at
             .get(&current.alloc_id)
             .is_some_and(|seen_at| tick.now_unix < restart_retry_deadline(*seen_at, attempts));
-    if restart_not_due || actual.guest_attachments.occupancy.held < MAX_GUEST_NETWORK_ATTACHMENTS {
+    if restart_not_due || !actual.guest_attachments.occupancy.at_cap() {
         return Some(&current.alloc_id);
     }
     None
@@ -922,7 +923,8 @@ impl WorkloadLifecycle {
                 // terminal-attempt fence or the running-origin replacement
                 // branch consumes it. A newer desired generation starts a new
                 // attempt; equal generations keep every current-attempt veto.
-                let restart_pending = view.observed_generation < desired.generation;
+                let restart_pending =
+                    restart_pending_until_successor_observed(view, desired.generation);
 
                 // P-GTI-ILLEGAL-07: a Job's durable terminal claim fences the
                 // attempt identity even if a late READY/DISPATCH-shaped row tries
@@ -973,7 +975,7 @@ impl WorkloadLifecycle {
                 // fresh placement, so the new instance is a genuine
                 // REPLACEMENT (end-then-bring-up). Emit one
                 // `StopAllocation { terminal: Stopped { by: Operator } }`
-                // for the current Running instance. `observed_generation`
+                // for the current Running instance. `issued_generation`
                 // is NOT stamped on this stop tick — stamping here would
                 // re-arm the veto before the fresh instance exists,
                 // stranding the workload Terminated (the load-bearing
@@ -1295,7 +1297,7 @@ impl WorkloadLifecycle {
                     // At the node cap, the row-neutral reclaim pass below
                     // owns a leased predecessor. Without a lease, placement
                     // waits for a later occupancy change.
-                    if actual.guest_attachments.occupancy.held >= MAX_GUEST_NETWORK_ATTACHMENTS {
+                    if actual.guest_attachments.occupancy.at_cap() {
                         return (Vec::new(), view.clone());
                     }
                     let Some(attempt) = next_allocation_attempt(&allocs_vec, view) else {
@@ -1305,9 +1307,9 @@ impl WorkloadLifecycle {
                     let action =
                         restart_allocation_action(job, desired, failed, successor_alloc_id.clone());
                     let mut next_view = view.clone();
-                    if generation_replacement {
-                        next_view.observed_generation = desired.generation;
-                    }
+                    next_view
+                        .issued_generation
+                        .insert(successor_alloc_id.clone(), desired.generation);
                     let predecessor_attempts =
                         view.restart_counts.get(&failed.alloc_id).copied().unwrap_or(0);
                     let successor_attempts = if generation_replacement || platform_reclaimed {
@@ -1381,6 +1383,7 @@ impl WorkloadLifecycle {
                         let driver = match &job.driver {
                             WorkloadDriver::Vm(Vm { command, args, kernel, rootfs }) => {
                                 DriverPayload::Vm(VmPayload {
+                                    volume: None,
                                     command: command.clone(),
                                     args: args.clone(),
                                     kernel: PathBuf::from(kernel),
@@ -1419,7 +1422,7 @@ impl WorkloadLifecycle {
                         // (ADR-0073 § 5, R3/R4): the placement tick is the
                         // ONLY tick that stamps. When `restart_pending`
                         // (this fresh placement is satisfying a pending
-                        // generation), stamp `observed_generation =
+                        // generation), record `issued_generation[fresh] =
                         // desired.generation` — NOT `observed + 1`. The
                         // `= desired` stamp is what makes N pre-placement
                         // restarts coalesce into ONE placement
@@ -1429,13 +1432,11 @@ impl WorkloadLifecycle {
                         // `observed == desired` and does not re-place
                         // (S-BIR-COALESCE-NO-REPLAY). When NOT
                         // `restart_pending` (an ordinary first placement /
-                        // resubmit-after-GC), `observed_generation` is left
+                        // resubmit-after-GC), `issued_generation` is left
                         // unchanged.
                         let mut next_view = view.clone();
-                        next_view.restart_counts.insert(alloc_id, 0);
-                        if restart_pending {
-                            next_view.observed_generation = desired.generation;
-                        }
+                        next_view.restart_counts.insert(alloc_id.clone(), 0);
+                        next_view.issued_generation.insert(alloc_id, desired.generation);
                         (vec![action], next_view)
                     },
                 )
@@ -1686,6 +1687,7 @@ fn restart_allocation_action(
     let identity = SpiffeId::for_allocation(&job.id, &successor_alloc_id);
     let driver = match &job.driver {
         WorkloadDriver::Vm(Vm { command, args, kernel, rootfs }) => DriverPayload::Vm(VmPayload {
+            volume: None,
             command: command.clone(),
             args: args.clone(),
             kernel: PathBuf::from(kernel),
@@ -1705,6 +1707,65 @@ fn restart_allocation_action(
         },
         kind: desired.workload_kind,
     }
+}
+
+/// Whether the committed generation still has no observed successor (ADR-0326).
+///
+/// True iff `current` is `Some(row)`, `row` is not a finished Job row
+/// (`row.kind == WorkloadKind::Job && row.terminal.is_some()`, H1), and
+/// `view.issued_generation[row.alloc_id]` (absent reads `0`) is less than
+/// `desired_generation`. With no row it is false. It is the only definition of
+/// `restart_pending`.
+///
+/// SCAFFOLD: true — DISTILL RED scaffold. The reconciler still decides with
+/// [`restart_pending_until_successor_observed`] until DELIVER replaces that
+/// stamp-on-emit rule with this function.
+#[must_use]
+pub fn generation_replacement_pending(
+    view: &WorkloadLifecycleView,
+    desired_generation: u64,
+    current: Option<&AllocStatusRow>,
+) -> bool {
+    let _ = (view, desired_generation, current);
+    panic!("RED scaffold: generation_replacement_pending is not implemented (ADR-0326)")
+}
+
+/// Whether this workload's start is blocked only by guest-network capacity
+/// (ADR-0327, H2): the one predicate the reconciler's rules and
+/// `overdrive workload describe` share.
+///
+/// True iff the kind is not a Schedule, the workload is to run, no active row
+/// is `Running`, the current row is not `Draining`, the node's guest-network
+/// attachments are at the cap, the current row (if any) holds no lease, and
+/// the class of the current row would otherwise be (re)started; the arms are
+/// in `feature-delta.md` § "Operator surface: a workload waiting for capacity".
+///
+/// SCAFFOLD: true — DISTILL RED scaffold.
+#[must_use]
+pub fn start_blocked_only_by_capacity(
+    kind: WorkloadKind,
+    run_desired: bool,
+    rows: &[&AllocStatusRow],
+    view: &WorkloadLifecycleView,
+    desired_generation: u64,
+    observation: &overdrive_core::traits::GuestAttachmentObservation,
+) -> bool {
+    let _ = (kind, run_desired, rows, view, desired_generation, observation);
+    panic!("RED scaffold: start_blocked_only_by_capacity is not implemented (ADR-0327)")
+}
+
+/// The stamp-on-emit restart rule the reconciler decides with today: a
+/// generation is pending until some issued allocation serves it.
+///
+/// SCAFFOLD: true — DISTILL keeps the pre-ADR-0326 decision (the largest
+/// `issued_generation` entry equals the old `issued_generation` stamp) so the
+/// existing reconciler behaviour is unchanged until DELIVER switches every call
+/// site to [`generation_replacement_pending`].
+fn restart_pending_until_successor_observed(
+    view: &WorkloadLifecycleView,
+    desired_generation: u64,
+) -> bool {
+    view.issued_generation.values().copied().max().unwrap_or(0) < desired_generation
 }
 
 /// Whether `WorkloadLifecycle` places a successor (`RestartAllocation`) for
@@ -1970,9 +2031,9 @@ pub struct WorkloadLifecycleState {
     /// (absent ⇒ 0). Bumped by `overdrive workload restart` (the
     /// atomic `TxnOp::IncrementU64` bump-and-clear). Per ADR-0073
     /// § "The six pinned signatures" item 5: the reconciler places a
-    /// fresh instance when `view.observed_generation < desired.generation`
+    /// fresh instance when `the largest issued_generation entry < desired.generation`
     /// (`restart_pending`) and, on the placement tick, stamps
-    /// `observed_generation = desired.generation` so subsequent ticks
+    /// `issued_generation[fresh] = desired.generation` so subsequent ticks
     /// see `observed == desired` and the current-instance-scoped veto
     /// re-arms for the fresh instance.
     pub generation: u64,
@@ -2138,6 +2199,7 @@ pub fn allocation_spec_for_live_intent(
     };
     let driver = match driver {
         WorkloadDriver::Vm(Vm { command, args, kernel, rootfs }) => DriverPayload::Vm(VmPayload {
+            volume: None,
             command: command.clone(),
             args: args.clone(),
             kernel: PathBuf::from(kernel),
@@ -2183,18 +2245,15 @@ pub struct WorkloadLifecycleView {
     /// evolution"); the semantics are unchanged.
     #[serde(default, alias = "released_for_terminal")]
     pub released_for_deletion: BTreeSet<overdrive_core::id::ContentHash>,
-    /// The generation this reconciler has already placed a fresh
-    /// instance for. Persisted *input* per `.claude/rules/development.md`
-    /// § "Persist inputs, not derived state": the reconciler places when
-    /// `observed_generation < desired.generation` and stamps
-    /// `observed_generation = desired.generation` once it does (on the
-    /// placement tick only — never the stop tick). The `= desired` stamp
-    /// (NOT `observed + 1`) is what makes N pre-placement restarts
-    /// coalesce into ONE placement by construction (ADR-0073 § 5).
-    /// Additive `#[serde(default)]` CBOR field — no rkyv envelope bump
-    /// (per § "Reconciler I/O → Schema evolution").
+    /// The desired generation each issued allocation id serves (ADR-0326).
+    /// Written at the two issuing sites (the restart arm and the placement
+    /// arm) in the same `next_view` as the id's `restart_counts` entry and with
+    /// the same lifetime; the value is `desired.generation` at issue in every
+    /// case. A persisted *input* per `.claude/rules/development.md` § "Persist
+    /// inputs, not derived state": it records what was issued, never that a
+    /// launch happened. Additive `#[serde(default)]` CBOR field.
     #[serde(default)]
-    pub observed_generation: u64,
+    pub issued_generation: BTreeMap<AllocationId, u64>,
     /// Network-reclaim attempts per allocation (D-295-R11). Persisted input
     /// of the reclaim backoff; the deadline is recomputed every tick from
     /// this and [`Self::reclaim_emitted_at`] against the live backoff policy.
@@ -2630,7 +2689,7 @@ mod service_vip_release_emission_tests {
             restart_counts: BTreeMap::new(),
             last_failure_seen_at: BTreeMap::new(),
             released_for_deletion: released,
-            observed_generation: 0,
+            issued_generation: BTreeMap::new(),
             reclaim_attempts: BTreeMap::new(),
             reclaim_emitted_at: BTreeMap::new(),
         };
@@ -2977,7 +3036,7 @@ mod eligibility_tests {
                 seen_at,
             )]),
             released_for_deletion: BTreeSet::new(),
-            observed_generation: 0,
+            issued_generation: BTreeMap::new(),
             reclaim_attempts: BTreeMap::new(),
             reclaim_emitted_at: BTreeMap::new(),
         };
@@ -3226,7 +3285,7 @@ mod netns_density_lifecycle_fixture {
             restart_counts: issued.into_iter().collect(),
             last_failure_seen_at: failure.into_iter().collect(),
             released_for_deletion: BTreeSet::new(),
-            observed_generation: 0,
+            issued_generation: BTreeMap::new(),
             reclaim_attempts: BTreeMap::new(),
             reclaim_emitted_at: BTreeMap::new(),
         }
@@ -4132,7 +4191,7 @@ mod restart_ssot_agreement {
             rows.push(current.clone());
             let issued = rows.iter().map(|r| (r.alloc_id.clone(), 0)).chain([(current.alloc_id.clone(), attempts)]);
             let mut lifecycle_view = view(issued, Some((current.alloc_id.clone(), at(1_000))));
-            lifecycle_view.observed_generation = 0;
+            lifecycle_view.issued_generation.clear();
             let (mut desired, actual) = states(intent, kind, rows, &observation(0, 0, std::collections::BTreeMap::new()));
             desired.generation = u64::from(generation_replacement);
             let run_desired = desired.job.is_some() && !desired.desired_to_stop;

@@ -51,7 +51,8 @@ use overdrive_core::id::{AllocationId, NodeId, SpiffeId, WorkloadId};
 use overdrive_core::reconcilers::{Action, TickContext};
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverPayload,
-    DriverStartClass, DriverStartFailure, DriverType, Resources, VmPayload, VmStartFailure,
+    DriverStartClass, DriverStartFailure, DriverType, LaunchSupersession, Resources, VmPayload,
+    VmStartFailure,
 };
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::mtls_resolve::{MtlsResolution, MtlsResolve};
@@ -137,7 +138,11 @@ impl Driver for RecordingVmDriver {
         DriverType::Vm
     }
 
-    async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
+    async fn start(
+        &self,
+        spec: &AllocationSpec,
+        _supersession: &dyn LaunchSupersession,
+    ) -> Result<AllocationHandle, DriverError> {
         self.started.lock().push(spec.clone());
         match *self.script.lock() {
             StartScript::Ready => {
@@ -387,6 +392,7 @@ fn spec(name: &str) -> AllocationSpec {
         identity: SpiffeId::new(&format!("spiffe://overdrive.local/workload/nd295/alloc/{name}"))
             .expect("SPIFFE ID"),
         driver: DriverPayload::Vm(VmPayload {
+            volume: None,
             command: "/bin/true".to_owned(),
             args: Vec::new(),
             kernel: PathBuf::from("/nd295/kernel"),

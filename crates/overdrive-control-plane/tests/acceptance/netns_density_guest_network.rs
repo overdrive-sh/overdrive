@@ -44,7 +44,7 @@ use overdrive_core::traits::IdentityRead;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverPayload,
-    DriverType, ExitEvent, ExitKind, Resources, VmPayload,
+    DriverType, ExitEvent, ExitKind, LaunchSupersession, Resources, VmPayload,
 };
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::mtls_enforcement::{MtlsEnforcement, MtlsLimits};
@@ -297,8 +297,12 @@ impl Driver for TraceDriver {
         self.inner.r#type()
     }
 
-    async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
-        self.inner.start(spec).await
+    async fn start(
+        &self,
+        spec: &AllocationSpec,
+        supersession: &dyn LaunchSupersession,
+    ) -> Result<AllocationHandle, DriverError> {
+        self.inner.start(spec, supersession).await
     }
 
     async fn release_for_exit_emission(&self, handle: &AllocationHandle) {
@@ -861,6 +865,7 @@ fn spec(name: &str) -> AllocationSpec {
         identity: SpiffeId::new(&format!("spiffe://overdrive.local/workload/nd295/alloc/{name}"))
             .expect("SPIFFE ID"),
         driver: DriverPayload::Vm(VmPayload {
+            volume: None,
             command: "/bin/true".to_owned(),
             args: Vec::new(),
             kernel: PathBuf::from("/conformance/kernel"),

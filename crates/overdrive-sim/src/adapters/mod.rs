@@ -116,7 +116,9 @@ pub mod vmm;
 // `vm_host_state_equivalence` structural guard (`overdrive-host` tests,
 // S-VM-91) drives both this and the host `RealVmHostState` adapter
 // through the same call sequence.
+pub mod launch_supersession;
 pub mod vm_host_state;
+pub mod volume_backing;
 
 pub use beacon_io::{SimBeaconIo, SimBeaconSocketObservation};
 pub use ca::{SimCa, SimCaFactory};
@@ -130,6 +132,7 @@ pub use flow_forwarder::{
 pub use guest_dns::{SimGuestDns, SimGuestDnsFactory, SimGuestDnsServeExit};
 pub use identity_read::SimIdentityRead;
 pub use kek::SimKek;
+pub use launch_supersession::SimLaunchSupersession;
 pub use mtls_enforcement::{ScriptedTrip, SimMtlsEnforcement, SimMtlsEnforcementFactory};
 pub use mtls_intercept::{
     SimAcceptScript, SimInterceptFault, SimInterceptListener, SimMtlsIntercept, SimSharedTable,

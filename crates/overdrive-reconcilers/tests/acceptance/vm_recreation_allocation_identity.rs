@@ -351,14 +351,14 @@ fn desired_generation_replacement_carries_policy_without_failure_charge() {
         let (mut desired, mut actual) = states(ComposedDriver::job(workload), [predecessor]);
         desired.generation = 1;
         actual.generation = 1;
-        let mut view = WorkloadLifecycleView { observed_generation: 0, ..Default::default() };
+        let mut view = WorkloadLifecycleView::default();
         view.restart_counts.insert(predecessor_id.clone(), 2);
         view.last_failure_seen_at.insert(predecessor_id.clone(), instant(10));
 
         let (actions, next) = reconcile(&desired, &actual, &view, 20);
 
         assert_restart_identity(driver, workload, &predecessor_id, &successor, &actions);
-        assert_eq!(next.observed_generation, 1);
+        assert_eq!(next.issued_generation.get(&successor), Some(&1));
         assert_eq!(next.restart_counts.get(&predecessor_id), Some(&2));
         assert_eq!(next.restart_counts.get(&successor), Some(&2));
         assert_eq!(next.last_failure_seen_at.get(&successor), Some(&instant(10)));

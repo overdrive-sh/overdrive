@@ -390,7 +390,11 @@ impl Driver for RecordingDriver {
         self.driver_type
     }
 
-    async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
+    async fn start(
+        &self,
+        spec: &AllocationSpec,
+        _supersession: &dyn overdrive_core::traits::LaunchSupersession,
+    ) -> Result<AllocationHandle, DriverError> {
         self.starts.lock().push(spec.alloc.clone());
         self.trace.lock().push(TraceEvent::Start(spec.alloc.clone()));
         // Retain a permit when the observer has not been polled yet. The
@@ -477,7 +481,11 @@ impl Driver for OwnerPathDriver {
         self.driver_type
     }
 
-    async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
+    async fn start(
+        &self,
+        spec: &AllocationSpec,
+        _supersession: &dyn overdrive_core::traits::LaunchSupersession,
+    ) -> Result<AllocationHandle, DriverError> {
         self.starts.lock().push(spec.alloc.clone());
         self.persistence_at_start.lock().push(self.view_persisted.load(Ordering::SeqCst));
         let behavior = self.behaviors.lock().pop_front();
@@ -574,6 +582,7 @@ fn tick() -> TickContext {
 
 fn payload(_driver_type: DriverType) -> DriverPayload {
     DriverPayload::Vm(VmPayload {
+        volume: None,
         command: "/sbin/workload".to_owned(),
         args: vec!["--serve".to_owned()],
         kernel: Path::new("/srv/vm/kernel").to_path_buf(),

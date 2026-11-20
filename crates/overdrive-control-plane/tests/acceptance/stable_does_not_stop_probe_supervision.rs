@@ -102,6 +102,7 @@ fn spec_with(alloc: &AllocationId, probe_descriptors: Vec<ProbeDescriptor>) -> A
         alloc: alloc.clone(),
         identity: SpiffeId::from_str("spiffe://overdrive.local/test/svc").expect("valid SpiffeId"),
         driver: DriverPayload::Vm(VmPayload {
+            volume: None,
             command: "/sbin/init".to_owned(),
             args: Vec::new(),
             kernel: "/kernel".into(),
@@ -209,6 +210,7 @@ async fn harness() -> Harness {
         },
         beacon,
         Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        None,
     ));
     let mut ports = VmDispatchPorts::sim(Arc::clone(&driver));
     ports.obs = Arc::clone(&obs);

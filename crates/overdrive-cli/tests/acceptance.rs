@@ -70,6 +70,9 @@ mod acceptance {
     // targets the typed `ServiceFailureReason` renderer).
     mod service_early_exit_render;
     mod workload_describe_startup_stop;
+    // node-local-persistent-volume (GH #348): the volume section of describe.
+    mod workload_describe_capacity_wait;
+    mod workload_describe_volume;
     // service-kind-vm-workloads (GH #257) — both existing Service deploy
     // lanes must project the parser-selected driver arm identically.
     mod service_kind_vm_workloads;

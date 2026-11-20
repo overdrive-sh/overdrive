@@ -61,6 +61,7 @@ async fn sim_driver_live_map_returns_to_zero_after_eight_start_stop_cycles() {
             alloc: alloc.clone(),
             identity,
             driver: DriverPayload::Vm(VmPayload {
+                volume: None,
                 command: "registry/livemap:1.0".to_owned(),
                 args: vec![],
                 kernel: PathBuf::from("/nonexistent/kernel"),
@@ -73,7 +74,10 @@ async fn sim_driver_live_map_returns_to_zero_after_eight_start_stop_cycles() {
             transport: None,
         };
 
-        let handle = driver.start(&spec).await.expect("start succeeds");
+        let handle = driver
+            .start(&spec, &overdrive_sim::adapters::SimLaunchSupersession::new())
+            .await
+            .expect("start succeeds");
         driver.stop(&handle).await.expect("stop succeeds");
     }
 

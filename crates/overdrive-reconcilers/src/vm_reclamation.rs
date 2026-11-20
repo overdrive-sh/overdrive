@@ -36,9 +36,7 @@ use overdrive_core::reconcilers::{HydrateError, HydrationContext};
 use overdrive_core::traits::driver::DriverType;
 use overdrive_core::traits::vm_host_state::VmHostObservation;
 
-use super::{
-    Action, Reconciler, ReconcilerName, TargetResource, TickContext,
-};
+use super::{Action, Reconciler, ReconcilerName, TargetResource, TickContext};
 
 // ---------------------------------------------------------------------------
 // SupervisionSet — the observed supervision discriminator (brief §105a.3)

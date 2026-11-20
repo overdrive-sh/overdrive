@@ -69,6 +69,7 @@ fn vm_spec(name: &str) -> AllocationSpec {
         alloc: aid(name),
         identity: SpiffeId::from_str("spiffe://overdrive.local/test/vm").expect("valid SpiffeId"),
         driver: DriverPayload::Vm(VmPayload {
+            volume: None,
             command: "/bin/true".to_owned(),
             args: vec![],
             kernel: PathBuf::from("/nonexistent/kernel"),
@@ -93,7 +94,10 @@ async fn vm_reclamation_hydrate_actual_projects_host_observation_and_supervision
 
     // --- the Vm driver: ONE live allocation supervised ---
     let vm_driver: Arc<SimDriver> = Arc::new(SimDriver::new(DriverType::Vm));
-    vm_driver.start(&vm_spec("alloc-live-0")).await.expect("Vm driver start");
+    vm_driver
+        .start(&vm_spec("alloc-live-0"), &overdrive_sim::adapters::SimLaunchSupersession::new())
+        .await
+        .expect("Vm driver start");
     let mut drivers = DriverRegistry::new();
     drivers.insert(Arc::clone(&vm_driver) as Arc<dyn Driver>);
 

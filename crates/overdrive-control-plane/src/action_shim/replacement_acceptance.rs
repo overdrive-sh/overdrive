@@ -47,7 +47,7 @@ use overdrive_core::public_ingress::{
 use overdrive_core::reconcilers::{Action, TickContext};
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverPayload,
-    DriverType, Resources, VmPayload,
+    DriverType, LaunchSupersession, Resources, VmPayload,
 };
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::mtls_enforcement::{EnforcedConnectionId, MtlsEnforcementError};
@@ -186,7 +186,11 @@ impl Driver for RecordingDriver {
         self.driver_type
     }
 
-    async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
+    async fn start(
+        &self,
+        spec: &AllocationSpec,
+        _supersession: &dyn LaunchSupersession,
+    ) -> Result<AllocationHandle, DriverError> {
         self.starts.lock().push(spec.alloc.clone());
         self.trace.lock().push(TraceEvent::Start(spec.alloc.clone()));
         // Retain a permit when the observer has not been polled yet. The
@@ -334,6 +338,7 @@ fn tick() -> TickContext {
 
 fn payload(_driver_type: DriverType) -> DriverPayload {
     DriverPayload::Vm(VmPayload {
+        volume: None,
         command: "/sbin/workload".to_owned(),
         args: vec!["--serve".to_owned()],
         kernel: Path::new("/srv/vm/kernel").to_path_buf(),

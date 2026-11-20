@@ -334,6 +334,7 @@ impl LivenessWorld {
             },
             beacon_intake,
             Arc::clone(&board),
+            None,
         ));
 
         let allocator = crate::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);

@@ -125,6 +125,7 @@ fn spec(
         ))
         .expect("valid identity"),
         driver: DriverPayload::Vm(VmPayload {
+            volume: None,
             command: "/sbin/init".to_owned(),
             args: Vec::new(),
             kernel,
@@ -250,6 +251,7 @@ async fn failed_vm_cleanup_hands_only_stranded_vm_artifacts_to_disposal() {
         .await
         .expect("the node beacon intake binds over the sim"),
         guest_listener_board,
+        None,
     ));
     let obs = Arc::new(SimObservationStore::single_peer(node.clone(), 0));
     let owner = Arc::new(SimSharedGuestNetworkOwner::default());

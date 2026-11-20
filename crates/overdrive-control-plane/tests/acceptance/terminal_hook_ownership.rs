@@ -147,6 +147,7 @@ fn spec(alloc: &AllocationId, probe_descriptors: Vec<ProbeDescriptor>) -> Alloca
         identity: SpiffeId::from_str("spiffe://overdrive.local/workload/hooks/alloc/0")
             .expect("valid spiffe id"),
         driver: DriverPayload::Vm(VmPayload {
+            volume: None,
             command: "/sbin/init".to_owned(),
             args: Vec::new(),
             kernel: PathBuf::from("/kernel"),
@@ -811,7 +812,10 @@ async fn a_driver_with_no_probe_runner_takes_the_default_path() {
         CancellationToken::new(),
     );
     let a = alloc("alloc-plain-0");
-    let handle = plain.start(&probed_spec(&a)).await.expect("start");
+    let handle = plain
+        .start(&probed_spec(&a), &overdrive_sim::adapters::SimLaunchSupersession::new())
+        .await
+        .expect("start");
     plain.release_for_exit_emission(&handle).await;
     let running = overdrive_core::traits::observation_store::AllocStatusRow {
         alloc_id: a.clone(),

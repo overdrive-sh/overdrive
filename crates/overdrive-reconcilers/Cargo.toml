@@ -50,6 +50,8 @@ tracing.workspace        = true
 
 [dev-dependencies]
 proptest.workspace = true
+# node-local-persistent-volume: the wire spec of a `[vm.volume]` workload.
+serde_json.workspace = true
 # netns-density-295 R5-PROBE-COUNT — the View CBOR schema-evolution body.
 ciborium.workspace = true
 # `overdrive_test_default!` and `placement!` place the host-pure tests.

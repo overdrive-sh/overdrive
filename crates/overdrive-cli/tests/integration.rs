@@ -82,6 +82,10 @@ mod integration {
     // failure emits `health.startup.refused` event and returns
     // `CliError::ProbeRefused`. Per ADR-0054 § Composition root wiring.
     mod serve_probe_refusal;
+    // node-local-persistent-volume (GH #348, ADR-0314) — the volume pool boot gate.
+    mod volume_boot_probe;
+    // Gated behind `kvm-tests` by the file-level cfg, like its siblings.
+    mod volume_survives;
 
     // public-ingress-gateway — the operator CLI against the production
     // handlers (S-PIG-36 on a gateway-disabled composition).

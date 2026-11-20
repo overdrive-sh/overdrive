@@ -75,6 +75,7 @@ fn sample_vm_config(fixture: &VmFixture, run_root: &Path, index_dir: &Path) -> V
     let alloc = AllocationId::new("vmhosteq-a").expect("valid alloc id");
     let master_bytes = std::fs::metadata(&fixture.rootfs_path).expect("stat staged rootfs").len();
     VmConfig {
+        volume: None,
         alloc: alloc.clone(),
         kernel: validated_kernel(fixture),
         rootfs: RootfsPlan::for_alloc(

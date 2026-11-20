@@ -122,6 +122,63 @@ pub async fn serve_with_vm(
     serve_composed(args, dataplane, Some(vm)).await
 }
 
+/// Boots `serve` with the host VM ports and `volume_pool` as the node's volume
+/// pool probe (GH #348, ADR-0314): the one driven port a volume boot test
+/// replaces (`Optional` capability, as `overdrive serve` runs).
+///
+/// # Errors
+///
+/// What `run_with_adapters` returns.
+#[expect(
+    clippy::result_large_err,
+    reason = "the bundle builder returns the boot's typed `ControlPlaneError` unboxed, as `run_server` does"
+)]
+pub async fn serve_with_volume_pool(
+    args: ServeArgs,
+    volume_pool: Arc<dyn overdrive_core::traits::volume_backing::VolumePoolProbe>,
+) -> Result<ServeHandle, CliError> {
+    overdrive_testing::forwarder_module::expect_forwarder_module();
+    run_with_adapters(args, Arc::new(RealCgroupFs::new()), move |config, fs| {
+        let mut adapters = NodeAdapters::host(config, fs, Arc::new(SimKek::for_boot()))?;
+        adapters.boot.dataplane =
+            Arc::new(SimDataplaneComposer::new(Arc::new(SimDataplane::new()), Ipv4Addr::LOCALHOST));
+        adapters.vm.volume_pool = volume_pool;
+        Ok(adapters)
+    })
+    .await
+}
+
+/// Boots `serve` with the fixture's VM ports (`Required` capability) and `volume_pool` as the
+/// node's volume pool probe: the two driven ports a volume composition test replaces, so the
+/// production `compose_volume_backing` and `VmDriver::new(volumes)` path runs over a simulated pool
+/// and VMM.
+///
+/// # Errors
+///
+/// What `run_with_adapters` returns.
+#[expect(
+    clippy::result_large_err,
+    reason = "the bundle builder returns the boot's typed `ControlPlaneError` unboxed, as `run_server` does"
+)]
+pub async fn serve_with_vm_and_volume_pool(
+    args: ServeArgs,
+    vm: VmPorts,
+    volume_pool: Arc<dyn overdrive_core::traits::volume_backing::VolumePoolProbe>,
+) -> Result<ServeHandle, CliError> {
+    overdrive_testing::forwarder_module::expect_forwarder_module();
+    run_with_adapters(args, Arc::new(RealCgroupFs::new()), move |config, fs| {
+        let mut adapters = NodeAdapters::host(config, fs, Arc::new(SimKek::for_boot()))?;
+        adapters.boot.dataplane =
+            Arc::new(SimDataplaneComposer::new(Arc::new(SimDataplane::new()), Ipv4Addr::LOCALHOST));
+        adapters.vm.vmm = vm.vmm;
+        adapters.vm.beacon = vm.beacon;
+        adapters.vm.capability = VmCapability::Required;
+        adapters.vm.volume_pool = volume_pool;
+        Ok(adapters)
+    })
+    .await
+}
+
 #[expect(
     clippy::result_large_err,
     reason = "the bundle builder returns the boot's typed `ControlPlaneError` unboxed, as `run_server` does"

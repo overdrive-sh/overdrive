@@ -14,13 +14,13 @@
 //!
 //! The load-bearing contract (ADR-0073 § 5, item 5):
 //!
-//! - `restart_pending = view.observed_generation < desired.generation`.
+//! - `restart_pending = largest issued_generation < desired.generation`.
 //! - The veto is current-instance-scoped:
 //!   `!restart_pending && current_alloc(&allocs).is_some_and(is_operator_stopped)`
 //!   — NOT `allocs.iter().any(is_operator_stopped)`.
-//! - The placement tick stamps `observed_generation = desired.generation`
+//! - The placement tick records `issued_generation[fresh] = desired.generation`
 //!   (NOT `observed + 1`); the stop tick (R2) and the draining tick (R5)
-//!   leave `observed_generation` unchanged.
+//!   leave `issued_generation` unchanged.
 
 #![allow(clippy::expect_used)]
 // Doc comments reference symbol-shaped tokens in plain prose.
@@ -240,12 +240,27 @@ fn alloc_platform_reclaimed(alloc_id: &str, workload_id: &str, node_id: &str) ->
     }
 }
 
+/// A view whose largest `issued_generation` entry is `generation` (the
+/// generation an already-issued allocation serves); `0` seeds nothing.
+fn view_seeded(generation: u64) -> WorkloadLifecycleView {
+    let mut view = WorkloadLifecycleView::default();
+    if generation > 0 {
+        view.issued_generation.insert(aid("alloc-seeded"), generation);
+    }
+    view
+}
+
+/// The largest generation any issued allocation serves (`0` when none).
+fn issued_max(view: &WorkloadLifecycleView) -> u64 {
+    view.issued_generation.values().copied().max().unwrap_or(0)
+}
+
 /// A `WorkloadLifecycleView` whose `restart_counts` for `alloc_id` is
-/// pre-set to `n` (observed_generation defaults to `desired` in the
+/// pre-set to `n` (issued_generation seeded to `desired` in the
 /// tests below so `restart_pending` is false and the crash-restart
 /// branch is reached).
 fn view_with_restart_counts(observed: u64, alloc_id: &str, n: u32) -> WorkloadLifecycleView {
-    let mut view = WorkloadLifecycleView { observed_generation: observed, ..Default::default() };
+    let mut view = view_seeded(observed);
     view.restart_counts.insert(aid(alloc_id), n);
     view
 }
@@ -306,7 +321,7 @@ fn states(
 }
 
 fn view_with_observed(observed: u64) -> WorkloadLifecycleView {
-    WorkloadLifecycleView { observed_generation: observed, ..Default::default() }
+    view_seeded(observed)
 }
 
 fn run(
@@ -372,8 +387,9 @@ fn s_bir_restart_stopped_places_fresh_instance_and_stamps() {
     assert_eq!(next.restart_counts.get(&aid("alloc-payments-1")), Some(&0));
     assert!(!next.last_failure_seen_at.contains_key(&aid("alloc-payments-1")));
     assert_eq!(
-        next.observed_generation, 1,
-        "the placement tick must stamp observed_generation = desired.generation (1)",
+        issued_max(&next),
+        1,
+        "the placement tick must record issued_generation = desired.generation (1)",
     );
     // Intent-retained contract, pinned across EVERY withdrawal/teardown
     // shape (review-01-02 nitpick): a stopped-origin restart places the
@@ -440,8 +456,9 @@ fn s_bir_restart_running_stop_emits_one_stop_no_stamp() {
         "R2 places nothing this tick — the fresh instance comes after the old one Terminates",
     );
     assert_eq!(
-        next.observed_generation, 0,
-        "observed_generation MUST be UNCHANGED on the stop tick (R2) — stamping here re-arms \
+        issued_max(&next),
+        0,
+        "issued_generation MUST be UNCHANGED on the stop tick (R2) — stamping here re-arms \
          the veto before the fresh instance exists, stranding the workload Terminated",
     );
 }
@@ -470,8 +487,9 @@ fn s_bir_restart_running_place_places_fresh_and_stamps() {
     assert_eq!(next.restart_counts.get(&aid("alloc-coinflip-1")), Some(&0));
     assert!(!next.last_failure_seen_at.contains_key(&aid("alloc-coinflip-1")));
     assert_eq!(
-        next.observed_generation, 1,
-        "the placement tick (R3) is the only tick that stamps observed_generation = desired",
+        issued_max(&next),
+        1,
+        "the placement tick (R3) is the only tick that records issued_generation = desired",
     );
 }
 
@@ -496,8 +514,9 @@ fn s_bir_stop_once_no_duplicate_stop_while_draining() {
          fights the teardown; got {actions:?}",
     );
     assert_eq!(
-        next.observed_generation, 0,
-        "observed_generation is still unstamped while the old instance drains",
+        issued_max(&next),
+        0,
+        "issued_generation is still unstamped while the old instance drains",
     );
 }
 
@@ -526,7 +545,8 @@ fn s_bir_coalesce_place_one_instance_stamps_to_latest_generation() {
     assert_eq!(next.restart_counts.get(&aid("alloc-payments-1")), Some(&0));
     assert!(!next.last_failure_seen_at.contains_key(&aid("alloc-payments-1")));
     assert_eq!(
-        next.observed_generation, 2,
+        issued_max(&next),
+        2,
         "stamp is observed = desired (= 2), NOT observed + 1 — the level-triggered coalesce",
     );
 }
@@ -551,8 +571,9 @@ fn s_bir_coalesce_no_replay_after_stamp() {
         "restart_pending is false (observed == desired) — no further StartAllocation; got {actions:?}",
     );
     assert_eq!(
-        next.observed_generation, 2,
-        "the generation never goes backwards — observed_generation stays 2",
+        issued_max(&next),
+        2,
+        "the generation never goes backwards — issued_generation stays 2",
     );
 }
 
@@ -588,7 +609,8 @@ fn s_bir_sequential_restart_reenters_cycle() {
         other => panic!("expected StopAllocation, got {other:?}"),
     }
     assert_eq!(
-        next.observed_generation, 1,
+        issued_max(&next),
+        1,
         "no stamp on this re-entry stop tick (the fresh payments-2 has not been placed)",
     );
 }

@@ -1108,7 +1108,9 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
         restart_counts: restart_counts_persisted.clone(),
         last_failure_seen_at: last_failure_seen_at_persisted.clone(),
         released_for_deletion: ::std::collections::BTreeSet::new(),
-        observed_generation: 0,
+        // `issued_generation` is a persisted input with the lifetime of
+        // `restart_counts` (ADR-0326): it rehydrates with them.
+        issued_generation: view_pre.issued_generation.clone(),
         reclaim_attempts: std::collections::BTreeMap::new(),
         reclaim_emitted_at: std::collections::BTreeMap::new(),
     };
@@ -1319,7 +1321,7 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
         restart_counts,
         last_failure_seen_at,
         released_for_deletion: ::std::collections::BTreeSet::new(),
-        observed_generation: 0,
+        issued_generation: std::collections::BTreeMap::new(),
         reclaim_attempts: std::collections::BTreeMap::new(),
         reclaim_emitted_at: std::collections::BTreeMap::new(),
     };
@@ -1442,7 +1444,7 @@ async fn drop_workload_lifecycle_view_removes_seeded_view() {
         restart_counts: counts,
         last_failure_seen_at: BTreeMap::new(),
         released_for_deletion: ::std::collections::BTreeSet::new(),
-        observed_generation: 0,
+        issued_generation: std::collections::BTreeMap::new(),
         reclaim_attempts: std::collections::BTreeMap::new(),
         reclaim_emitted_at: std::collections::BTreeMap::new(),
     };

@@ -400,7 +400,7 @@ fn unreported_pre_ready_vmm_exit_finalizes_once_without_restart_or_view_change()
         restart_counts,
         last_failure_seen_at: BTreeMap::new(),
         released_for_deletion: std::collections::BTreeSet::new(),
-        observed_generation: 17,
+        issued_generation: BTreeMap::from([(aid("alloc-payments-0"), 17)]),
         reclaim_attempts: BTreeMap::new(),
         reclaim_emitted_at: BTreeMap::new(),
     };
@@ -487,7 +487,7 @@ fn service_kind_failed_alloc_preserves_restart_branch() {
         restart_counts,
         last_failure_seen_at: BTreeMap::new(),
         released_for_deletion: ::std::collections::BTreeSet::new(),
-        observed_generation: 0,
+        issued_generation: BTreeMap::new(),
         reclaim_attempts: BTreeMap::new(),
         reclaim_emitted_at: BTreeMap::new(),
     };

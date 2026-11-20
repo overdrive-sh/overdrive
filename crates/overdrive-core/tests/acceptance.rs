@@ -37,6 +37,10 @@ mod acceptance {
     mod intent_key_canonical;
     mod observation_row_display;
     mod reconciler_trait_surface;
+    mod vm_volume_size;
+    mod vm_volume_spec;
+    mod volume_unavailable_reason;
+    mod volume_value_types;
 
     // reconciler-framework-improvements step 02-01 (ADR-0084 §2 / §5 step 3,
     // 2026-08-23 lean amendment, GH #266) — Piece B complete discriminant:

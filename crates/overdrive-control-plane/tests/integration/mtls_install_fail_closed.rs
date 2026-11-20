@@ -116,7 +116,7 @@ use overdrive_core::traits::IdentityRead;
 use overdrive_core::traits::ca::{CaCertDer, CaCertPem, CaKeyPem, SvidMaterial};
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverStartClass,
-    DriverStartFailure, DriverType, Resources,
+    DriverStartFailure, DriverType, LaunchSupersession, Resources,
 };
 use overdrive_core::traits::mtls_enforcement::{MtlsEnforcement, MtlsLimits};
 use overdrive_core::traits::observation_store::{
@@ -201,6 +201,7 @@ fn build_spec(alloc: &AllocationId) -> AllocationSpec {
             .expect("valid spiffe id"),
         driver: overdrive_core::traits::driver::DriverPayload::Vm(
             overdrive_core::traits::driver::VmPayload {
+                volume: None,
                 command: "/bin/true".to_owned(),
                 args: Vec::new(),
                 kernel: PathBuf::from("/nonexistent/kernel"),
@@ -352,9 +353,13 @@ impl Driver for JournalDriver {
         self.inner.r#type()
     }
 
-    async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
+    async fn start(
+        &self,
+        spec: &AllocationSpec,
+        supersession: &dyn LaunchSupersession,
+    ) -> Result<AllocationHandle, DriverError> {
         record(&self.journal, Step::DriverStart, Some(&spec.alloc));
-        self.inner.start(spec).await
+        self.inner.start(spec, supersession).await
     }
 
     async fn stop(&self, handle: &AllocationHandle) -> Result<(), DriverError> {
@@ -1231,8 +1236,12 @@ impl Driver for HoldingReleaseDriver {
         self.inner.r#type()
     }
 
-    async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
-        self.inner.start(spec).await
+    async fn start(
+        &self,
+        spec: &AllocationSpec,
+        supersession: &dyn LaunchSupersession,
+    ) -> Result<AllocationHandle, DriverError> {
+        self.inner.start(spec, supersession).await
     }
 
     async fn stop(&self, handle: &AllocationHandle) -> Result<(), DriverError> {
@@ -1536,7 +1545,11 @@ impl Driver for RestartAbortDriver {
         DriverType::Vm
     }
 
-    async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
+    async fn start(
+        &self,
+        spec: &AllocationSpec,
+        _supersession: &dyn LaunchSupersession,
+    ) -> Result<AllocationHandle, DriverError> {
         self.starts.lock().push(spec.alloc.clone());
         if self.armed.load(std::sync::atomic::Ordering::SeqCst)
             && self.scenario == RestartAbortScenario::DriverStart

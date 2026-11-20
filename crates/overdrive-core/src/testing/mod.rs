@@ -15,3 +15,7 @@ pub mod observation_store;
 /// slice-01 acceptance test so `overdrive-sim`'s journal test (step
 /// 01-03) can construct the same reference workflow. See submodule docs.
 pub mod workflow;
+
+/// Fixtures for the node-local persistent volume value types (GH #348): a
+/// `VolumeSize` built without its grammar, for tests that are not about it.
+pub mod volume;

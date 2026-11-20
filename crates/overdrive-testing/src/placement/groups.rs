@@ -33,7 +33,7 @@ pub enum GuestGroup {
 }
 
 /// The closed registry: each group with its profiles. The first profile of a
-/// group is its base profile, the one an omitted profile selects. Twenty-two
+/// group is its base profile, the one an omitted profile selects. Twenty-three
 /// environments over eight groups.
 const ENVIRONMENTS: [(&str, &[&str]); 8] = [
     ("probe", &["base"]),
@@ -57,6 +57,7 @@ const ENVIRONMENTS: [(&str, &[&str]); 8] = [
             "nested-launch",
             "nested-launch-rustc",
             "nested-launch-lane",
+            "volume-pool",
         ],
     ),
     ("stress", &["base"]),

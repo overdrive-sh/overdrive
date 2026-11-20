@@ -954,6 +954,7 @@ pub(crate) mod sim_vm_host {
             },
             intake,
             guest_listener_board,
+            None,
         );
         let pool =
             Arc::new(GuestAddressPool::new(prefix, GATEWAY, Arc::new(SimEntropy::new(seed))));
@@ -997,6 +998,7 @@ pub(crate) mod sim_vm_host {
             identity: SpiffeId::new("spiffe://overdrive.local/workload/cid-lease/alloc/x")
                 .expect("valid spiffe id"),
             driver: DriverPayload::Vm(VmPayload {
+                volume: None,
                 command: "/sbin/init".to_owned(),
                 args: vec![],
                 kernel: root.join("vmlinuz"),
@@ -1056,7 +1058,8 @@ mod boot_reclamation_before_assign {
         let spec = vm_spec(&composition.root, &plan);
         let driver = composition.driver.clone();
         let start = tokio::spawn(async move {
-            let _ = driver.start(&spec).await;
+            let _ =
+                driver.start(&spec, &overdrive_sim::adapters::SimLaunchSupersession::new()).await;
         });
         for _ in 0..10_000 {
             if vmm.vsock_device_holders().contains_key(&cid) || start.is_finished() {
@@ -1192,9 +1195,12 @@ mod boot_reclamation_before_assign {
             .expect("a free offset");
         assert_eq!(plan.assignment().cid(), orphan_cid, "precondition: the orphan's CID");
         let spec = vm_spec(&restarted.root, &plan);
-        let outcome = tokio::time::timeout(Duration::from_secs(10), restarted.driver.start(&spec))
-            .await
-            .expect("the start ends");
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(10),
+            restarted.driver.start(&spec, &overdrive_sim::adapters::SimLaunchSupersession::new()),
+        )
+        .await
+        .expect("the start ends");
         assert!(outcome.is_err(), "the VMM exits before READY: a start failure, got {outcome:?}");
         assert_eq!(
             vmm.vsock_device_holders(),
@@ -1230,5 +1236,615 @@ mod boot_reclamation_before_assign {
                 .is_some_and(|live| live.contains(&alloc("supervised-0"))),
             "the driver still supervises it"
         );
+    }
+}
+
+/// Boot reclamation ends a VMM that was still booting when `serve` died,
+/// before any launch for its workload, and its volume claim drains so the
+/// successor's launch attaches the volume without a `VolumeUnavailable { Held }`
+/// row and with nothing charged (M7; feature delta § Launch path, Gate G-2).
+///
+/// Two boots of the production composition, `run_server_with_obs_and_driver`
+/// (the boot, its `VmReclamation` boot-epoch drive, the convergence loop, the
+/// public HTTPS API), over the same data directory. One `SimVmm`, one
+/// `SimVolumeBacking`, one `SimObservationStore`, one `SimVmmHost` and one
+/// `SimClock` outlive both. The workload is deployed through the public API
+/// (`POST /v1/workloads`, the declaration with a `[vm.volume]`), so the
+/// convergence loop, the action shim and the `VmDriver` launch it; the launch
+/// parks in the guest-boot wait (no guest READY is delivered) with its VMM
+/// holding the claim. `ServerHandle::kill_for_test` is the process death of a
+/// crashed `serve`: its VMM survives as an orphan. The second boot runs the
+/// boot reclamation as its own boot step; nothing in the test calls
+/// `converge`.
+///
+/// Test support models the orphan's claim: the recording `Vmm` links the
+/// workload's `SimVolumeBacking` claim to the created process's liveness
+/// (`hold_claim_while_live`), so killing the VMM releases its claim.
+///
+/// Oracle, at driven ports only: `SimVmm::is_live` (the orphan's pid), what
+/// the recording `Vmm` was asked to create and, at each create, the claim the
+/// pool reported and whether the orphan was still live,
+/// `SimVolumeBacking::claim_state`, and the observation store's rows.
+///
+/// PENDING: the production spec parser refuses `[vm.volume]`, so the deploy is
+/// refused and each test stops at "a workload declaring a volume must be
+/// accepted"; its reclamation assertions are first exercised when the spec
+/// surface, the launch path and `SimVolumeBacking` land.
+///
+/// Tier 1, in-process over `Sim*` adapters. `host_pure`.
+#[cfg(all(test, feature = "integration-tests"))]
+#[allow(
+    clippy::expect_used,
+    clippy::too_many_lines,
+    clippy::doc_markdown,
+    clippy::panic,
+    reason = "test fixtures assert their preconditions"
+)]
+mod mid_boot_volume_reclamation {
+    use std::path::Path;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::time::Duration;
+
+    use async_trait::async_trait;
+    use overdrive_core::UnixInstant;
+    use overdrive_core::aggregate::WorkloadKind;
+    use overdrive_core::guest_network::GuestNetworkExecWiring;
+    use overdrive_core::guest_transport::GuestCid;
+    use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
+    use overdrive_core::testing::volume::volume_size_gib;
+    use overdrive_core::traits::clock::Clock;
+    use overdrive_core::traits::driver::{
+        AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverType,
+        ExitEvent, LaunchSupersession, Resources,
+    };
+    use overdrive_core::traits::observation_store::{
+        AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore, TransitionSource,
+    };
+    use overdrive_core::traits::vm_host_state::VmHostState;
+    use overdrive_core::traits::vmm::{
+        Result as VmmResult, VmControl, VmProcess, VmTermination, Vmm, VmmProbeError,
+    };
+    use overdrive_core::traits::volume_backing::{ClaimState, VolumeBacking, VolumePoolProbe};
+    use overdrive_core::transition_reason::TransitionReason;
+    use overdrive_core::vm::beacon::BeaconIo;
+    use overdrive_core::vm::config::{
+        Gid, HostArch, KERNEL_MAGIC_WINDOW, VmConfig, VmConfinement, VmmIdentity,
+    };
+    use overdrive_sim::adapters::beacon_io::SimBeaconIo;
+    use overdrive_sim::adapters::observation_store::SimObservationStore;
+    use overdrive_sim::adapters::probers::{SimHttpProber, SimTcpProber};
+    use overdrive_sim::{
+        SimCgroupAccounting, SimCgroupFs, SimVmm, SimVolumeBacking, SimVolumePoolProbe,
+    };
+    use overdrive_testing::placement;
+    use overdrive_worker::probe_runner::ProbeRunner;
+    use overdrive_worker::{BeaconIntake, VmDriver, VmHostLayout};
+    use parking_lot::Mutex;
+    use tempfile::TempDir;
+
+    use super::sim_vm_host::{RecordingVmm, SimVmmHost};
+    use crate::shared_network_test_ports::composed::ComposedNode;
+    use crate::shared_network_test_ports::{TestGuestDnsFactory, shared_guest_network_owner};
+    use crate::{ServerHandle, run_server_with_obs_and_driver};
+
+    placement!(host_pure);
+
+    /// The workload `quint_node_volume::declaration_wire` declares.
+    const WORKLOAD: &str = "vol-w";
+    /// The convergence tick cadence the injected clock is advanced by.
+    const TICK: Duration = Duration::from_millis(100);
+    /// Upper bound on injected ticks a wait may take (30 s of logical time).
+    const MAX_TICKS: usize = 300;
+
+    fn workload() -> WorkloadId {
+        WorkloadId::new(WORKLOAD).expect("valid workload id")
+    }
+
+    /// What the recording `Vmm` saw of one `create`.
+    #[derive(Clone, Debug)]
+    struct CreateRecord {
+        alloc: AllocationId,
+        volume: bool,
+        /// The pool's claim for the workload when the create was asked for
+        /// (volume creates only).
+        claim_before: Option<ClaimState>,
+        /// Whether the orphan watched by this `Vmm` was still live then.
+        orphan_live: bool,
+    }
+
+    /// `Vmm` decorator over the host-recording double: records every `create`
+    /// and, for a create whose config carries a volume, links the workload's
+    /// claim to the created process's liveness (Cloud Hypervisor's exclusive
+    /// open lasts as long as the process).
+    struct ClaimingVmm {
+        inner: RecordingVmm,
+        volumes: SimVolumeBacking,
+        /// The orphan to watch, 0 for none.
+        orphan: AtomicU32,
+        creates: Mutex<Vec<CreateRecord>>,
+    }
+
+    #[async_trait]
+    impl Vmm for ClaimingVmm {
+        fn kind(&self) -> &'static str {
+            self.inner.kind()
+        }
+
+        async fn probe(&self) -> Result<(), VmmProbeError> {
+            self.inner.probe().await
+        }
+
+        async fn create(&self, config: &VmConfig, cid: GuestCid) -> VmmResult<VmProcess> {
+            let volume = config.volume.is_some();
+            let claim_before =
+                if volume { self.volumes.claim_state(&workload()).await.ok() } else { None };
+            let orphan = self.orphan.load(Ordering::SeqCst);
+            self.creates.lock().push(CreateRecord {
+                alloc: config.alloc.clone(),
+                volume,
+                claim_before,
+                orphan_live: orphan != 0 && self.inner.inner.is_live(orphan),
+            });
+            let process = self.inner.create(config, cid).await?;
+            if volume {
+                let vmm = self.inner.inner.clone();
+                let pid = process.control.pid;
+                self.volumes.hold_claim_while_live(&workload(), move || vmm.is_live(pid));
+            }
+            Ok(process)
+        }
+
+        async fn terminate(
+            &self,
+            control: &VmControl,
+            grace: Duration,
+        ) -> VmmResult<VmTermination> {
+            self.inner.terminate(control, grace).await
+        }
+    }
+
+    /// What the recording driver saw of one `Driver::start`.
+    #[derive(Clone, Debug)]
+    struct StartRecord {
+        alloc: AllocationId,
+        /// Whether the orphan watched by this driver was still live when the start was
+        /// called.
+        orphan_live: bool,
+    }
+
+    /// `Driver` decorator over the production `VmDriver`: records every `start` at the driven
+    /// port, with the orphan's liveness at that instant, so a launch minted before boot
+    /// reclamation ended the orphan is observable even when it has not reached `Vmm::create`.
+    struct StartRecordingDriver {
+        inner: VmDriver,
+        sim_vmm: SimVmm,
+        /// The orphan to watch, 0 for none.
+        orphan: u32,
+        starts: Mutex<Vec<StartRecord>>,
+    }
+
+    #[async_trait]
+    impl Driver for StartRecordingDriver {
+        fn r#type(&self) -> DriverType {
+            self.inner.r#type()
+        }
+
+        async fn start(
+            &self,
+            spec: &AllocationSpec,
+            supersession: &dyn LaunchSupersession,
+        ) -> Result<AllocationHandle, DriverError> {
+            self.starts.lock().push(StartRecord {
+                alloc: spec.alloc.clone(),
+                orphan_live: self.orphan != 0 && self.sim_vmm.is_live(self.orphan),
+            });
+            self.inner.start(spec, supersession).await
+        }
+
+        async fn release_for_exit_emission(&self, handle: &AllocationHandle) {
+            self.inner.release_for_exit_emission(handle).await;
+        }
+
+        async fn stop(&self, handle: &AllocationHandle) -> Result<(), DriverError> {
+            self.inner.stop(handle).await
+        }
+
+        async fn status(&self, handle: &AllocationHandle) -> Result<AllocationState, DriverError> {
+            self.inner.status(handle).await
+        }
+
+        async fn resize(
+            &self,
+            handle: &AllocationHandle,
+            resources: Resources,
+        ) -> Result<(), DriverError> {
+            self.inner.resize(handle, resources).await
+        }
+
+        fn take_exit_receiver(&self) -> Option<tokio::sync::mpsc::Receiver<ExitEvent>> {
+            self.inner.take_exit_receiver()
+        }
+
+        fn on_alloc_running(&self, spec: &AllocationSpec) {
+            self.inner.on_alloc_running(spec);
+        }
+
+        fn on_alloc_terminal(&self, alloc_id: &AllocationId) {
+            self.inner.on_alloc_terminal(alloc_id);
+        }
+
+        fn on_alloc_stable(&self, alloc_id: &AllocationId) {
+            self.inner.on_alloc_stable(alloc_id);
+        }
+
+        fn live_allocations(&self) -> Option<Vec<AllocationId>> {
+            self.inner.live_allocations()
+        }
+
+        fn try_begin_reclamation(&self, alloc: &AllocationId) -> bool {
+            self.inner.try_begin_reclamation(alloc)
+        }
+
+        fn release_supervision(&self, alloc: &AllocationId) {
+            self.inner.release_supervision(alloc);
+        }
+    }
+
+    fn stage_artifacts(root: &Path) {
+        std::fs::create_dir_all(root).expect("artifact root");
+        std::fs::write(root.join("master.img"), b"deterministic-fixture-rootfs-bytes")
+            .expect("write synthetic master rootfs");
+        let mut header = vec![0_u8; KERNEL_MAGIC_WINDOW];
+        header[..4].copy_from_slice(b"\x7fELF");
+        std::fs::write(root.join("vmlinuz"), &header).expect("stage the synthetic kernel image");
+    }
+
+    /// The node: what outlives a `serve` process.
+    struct Node {
+        composed: ComposedNode,
+        sim_vmm: SimVmm,
+        host: Arc<SimVmmHost>,
+        volumes: SimVolumeBacking,
+        obs: Arc<SimObservationStore>,
+        artifacts: TempDir,
+    }
+
+    /// One `serve` process: the production boot over the node's roots.
+    struct Process {
+        server: ServerHandle,
+        vmm: Arc<ClaimingVmm>,
+        driver: Arc<StartRecordingDriver>,
+        client: reqwest::Client,
+        base: String,
+    }
+
+    fn client_trusting(ca_pem: &str) -> reqwest::Client {
+        let cert = reqwest::Certificate::from_pem(ca_pem.as_bytes()).expect("parse CA PEM");
+        reqwest::Client::builder()
+            .add_root_certificate(cert)
+            .https_only(true)
+            .use_rustls_tls()
+            .timeout(Duration::from_secs(5))
+            .build()
+            .expect("build reqwest client")
+    }
+
+    fn read_ca_from_trust_triple(operator_config_dir: &Path) -> String {
+        use base64::Engine as _;
+        use base64::engine::general_purpose::STANDARD as BASE64;
+
+        let config_path = operator_config_dir.join(".overdrive").join("config");
+        let text = std::fs::read_to_string(&config_path).unwrap_or_else(|error| {
+            panic!("read trust triple at {}: {error}", config_path.display())
+        });
+        let doc: toml::Value = toml::from_str(&text).expect("parse trust triple TOML");
+        let ca_b64 = doc
+            .get("contexts")
+            .and_then(toml::Value::as_array)
+            .and_then(|contexts| {
+                contexts.iter().find(|context| {
+                    context.get("name").and_then(toml::Value::as_str) == Some("local")
+                })
+            })
+            .and_then(|context| context.get("ca"))
+            .and_then(toml::Value::as_str)
+            .expect("[[contexts]] with name=\"local\" must carry a ca field");
+        String::from_utf8(BASE64.decode(ca_b64).expect("base64 decode ca"))
+            .expect("ca PEM is UTF-8")
+    }
+
+    impl Node {
+        fn new() -> Self {
+            let artifacts = TempDir::new().expect("tmpdir");
+            stage_artifacts(artifacts.path());
+            let sim_vmm = SimVmm::new();
+            Self {
+                composed: ComposedNode::fresh(),
+                host: SimVmmHost::new(sim_vmm.clone(), false),
+                sim_vmm,
+                volumes: SimVolumeBacking::with_capacity(volume_size_gib(8)),
+                obs: Arc::new(SimObservationStore::single_peer(
+                    NodeId::new("local").expect("valid node ID"),
+                    0,
+                )),
+                artifacts,
+            }
+        }
+
+        /// Boot one `serve` process through `run_server_with_obs_and_driver`:
+        /// the VM driver over the recording `Vmm` and the node's pool, the
+        /// node's observation store, simulated host and clock. `orphan` is the
+        /// pid the recording `Vmm` watches (0 for none).
+        async fn boot(&self, seed: u64, orphan: u32) -> Process {
+            let clock = Arc::clone(&self.composed.clock);
+            let config = self.composed.config();
+            let mut boot = self
+                .composed
+                .boot_adapters(&config, Arc::new(TestGuestDnsFactory::default()))
+                .expect("the node's stores open over its data directory");
+            boot.clock = Arc::clone(&clock) as Arc<dyn Clock>;
+            boot.observation = Arc::clone(&self.obs) as Arc<dyn ObservationStore>;
+            boot.vm_host_state = Arc::clone(&self.host) as Arc<dyn VmHostState>;
+
+            let wiring = GuestNetworkExecWiring::new(Arc::clone(&clock) as Arc<dyn Clock>);
+            let root = self.artifacts.path().join(format!("serve-{seed}"));
+            std::fs::create_dir_all(&root).expect("per-process root");
+            let beacon = Arc::new(SimBeaconIo::stepped(self.sim_vmm.clone()));
+            let intake = BeaconIntake::bind(
+                Arc::clone(&beacon) as Arc<dyn BeaconIo>,
+                overdrive_core::guest_transport::VsockListenPort::KernelAssigned,
+            )
+            .await
+            .expect("the sim beacon listener binds");
+            let guest_listener_board = Arc::new(overdrive_worker::GuestListenerBoard::new());
+            let probe_runner = Arc::new(ProbeRunner::new(
+                Arc::new(SimTcpProber::new()),
+                Arc::new(SimHttpProber::new()),
+                Arc::clone(&clock) as Arc<dyn Clock>,
+                Arc::clone(&self.obs) as Arc<dyn ObservationStore>,
+                Arc::new(overdrive_sim::adapters::guest_stream_dial::SimGuestStreamDial::new()),
+                Arc::clone(&guest_listener_board)
+                    as Arc<dyn overdrive_core::traits::GuestListenerReports>,
+            ));
+            let probed: Arc<dyn VolumeBacking> = SimVolumePoolProbe::composed(self.volumes.clone())
+                .probe()
+                .await
+                .expect("the composed pool probes")
+                .expect("a node with a composed pool yields a backing");
+            let vmm = Arc::new(ClaimingVmm {
+                inner: RecordingVmm { inner: self.sim_vmm.clone(), host: Arc::clone(&self.host) },
+                volumes: self.volumes.clone(),
+                orphan: AtomicU32::new(orphan),
+                creates: Mutex::new(Vec::new()),
+            });
+            let vm_driver = VmDriver::new(
+                Arc::clone(&vmm) as Arc<dyn Vmm>,
+                Arc::clone(&clock) as Arc<dyn Clock>,
+                Arc::new(SimCgroupFs::new()),
+                Arc::new(SimCgroupAccounting::new()),
+                probe_runner,
+                wiring.gate(),
+                VmHostLayout {
+                    cgroup_root: root.join("cgroup"),
+                    run_dir_root: root.join("run"),
+                    clone_index_dir: root.join("clone-index"),
+                    clone_staging_dir: root.join("clone-staging"),
+                    arch: HostArch::X86_64,
+                    confinement: VmConfinement::confined(
+                        VmmIdentity { uid: 1000, gid: Gid::new(994), supplementary: vec![] },
+                        1024,
+                    ),
+                },
+                intake,
+                guest_listener_board,
+                Some(probed),
+            );
+            let driver = Arc::new(StartRecordingDriver {
+                inner: vm_driver,
+                sim_vmm: self.sim_vmm.clone(),
+                orphan,
+                starts: Mutex::new(Vec::new()),
+            });
+            let operator_config_dir = config.operator_config_dir.clone();
+            let server = run_server_with_obs_and_driver(
+                config,
+                boot,
+                Arc::clone(&driver) as Arc<dyn Driver>,
+                shared_guest_network_owner(),
+                wiring,
+            )
+            .await
+            .expect("the production boot, boot reclamation included, completes");
+            let bound = server.local_addr().await.expect("server bound address");
+            let client = client_trusting(&read_ca_from_trust_triple(&operator_config_dir));
+            Process {
+                server,
+                vmm,
+                driver,
+                client,
+                base: format!("https://localhost:{}", bound.port()),
+            }
+        }
+
+        /// Deploy the volume workload through the public API.
+        async fn deploy(&self, process: &Process) {
+            let root = self.artifacts.path().to_str().expect("utf-8 artifact root");
+            let response = process
+                .client
+                .post(format!("{}/v1/workloads", process.base))
+                .json(&crate::quint_node_volume::declaration_wire(root))
+                .send()
+                .await
+                .expect("submit reaches the public API");
+            let status = response.status();
+            let body = response.text().await.unwrap_or_default();
+            assert!(
+                status.is_success(),
+                "a workload declaring a volume must be accepted: {status} {body}"
+            );
+        }
+
+        /// Advance the injected clock until `cond` holds.
+        async fn tick_until(&self, what: &str, mut cond: impl FnMut() -> bool) {
+            for _ in 0..MAX_TICKS {
+                if cond() {
+                    return;
+                }
+                self.composed.clock.tick(TICK);
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+            panic!("{what} within {MAX_TICKS} ticks");
+        }
+
+        /// Drive `work` to completion while the injected clock keeps advancing, so
+        /// no clock-bounded wait inside it parks forever.
+        async fn ticking<F: std::future::Future>(&self, work: F) -> F::Output {
+            let mut work = std::pin::pin!(work);
+            loop {
+                tokio::select! {
+                    biased;
+                    output = &mut work => return output,
+                    () = tokio::time::sleep(Duration::from_millis(5)) => self.composed.clock.tick(TICK),
+                }
+            }
+        }
+    }
+
+    /// The `Running` row a launch that completed leaves behind, in the shape
+    /// the action shim writes.
+    #[cfg(test)]
+    fn running_row(alloc_id: &AllocationId) -> AllocStatusRow {
+        let node = NodeId::new("local").expect("valid NodeId");
+        AllocStatusRow {
+            alloc_id: alloc_id.clone(),
+            workload_id: workload(),
+            node_id: node.clone(),
+            state: AllocState::Running,
+            updated_at: LogicalTimestamp { counter: 1, writer: node },
+            reason: Some(TransitionReason::Started),
+            detail: None,
+            terminal: None,
+            stderr_tail: None,
+            kind: WorkloadKind::Service,
+            listeners: Vec::new(),
+            started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
+            workload_addr: None,
+            last_terminated: None,
+            restart_count: 0,
+        }
+    }
+
+    /// What the crash leaves in the durable observation store.
+    #[derive(Clone, Copy)]
+    enum Residue {
+        /// The launch was parked in boot: no row was written (the boot
+        /// reclamation discards the stranded artifacts).
+        NoRow,
+        /// The allocation's `Running` row survives (the boot reclamation
+        /// reclaims the allocation).
+        RunningRow,
+    }
+
+    async fn scenario(residue: Residue) {
+        let node = Node::new();
+
+        // The first process deploys the workload; its launch parks in the guest-boot wait.
+        let first = node.boot(1, 0).await;
+        node.deploy(&first).await;
+        node.tick_until("the volume launch creates its VMM", || {
+            !first.vmm.creates.lock().is_empty()
+        })
+        .await;
+        let orphan_alloc = first.vmm.creates.lock()[0].alloc.clone();
+        let orphan_pid = {
+            let pids = node.host.pids_of(&orphan_alloc);
+            assert_eq!(pids.len(), 1, "the launch created one VMM: {pids:?}");
+            *pids.iter().next().expect("one pid")
+        };
+        assert!(
+            first.vmm.creates.lock()[0].volume,
+            "the launch must attach the declared volume to its VMM"
+        );
+        assert!(
+            matches!(node.volumes.claim_state(&workload()).await, Ok(ClaimState::Held)),
+            "the parked launch's VMM must hold the workload's volume claim"
+        );
+        assert!(
+            node.obs.alloc_status_rows().await.expect("rows").is_empty(),
+            "precondition: the parked launch has written no row"
+        );
+
+        // `serve` dies: its tasks and composition die; its VMM does not.
+        let Process { server, .. } = first;
+        let _residue = node.ticking(server.kill_for_test()).await;
+        assert!(node.sim_vmm.is_live(orphan_pid), "the orphan survives the crash");
+        if matches!(residue, Residue::RunningRow) {
+            node.obs
+                .write_alloc_lifecycle(running_row(&orphan_alloc), TransitionSource::Reconciler)
+                .await
+                .expect("the completed launch's Running row");
+        }
+
+        // The next process: boot reclamation is its own boot step.
+        let second = node.boot(2, orphan_pid).await;
+        assert!(
+            !node.sim_vmm.is_live(orphan_pid),
+            "the orphan's VMM is not live once boot returns"
+        );
+        node.tick_until("the successor's launch creates its VMM", || {
+            !second.vmm.creates.lock().is_empty()
+        })
+        .await;
+
+        let starts = second.driver.starts.lock().clone();
+        assert_eq!(starts.len(), 1, "one launch reached the driver's start: {starts:?}");
+        assert_ne!(starts[0].alloc, orphan_alloc, "the launch is a new allocation: {starts:?}");
+        assert!(
+            !starts[0].orphan_live,
+            "no launch was minted before boot reclamation ended the orphan: {starts:?}"
+        );
+        let creates = second.vmm.creates.lock().clone();
+        assert_eq!(creates.len(), 1, "one launch reached the VMM port: {creates:?}");
+        let successor = &creates[0];
+        assert_ne!(successor.alloc, orphan_alloc, "the successor is a new allocation");
+        assert!(successor.volume, "the successor's launch must attach the volume");
+        assert!(
+            !successor.orphan_live,
+            "no launch reached the VMM port before the orphan was ended: {creates:?}"
+        );
+        assert!(
+            matches!(successor.claim_before, Some(ClaimState::Free)),
+            "the orphan's claim must have drained before the successor attached: {creates:?}"
+        );
+        let rows = node.obs.alloc_status_rows().await.expect("rows readable");
+        assert!(
+            rows.iter().all(|row| row.state != AllocState::Failed
+                && !matches!(row.reason, Some(TransitionReason::VmVolumeUnavailable { .. }))),
+            "no VolumeUnavailable Held row and nothing charged: {rows:?}"
+        );
+
+        let Process { server, .. } = second;
+        node.ticking(server.shutdown(Duration::from_secs(2)))
+            .await
+            .expect("the second process shuts down within its drain deadline");
+    }
+
+    /// M7 (the named cell; the crash leaves no row). PENDING on its own
+    /// precondition, see the module documentation.
+    /// CONTRACT_SHAPE: bounded-change.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[should_panic(expected = "a workload declaring a volume must be accepted")]
+    async fn boot_reclamation_ends_a_mid_boot_vmm_before_any_launch_for_its_workload() {
+        scenario(Residue::NoRow).await;
+    }
+
+    /// M7 (c): the same when the crash leaves a `Running` row, so the
+    /// reclamation is a `ReclaimAllocation`. PENDING on the same precondition.
+    /// CONTRACT_SHAPE: bounded-change.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[should_panic(expected = "a workload declaring a volume must be accepted")]
+    async fn boot_reclamation_ends_a_mid_boot_vmm_when_the_crash_left_a_running_row() {
+        scenario(Residue::RunningRow).await;
     }
 }

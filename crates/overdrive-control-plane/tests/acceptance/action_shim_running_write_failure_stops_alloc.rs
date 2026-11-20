@@ -83,6 +83,7 @@ fn start_action() -> Action {
             identity: SpiffeId::new("spiffe://overdrive.local/workload/writefail/alloc/0")
                 .expect("valid spiffe id"),
             driver: DriverPayload::Vm(VmPayload {
+                volume: None,
                 command: "/bin/true".to_owned(),
                 args: Vec::new(),
                 kernel: PathBuf::from("/nonexistent/kernel"),

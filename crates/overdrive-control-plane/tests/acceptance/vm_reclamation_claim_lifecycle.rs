@@ -43,7 +43,7 @@ use overdrive_core::id::{AllocationId, NodeId};
 use overdrive_core::reconcilers::TargetResource;
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverType, ExitEvent,
-    ExitKind, Resources,
+    ExitKind, LaunchSupersession, Resources,
 };
 use overdrive_core::traits::observation_store::{ObservationStore, ObservationStoreError};
 use overdrive_core::traits::vm_host_state::VmHostState;
@@ -118,8 +118,12 @@ impl Driver for ClaimTrackingDriver {
         self.inner.r#type()
     }
 
-    async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
-        let handle = self.inner.start(spec).await?;
+    async fn start(
+        &self,
+        spec: &AllocationSpec,
+        supersession: &dyn LaunchSupersession,
+    ) -> Result<AllocationHandle, DriverError> {
+        let handle = self.inner.start(spec, supersession).await?;
         self.claim(&spec.alloc);
         Ok(handle)
     }
@@ -435,6 +439,7 @@ async fn release_supervision_fires_on_no_prior_row_arm() {
             .expect("valid SpiffeId"),
         driver: overdrive_core::traits::driver::DriverPayload::Vm(
             overdrive_core::traits::driver::VmPayload {
+                volume: None,
                 command: "/bin/true".to_owned(),
                 args: vec![],
                 kernel: std::path::PathBuf::from("/nonexistent/kernel"),
@@ -448,7 +453,11 @@ async fn release_supervision_fires_on_no_prior_row_arm() {
         probe_descriptors: Vec::new(),
         transport: None,
     };
-    let handle = h.driver.start(&spec).await.expect("SimDriver::start succeeds");
+    let handle = h
+        .driver
+        .start(&spec, &overdrive_sim::adapters::SimLaunchSupersession::new())
+        .await
+        .expect("SimDriver::start succeeds");
     h.driver.release_for_exit_emission(&handle).await;
 
     h.driver.inner.inject_exit_after(

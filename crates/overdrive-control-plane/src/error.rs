@@ -730,6 +730,13 @@ pub enum ControlPlaneError {
     #[error(transparent)]
     VmmBoot(#[from] VmmBootError),
 
+    /// The volume pool is present but its boot probe failed (GH #348,
+    /// ADR-0314): `health.startup.refused`, reason `volume_backing.probe`.
+    /// Boot-path shape as `VmmBoot`: the `to_response` arm is
+    /// exhaustiveness-only.
+    #[error(transparent)]
+    VolumeBackingBoot(#[from] overdrive_core::traits::volume_backing::VolumeProbeError),
+
     /// `VmReclamation` boot-epoch drive refusal (ADR-0083 §D7, brief.md
     /// §105a.6, GH #42, step 02-02). Fires when [`crate::vm_reclamation_boot::converge`]
     /// fails — a genuine `VmHostState` substrate error (not a
@@ -1215,6 +1222,11 @@ pub fn to_response(err: ControlPlaneError) -> (StatusCode, ErrorBody) {
             // is exhaustiveness-only. The composition root branches on
             // `matches!(e, ControlPlaneError::VmmBoot(_))` to emit
             // `health.startup.refused` and refuse to boot fail-closed.
+            StatusCode::INTERNAL_SERVER_ERROR,
+            ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
+        ),
+        ControlPlaneError::VolumeBackingBoot(e) => (
+            // Boot-path shape as `VmmBoot`: exhaustiveness-only.
             StatusCode::INTERNAL_SERVER_ERROR,
             ErrorBody { error: "internal".into(), message: e.to_string(), field: None },
         ),

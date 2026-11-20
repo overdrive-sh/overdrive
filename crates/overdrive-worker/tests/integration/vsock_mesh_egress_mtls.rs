@@ -421,6 +421,7 @@ fn intercept_live_spec(alloc: &AllocationId, guest: GuestAddressing) -> Allocati
         alloc: alloc.clone(),
         identity: client_spiffe(),
         driver: DriverPayload::Vm(VmPayload {
+            volume: None,
             command: "/bin/true".to_owned(),
             args: vec![],
             kernel: "/nonexistent/kernel".into(),

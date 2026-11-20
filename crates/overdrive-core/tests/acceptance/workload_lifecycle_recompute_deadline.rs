@@ -224,7 +224,7 @@ fn recomputes_deadline_at_window_boundary() {
         restart_counts,
         last_failure_seen_at,
         released_for_deletion: ::std::collections::BTreeSet::new(),
-        observed_generation: 0,
+        issued_generation: BTreeMap::new(),
         reclaim_attempts: BTreeMap::new(),
         reclaim_emitted_at: BTreeMap::new(),
     };
@@ -318,7 +318,7 @@ fn restart_survival_idempotence() {
         restart_counts,
         last_failure_seen_at,
         released_for_deletion: ::std::collections::BTreeSet::new(),
-        observed_generation: 0,
+        issued_generation: BTreeMap::new(),
         reclaim_attempts: BTreeMap::new(),
         reclaim_emitted_at: BTreeMap::new(),
     };

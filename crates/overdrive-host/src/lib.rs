@@ -51,6 +51,7 @@ pub mod vmm;
 // `overdrive.slice/workloads.slice/`, the VM run root, and the
 // rootfs-clone staging directory.
 pub mod vm_host_state;
+pub mod volume_backing;
 
 pub use beacon_io::VsockBeaconIo;
 pub use ca::{RcgenCa, RcgenCaFactory};
@@ -61,3 +62,4 @@ pub use entropy::{CountingOsEntropy, OsEntropy};
 pub use transport::TcpTransport;
 pub use vm_host_state::RealVmHostState;
 pub use vmm::CloudHypervisorVmm;
+pub use volume_backing::{LvmVolumeBacking, LvmVolumePoolProbe};

@@ -132,6 +132,11 @@ mod acceptance {
     // `overdrive-cli::integration::workload_describe_probes`, in a
     // package this crate's mutation run does not execute).
     mod alloc_status_probes;
+    // node-local-persistent-volume (GH #348): `AllocStatusResponse.volume`.
+    mod alloc_status_capacity_wait;
+    mod alloc_status_volume;
+    mod capacity_wait_composition;
+    mod launch_lane_supersession;
 
     mod api_type_shapes;
     mod cluster_status_lists_both_reconcilers;
@@ -195,13 +200,13 @@ mod acceptance {
     mod error_mapping_exhaustive;
     mod eval_broker_collapse;
     mod gateway_status_read_error_mapping;
-    mod route_set_error_mapping;
     #[cfg(feature = "integration-tests")]
     mod job_stop_idempotent;
     #[cfg(feature = "integration-tests")]
     mod job_stop_intent_key;
     #[cfg(feature = "integration-tests")]
     mod job_stop_unknown;
+    mod route_set_error_mapping;
     mod workload_lifecycle_backoff;
     // `pending_no_capacity_renders_reason` was retired in slice 01 step
     // 01-03: the legacy `AllocStatusRowBody.reason: Option<String>`
@@ -259,7 +264,7 @@ mod acceptance {
     // raw store) and the generation DECISION logic
     // (`runtime_convergence_loop`, hand-built state literals): drives the
     // reconciler's REAL read of `workloads/<id>/generation` through
-    // `run_convergence_tick` and asserts `observed_generation` stamps to the
+    // `run_convergence_tick` and asserts the max `issued_generation` stamp is to the
     // bumped value — locking `generation_value` to the writer's key
     // (`IntentKey::for_workload_generation`) and the `IncrementU64` decode
     // (`TxnOp::decode_counter`). Gated behind `integration-tests` for the

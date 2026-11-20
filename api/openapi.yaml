@@ -352,8 +352,8 @@ paths:
         operator-stopped workload is resumed; the intent stays declared
         throughout (distinct from #211 job removal). The verb bumps a
         monotonic desired-run generation; the `WorkloadLifecycle` reconciler
-        places a fresh instance when `observed_generation < generation` (the
-        placement decision lives in the reconciler, NOT this handler).
+        places a fresh instance while the committed generation has no observed
+        successor allocation row (ADR-0326; the placement decision lives in the reconciler, NOT this handler).
 
         404 contract: a restart against an `<id>` that was never deployed (no
         `IntentKey::for_workload(<id>)` row) returns HTTP 404 with the same
@@ -509,6 +509,17 @@ components:
       required:
       - rows
       properties:
+        capacity_wait:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/CapacityWait'
+            description: |-
+              Present while this workload's start is blocked only by a node capacity
+              limit (ADR-0327): the guest-network attachment pool is full, so the
+              workload has no allocation row yet and placement resumes when a slot
+              frees. Derived at read time from the workload's rows, the reconciler's
+              View and the pool's occupancy; never persisted. Additive: absent when
+              the workload is not waiting.
         issued_certificates:
           type: array
           items:
@@ -800,6 +811,37 @@ components:
       enum:
       - operator
       - cluster
+    CapacityResource:
+      type: string
+      description: A node capacity resource a workload can wait on.
+      enum:
+      - guest-network-attachments
+    CapacityWait:
+      type: object
+      description: |-
+        The capacity limit a workload's start is waiting on (ADR-0327).
+
+        `held` counts retiring leases, which still occupy the cap (ADR-0133);
+        `cap` is `MAX_GUEST_NETWORK_ATTACHMENTS`. There is no start time and no
+        history.
+      required:
+      - resource
+      - held
+      - cap
+      properties:
+        cap:
+          type: integer
+          format: int32
+          description: The node's attachment cap.
+          minimum: 0
+        held:
+          type: integer
+          format: int32
+          description: Attachments held on the node.
+          minimum: 0
+        resource:
+          $ref: '#/components/schemas/CapacityResource'
+          description: The exhausted resource.
     CertifiedKeyFailureBody:
       type: string
       description: The closed categories of a failed certified-key install.
@@ -3786,6 +3828,24 @@ components:
             type: string
             enum:
             - vm_guest_command_dispatch_failed
+      - type: object
+        description: The workload's volume could not be attached (ADR-0317, ADR-0318).
+        required:
+        - data
+        - kind
+        properties:
+          data:
+            type: object
+            description: The workload's volume could not be attached (ADR-0317, ADR-0318).
+            required:
+            - cause
+            properties:
+              cause:
+                $ref: '#/components/schemas/VolumeUnavailableCause'
+          kind:
+            type: string
+            enum:
+            - vm_volume_unavailable
       description: |-
         Structured reason for a lifecycle transition.
 
@@ -3970,6 +4030,81 @@ components:
           type: string
           description: Operator-supplied rootfs artifact path (BYO).
       additionalProperties: false
+    VolumeOperation:
+      type: string
+      description: |-
+        The `lvm` or device operation that failed (`VolumeBackingError::PoolCommand`,
+        `VolumeUnavailableCause::PoolCommandFailed`).
+      enum:
+      - report
+      - create
+      - activate
+      - claim
+    VolumeUnavailableCause:
+      oneOf:
+      - type: object
+        description: No volume pool is composed on this node.
+        required:
+        - kind
+        properties:
+          kind:
+            type: string
+            enum:
+            - pool_absent
+      - type: object
+        description: Not enough free extents for the declared size.
+        required:
+        - data
+        - kind
+        properties:
+          data:
+            type: object
+            description: Not enough free extents for the declared size.
+            required:
+            - needed
+            - free
+            properties:
+              free:
+                type: string
+                description: Free space observed before the create.
+              needed:
+                type: string
+                description: The declared size.
+          kind:
+            type: string
+            enum:
+            - insufficient_space
+      - type: object
+        description: An `lvm` command or device operation failed, or the `ensure` deadline passed.
+        required:
+        - data
+        - kind
+        properties:
+          data:
+            type: object
+            description: An `lvm` command or device operation failed, or the `ensure` deadline passed.
+            required:
+            - operation
+            properties:
+              operation:
+                $ref: '#/components/schemas/VolumeOperation'
+                description: The operation in progress when it failed.
+          kind:
+            type: string
+            enum:
+            - pool_command_failed
+      - type: object
+        description: |-
+          The volume's kernel claim stayed held past the 30 s bound (a constant;
+          the cause carries nothing).
+        required:
+        - kind
+        properties:
+          kind:
+            type: string
+            enum:
+            - held
+      description: Why a launch could not obtain its volume (ADR-0317, ADR-0318).
     WithdrawRouteResponse:
       type: object
       description: '`DELETE /v1/routes/{id}` response.'

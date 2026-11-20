@@ -60,8 +60,8 @@ use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole, ProbeRunS
 use overdrive_core::reconcilers::{ReconcilerName, TargetResource};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{
-    AllocationHandle, AllocationSpec, Driver, DriverError, DriverPayload, DriverType, Resources,
-    VmPayload,
+    AllocationHandle, AllocationSpec, Driver, DriverError, DriverPayload, DriverType,
+    LaunchSupersession, Resources, VmPayload,
 };
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
@@ -197,8 +197,12 @@ impl Driver for ProbeRunnerDriver {
         self.sim.r#type()
     }
 
-    async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
-        self.sim.start(spec).await
+    async fn start(
+        &self,
+        spec: &AllocationSpec,
+        supersession: &dyn LaunchSupersession,
+    ) -> Result<AllocationHandle, DriverError> {
+        self.sim.start(spec, supersession).await
     }
 
     async fn stop(&self, handle: &AllocationHandle) -> Result<(), DriverError> {
@@ -289,6 +293,7 @@ pub(super) fn vm_spec(
         alloc: alloc.clone(),
         identity: SpiffeId::for_allocation(workload, alloc),
         driver: DriverPayload::Vm(VmPayload {
+            volume: None,
             command: "/bin/serve".to_owned(),
             args: Vec::new(),
             kernel: PathBuf::from("/kernel"),

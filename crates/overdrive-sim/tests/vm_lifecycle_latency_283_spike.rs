@@ -235,13 +235,17 @@ impl Driver for DelayedDriver {
     fn r#type(&self) -> DriverType {
         DriverType::Vm
     }
-    async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
+    async fn start(
+        &self,
+        spec: &AllocationSpec,
+        supersession: &dyn overdrive_core::traits::LaunchSupersession,
+    ) -> Result<AllocationHandle, DriverError> {
         self.events.lock().push(DriverEvent::Entered(Effect::Start, spec.alloc.clone()));
         if self.effect == Effect::Start && spec.alloc.as_str().starts_with("alloc-slow") {
             self.entered.send(Effect::Start).unwrap();
             self.release.acquire().await.unwrap().forget();
         }
-        let result = self.inner.start(spec).await?;
+        let result = self.inner.start(spec, supersession).await?;
         self.events.lock().push(DriverEvent::Returned(Effect::Start, spec.alloc.clone()));
         Ok(result)
     }
@@ -1157,7 +1161,10 @@ async fn view_fsync_failure_prevents_dispatch_and_recovers() {
     assert!(running(&obs, "fsync-subject").await, "seed={seed}: same-input recovery must dispatch");
     assert_eq!(driver.live_count(), 2);
     let recovered = state.runtime.loaded_workload_lifecycle_views_for_test(&name).unwrap();
-    assert_eq!(recovered.get(&subject).unwrap().observed_generation, 1);
+    assert_eq!(
+        recovered.get(&subject).unwrap().issued_generation.values().copied().max().unwrap_or(0),
+        1
+    );
     let durable: std::collections::BTreeMap<TargetResource, WorkloadLifecycleView> =
         views.bulk_load("workload-lifecycle").await.unwrap();
     assert_eq!(durable, recovered, "seed={seed}: recovered View is durable");

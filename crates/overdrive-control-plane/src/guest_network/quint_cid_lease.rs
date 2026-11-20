@@ -567,6 +567,7 @@ fn compose(node: &Node, boot: u32) -> Composed {
             },
             intake,
             guest_listener_board,
+            None,
         );
         // D-21: every composition reopens the node's stores from disk
         // through the composition root's open (`StoreAdapters::open` over

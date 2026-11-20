@@ -1163,6 +1163,7 @@ fn allocation_spec_at(name: &str, address: Ipv4Addr) -> AllocationSpec {
         ))
         .expect("SPIFFE ID"),
         driver: DriverPayload::Vm(VmPayload {
+            volume: None,
             command: "/bin/true".to_owned(),
             args: Vec::new(),
             kernel: "/kernel".into(),

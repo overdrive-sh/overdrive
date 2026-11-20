@@ -134,6 +134,7 @@ async fn driver_over_vmm(
         layout(root),
         beacon,
         guest_listener_board,
+        None,
     );
     (driver, beacon_port)
 }
@@ -238,6 +239,7 @@ impl Node {
             identity: SpiffeId::new("spiffe://overdrive.local/workload/beacon/alloc/x")
                 .expect("valid spiffe id"),
             driver: DriverPayload::Vm(VmPayload {
+                volume: None,
                 command: "/sbin/init".to_owned(),
                 args: vec![],
                 kernel: self.root.join("vmlinuz"),
@@ -263,7 +265,9 @@ impl Node {
     ) -> (u32, JoinHandle<Result<AllocationHandle, DriverError>>) {
         let driver = self.driver.clone();
         let owned = spec.clone();
-        let start = tokio::spawn(async move { driver.start(&owned).await });
+        let start = tokio::spawn(async move {
+            driver.start(&owned, &overdrive_sim::adapters::SimLaunchSupersession::new()).await
+        });
         let pid = tokio::time::timeout(Duration::from_secs(10), async {
             loop {
                 if let Some(pid) = self.vmm.vsock_device_holders().get(&cid()) {

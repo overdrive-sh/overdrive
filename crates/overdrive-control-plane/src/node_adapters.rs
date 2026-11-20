@@ -313,6 +313,10 @@ pub struct VmAdapters {
     pub cgroup_accounting: Arc<dyn CgroupAccounting>,
     /// What a failed VM probe means at boot step 2.
     pub capability: VmCapability,
+    /// `LvmVolumePoolProbe` in production; `SimVolumePoolProbe` in a simulated-VM
+    /// test. Required: a fixture with no pool passes `SimVolumePoolProbe::absent()`
+    /// (GH #348, ADR-0314).
+    pub volume_pool: Arc<dyn overdrive_core::traits::volume_backing::VolumePoolProbe>,
 }
 
 /// What a failed `Vmm::probe` or `CgroupAccounting::probe` (or the
@@ -392,6 +396,7 @@ impl NodeAdapters {
             beacon: Arc::new(overdrive_host::VsockBeaconIo::new()),
             cgroup_accounting: Arc::new(overdrive_host::RealCgroupAccounting::new()),
             capability: VmCapability::Optional,
+            volume_pool: Arc::new(overdrive_host::LvmVolumePoolProbe::new()),
         };
         let dataplane: Arc<dyn DataplaneComposer> = Arc::new(HostDataplaneComposer::new());
         let mtls = MtlsAdapters {

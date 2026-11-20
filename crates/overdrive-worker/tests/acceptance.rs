@@ -62,6 +62,9 @@ mod acceptance {
     // cause selection, verbatim diagnostics, early-exit/deadline facts,
     // initial/restart parity, and allocation-scoped cleanup.
     mod vm_driver_start_failure_contract;
+    // node-local-persistent-volume (GH #348): the launch path's volume gates.
+    mod launch_supersession;
+    mod node_volume_launch;
     // Step 03-09 (DWD-26 / ADR-0083 §§D3f-D3h) — S-VM-85: the clone-index
     // link outlives the clone it points at, on every interleaving.
     // Component-scope acceptance against SimVmm over a real filesystem

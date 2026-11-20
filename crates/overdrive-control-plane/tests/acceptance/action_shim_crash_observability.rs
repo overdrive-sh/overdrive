@@ -52,7 +52,7 @@ use overdrive_core::public_ingress::{
 use overdrive_core::reconcilers::{Action, TickContext};
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverStartClass,
-    DriverStartFailure, DriverType, Resources, VmPayload, VmStartFailure,
+    DriverStartFailure, DriverType, LaunchSupersession, Resources, VmPayload, VmStartFailure,
 };
 use overdrive_core::traits::observation_store::WorkloadSvidIssueStatusRowV1;
 use overdrive_core::traits::observation_store::{
@@ -92,7 +92,11 @@ impl Driver for ScriptedDriver {
         self.driver_type
     }
 
-    async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
+    async fn start(
+        &self,
+        spec: &AllocationSpec,
+        _supersession: &dyn LaunchSupersession,
+    ) -> Result<AllocationHandle, DriverError> {
         self.start_calls.fetch_add(1, Ordering::SeqCst);
         match self.outcome {
             StartOutcome::Accept => {
@@ -178,6 +182,7 @@ fn spec() -> AllocationSpec {
         identity: SpiffeId::new("spiffe://overdrive.local/workload/crashobs/alloc/0")
             .expect("valid spiffe id"),
         driver: overdrive_core::traits::driver::DriverPayload::Vm(VmPayload {
+            volume: None,
             command: "/bin/true".to_owned(),
             args: Vec::new(),
             kernel: PathBuf::from("/nonexistent/kernel"),
@@ -192,6 +197,7 @@ fn spec() -> AllocationSpec {
 fn vm_spec() -> AllocationSpec {
     AllocationSpec {
         driver: overdrive_core::traits::driver::DriverPayload::Vm(VmPayload {
+            volume: None,
             command: "/bin/true".to_owned(),
             args: Vec::new(),
             kernel: PathBuf::from("/nonexistent/kernel"),
@@ -700,7 +706,11 @@ impl Driver for TerminalFenceDriver {
         DriverType::Vm
     }
 
-    async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
+    async fn start(
+        &self,
+        spec: &AllocationSpec,
+        _supersession: &dyn LaunchSupersession,
+    ) -> Result<AllocationHandle, DriverError> {
         if self.try_insert_claim(&spec.alloc) {
             Ok(AllocationHandle { alloc: spec.alloc.clone(), pid: None })
         } else {

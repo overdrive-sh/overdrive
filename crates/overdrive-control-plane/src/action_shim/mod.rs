@@ -26,13 +26,14 @@ use overdrive_core::eval_broker::Evaluation;
 use overdrive_core::eval_broker::EvaluationBroker;
 use overdrive_core::eval_broker::EvaluationEligibility;
 use overdrive_core::id::{AllocationId, ContentHash, CorrelationKey, NodeId, SpiffeId, WorkloadId};
+use overdrive_core::reconcilers::TargetResource;
 use overdrive_core::reconcilers::{Action, TickContext};
 use overdrive_core::traits::ca::Ca;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::dataplane::Dataplane;
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, Driver, DriverError, DriverRegistry, DriverStartClass,
-    DriverStartFailure, DriverType, VmStartFailure,
+    DriverStartFailure, DriverType, LaunchSupersession, VmStartFailure,
 };
 use overdrive_core::traits::observation_store::{
     AllocLifecycleOccurrenceRow, AllocLifecyclePredecessor, AllocState, AllocStatusRow, CrashFacts,
@@ -92,6 +93,19 @@ impl EvaluationSubmission<'_> {
             }
             #[cfg(test)]
             Self::Standalone(broker) => broker.lock().submit(evaluation, now, eligibility),
+        }
+    }
+
+    /// The convergence lane's supersession signal for the workload `workload`
+    /// (ADR-0325). The standalone broker has no lanes: an unraised signal.
+    fn lane_supersession(&self, workload: &WorkloadId) -> Arc<dyn LaunchSupersession> {
+        match self {
+            Self::Runtime(runtime) => match TargetResource::new(&format!("workload/{workload}")) {
+                Ok(target) => runtime.lane_supersession(&target),
+                Err(_) => Arc::new(crate::reconciler_runtime::UnraisedSupersession),
+            },
+            #[cfg(test)]
+            Self::Standalone(_) => Arc::new(crate::reconciler_runtime::UnraisedSupersession),
         }
     }
 }
@@ -1869,9 +1883,11 @@ async fn dispatch_single(
                 teardown_for_dispatch(&alloc_id, guest_network).await?;
                 return Err(issue_error);
             }
+            let supersession = broker.lane_supersession(&workload_id);
+            // RED scaffold (ADR-0325, N-SUP): DELIVER maps StartSuperseded to no row
             let start_outcome: Result<AllocationHandle, DriverError> =
                 match drivers.get(driver_kind) {
-                    Some(driver) => driver.start(&spec).await,
+                    Some(driver) => driver.start(&spec, &*supersession).await,
                     None => Err(DriverError::StartRejected {
                         failure: DriverStartFailure {
                             class: DriverStartClass::Unclassified { driver: driver_kind },
@@ -2329,8 +2345,10 @@ async fn dispatch_single(
                     }
 
                     // Route the supplied successor payload to its composed driver.
+                    let supersession = broker.lane_supersession(&prior_row.workload_id);
+                    // RED scaffold (ADR-0325, N-SUP): DELIVER maps StartSuperseded to no row
                     let start_outcome = match drivers.get(driver_kind) {
-                        Some(driver) => driver.start(&spec).await,
+                        Some(driver) => driver.start(&spec, &*supersession).await,
                         None => Err(DriverError::StartRejected {
                             failure: DriverStartFailure {
                                 class: DriverStartClass::Unclassified { driver: driver_kind },
@@ -3274,6 +3292,11 @@ mod guest_activation_acceptance;
 #[cfg(all(test, feature = "integration-tests"))]
 mod replacement_acceptance;
 
+/// Launch outcomes that precede the driver (ADR-0325, ADR-0328, ADR-0329).
+/// Source-local: the cap is reached through the pool's crate-private `assign`.
+#[cfg(test)]
+mod prelaunch_outcome_acceptance;
+
 #[cfg(test)]
 mod guest_command_release_tests {
     #![allow(clippy::doc_markdown)]
@@ -3365,6 +3388,7 @@ mod fail_closed_mtls_tests {
     use overdrive_core::reconcilers::TickContext;
     use overdrive_core::traits::IdentityRead;
     use overdrive_core::traits::clock::Clock;
+    use overdrive_core::traits::driver::LaunchSupersession;
     use overdrive_core::traits::driver::{
         AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverStartClass,
         DriverStartFailure, DriverType, Resources,
@@ -3433,7 +3457,11 @@ mod fail_closed_mtls_tests {
             DriverType::Vm
         }
 
-        async fn start(&self, _spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
+        async fn start(
+            &self,
+            _spec: &AllocationSpec,
+            _supersession: &dyn LaunchSupersession,
+        ) -> Result<AllocationHandle, DriverError> {
             Err(DriverError::StartRejected {
                 failure: DriverStartFailure {
                     class: DriverStartClass::Unclassified { driver: DriverType::Vm },
@@ -4379,6 +4407,7 @@ mod admission_refusal_acceptance {
             ))
             .expect("SPIFFE ID"),
             driver: DriverPayload::Vm(VmPayload {
+                volume: None,
                 command: "/bin/true".to_owned(),
                 args: Vec::new(),
                 kernel: PathBuf::from("/nd295/kernel"),

@@ -106,6 +106,17 @@ mod integration {
     #[path = "../common/vm_dispatch.rs"]
     pub mod vm_dispatch;
 
+    // Node-local persistent volume (GH #348): the composed node the
+    // capacity-wait tests drive, shared with the acceptance binary's cheap
+    // guards through `#[path]` (it resolves `super::serve_ports`). The
+    // capacity-wait tests fill the real guest address pool to its cap of
+    // 16,384 attachments (about 56 s per fill on a debug build), so they run
+    // under `integration-tests`.
+    mod alloc_status_capacity_wait;
+    mod capacity_wait_composition;
+    #[path = "../acceptance/capacity_wait_composition.rs"]
+    pub mod capacity_wait_rig;
+
     // built-in-ca (GH #28) — DISTILL RED scaffolds. `ca_equivalence` is the
     // central `Ca` trait-contract enforcement test driving BOTH `RcgenCa`
     // (host) and `SimCa` (sim) through the same call sequence (ADR-0063 D8;
@@ -194,6 +205,7 @@ mod integration {
     /// Asserts `Reconciler::NAME` is a compile-time anchor and that
     /// `write_through_bytes` accepts `&'static str` directly.
     mod redb_view_store_no_leak;
+    mod restart_generation_invariant;
     /// single-node-dataplane-wiring step 01-04 (ADR-0061 § 8 / § 5) —
     /// Tier-3 regression for the serve-boot dataplane wiring. Drives the
     /// real `provision` + `EbpfDataplane::new_with_pin_dir` seam: (HAPPY)

@@ -357,8 +357,12 @@ impl Driver for ProbedVmDriver {
         DriverType::Vm
     }
 
-    async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
-        self.inner.start(spec).await
+    async fn start(
+        &self,
+        spec: &AllocationSpec,
+        supersession: &dyn overdrive_core::traits::LaunchSupersession,
+    ) -> Result<AllocationHandle, DriverError> {
+        self.inner.start(spec, supersession).await
     }
 
     async fn stop(&self, handle: &AllocationHandle) -> Result<(), DriverError> {

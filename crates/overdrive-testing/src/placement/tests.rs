@@ -18,7 +18,7 @@ use super::{GuestPlacement, Sharing, in_metal_run};
 
 placement!(host_pure);
 
-/// The 22 environments over 8 groups the registry is closed over: each group's
+/// The 23 environments over 8 groups the registry is closed over: each group's
 /// profiles, the base profile spelled as the empty string.
 const ENVIRONMENTS: &[(&str, &[&str])] = &[
     ("probe", &["base"]),
@@ -44,6 +44,7 @@ const ENVIRONMENTS: &[(&str, &[&str])] = &[
             "nested-launch",
             "nested-launch-rustc",
             "nested-launch-lane",
+            "volume-pool",
         ],
     ),
 ];
@@ -84,7 +85,7 @@ fn the_registry_accepts_each_named_environment() {
             accepted += 1;
         }
     }
-    assert_eq!(accepted, 22, "twenty-two environments over eight groups");
+    assert_eq!(accepted, 23, "twenty-three environments over eight groups");
     let _ = A_PLACEMENT_BUILT_AT_COMPILE_TIME;
 }
 

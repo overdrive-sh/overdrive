@@ -742,6 +742,7 @@ fn spec(name: &str, transport: Option<GuestTransportAssignment>) -> AllocationSp
         ))
         .expect("SPIFFE ID"),
         driver: DriverPayload::Vm(VmPayload {
+            volume: None,
             command: "/bin/true".to_owned(),
             args: Vec::new(),
             kernel: PathBuf::from("/nonexistent/kernel"),

@@ -101,6 +101,7 @@ fn frozen_driver_error_remains_exhaustively_matchable_by_external_callers() {
             DriverError::Io(_) => "io",
             DriverError::ResizeUnsupported { .. } => "resize_unsupported",
             DriverError::GuestTransportMissing { .. } => "guest_transport_missing",
+            DriverError::StartSuperseded => "start_superseded",
         }
     }
 

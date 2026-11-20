@@ -73,6 +73,7 @@ pub mod vmm;
 // from — a NEW port, not a widened `CgroupFs` (ADR-0083 §A8). Composed
 // unconditionally, never gated on `Vmm`.
 pub mod vm_host_state;
+pub mod volume_backing;
 
 pub use ca::{
     Ca, CaCertDer, CaCertPem, CaError, CaKeyPem, IntermediateHandle, RootCaHandle, SvidMaterial,
@@ -82,7 +83,7 @@ pub use cgroup_accounting::{CgroupAccounting, CgroupAccountingError, CgroupAccou
 pub use cgroup_fs::{CgroupFs, ProbeError};
 pub use clock::Clock;
 pub use dataplane::Dataplane;
-pub use driver::{Driver, DriverType};
+pub use driver::{Driver, DriverType, LaunchSupersession};
 pub use entropy::Entropy;
 pub use guest_attachment_view::{
     GuestAttachmentLease, GuestAttachmentObservation, GuestAttachmentView,

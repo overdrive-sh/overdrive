@@ -208,7 +208,7 @@ fn workload_states(row: AllocStatusRow) -> (WorkloadLifecycleState, WorkloadLife
     };
     let mut actual_allocs = BTreeMap::new();
     actual_allocs.insert(row.alloc_id.clone(), row);
-    // observed_generation == desired.generation is set on the View; the
+    // max issued_generation == desired.generation is set on the View; the
     // desired/actual states both carry generation 1.
     (base(BTreeMap::new()), base(actual_allocs))
 }
@@ -223,8 +223,10 @@ fn liveness_restart_loop_trajectory_exhausts_to_service_failed() {
     let wl = WorkloadLifecycle::canonical();
 
     // Single shared budget lives here, threaded across every cadence.
-    let mut wl_view =
-        WorkloadLifecycleView { observed_generation: 1, ..WorkloadLifecycleView::default() };
+    let mut wl_view = WorkloadLifecycleView {
+        issued_generation: BTreeMap::from([(allocation_id(0), 1)]),
+        ..WorkloadLifecycleView::default()
+    };
     // ServiceLifecycle's private counter View (never carries budget).
     let sl_view = ServiceLifecycleView::default();
 

@@ -98,6 +98,7 @@ fn fixture_response(
         issued_certificates: vec![],
         probes: vec![],
         probe_results: vec![],
+        capacity_wait: None,
     }
 }
 
@@ -1152,4 +1153,145 @@ fn failing_probe_renders_no_fabricated_failure_ratio() {
          failure count, so a `(0/3)` here would be a fabricated claim that the probe has \
          failed zero times while reporting it as failing; got:\n{rendered}",
     );
+}
+
+// ===========================================================================
+// Waiting for guest-network capacity: the empty-state hint is suppressed
+// (node-local persistent volume, GH #348; ADR-0327; feature-delta § "Operator
+// surface: a workload waiting for capacity", Human rendering).
+//
+// Scenario: a workload's start is blocked only by the node's full guest-network
+// attachment pool, so it has no allocation row yet. The generic empty-state
+// text ("check that a node is eligible to place it") would send the operator to
+// the wrong place; `describe` prints the `Waiting` line instead. With no wait
+// and no rows the generic text is unchanged.
+//
+// Shape: example. Owner: `commands::workload::describe` (the empty-state
+// derivation) over `ApiClient`. Driving port: `describe`, against a TLS stub
+// that serves a handcrafted `AllocStatusResponse` (a real server cannot produce
+// `capacity_wait` until the handler lands; the stub is test support in this
+// file and adds no production surface). Oracle: the rendered operator text.
+// Evidence tier: Tier-1 in-process (real TLS, real reqwest client).
+//
+// PENDING: the waiting test fails today on its own assertion; the GUARD passes
+// today and must keep passing.
+// ===========================================================================
+
+mod capacity_wait_empty_state {
+    #![allow(clippy::doc_markdown, reason = "the CONTRACT_SHAPE line is machine-read verbatim")]
+
+    use std::sync::Arc;
+
+    use axum::Router;
+    use axum::body::Body;
+    use axum::http::{Response, header};
+    use axum::routing::get;
+    use overdrive_cli::commands::workload::{DescribeArgs, describe};
+    use overdrive_cli::render::workload_describe;
+    use overdrive_control_plane::api::{AllocStatusResponse, CapacityResource, CapacityWait};
+    use overdrive_control_plane::tls_bootstrap::{
+        load_server_tls_config, mint_ephemeral_ca, write_trust_triple,
+    };
+    use overdrive_core::aggregate::WorkloadKind;
+    use overdrive_testing::overdrive_test;
+    use tempfile::TempDir;
+
+    const WAITING_LINE: &str = "Waiting  guest-network attachment capacity is full on this node (16384 of 16384 attached); placement resumes when one frees.";
+    const GENERIC_HINT: &str = "check that a node is eligible";
+    const PENDING_MESSAGE: &str =
+        "describe must show the capacity wait and suppress the eligibility hint";
+
+    /// A TLS stub of `GET /v1/allocs` answering `response`; returns the operator config path
+    /// whose trust triple pins the stub's CA.
+    fn stub_control_plane(response: &AllocStatusResponse) -> (std::path::PathBuf, TempDir) {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let material = mint_ephemeral_ca().expect("an ephemeral CA");
+        let server_config = load_server_tls_config(&material).expect("the server TLS config");
+        let body = serde_json::to_string(response).expect("serialise the response");
+        let app = Router::new().route(
+            "/v1/allocs",
+            get(move || {
+                let body = body.clone();
+                async move {
+                    Response::builder()
+                        .header(header::CONTENT_TYPE, "application/json")
+                        .body(Body::from(body))
+                        .expect("a response")
+                }
+            }),
+        );
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        listener.set_nonblocking(true).expect("non-blocking");
+        let port = listener.local_addr().expect("addr").port();
+        let rustls = axum_server::tls_rustls::RustlsConfig::from_config(Arc::new(server_config));
+        tokio::spawn(async move {
+            let _ =
+                axum_server::from_tcp_rustls(listener, rustls).serve(app.into_make_service()).await;
+        });
+        let config_dir = TempDir::new().expect("tempdir");
+        write_trust_triple(config_dir.path(), &format!("https://127.0.0.1:{port}"), &material)
+            .expect("trust triple");
+        (config_dir.path().join(".overdrive").join("config"), config_dir)
+    }
+
+    fn response_without_rows(wait: Option<CapacityWait>) -> AllocStatusResponse {
+        AllocStatusResponse {
+            workload_id: Some("web".to_owned()),
+            spec_digest: Some("a".repeat(64)),
+            kind: Some(WorkloadKind::Job),
+            replicas_desired: 1,
+            replicas_running: 0,
+            capacity_wait: wait,
+            ..Default::default()
+        }
+    }
+
+    async fn described(response: &AllocStatusResponse) -> String {
+        let (config_path, _guard) = stub_control_plane(response);
+        let out = describe(DescribeArgs { id: "web".to_owned(), config_path })
+            .await
+            .expect("describe against the stub control plane");
+        workload_describe(&out)
+    }
+
+    /// PENDING. A workload waiting for capacity with no allocation rows shows the `Waiting` line
+    /// and not the generic eligibility hint.
+    /// CONTRACT_SHAPE: bounded-change.
+    #[overdrive_test(guest = "cgroup-default")]
+    #[tokio::test]
+    #[should_panic(
+        expected = "describe must show the capacity wait and suppress the eligibility hint: the Waiting line is absent"
+    )]
+    async fn describe_of_a_waiting_workload_shows_the_wait_and_not_the_eligibility_hint() {
+        let wait = CapacityWait {
+            resource: CapacityResource::GuestNetworkAttachments,
+            held: 16_384,
+            cap: 16_384,
+        };
+        let text = described(&response_without_rows(Some(wait))).await;
+        assert!(
+            text.lines().any(|line| line == WAITING_LINE),
+            "{PENDING_MESSAGE}: the Waiting line is absent; got:\n{text}"
+        );
+        assert!(
+            !text.contains(GENERIC_HINT),
+            "{PENDING_MESSAGE}: the generic hint is still printed; got:\n{text}"
+        );
+    }
+
+    /// GUARD. With no capacity wait and no rows the generic empty-state text is unchanged and no
+    /// `Waiting` line appears.
+    /// CONTRACT_SHAPE: bounded-change.
+    #[overdrive_test(guest = "cgroup-default")]
+    #[tokio::test]
+    async fn describe_with_no_wait_and_no_rows_keeps_the_generic_empty_state() {
+        let text = described(&response_without_rows(None)).await;
+        assert!(
+            text.contains("0 allocations for workload web")
+                && text.contains(GENERIC_HINT)
+                && text.contains("the control plane's convergence loop is running"),
+            "the generic empty-state text is unchanged; got:\n{text}"
+        );
+        assert!(!text.contains("Waiting"), "no Waiting line without a wait; got:\n{text}");
+    }
 }

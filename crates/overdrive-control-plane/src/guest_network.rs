@@ -566,7 +566,7 @@ impl GuestAddressPool {
         }
 
         let occupancy = guest_pool_occupancy(&state);
-        if occupancy.held >= overdrive_core::guest_network::MAX_GUEST_NETWORK_ATTACHMENTS {
+        if occupancy.at_cap() {
             drop(state);
             tracing::info!(
                 name: "guest_network.admission_refused",

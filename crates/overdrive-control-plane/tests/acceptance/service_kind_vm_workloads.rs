@@ -128,10 +128,12 @@ async fn one_server_boot_shares_exactly_one_trusted_probe_runner_with_vm_driver(
         },
         beacon,
         Arc::new(overdrive_worker::GuestListenerBoard::new()),
+        None,
     );
     let vm = allocation_spec(
         "svm-22-vm",
         DriverPayload::Vm(VmPayload {
+            volume: None,
             command: "/sbin/init".to_owned(),
             args: Vec::new(),
             kernel: PathBuf::from("/kernel"),

@@ -116,6 +116,7 @@ async fn ficlone_fails_closed_on_a_real_non_reflink_target() {
         .expect("fixture-staged kernel validates for x86_64");
 
     let config = VmConfig {
+        volume: None,
         alloc: alloc.clone(),
         kernel,
         rootfs,

@@ -1004,6 +1004,7 @@ fn filler_action(tag: &str, index: usize) -> Action {
             ))
             .expect("SPIFFE ID"),
             driver: DriverPayload::Vm(VmPayload {
+                volume: None,
                 command: "/bin/sleep".to_owned(),
                 args: vec!["3600".to_owned()],
                 kernel: PathBuf::from("/nd295/kernel"),

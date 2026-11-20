@@ -28,6 +28,7 @@ Status: `pending | satisfied | partial | broken | unanchored-claim | out-of-scop
 | [E13](E13-vm-service-inferred-tcp-startup/) | E | zero declared probes retain inferred guest-targeted TCP behavior observed by complementary VM client Jobs | — | S-SVM-29, US-SVM-1, ADR-0058/0090, GH #257 | `satisfied` |
 | [E14](E14-vm-service-post-greenfield-cut/) | E | post-cut checked-in healthy VM Service reaches Stable and its VM client receives the exact guest reply through the Service frontend with owned cleanup | K1/K2 | S-SVM-01, US-SVM-1/2, remove-legacy-exec-workload-driver feature-delta post-cut event, roadmap 03-01 | `satisfied` — [E14 different-fox review](../../docs/feature/remove-legacy-exec-workload-driver/deliver/review-03-01.md) |
 | [E15](E15-public-ingress-operator-journey/) | E | an operator-supplied public hostname, chain and key serve a VM Service's streamed response to an external TLS 1.3 client through the gateway with kernel TLS armed on both legs | — | S-PIG-01 / AT-PIG-E2E-1, OUT-PIG-PUBLIC-REQUEST, ADR-0244, ADR-0239 | `pending` |
+| [E16](E16-node-local-volume-survives-restart-and-reboot/) | E | a VM workload's node-local volume keeps its data through a node reboot; `describe` shows the volume and a typed reason when the pool is too small | — | VD-2 (ADR-0311), VD-8 (ADR-0317), VD-9 (ADR-0318), GH #348 | `pending` (claim authored; reboot needs the host owner's authorisation) |
 
 ## Feature coverage
 

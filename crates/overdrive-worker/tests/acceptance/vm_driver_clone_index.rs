@@ -143,6 +143,7 @@ fn build_spec(alloc: &AllocationId, tmp: &TempDir, cid_offset: u32) -> Allocatio
         identity: SpiffeId::new("spiffe://overdrive.local/workload/clone-index-test/alloc/x")
             .expect("valid spiffe id"),
         driver: DriverPayload::Vm(VmPayload {
+            volume: None,
             command: "/sbin/init".to_owned(),
             args: vec![],
             kernel: kernel_path(tmp),
@@ -184,6 +185,7 @@ async fn build_driver(
         layout,
         beacon.intake().await,
         guest_listener_board,
+        None,
     );
     (driver, clock, beacon)
 }
@@ -194,7 +196,9 @@ async fn build_driver(
 async fn start_with_beacon(driver: &VmDriver, spec: &AllocationSpec, beacon: &BeaconHarness) {
     let driver = driver.clone();
     let spec_owned = spec.clone();
-    let start_task = tokio::spawn(async move { driver.start(&spec_owned).await });
+    let start_task = tokio::spawn(async move {
+        driver.start(&spec_owned, &overdrive_sim::adapters::SimLaunchSupersession::new()).await
+    });
 
     let _guest = beacon.dial_ready(spec).await;
 

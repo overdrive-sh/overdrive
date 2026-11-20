@@ -4080,6 +4080,7 @@ mod tests {
             ),
             alloc,
             driver: DriverPayload::Vm(VmPayload {
+                volume: None,
                 command: "/bin/true".to_owned(),
                 args: Vec::new(),
                 kernel: PathBuf::from("/nonexistent/kernel"),

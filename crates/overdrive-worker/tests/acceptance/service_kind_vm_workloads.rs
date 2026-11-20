@@ -110,6 +110,7 @@ fn allocation_spec(
 
 fn vm_payload() -> DriverPayload {
     DriverPayload::Vm(VmPayload {
+        volume: None,
         command: "/bin/true".to_owned(),
         args: Vec::new(),
         kernel: PathBuf::from("/kernel"),
@@ -162,6 +163,7 @@ async fn shared_vm_driver() -> (VmDriver, Arc<ProbeRunner>) {
         layout,
         intake,
         guest_listener_board,
+        None,
     );
     (driver, probe_runner)
 }

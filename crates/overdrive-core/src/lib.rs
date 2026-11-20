@@ -149,6 +149,8 @@ pub mod wall_clock;
 // `docs/feature/cli-submit-vs-deploy-and-alloc-status/distill/wave-decisions.md`
 // DWD-03.
 pub mod transition_reason;
+// Node-local persistent volume value types (GH #348).
+pub mod volume;
 // `vm::config` — `VmConfig`'s pure value family for the Cloud Hypervisor
 // VM driver (`microvm-driver-cloud-hypervisor`, GH #42, ADR-0082 §§D2.1-
 // D2.5): `DiskAttachment`, `MemoryPlan` + `reserve_bytes`, `KernelImage`,

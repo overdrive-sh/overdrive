@@ -283,7 +283,7 @@ fn withdrawn_service_release_action_idempotent_on_reemit() {
         restart_counts: BTreeMap::new(),
         last_failure_seen_at: BTreeMap::new(),
         released_for_deletion: released,
-        observed_generation: 0,
+        issued_generation: BTreeMap::new(),
         reclaim_attempts: BTreeMap::new(),
         reclaim_emitted_at: BTreeMap::new(),
     };

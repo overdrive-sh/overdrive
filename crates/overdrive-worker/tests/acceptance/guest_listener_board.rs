@@ -179,6 +179,7 @@ impl Harness {
             },
             intake,
             Arc::clone(&board),
+            None,
         );
         let exits = driver.take_exit_receiver().expect("the exit receiver is taken once");
         Self { _tmp: tmp, root, vmm, io, driver, board, exits, next: 0 }
@@ -195,6 +196,7 @@ impl Harness {
             identity: SpiffeId::new("spiffe://overdrive.local/workload/board/alloc/x")
                 .expect("valid spiffe id"),
             driver: DriverPayload::Vm(VmPayload {
+                volume: None,
                 command: "/sbin/init".to_owned(),
                 args: vec![],
                 kernel: self.root.join("vmlinuz"),
@@ -235,7 +237,9 @@ impl Harness {
         let token = LaunchToken::from_bytes([0x5a + index as u8; 16]).expect("a non-zero token");
         let spec = self.spec(&alloc, index, token);
         let driver = self.driver.clone();
-        let start = tokio::spawn(async move { driver.start(&spec).await });
+        let start = tokio::spawn(async move {
+            driver.start(&spec, &overdrive_sim::adapters::SimLaunchSupersession::new()).await
+        });
         let cid = Self::cid(index);
         let pid = tokio::time::timeout(Duration::from_secs(10), async {
             loop {

@@ -324,6 +324,7 @@ fn sample_spec() -> AllocationSpec {
         alloc: alloc("alloc-a1b2c3"),
         identity: spiffe("workload/payments/alloc/a1b2c3"),
         driver: DriverPayload::Vm(VmPayload {
+            volume: None,
             command: "registry/payments:1.0".to_owned(),
             args: vec![],
             kernel: PathBuf::from("/nonexistent/kernel"),
@@ -341,7 +342,10 @@ async fn sim_driver_start_stop_status_round_trip() {
     let driver = SimDriver::new(DriverType::Vm);
     let spec = sample_spec();
 
-    let handle = driver.start(&spec).await.expect("start succeeds");
+    let handle = driver
+        .start(&spec, &overdrive_sim::adapters::SimLaunchSupersession::new())
+        .await
+        .expect("start succeeds");
     assert_eq!(handle.alloc, spec.alloc);
 
     let state = driver.status(&handle).await.expect("status after start");
@@ -367,7 +371,10 @@ async fn sim_driver_start_stop_status_round_trip() {
 #[tokio::test]
 async fn sim_driver_honours_configured_start_failure() {
     let driver = SimDriver::new(DriverType::Vm).fail_on_start_with("disk full".to_owned());
-    let err = driver.start(&sample_spec()).await.expect_err("start must fail");
+    let err = driver
+        .start(&sample_spec(), &overdrive_sim::adapters::SimLaunchSupersession::new())
+        .await
+        .expect_err("start must fail");
 
     match err {
         // DWD-24: the family now rides the typed class, and the injected
@@ -548,7 +555,10 @@ async fn sim_driver_resize_succeeds_for_running_allocation() {
     // flip: a running allocation's resize must succeed; missing must
     // fail. Together with the previous test, both branches are covered.
     let driver = SimDriver::new(DriverType::Vm);
-    let handle = driver.start(&sample_spec()).await.expect("start succeeds");
+    let handle = driver
+        .start(&sample_spec(), &overdrive_sim::adapters::SimLaunchSupersession::new())
+        .await
+        .expect("start succeeds");
 
     driver
         .resize(&handle, Resources { cpu_milli: 1000, memory_bytes: 2048 })

@@ -37,8 +37,7 @@ use overdrive_reconcilers::service_lifecycle::{
 // (4) The CONTRACT stayed in core — no core->reconcilers back-edge. These
 //     paths MUST keep resolving at `overdrive_core::reconcilers::`.
 use overdrive_core::reconcilers::{
-    Action, HydrateError, HydrationContext, Reconciler, ReconcilerName, TargetResource,
-    TickContext,
+    Action, HydrateError, HydrationContext, Reconciler, ReconcilerName, TargetResource, TickContext,
 };
 
 /// The extraction compiled and every moved/stayed symbol resolves at its

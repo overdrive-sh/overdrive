@@ -50,8 +50,7 @@
 use overdrive_core::aggregate::{IntentKey, WorkloadIntent, scan_workload_intents};
 use overdrive_core::id::{ServiceId, WorkloadId};
 use overdrive_core::reconcilers::{
-    Action, HydrateError, HydrationContext, Reconciler, ReconcilerName, TargetResource,
-    TickContext,
+    Action, HydrateError, HydrationContext, Reconciler, ReconcilerName, TargetResource, TickContext,
 };
 use overdrive_core::traits::observation_store::ObservationRowKind;
 use overdrive_core::wall_clock::UnixInstant;
@@ -86,8 +85,9 @@ pub use workflow_lifecycle::{
 };
 pub use workload_lifecycle::{
     RESTART_BACKOFF_CEILING, RESTART_BACKOFF_DURATION, WorkloadLifecycle, WorkloadLifecycleState,
-    WorkloadLifecycleView, backoff_for_attempt, current_alloc, project_probe_descriptors,
-    project_service_listen_ports, restart_after_failure, restart_decision,
+    WorkloadLifecycleView, backoff_for_attempt, current_alloc, generation_replacement_pending,
+    project_probe_descriptors, project_service_listen_ports, restart_after_failure,
+    restart_decision, start_blocked_only_by_capacity,
 };
 
 // `ServiceLifecycleReconciler` lives in `crate::service_lifecycle` (a sibling

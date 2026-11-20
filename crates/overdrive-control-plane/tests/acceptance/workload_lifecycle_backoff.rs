@@ -24,7 +24,8 @@ use overdrive_control_plane::{AppState, noop_heartbeat, workload_lifecycle};
 use overdrive_core::aggregate::{DriverInput, IntentKey, Job, JobSpecInput, ResourcesInput};
 use overdrive_core::id::{NodeId, WorkloadId};
 use overdrive_core::traits::driver::{
-    AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverType, Resources,
+    AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverType,
+    LaunchSupersession, Resources,
 };
 use overdrive_core::traits::observation_store::{AllocState, ObservationStore};
 use overdrive_sim::adapters::clock::SimClock;
@@ -60,7 +61,11 @@ impl Driver for AlwaysFailDriver {
         DriverType::Vm
     }
 
-    async fn start(&self, _spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
+    async fn start(
+        &self,
+        _spec: &AllocationSpec,
+        _supersession: &dyn LaunchSupersession,
+    ) -> Result<AllocationHandle, DriverError> {
         {
             let mut n = self.start_count.lock().expect("mutex");
             *n = n.saturating_add(1);

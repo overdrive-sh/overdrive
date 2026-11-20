@@ -1076,7 +1076,7 @@ pub mod composed {
         /// The node's configuration: configuration only (NO-OVERRIDE-SEAMS),
         /// over the node's directories, the vsock listeners kernel-assigned
         /// (PORTS-CONFIG; the owner reports what it bound, `flow_ports()`).
-        fn config(&self) -> ServerConfig {
+        pub(crate) fn config(&self) -> ServerConfig {
             let data_dir = self.dirs.path().join("data");
             let operator_config_dir = self.dirs.path().join("conf");
             std::fs::create_dir_all(&data_dir).expect("create data dir");
@@ -1098,7 +1098,7 @@ pub mod composed {
         /// node's `SimMtlsIntercept` with the simulated enforcement factory
         /// (built by the boot over its one `OwnerDial`, LEGS-DIAL), and
         /// `dns`. Err: the store open's typed refusal, as the boot returns it.
-        fn boot_adapters(
+        pub(crate) fn boot_adapters(
             &self,
             config: &ServerConfig,
             dns: Arc<TestGuestDnsFactory>,

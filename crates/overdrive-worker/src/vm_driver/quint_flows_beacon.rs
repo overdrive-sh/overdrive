@@ -318,6 +318,7 @@ async fn vm_driver(
         },
         intake,
         guest_listener_board,
+        None,
     );
     (driver, beacon_port)
 }
@@ -407,6 +408,7 @@ impl FlowsBeaconDriver {
             identity: SpiffeId::new("spiffe://overdrive.local/workload/flows-beacon/alloc/x")
                 .expect("valid spiffe id"),
             driver: DriverPayload::Vm(VmPayload {
+                volume: None,
                 command: "/sbin/init".to_owned(),
                 args: vec![],
                 kernel: self.tmp.path().join("vmlinuz"),
@@ -425,7 +427,9 @@ impl FlowsBeaconDriver {
         let alloc = lease.alloc.clone();
         let token = lease.launch;
         let driver = self.driver.clone();
-        let start = self.runtime.spawn(async move { driver.start(&spec).await });
+        let start = self.runtime.spawn(async move {
+            driver.start(&spec, &overdrive_sim::adapters::SimLaunchSupersession::new()).await
+        });
         self.launch = Some(Launch { alloc, token, pid: None, start });
         let deadline = std::time::Instant::now() + SETTLE_BOUND;
         while !self.vmm.vsock_device_holders().contains_key(&node_cid()) {

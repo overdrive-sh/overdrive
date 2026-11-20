@@ -94,7 +94,8 @@ use overdrive_core::reconcilers::{Action, TickContext};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver as DriverPort, DriverError,
-    DriverPayload, DriverRegistry, DriverType, ExitEvent, ExitKind, Resources, VmPayload,
+    DriverPayload, DriverRegistry, DriverType, ExitEvent, ExitKind, LaunchSupersession, Resources,
+    VmPayload,
 };
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
@@ -313,8 +314,9 @@ impl DriverPort for PacedDriver {
     async fn start(
         &self,
         spec: &AllocationSpec,
+        supersession: &dyn LaunchSupersession,
     ) -> std::result::Result<AllocationHandle, DriverError> {
-        let handle = self.sim.start(spec).await;
+        let handle = self.sim.start(spec, supersession).await;
         pause(Point::StartDone);
         handle
     }
@@ -399,6 +401,7 @@ fn spec_of(alloc: &AllocationId) -> AllocationSpec {
         identity: SpiffeId::from_str("spiffe://overdrive.local/workload/hooks/alloc/0")
             .expect("valid spiffe id"),
         driver: DriverPayload::Vm(VmPayload {
+            volume: None,
             command: "/sbin/init".to_owned(),
             args: Vec::new(),
             kernel: PathBuf::from("/kernel"),

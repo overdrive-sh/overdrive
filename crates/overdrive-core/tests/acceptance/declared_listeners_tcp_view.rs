@@ -24,6 +24,7 @@ fn spec_with(declared: Vec<Listener>) -> AllocationSpec {
         identity: SpiffeId::new("spiffe://overdrive.local/workload/tcp-view/alloc/tcp-view-0")
             .expect("spiffe id"),
         driver: DriverPayload::Vm(VmPayload {
+            volume: None,
             command: "/bin/serve".to_owned(),
             args: Vec::new(),
             kernel: PathBuf::from("/kernel"),

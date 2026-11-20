@@ -382,6 +382,7 @@ fn build_client_spec(pki: &TestPki, _host_veth: Option<String>) -> AllocationSpe
         identity: pki.client_leaf.spiffe.clone(),
         driver: overdrive_core::traits::driver::DriverPayload::Vm(
             overdrive_core::traits::driver::VmPayload {
+                volume: None,
                 command: "/bin/true".to_owned(),
                 args: vec![],
                 kernel: "/nonexistent/kernel".into(),

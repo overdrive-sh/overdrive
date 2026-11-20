@@ -1150,6 +1150,7 @@ fn intercept_spec(
             args: vec![],
             kernel: "/nonexistent/kernel".into(),
             rootfs: "/nonexistent/rootfs".into(),
+            volume: None,
         }),
         resources: Resources { cpu_milli: 50, memory_bytes: 32 * 1024 * 1024 },
         probe_descriptors: Vec::new(),

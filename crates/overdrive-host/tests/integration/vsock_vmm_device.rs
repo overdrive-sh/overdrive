@@ -137,6 +137,7 @@ fn launch_config_on(
         assert!(cmdline.append_platform_token(token), "fixture kernel parameter {token} appends");
     }
     let config = VmConfig {
+        volume: None,
         alloc: alloc.clone(),
         kernel,
         rootfs: RootfsPlan::for_alloc(

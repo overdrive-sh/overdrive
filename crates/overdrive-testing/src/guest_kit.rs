@@ -677,6 +677,7 @@ impl GuestKit {
         let vcpus =
             NonZeroU8::new(boot.vcpus).unwrap_or_else(|| panic!("a guest has at least one vCPU"));
         let config = VmConfig {
+            volume: None,
             alloc: alloc.clone(),
             kernel,
             // Keep the production FICLONE target on the caller's

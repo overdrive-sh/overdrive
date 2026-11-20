@@ -43,7 +43,7 @@
 use std::collections::BTreeMap;
 
 use crate::aggregate::Node;
-use crate::guest_network::{GuestAttachmentOccupancy, MAX_GUEST_NETWORK_ATTACHMENTS};
+use crate::guest_network::GuestAttachmentOccupancy;
 use crate::id::NodeId;
 use crate::traits::driver::Resources;
 use crate::traits::observation_store::{AllocState, AllocStatusRow};
@@ -112,7 +112,7 @@ pub fn schedule(
     for (node_id, node) in nodes {
         let free = free_capacity(node, current_allocs, needed);
 
-        if guest_attachments.held < MAX_GUEST_NETWORK_ATTACHMENTS && covers(&free, needed) {
+        if !guest_attachments.at_cap() && covers(&free, needed) {
             return Ok(node_id.clone());
         }
 

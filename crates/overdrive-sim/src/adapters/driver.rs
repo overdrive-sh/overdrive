@@ -23,13 +23,13 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use parking_lot::Mutex;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, watch};
 
 use overdrive_core::id::AllocationId;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverStartClass,
-    DriverStartFailure, DriverType, ExitEvent, ExitKind, Resources,
+    DriverStartFailure, DriverType, ExitEvent, ExitKind, LaunchSupersession, Resources,
 };
 
 use crate::adapters::clock::SimClock;
@@ -111,6 +111,64 @@ pub struct SimDriver {
     next_start_rejection: Mutex<Option<String>>,
     /// Every [`Driver::stop`] call, in call order (the stop-call oracle).
     stop_calls: Mutex<Vec<AllocationId>>,
+    /// Scripted one-shot park of the next [`Driver::start`] (test support: the
+    /// seam that holds a launch between the tick and its outcome).
+    next_start_park: Mutex<Option<StartPark>>,
+}
+
+/// What a parked [`Driver::start`] does when released.
+#[derive(Debug, Clone)]
+enum ParkRelease {
+    /// Proceed as an ordinary start.
+    Proceed,
+    /// Fail as [`DriverError::StartRejected`] with this reason.
+    Reject(String),
+}
+
+/// Test support: a handle to one parked [`Driver::start`].
+///
+/// The next `start` after [`SimDriver::park_next_start`] enters, marks the
+/// park entered and waits. It proceeds when the test releases it. When the
+/// park was scripted to observe the lane signal (`observe_lane_signal`, the
+/// model's `LaunchLost`), the lane's [`LaunchSupersession`] ending the wait
+/// returns [`DriverError::StartSuperseded`]; a park that does not observe the
+/// signal ignores it, as a driver with no interruptible wait does.
+#[derive(Debug, Clone)]
+pub struct StartPark {
+    entered: Arc<watch::Sender<bool>>,
+    release: Arc<watch::Sender<Option<ParkRelease>>>,
+    superseded: Arc<AtomicBool>,
+    observe_lane_signal: bool,
+}
+
+impl StartPark {
+    /// Resolves once the parked `start` has been entered.
+    pub async fn entered(&self) {
+        let mut rx = self.entered.subscribe();
+        let _ = rx.wait_for(|entered| *entered).await;
+    }
+
+    /// True once the parked `start` has been entered.
+    #[must_use]
+    pub fn has_entered(&self) -> bool {
+        *self.entered.borrow()
+    }
+
+    /// Let the parked `start` proceed as an ordinary start.
+    pub fn release(&self) {
+        self.release.send_replace(Some(ParkRelease::Proceed));
+    }
+
+    /// Let the parked `start` fail as [`DriverError::StartRejected`].
+    pub fn release_rejected(&self, reason: &str) {
+        self.release.send_replace(Some(ParkRelease::Reject(reason.to_owned())));
+    }
+
+    /// True once the parked `start` returned [`DriverError::StartSuperseded`].
+    #[must_use]
+    pub fn observed_supersession(&self) -> bool {
+        self.superseded.load(Ordering::SeqCst)
+    }
 }
 
 /// Configured failure mode for the driver. Stored behind a mutex so
@@ -158,6 +216,7 @@ impl SimDriver {
             clock,
             stop_failure: Mutex::new(None),
             next_start_rejection: Mutex::new(None),
+            next_start_park: Mutex::new(None),
             stop_calls: Mutex::new(Vec::new()),
         }
     }
@@ -178,6 +237,24 @@ impl SimDriver {
     /// untouched.
     pub fn script_next_start_rejection(&self, reason: Option<&str>) {
         *self.next_start_rejection.lock() = reason.map(str::to_owned);
+    }
+
+    /// Park the next [`Driver::start`] until the returned handle releases it
+    /// (test support, the seam that holds a launch's dispatch). With
+    /// `observe_lane_signal` the parked start also ends with
+    /// [`DriverError::StartSuperseded`] when the lane's signal is raised; a
+    /// driver scripted otherwise ignores the signal.
+    pub fn park_next_start(&self, observe_lane_signal: bool) -> StartPark {
+        let (entered, _) = watch::channel(false);
+        let (release, _) = watch::channel(None);
+        let park = StartPark {
+            entered: Arc::new(entered),
+            release: Arc::new(release),
+            superseded: Arc::new(AtomicBool::new(false)),
+            observe_lane_signal,
+        };
+        *self.next_start_park.lock() = Some(park.clone());
+        park
     }
 
     /// Every [`Driver::stop`] call so far (failed ones included), in call
@@ -409,7 +486,41 @@ impl Driver for SimDriver {
         self.r#type
     }
 
-    async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
+    async fn start(
+        &self,
+        spec: &AllocationSpec,
+        supersession: &dyn LaunchSupersession,
+    ) -> Result<AllocationHandle, DriverError> {
+        let park = self.next_start_park.lock().take();
+        if let Some(park) = park {
+            park.entered.send_replace(true);
+            let mut release = park.release.subscribe();
+            let released = async { release.wait_for(Option::is_some).await.map(|r| r.clone()) };
+            let outcome = if park.observe_lane_signal {
+                tokio::select! {
+                    biased;
+                    () = supersession.superseded() => None,
+                    released = released => Some(released),
+                }
+            } else {
+                Some(released.await)
+            };
+            match outcome {
+                None => {
+                    park.superseded.store(true, Ordering::SeqCst);
+                    return Err(DriverError::StartSuperseded);
+                }
+                Some(Ok(Some(ParkRelease::Reject(reason)))) => {
+                    return Err(DriverError::StartRejected {
+                        failure: DriverStartFailure {
+                            class: DriverStartClass::Unclassified { driver: self.r#type },
+                            detail: reason,
+                        },
+                    });
+                }
+                Some(_) => {}
+            }
+        }
         let one_shot = self.next_start_rejection.lock().take();
         let failure = one_shot
             .map(|reason| FailureMode::StartRejected { reason })
@@ -646,6 +757,7 @@ mod release_for_exit_emission_tests {
             identity: SpiffeId::from_str("spiffe://overdrive.local/test/wl")
                 .expect("valid SpiffeId"),
             driver: DriverPayload::Vm(VmPayload {
+                volume: None,
                 command: "/bin/true".to_owned(),
                 args: vec![],
                 kernel: PathBuf::from("/nonexistent/kernel"),
@@ -666,7 +778,10 @@ mod release_for_exit_emission_tests {
     async fn release_for_exit_emission_is_idempotent() {
         let driver = SimDriver::new(DriverType::Vm);
         let spec = sample_spec("alloc-idempotent");
-        let handle = driver.start(&spec).await.expect("start succeeds");
+        let handle = driver
+            .start(&spec, &crate::adapters::SimLaunchSupersession::new())
+            .await
+            .expect("start succeeds");
         // First fire — consumes the stashed sender.
         driver.release_for_exit_emission(&handle).await;
         // Second fire — must NOT panic. (Asserted by the test

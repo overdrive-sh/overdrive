@@ -1078,6 +1078,9 @@ pub struct VmDriver {
     /// The host-side board of reported guest listeners (PR-1): the beacon
     /// reader is its writer, and the probe runner reads it through its port.
     guest_listener_board: Arc<crate::GuestListenerBoard>,
+    /// The node's probed volume pool; `None` when no pool is composed (GH #348).
+    #[allow(dead_code, reason = "DISTILL RED scaffold: the launch path reads it in DELIVER")]
+    volumes: Option<Arc<dyn overdrive_core::traits::volume_backing::VolumeBacking>>,
     live: Arc<LiveMap>,
     exit_tx: mpsc::Sender<ExitEvent>,
     exit_rx: Arc<Mutex<Option<mpsc::Receiver<ExitEvent>>>>,
@@ -1095,7 +1098,7 @@ impl VmDriver {
     #[must_use]
     #[allow(
         clippy::too_many_arguments,
-        reason = "D13-S1 pins the constructor's nine parameters; every port is mandatory"
+        reason = "D13-S1 pins the constructor's parameters; every port is mandatory"
     )]
     pub fn new(
         vmm: Arc<dyn Vmm>,
@@ -1107,6 +1110,7 @@ impl VmDriver {
         layout: VmHostLayout,
         beacon: BeaconIntake,
         guest_listener_board: Arc<crate::GuestListenerBoard>,
+        volumes: Option<Arc<dyn overdrive_core::traits::volume_backing::VolumeBacking>>,
     ) -> Self {
         let (exit_tx, exit_rx) = mpsc::channel(EXIT_CHANNEL_CAPACITY);
         let cgroup_manager = CgroupManager::new(layout.cgroup_root.clone(), fs);
@@ -1122,6 +1126,7 @@ impl VmDriver {
             beacon: Arc::new(beacon),
             beacon_state,
             guest_listener_board,
+            volumes,
             live: Arc::new(Mutex::new(BTreeMap::new())),
             exit_tx,
             exit_rx: Arc::new(Mutex::new(Some(exit_rx))),
@@ -1405,6 +1410,7 @@ impl VmDriver {
             &self.layout.clone_index_dir,
         );
         let config = VmConfig {
+            volume: None,
             alloc: spec.alloc.clone(),
             kernel,
             rootfs: rootfs.clone(),
@@ -1579,7 +1585,12 @@ impl Driver for VmDriver {
         DriverType::Vm
     }
 
-    async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
+    // RED scaffold (ADR-0325): DELIVER reads the signal at observation points 1-6
+    async fn start(
+        &self,
+        spec: &AllocationSpec,
+        _supersession: &dyn overdrive_core::traits::LaunchSupersession,
+    ) -> Result<AllocationHandle, DriverError> {
         let ProvisionedVmm { run_dir, scope, control, mut exit, diagnostics, rootfs, memory } =
             self.provision_vmm(spec).await?;
 
@@ -2704,6 +2715,7 @@ mod tests {
             )
             .expect("valid identity"),
             driver: DriverPayload::Vm(VmPayload {
+                volume: None,
                 command: "/sbin/init".to_owned(),
                 args: vec![],
                 kernel,
@@ -2733,6 +2745,7 @@ mod tests {
             layout,
             test_beacon_intake().await,
             guest_listener_board,
+            None,
         )
         .with_guest_console_reader(reader.clone());
         (driver, spec, reader, terminate_calls, rootfs, run_dir)
@@ -2758,7 +2771,10 @@ mod tests {
             let temp = tempfile::TempDir::new().expect("diagnostic start fixture");
             let (driver, spec, reader, terminate_calls, rootfs, run_dir) =
                 diagnostic_start_fixture(&temp, outcome).await;
-            let error = driver.start(&spec).await.expect_err("pre-READY exit rejects start");
+            let error = driver
+                .start(&spec, &overdrive_sim::adapters::SimLaunchSupersession::new())
+                .await
+                .expect_err("pre-READY exit rejects start");
             let DriverError::StartRejected { failure } = error else {
                 panic!("diagnostic failure must not change the typed rejection");
             };
@@ -2821,6 +2837,7 @@ mod tests {
             layout.clone(),
             test_beacon_intake().await,
             guest_listener_board,
+            None,
         );
         let alloc = AllocationId::new("alloc-cleanup-partitions").expect("valid allocation");
         driver.live.lock().insert(alloc.clone(), VmSupervision::Starting);

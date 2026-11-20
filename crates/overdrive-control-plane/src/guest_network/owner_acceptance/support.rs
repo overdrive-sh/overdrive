@@ -423,6 +423,7 @@ impl Composition {
             ),
             alloc: lease.alloc.clone(),
             driver: DriverPayload::Vm(VmPayload {
+                volume: None,
                 command: "/bin/true".to_owned(),
                 args: Vec::new(),
                 kernel: std::path::PathBuf::from("/nonexistent/kernel"),

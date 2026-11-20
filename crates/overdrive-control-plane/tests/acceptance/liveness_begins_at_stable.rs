@@ -56,6 +56,7 @@ fn spec(alloc: &AllocationId, roles: &[ProbeRole]) -> AllocationSpec {
         alloc: alloc.clone(),
         identity: SpiffeId::from_str("spiffe://overdrive.local/test/svc").expect("spiffe id"),
         driver: DriverPayload::Vm(VmPayload {
+            volume: None,
             command: "/sbin/init".to_owned(),
             args: Vec::new(),
             kernel: "/kernel".into(),
@@ -121,6 +122,7 @@ async fn process() -> Process {
         },
         beacon,
         guest_listener_board,
+        None,
     );
     Process { driver, runner, clock, obs, tcp }
 }

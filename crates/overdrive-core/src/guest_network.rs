@@ -175,6 +175,17 @@ pub struct GuestAttachmentOccupancy {
     pub retiring: u32,
 }
 
+impl GuestAttachmentOccupancy {
+    /// True when the node's attachments are at the fixed cap
+    /// (`held >= MAX_GUEST_NETWORK_ATTACHMENTS`). The one definition the
+    /// scheduler, the reconciler, the pool's admission and the capacity-wait
+    /// predicate share.
+    #[must_use]
+    pub const fn at_cap(self) -> bool {
+        self.held >= MAX_GUEST_NETWORK_ATTACHMENTS
+    }
+}
+
 impl GuestNetworkExecWiring {
     /// Construct one BootClosed state and its paired opaque capabilities.
     /// CONTRACT_SHAPE: pure-function.

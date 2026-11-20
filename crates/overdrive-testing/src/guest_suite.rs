@@ -1403,6 +1403,9 @@ enum AttemptEnvironment {
     NestedLaunchRustc,
     /// `cgroup-default` `nested-launch-lane`: `nested-launch` plus the lane test binary.
     NestedLaunchLane,
+    /// `cgroup-default` `volume-pool`: `nested-launch` plus the node-local volume pool
+    /// (GH #348; the pool's provisioning is the guest-kit volume-pool step).
+    VolumePool,
 }
 
 impl AttemptEnvironment {
@@ -1425,6 +1428,7 @@ impl AttemptEnvironment {
             ("cgroup-default", "nested-launch") => Self::NestedLaunch,
             ("cgroup-default", "nested-launch-rustc") => Self::NestedLaunchRustc,
             ("cgroup-default", "nested-launch-lane") => Self::NestedLaunchLane,
+            ("cgroup-default", "volume-pool") => Self::VolumePool,
             ("cgroup-default", "base" | QUINT_PROFILE)
             | ("probe" | "core" | "unload" | "ulp" | "stress" | "nested-boundary", "base") => {
                 Self::Base
@@ -1455,7 +1459,13 @@ impl AttemptEnvironment {
     /// The body boots its own guests (the outer guest is the nested substrate
     /// plus the launched VMM).
     const fn launches_guests(self) -> bool {
-        matches!(self, Self::NestedLaunch | Self::NestedLaunchRustc | Self::NestedLaunchLane)
+        matches!(
+            self,
+            Self::NestedLaunch
+                | Self::NestedLaunchRustc
+                | Self::NestedLaunchLane
+                | Self::VolumePool
+        )
     }
 
     /// The outer guest of a `cgroup-default` profile that needs the nested-KVM
@@ -1466,7 +1476,8 @@ impl AttemptEnvironment {
             Self::Nested
             | Self::NestedLaunch
             | Self::NestedLaunchRustc
-            | Self::NestedLaunchLane => Some(NestedVmGuestResources::STANDARD),
+            | Self::NestedLaunchLane
+            | Self::VolumePool => Some(NestedVmGuestResources::STANDARD),
             _ => None,
         }
     }

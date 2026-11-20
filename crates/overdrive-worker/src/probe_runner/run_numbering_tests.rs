@@ -149,6 +149,7 @@ fn vm_spec(alloc: &AllocationId) -> AllocationSpec {
         alloc: alloc.clone(),
         identity: SpiffeId::for_allocation(&WorkloadId::new("probed").expect("workload"), alloc),
         driver: DriverPayload::Vm(VmPayload {
+            volume: None,
             command: "/bin/serve".to_owned(),
             args: Vec::new(),
             kernel: PathBuf::from("/kernel"),

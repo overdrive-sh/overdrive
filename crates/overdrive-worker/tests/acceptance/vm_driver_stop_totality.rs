@@ -150,6 +150,7 @@ fn build_spec(alloc: &AllocationId, tmp: &TempDir) -> AllocationSpec {
             .expect("valid spiffe id"),
         driver: overdrive_core::traits::driver::DriverPayload::Vm(
             overdrive_core::traits::driver::VmPayload {
+                volume: None,
                 command: "/sbin/init".to_owned(),
                 args: vec![],
                 kernel: fixture_kernel_path(tmp),
@@ -195,6 +196,7 @@ async fn build_driver(
         layout,
         beacon.intake().await,
         guest_listener_board,
+        None,
     );
     (driver, clock, beacon)
 }
@@ -234,6 +236,7 @@ async fn build_driver_with_cgroup_fs(
         layout,
         beacon.intake().await,
         guest_listener_board,
+        None,
     );
     (driver, clock, cgroup_fs, beacon)
 }
@@ -297,7 +300,7 @@ impl CgroupFs for HoldsWorkloadScopeRemoval {
     }
 }
 
-/// Spawn `driver.start(&spec)`; once its VMM exists the guest connects
+/// Spawn `driver.start(&spec, &overdrive_sim::adapters::SimLaunchSupersession::new())`; once its VMM exists the guest connects
 /// with `READY`; await the spawned task to completion — the shared "beacon
 /// wins the boot race" happy path several scenarios below build on.
 async fn start_with_beacon_accepted(
@@ -307,7 +310,9 @@ async fn start_with_beacon_accepted(
 ) -> (AllocationHandle, GuestSession) {
     let driver = driver.clone();
     let spec_owned = spec.clone();
-    let start_task = tokio::spawn(async move { driver.start(&spec_owned).await });
+    let start_task = tokio::spawn(async move {
+        driver.start(&spec_owned, &overdrive_sim::adapters::SimLaunchSupersession::new()).await
+    });
 
     let guest = beacon.dial_ready(spec).await;
 
@@ -416,7 +421,10 @@ async fn create_failure_retains_disposition_claim_and_cleans_up_run_directory() 
     let alloc = AllocationId::new("alloc-create-fail").expect("valid alloc id");
     let spec = build_spec(&alloc, &tmp);
 
-    let err = driver.start(&spec).await.expect_err("Vmm::create failure rejects start");
+    let err = driver
+        .start(&spec, &overdrive_sim::adapters::SimLaunchSupersession::new())
+        .await
+        .expect_err("Vmm::create failure rejects start");
     assert!(matches!(err, overdrive_core::traits::driver::DriverError::StartRejected { .. }));
 
     assert_eq!(
@@ -495,7 +503,10 @@ async fn vmm_exits_before_beacon_retains_disposition_claim_and_cleans_up() {
     let alloc = AllocationId::new("alloc-exit-before-beacon").expect("valid alloc id");
     let spec = build_spec(&alloc, &tmp);
 
-    let err = driver.start(&spec).await.expect_err("VMM exit before beacon rejects start");
+    let err = driver
+        .start(&spec, &overdrive_sim::adapters::SimLaunchSupersession::new())
+        .await
+        .expect_err("VMM exit before beacon rejects start");
     assert!(matches!(err, overdrive_core::traits::driver::DriverError::StartRejected { .. }));
 
     assert_eq!(
@@ -573,7 +584,11 @@ async fn accepted_connection_close_before_ready_preserves_exact_unreported_vmm_e
     let spec = build_spec(&alloc, &tmp);
     let driver_for_start = driver.clone();
     let spec_for_start = spec.clone();
-    let start = tokio::spawn(async move { driver_for_start.start(&spec_for_start).await });
+    let start = tokio::spawn(async move {
+        driver_for_start
+            .start(&spec_for_start, &overdrive_sim::adapters::SimLaunchSupersession::new())
+            .await
+    });
 
     let control = created_rx.await.expect("VMM control published after create");
     // The guest connects and closes before writing READY.
@@ -625,7 +640,11 @@ async fn boot_deadline_elapses_retains_disposition_claim_and_cleans_up() {
 
     let driver_for_task = driver.clone();
     let spec_owned = spec.clone();
-    let start_task = tokio::spawn(async move { driver_for_task.start(&spec_owned).await });
+    let start_task = tokio::spawn(async move {
+        driver_for_task
+            .start(&spec_owned, &overdrive_sim::adapters::SimLaunchSupersession::new())
+            .await
+    });
 
     // Let the spawned task reach the three-way select! and register
     // its `clock.sleep(VM_BOOT_DEADLINE)` waker BEFORE advancing —
@@ -934,7 +953,11 @@ async fn stop_sequence_a_pre_beacon_stop_skips_write_and_terminates() {
     // this sequence needs to tell apart.
     let driver_for_task = driver.clone();
     let spec_owned = spec.clone();
-    let start_task = tokio::spawn(async move { driver_for_task.start(&spec_owned).await });
+    let start_task = tokio::spawn(async move {
+        driver_for_task
+            .start(&spec_owned, &overdrive_sim::adapters::SimLaunchSupersession::new())
+            .await
+    });
     live_rx.await.expect("Vmm::create resolves before start() can ever return");
 
     // Callers may construct a handle with `pid: None` (mirrors
@@ -1776,6 +1799,7 @@ async fn exit_event_is_gated_until_running_confirmed_release() {
         layout,
         beacon.intake().await,
         guest_listener_board,
+        None,
     );
 
     // Drain the driver's `ExitEvent` channel — the exit observer's role.
@@ -2063,7 +2087,11 @@ async fn writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed
         let spec = build_spec(&alloc, &tmp);
         let start_driver = driver.clone();
         let start_spec = spec.clone();
-        let start = tokio::spawn(async move { start_driver.start(&start_spec).await });
+        let start = tokio::spawn(async move {
+            start_driver
+                .start(&start_spec, &overdrive_sim::adapters::SimLaunchSupersession::new())
+                .await
+        });
         tokio::time::timeout(Duration::from_secs(1), live_rx)
             .await
             .expect("S-VLL-08: start must reach the Live-without-writer interval")

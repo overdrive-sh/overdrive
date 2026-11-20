@@ -44,6 +44,7 @@ use overdrive_core::id::AllocationId;
 use overdrive_core::reconcilers::{
     Action, HydrateError, Reconciler, ReconcilerName, TargetResource, TickContext,
 };
+use overdrive_core::traits::driver::LaunchSupersession;
 use overdrive_core::traits::observation_store::AllocStatusRow;
 #[cfg(any(test, feature = "integration-tests"))]
 use overdrive_reconcilers::ServiceMapHydrator;
@@ -141,6 +142,21 @@ struct RegistryEntry {
     /// `reconcile` function, then re-acquires the lock to install the
     /// `next_view` after the (`.await`'d) `write_through` returns Ok.
     views: Mutex<AnyViewMap>,
+}
+
+/// A supersession signal that is never raised (ADR-0325 scaffold: DELIVER
+/// replaces it with the lane's token).
+pub(crate) struct UnraisedSupersession;
+
+#[async_trait::async_trait]
+impl LaunchSupersession for UnraisedSupersession {
+    fn is_superseded(&self) -> bool {
+        false
+    }
+
+    async fn superseded(&self) {
+        std::future::pending::<()>().await;
+    }
 }
 
 /// Registry + broker + view-store owner.
@@ -511,7 +527,7 @@ impl ReconcilerRuntime {
     /// default view when none is held) and `attempts =
     /// view.restart_counts[failed.alloc_id]` (0 when absent): `.0 =
     /// attempts.saturating_add(1)`; `.1 = restart_after_failure(kind,
-    /// run_desired, failed, attempts, view.observed_generation <
+    /// run_desired, failed, attempts, max(view.issued_generation) <
     /// desired_generation)` — the reconciler's own decision.
     #[must_use]
     pub fn restart_status_for_alloc(
@@ -531,7 +547,11 @@ impl ReconcilerRuntime {
                 run_desired,
                 failed,
                 attempts,
-                view.observed_generation < desired_generation,
+                // Compat copy of the stamp-on-emit rule (the body of
+                // `overdrive_reconcilers::workload_lifecycle::restart_pending_until_successor_observed`):
+                // delete with that helper in DELIVER step 9, when every call site switches to
+                // `generation_replacement_pending`.
+                view.issued_generation.values().copied().max().unwrap_or(0) < desired_generation,
             ),
         )
     }
@@ -544,6 +564,43 @@ impl ReconcilerRuntime {
     pub fn attempt_index_for_alloc(&self, target: &TargetResource, alloc_id: &AllocationId) -> u32 {
         let view = self.view_for_workload_lifecycle(target);
         view.restart_counts.get(alloc_id).copied().unwrap_or(0).saturating_add(1)
+    }
+
+    /// The generation the view stamped on `alloc_id` when it issued that
+    /// allocation, `None` when the view holds no stamp for it (ADR-0325).
+    #[must_use]
+    pub fn issued_generation_for_alloc(
+        &self,
+        target: &TargetResource,
+        alloc_id: &AllocationId,
+    ) -> Option<u64> {
+        let view = self.view_for_workload_lifecycle(target);
+        view.issued_generation.get(alloc_id).copied()
+    }
+
+    /// Raise the open convergence lane's supersession signal for `target`
+    /// (ADR-0325). A target with no open lane is a no-op.
+    #[allow(clippy::unused_self, reason = "DISTILL RED scaffold: DELIVER's lane table reads self")]
+    pub fn supersede_lane(&self, target: &TargetResource) {
+        // RED scaffold (ADR-0325): DELIVER owns the lane table.
+        let _ = target;
+    }
+
+    /// Raise the supersession signal of every open lane (node shutdown,
+    /// ADR-0325).
+    #[allow(clippy::unused_self, reason = "DISTILL RED scaffold: DELIVER's lane table reads self")]
+    pub fn supersede_all_lanes(&self) {
+        // RED scaffold (ADR-0325): DELIVER owns the lane table.
+    }
+
+    /// The open lane's supersession signal for `target`; with no open lane, an
+    /// UNRAISED signal (total).
+    #[must_use]
+    #[allow(clippy::unused_self, reason = "DISTILL RED scaffold: DELIVER's lane table reads self")]
+    pub fn lane_supersession(&self, target: &TargetResource) -> Arc<dyn LaunchSupersession> {
+        // RED scaffold (ADR-0325): DELIVER owns the lane table.
+        let _ = target;
+        Arc::new(UnraisedSupersession)
     }
 
     /// Look up the in-memory view for `(reconciler, target)` against
@@ -1854,7 +1911,7 @@ mod tests {
 
     /// A runtime with `WorkloadLifecycle` registered and its view of
     /// `workload/payments` seeded with `attempts` restarts charged to
-    /// `alloc-payments-0` and `observed_generation`.
+    /// `alloc-payments-0` and `observed_generation` (its `issued_generation` stamp).
     async fn runtime_with_attempts(
         tmp: &tempfile::TempDir,
         attempts: u32,
@@ -1867,7 +1924,8 @@ mod tests {
         let target = TargetResource::new("workload/payments").expect("target");
         let mut view = WorkloadLifecycleView::default();
         view.restart_counts.insert(AllocationId::new("alloc-payments-0").expect("id"), attempts);
-        view.observed_generation = observed_generation;
+        view.issued_generation
+            .insert(AllocationId::new("alloc-payments-0").expect("id"), observed_generation);
         runtime.seed_workload_lifecycle_view_for_test(&target, view);
         (runtime, target)
     }
@@ -1932,7 +1990,7 @@ mod tests {
     }
 
     /// RESTART-SSOT regression obligation 3, accessor half: a pending
-    /// desired generation (`observed_generation < desired_generation`)
+    /// desired generation (`max issued_generation < desired_generation`)
     /// places a successor past the ceiling; with no pending generation the
     /// same row is finalized.
     ///

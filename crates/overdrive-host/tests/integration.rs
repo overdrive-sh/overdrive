@@ -59,6 +59,11 @@ mod integration {
         VmmIdentity { uid: OVERDRIVE_VMM_UID, gid: Gid::new(OVERDRIVE_VMM_UID), supplementary }
     }
 
+    // node-local-persistent-volume (GH #348, ADR-0314) — the volume pool boot probe.
+    mod volume_pool_backing;
+    mod volume_pool_probe;
+    mod volume_pool_probe_pool;
+    mod volume_pool_support;
     // built-in-ca (GH #28) — RcgenCa real-crypto acceptance.
     mod rcgen_ca_chain_verify;
     mod rcgen_ca_root_key_envelope;

@@ -44,4 +44,11 @@ mod acceptance {
     // ADR-0276 O4 — `ServiceAllocPhase::from_row` totality over
     // `AllocState x Option<Ipv4Addr>`; `NotRunningState` excludes Running.
     mod service_alloc_phase_totality;
+
+    // node-local-persistent-volume (GH #348, ADR-0310) — the intent → `VolumePayload`
+    // projection at the three `WorkloadLifecycle` sites.
+    mod generation_replacement_pending;
+    mod restart_generation_reconcile;
+    mod start_blocked_only_by_capacity;
+    mod workload_volume_projection;
 }

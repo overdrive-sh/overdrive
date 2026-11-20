@@ -732,6 +732,19 @@ impl Harness {
             Invariant::GatewayApplicationShutdownConverges => {
                 crate::invariants::gateway_application::evaluate_shutdown_converges(seed).await
             }
+            // node-local-persistent-volume (GH #348): reachable only through
+            // `Harness::only(..)`; none of the three is in `Invariant::ALL` until
+            // the volume launch path and `SimVolumeBacking` land.
+            Invariant::VolumeSingleWriter => {
+                crate::invariants::volume_launch::evaluate_single_writer(seed).await
+            }
+            Invariant::VolumeDataSurvivesRestart => {
+                crate::invariants::volume_launch::evaluate_data_survives_restart(seed).await
+            }
+            Invariant::VolumeNoDrainFailureChargesBudget => {
+                crate::invariants::volume_launch::evaluate_no_drain_failure_charges_budget(seed)
+                    .await
+            }
         }
     }
 }

@@ -796,8 +796,7 @@ impl WakeWorld {
                 // `svid-lifecycle`'s `IssueSvid` dispatch audits through the generic
                 // `ObservationStore::write` (`issue_and_audit`, `action_shim/issue_svid.rs`), which
                 // `inject_write_failure` consumes: the issue fails and the SVID stays unheld.
-                let writes_generic_row =
-                    key == Key::K4 || (key == Key::K3 && self.vip_assigned);
+                let writes_generic_row = key == Key::K4 || (key == Key::K3 && self.vip_assigned);
                 if writes_generic_row {
                     self.obs.inject_write_failure(error);
                 } else {

@@ -121,6 +121,7 @@ fn build_spec(alloc: &AllocationId, tmp: &TempDir, cid_offset: u32) -> Allocatio
         identity: SpiffeId::new("spiffe://overdrive.local/workload/vm-fail/alloc/x")
             .expect("valid spiffe id"),
         driver: DriverPayload::Vm(VmPayload {
+            volume: None,
             command: "/sbin/init".to_owned(),
             args: vec![],
             kernel: fixture_kernel_path(tmp),
@@ -164,6 +165,7 @@ async fn build_driver(
         layout,
         beacon.intake().await,
         guest_listener_board,
+        None,
     );
     (driver, clock, cgroup_fs, beacon)
 }
@@ -177,7 +179,9 @@ async fn start_ready(
 ) -> (AllocationHandle, GuestSession) {
     let task_driver = driver.clone();
     let owned_spec = spec.clone();
-    let task = tokio::spawn(async move { task_driver.start(&owned_spec).await });
+    let task = tokio::spawn(async move {
+        task_driver.start(&owned_spec, &overdrive_sim::adapters::SimLaunchSupersession::new()).await
+    });
     let guest = beacon.dial_ready(spec).await;
     let handle = task.await.expect("start task did not panic").expect("READY completes the start");
     driver.release_for_exit_emission(&handle).await;
@@ -404,8 +408,13 @@ async fn vm_start_failure_class_is_independent_of_vmm_diagnostic_wording() {
             build_driver(&SimVmm::new(), Arc::new(vmm), layout).await;
         let alloc = AllocationId::new("alloc-wording").expect("valid alloc id");
 
-        let err =
-            driver.start(&build_spec(&alloc, &tmp, 0)).await.expect_err("create failure rejects");
+        let err = driver
+            .start(
+                &build_spec(&alloc, &tmp, 0),
+                &overdrive_sim::adapters::SimLaunchSupersession::new(),
+            )
+            .await
+            .expect_err("create failure rejects");
         let (class, detail) = expect_vm_class(err);
         observed.push((class, detail));
     }
@@ -442,7 +451,10 @@ async fn vm_start_failure_preserves_verbatim_vmm_diagnostic_detail() {
     let (driver, _clock, _fs, _beacon) = build_driver(&SimVmm::new(), Arc::new(vmm), layout).await;
     let alloc = AllocationId::new("alloc-verbatim").expect("valid alloc id");
 
-    let err = driver.start(&build_spec(&alloc, &tmp, 0)).await.expect_err("create failure rejects");
+    let err = driver
+        .start(&build_spec(&alloc, &tmp, 0), &overdrive_sim::adapters::SimLaunchSupersession::new())
+        .await
+        .expect_err("create failure rejects");
     let (class, detail) = expect_vm_class(err);
 
     assert_eq!(
@@ -472,8 +484,10 @@ async fn vm_early_exit_failure_preserves_exit_code_signal_and_final_stderr_tail(
     let (driver, _clock, _fs, _beacon) = build_driver(&SimVmm::new(), Arc::new(vmm), layout).await;
     let alloc = AllocationId::new("alloc-early-exit").expect("valid alloc id");
 
-    let err =
-        driver.start(&build_spec(&alloc, &tmp, 0)).await.expect_err("early VMM exit rejects start");
+    let err = driver
+        .start(&build_spec(&alloc, &tmp, 0), &overdrive_sim::adapters::SimLaunchSupersession::new())
+        .await
+        .expect_err("early VMM exit rejects start");
     let (class, detail) = expect_vm_class(err);
 
     assert_eq!(
@@ -503,7 +517,9 @@ async fn vm_boot_deadline_failure_preserves_deadline_milliseconds_and_live_conso
 
     let driver_task = driver.clone();
     let spec_owned = spec.clone();
-    let start = tokio::spawn(async move { driver_task.start(&spec_owned).await });
+    let start = tokio::spawn(async move {
+        driver_task.start(&spec_owned, &overdrive_sim::adapters::SimLaunchSupersession::new()).await
+    });
 
     // Advance logical time until the deadline arm resolves. Mirrors the
     // established pattern in `vm_driver_stop_totality.rs`.
@@ -568,10 +584,19 @@ async fn initial_and_restart_start_expose_identical_cause_and_detail_pairs() {
     // fresh lease (CID-NOCLAIM), so it carries its own transport.
     let restart_spec = build_spec(&alloc, &tmp, 0);
 
-    let first = expect_vm_class(driver.start(&spec).await.expect_err("initial start rejects"));
+    let first = expect_vm_class(
+        driver
+            .start(&spec, &overdrive_sim::adapters::SimLaunchSupersession::new())
+            .await
+            .expect_err("initial start rejects"),
+    );
     driver.release_supervision(&alloc);
-    let second =
-        expect_vm_class(driver.start(&restart_spec).await.expect_err("restart start rejects"));
+    let second = expect_vm_class(
+        driver
+            .start(&restart_spec, &overdrive_sim::adapters::SimLaunchSupersession::new())
+            .await
+            .expect_err("restart start rejects"),
+    );
     driver.release_supervision(&alloc);
 
     assert_eq!(
@@ -618,8 +643,11 @@ async fn duplicate_start_request_is_rejected_without_replacement_cross_ownership
     let sibling_pid = sibling_handle.pid.expect("sibling start returns a VMM pid");
     let target_task_driver = driver.clone();
     let target_task_spec = target_spec.clone();
-    let target_task =
-        tokio::spawn(async move { target_task_driver.start(&target_task_spec).await });
+    let target_task = tokio::spawn(async move {
+        target_task_driver
+            .start(&target_task_spec, &overdrive_sim::adapters::SimLaunchSupersession::new())
+            .await
+    });
     entered_rx.await.expect("target start reaches the deterministic create barrier");
 
     let starting_claims = driver.live_allocations().expect("VM driver reports claims");
@@ -635,7 +663,7 @@ async fn duplicate_start_request_is_rejected_without_replacement_cross_ownership
     );
 
     let duplicate = driver
-        .start(&duplicate_spec())
+        .start(&duplicate_spec(), &overdrive_sim::adapters::SimLaunchSupersession::new())
         .await
         .expect_err("a second start while the first is Starting is rejected");
     let rejection = expect_rejection(duplicate);
@@ -680,7 +708,10 @@ async fn duplicate_start_request_is_rejected_without_replacement_cross_ownership
     let live_clone_tree = artifact_tree(&clone_staging);
     let live_index_tree = artifact_tree(&clone_index);
     let live_duplicate = expect_rejection(
-        driver.start(&duplicate_spec()).await.expect_err("a duplicate Live start is rejected"),
+        driver
+            .start(&duplicate_spec(), &overdrive_sim::adapters::SimLaunchSupersession::new())
+            .await
+            .expect_err("a duplicate Live start is rejected"),
     );
     assert!(matches!(
         live_duplicate.class,
@@ -755,7 +786,7 @@ async fn failed_start_cleanup_twice_converges_to_the_same_residue_free_state() {
         let target_spec = build_spec(&target, &tmp, 1);
         let failure = expect_rejection(
             driver
-                .start(&target_spec)
+                .start(&target_spec, &overdrive_sim::adapters::SimLaunchSupersession::new())
                 .await
                 .expect_err("the missing rootfs rejects every fresh start"),
         );
@@ -835,7 +866,13 @@ async fn every_vm_start_rejection_leaves_no_vm_resources() {
 
         let (driver, _clock, cgroup_fs, _beacon) = build_driver(&sim, vmm, layout).await;
         let alloc = AllocationId::new("alloc-cleanup").expect("valid alloc id");
-        let err = driver.start(&build_spec(&alloc, &tmp, 0)).await.expect_err("start rejects");
+        let err = driver
+            .start(
+                &build_spec(&alloc, &tmp, 0),
+                &overdrive_sim::adapters::SimLaunchSupersession::new(),
+            )
+            .await
+            .expect_err("start rejects");
         assert!(matches!(err, DriverError::StartRejected { .. }), "[{arm}] must reject");
 
         assert_eq!(
@@ -901,7 +938,10 @@ async fn run_directory_create_failure_attempts_the_complete_known_cleanup_partit
 
     let failure = expect_rejection(
         driver
-            .start(&build_spec(&alloc, &tmp, 0))
+            .start(
+                &build_spec(&alloc, &tmp, 0),
+                &overdrive_sim::adapters::SimLaunchSupersession::new(),
+            )
             .await
             .expect_err("run-directory creation must reject"),
     );
@@ -953,7 +993,13 @@ async fn cgroup_create_failure_attempts_cleanup_and_removes_the_run_directory() 
     cgroup_fs.inject_error(SimOp::RemoveDir, scope_dir, std::io::ErrorKind::DirectoryNotEmpty);
 
     let failure = expect_rejection(
-        driver.start(&build_spec(&alloc, &tmp, 0)).await.expect_err("cgroup creation must reject"),
+        driver
+            .start(
+                &build_spec(&alloc, &tmp, 0),
+                &overdrive_sim::adapters::SimLaunchSupersession::new(),
+            )
+            .await
+            .expect_err("cgroup creation must reject"),
     );
 
     assert_eq!(failure.class, DriverStartClass::Unclassified { driver: DriverType::Vm });
@@ -987,8 +1033,10 @@ async fn a_permission_error_is_never_reported_as_a_missing_artifact() {
     let (driver, _clock, _fs, _beacon) = build_driver(&SimVmm::new(), Arc::new(vmm), layout).await;
     let alloc = AllocationId::new("alloc-eacces").expect("valid alloc id");
 
-    let err =
-        driver.start(&build_spec(&alloc, &tmp, 0)).await.expect_err("io failure rejects start");
+    let err = driver
+        .start(&build_spec(&alloc, &tmp, 0), &overdrive_sim::adapters::SimLaunchSupersession::new())
+        .await
+        .expect_err("io failure rejects start");
     let failure = expect_rejection(err);
 
     assert!(

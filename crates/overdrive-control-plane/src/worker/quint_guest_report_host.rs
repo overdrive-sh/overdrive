@@ -210,6 +210,7 @@ fn service_spec(root: &Path, alloc: &AllocationId) -> AllocationSpec {
         identity: SpiffeId::new("spiffe://overdrive.local/workload/gr-host/alloc/gr-host-alloc")
             .expect("valid SPIFFE ID"),
         driver: DriverPayload::Vm(VmPayload {
+            volume: None,
             command: "/sbin/init".to_owned(),
             args: Vec::new(),
             kernel: root.join("vmlinuz"),
@@ -350,6 +351,7 @@ fn build_world() -> std::result::Result<World, DriverError> {
             },
             intake,
             Arc::clone(&board),
+            None,
         );
         let mut runtime = ReconcilerRuntime::new_with_redb_view_store_for_test(&root)
             .expect("the reconciler runtime over the node's view store");

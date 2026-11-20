@@ -638,10 +638,7 @@ impl SimGuestFlowIo {
                 auto_ends: true,
                 released_ends: 0,
                 auto_run: true,
-                host_facts: GuestHostFacts {
-                    interfaces: BTreeMap::new(),
-                    nofile_limit: 1_048_576,
-                },
+                host_facts: GuestHostFacts { interfaces: BTreeMap::new(), nofile_limit: 1_048_576 },
                 stale_objects: false,
                 gateway_route: None,
                 device: SimForwarderDevice::new(),
@@ -2358,10 +2355,8 @@ impl GuestFlowIo for SimGuestFlowIo {
             PeerProtocol::Tcp => SimSocket::tcp(),
             PeerProtocol::Udp => SimSocket::udp(),
         };
-        let handle = self.issue(
-            &mut st,
-            HandleState::Peer(PeerState { spec, local, flow: None, socket }),
-        );
+        let handle =
+            self.issue(&mut st, HandleState::Peer(PeerState { spec, local, flow: None, socket }));
         Ok(PeerSocket(handle))
     }
 

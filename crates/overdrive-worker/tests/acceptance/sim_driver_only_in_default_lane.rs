@@ -26,6 +26,7 @@ async fn default_lane_does_not_spawn_real_processes() {
         identity: SpiffeId::new("spiffe://overdrive.local/workload/payments/alloc/a1")
             .expect("valid spiffe id"),
         driver: DriverPayload::Vm(VmPayload {
+            volume: None,
             command: "/bin/sleep".to_owned(),
             args: vec![],
             kernel: PathBuf::from("/nonexistent/kernel"),
@@ -39,7 +40,10 @@ async fn default_lane_does_not_spawn_real_processes() {
     };
 
     // Action — enter through the driving port.
-    let handle = driver.start(&spec).await.expect("SimDriver::start succeeds");
+    let handle = driver
+        .start(&spec, &overdrive_sim::adapters::SimLaunchSupersession::new())
+        .await
+        .expect("SimDriver::start succeeds");
 
     // Observable outcome — SimDriver never assigns a PID. If this
     // ever returns `Some(_)`, a real process was spawned in the

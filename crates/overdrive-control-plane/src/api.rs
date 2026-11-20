@@ -359,6 +359,48 @@ pub struct AllocStatusResponse {
     /// Additive + skip-if-empty, same as [`Self::issued_certificates`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub probe_results: Vec<ProbeResultRowJson>,
+    /// Present while this workload's start is blocked only by a node capacity
+    /// limit (ADR-0327): the guest-network attachment pool is full, so the
+    /// workload has no allocation row yet and placement resumes when a slot
+    /// frees. Derived at read time from the workload's rows, the reconciler's
+    /// View and the pool's occupancy; never persisted. Additive: absent when
+    /// the workload is not waiting.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub capacity_wait: Option<CapacityWait>,
+}
+
+/// The capacity limit a workload's start is waiting on (ADR-0327).
+///
+/// `held` counts retiring leases, which still occupy the cap (ADR-0133);
+/// `cap` is `MAX_GUEST_NETWORK_ATTACHMENTS`. There is no start time and no
+/// history.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct CapacityWait {
+    /// The exhausted resource.
+    pub resource: CapacityResource,
+    /// Attachments held on the node.
+    pub held: u32,
+    /// The node's attachment cap.
+    pub cap: u32,
+}
+
+/// A node capacity resource a workload can wait on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
+pub enum CapacityResource {
+    /// The node's guest-network attachment pool.
+    GuestNetworkAttachments,
+}
+
+impl CapacityResource {
+    /// The enum-owned kebab-case label (`"guest-network-attachments"`).
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::GuestNetworkAttachments => "guest-network-attachments",
+        }
+    }
 }
 
 /// Allocation-status row body — extended per ADR-0033 §1 / Slice 01

@@ -61,6 +61,7 @@ fn crashing_spec(alloc: &AllocationId) -> AllocationSpec {
             alloc,
         ),
         driver: DriverPayload::Vm(VmPayload {
+            volume: None,
             command: "/sbin/init".to_owned(),
             args: Vec::new(),
             kernel: PathBuf::from("/kernel"),

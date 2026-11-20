@@ -190,6 +190,8 @@ pub enum VmStartFailure {
     /// READY arrived but the guest command could not be delivered before
     /// the allocation reached Running.
     GuestCommandDispatchFailed { detail: String },
+    /// The workload's volume could not be attached (ADR-0317, ADR-0318).
+    VolumeUnavailable { cause: crate::volume::VolumeUnavailableCause },
 }
 
 /// The confinement control a host failed to supply (ADR-0083 §D5 row 6).
@@ -265,6 +267,43 @@ pub enum DriverError {
     /// which placement never issues.
     #[error("allocation {alloc} has no guest transport assignment for the VMM")]
     GuestTransportMissing { alloc: AllocationId },
+    /// A launch abandoned because an operator `stop` or `restart`, or node
+    /// shutdown, raised its lane's [`LaunchSupersession`] signal (ADR-0325).
+    ///
+    /// A typed outcome, not a failure: it has no [`DriverStartFailure`], no
+    /// `TransitionReason`, and so no representation that could be written as a
+    /// `Failed` row or charged to a restart budget. It means a clean teardown
+    /// with nothing left behind; a teardown that fails is `StartRejected`.
+    #[error("start superseded by a newer desired state")]
+    StartSuperseded,
+}
+
+/// The convergence lane's supersession signal, as a launch sees it (ADR-0325).
+///
+/// The convergence owner opens a lane for the target of every tick and raises
+/// its signal when an operator `workload stop` or `workload restart` commits,
+/// or when the node begins shutdown. A driver's `start` reads it at its step
+/// boundaries and inside its interruptible waits.
+///
+/// # Contract
+///
+/// - **Precondition:** none.
+/// - **Postcondition:** [`LaunchSupersession::is_superseded`] is true from the
+///   moment the signal is raised, forever after (a level, never an edge).
+///   [`LaunchSupersession::superseded`] resolves when `is_superseded()` is true
+///   (immediately if it already is) and never resolves otherwise; it is
+///   cancel-safe.
+/// - **Edge case:** a signal raised before the call, or twice, behaves as once.
+/// - **Invariant:** `superseded()` resolves iff `is_superseded()` is true at
+///   some instant after the call.
+#[async_trait]
+pub trait LaunchSupersession: Send + Sync {
+    /// True from the moment the signal is raised, forever after.
+    fn is_superseded(&self) -> bool;
+
+    /// Resolves when [`LaunchSupersession::is_superseded`] is true (immediately
+    /// if it already is); never resolves otherwise. Cancel-safe.
+    async fn superseded(&self);
 }
 
 /// Resource envelope for an allocation — cgroup limits for processes,
@@ -366,6 +405,19 @@ pub struct VmPayload {
     pub kernel: PathBuf,
     /// Operator-supplied rootfs artifact path (BYO).
     pub rootfs: PathBuf,
+    /// The workload's node-local volume, when its spec declares one
+    /// (GH #348, ADR-0310). `None` states no volume: the launch makes no
+    /// `ensure`, no claim wait and no second `--disk`.
+    pub volume: Option<VolumePayload>,
+}
+
+/// The volume a launch ensures and attaches (GH #348, ADR-0318).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VolumePayload {
+    /// The owning workload; the volume's identity (ADR-0311).
+    pub workload: crate::id::WorkloadId,
+    /// The declared size.
+    pub size: crate::volume::VolumeSize,
 }
 
 impl DriverPayload {
@@ -630,7 +682,21 @@ pub trait Driver: Send + Sync + 'static {
     /// Drivers that have no watcher (no `ExitEvent` emission path)
     /// do not need to override [`Driver::release_for_exit_emission`];
     /// the default no-op is correct for them.
-    async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError>;
+    ///
+    /// # Supersession (ADR-0325)
+    ///
+    /// `supersession` is the convergence lane's signal for this launch. A driver
+    /// with an interruptible wait reads it at its step boundaries and inside the
+    /// wait; a driver with none names the parameter `_supersession` and says so.
+    /// [`DriverError::StartSuperseded`] is returnable only after the driver
+    /// observed the signal and means a clean teardown with nothing left behind
+    /// (a teardown that fails is `StartRejected`, never `StartSuperseded`). A
+    /// driver with no interruptible wait never returns it.
+    async fn start(
+        &self,
+        spec: &AllocationSpec,
+        supersession: &dyn LaunchSupersession,
+    ) -> Result<AllocationHandle, DriverError>;
 
     /// Complete the Running-confirmed release for `handle.alloc`. See the
     /// post-condition section on [`Driver::start`] for the full contract:

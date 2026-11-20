@@ -75,6 +75,7 @@ fn spec(tmp: &TempDir, alloc: &AllocationId, argument_bytes: usize) -> Allocatio
         identity: SpiffeId::new("spiffe://overdrive.local/workload/nd295/alloc/exec")
             .expect("SPIFFE ID"),
         driver: DriverPayload::Vm(VmPayload {
+            volume: None,
             command: "/bin/true".to_owned(),
             args: vec!["x".repeat(argument_bytes)],
             kernel: tmp.path().join("vmlinuz"),
@@ -108,6 +109,7 @@ async fn driver(
         layout,
         beacon.intake().await,
         guest_listener_board,
+        None,
     );
     (driver, beacon, vmm)
 }
@@ -121,7 +123,11 @@ async fn start(
 ) -> (AllocationHandle, GuestSession) {
     let owned_driver = driver.clone();
     let owned_spec = spec.clone();
-    let start = tokio::spawn(async move { owned_driver.start(&owned_spec).await });
+    let start = tokio::spawn(async move {
+        owned_driver
+            .start(&owned_spec, &overdrive_sim::adapters::SimLaunchSupersession::new())
+            .await
+    });
     let guest = beacon.dial_ready(spec).await;
     let handle = start.await.expect("start joins").expect("READY admits VM");
     (handle, guest)

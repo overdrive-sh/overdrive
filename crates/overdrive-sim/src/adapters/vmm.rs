@@ -636,6 +636,7 @@ mod tests {
         let kernel = KernelImage::validate(root.join("vmlinux"), HostArch::X86_64, b"\x7fELF")
             .expect("an ELF header validates");
         VmConfig {
+            volume: None,
             alloc: alloc.clone(),
             kernel,
             rootfs: RootfsPlan::for_alloc(master, 512, &alloc, root, &root.join("clone-index")),

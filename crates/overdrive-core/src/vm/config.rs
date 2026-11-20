@@ -218,12 +218,27 @@ impl KernelImage {
 pub struct DiskAttachment {
     path: PathBuf,
     readonly: bool,
+    #[allow(dead_code, reason = "DISTILL RED scaffold: to_disk_arg renders serial in DELIVER")]
+    serial: Option<&'static str>,
+    #[allow(dead_code, reason = "DISTILL RED scaffold: to_disk_arg renders direct in DELIVER")]
+    direct: bool,
 }
 
 impl DiskAttachment {
     #[must_use]
     pub const fn new(path: PathBuf, readonly: bool) -> Self {
-        Self { path, readonly }
+        Self { path, readonly, serial: None, direct: false }
+    }
+
+    /// The workload volume's attachment: writable, `direct` on, serial
+    /// [`VOLUME_DISK_SERIAL`] (ADR-0315). The one constructor of a serial-tagged
+    /// or direct attachment.
+    ///
+    /// SCAFFOLD: true — the fields are set, but `to_disk_arg` still renders the
+    /// rootfs shape until DELIVER renders `direct` and `serial`.
+    #[must_use]
+    pub const fn volume(device: PathBuf) -> Self {
+        Self { path: device, readonly: false, serial: Some(VOLUME_DISK_SERIAL), direct: true }
     }
 
     /// The complete `--disk` argument value. This is the anti-corruption
@@ -878,6 +893,9 @@ pub struct VmConfig {
     pub run_dir: VmRunDir,
     pub confinement: VmConfinement,
     pub cgroup_scope: CgroupPath,
+    /// The workload's volume disk, attached as the second `--disk` after the
+    /// rootfs (GH #348, ADR-0315). `None` states no volume.
+    pub volume: Option<VolumeAttachment>,
 }
 
 impl VmConfig {
@@ -913,6 +931,20 @@ impl VmConfig {
     pub fn landlock_rules(&self) -> Vec<LandlockRule> {
         vec![self.run_dir.landlock_grant()]
     }
+}
+
+// -----------------------------------------------------------------------
+// Node-local persistent volume attachment (GH #348, ADR-0315) — RED scaffold
+// -----------------------------------------------------------------------
+
+/// The fixed virtio serial of the workload volume's guest disk (ADR-0315).
+pub const VOLUME_DISK_SERIAL: &str = "ovd-volume";
+
+/// The volume disk a launch attaches as the second `--disk`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VolumeAttachment {
+    /// The volume's device node (`/dev/mapper/overdrive-ovd--<hash>`).
+    pub device: PathBuf,
 }
 
 // -----------------------------------------------------------------------
@@ -1130,6 +1162,7 @@ mod tests {
             KernelImage::validate(PathBuf::from("/boot/vmlinuz"), HostArch::X86_64, &header)
                 .unwrap();
         VmConfig {
+            volume: None,
             alloc: alloc.clone(),
             kernel,
             rootfs: RootfsPlan::for_alloc(

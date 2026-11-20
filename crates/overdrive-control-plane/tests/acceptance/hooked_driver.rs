@@ -27,7 +27,7 @@ use overdrive_core::observation::ProbeRole;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverType, ExitEvent,
-    Resources,
+    LaunchSupersession, Resources,
 };
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::driver::SimDriver;
@@ -152,13 +152,17 @@ impl Driver for HookedDriver {
         DriverType::Vm
     }
 
-    async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
+    async fn start(
+        &self,
+        spec: &AllocationSpec,
+        supersession: &dyn LaunchSupersession,
+    ) -> Result<AllocationHandle, DriverError> {
         self.calls.lock().push(Call::Start(spec.alloc.clone()));
         let delay = *self.boot_delay.lock();
         if !delay.is_zero() {
             self.clock.sleep(delay).await;
         }
-        self.sim.start(spec).await
+        self.sim.start(spec, supersession).await
     }
 
     async fn release_for_exit_emission(&self, handle: &AllocationHandle) {

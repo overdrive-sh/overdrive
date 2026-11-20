@@ -1510,6 +1510,7 @@ async fn genuine_pre_change_contract(
             issued_certificates: vec![issued_certificate],
             probes: Vec::new(),
             probe_results: Vec::new(),
+            capacity_wait: None,
         },
     }
 }

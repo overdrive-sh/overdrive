@@ -189,6 +189,21 @@ mod quint_quiescence;
 // Service submit stream handler.
 #[cfg(all(test, feature = "integration-tests"))]
 mod quint_stream_conformance;
+
+// GH #348: the source-local Quint conformance driver of
+// `specs/quint/node-local-volume/node_volume.qnt`, conformance main `vol_conf`
+// — the VM launch path's volume ensure and claim wait (ADR-0317, ADR-0318),
+// driven through the production composition (operator handlers,
+// `WorkloadLifecycle`, the action shim, `VmDriver` over `SimVmm`).
+#[cfg(all(test, feature = "integration-tests"))]
+mod quint_node_volume;
+// GH #348: the restart-generation protocol's conformance driver (spec specs/quint/restart-generation).
+#[cfg(all(test, feature = "integration-tests"))]
+mod quint_restart_generation;
+// GH #348: boundary scenarios 2 and 4 of the launch path beyond the Quint run (rows and the
+// restart authority's view), over the conformance driver's production composition.
+#[cfg(all(test, feature = "integration-tests"))]
+mod node_volume_boundaries;
 #[cfg(all(test, feature = "integration-tests"))]
 mod shared_network_recovery_acceptance;
 // D13/DG-6: run_server shares the beacon reader's board with the probe runner.
@@ -3360,6 +3375,7 @@ pub async fn run_server(
     // at dispatch (`driver.vm.not_composed`); `Required` — the boot refuses
     // (`health.startup.refused`, reason `vmm.probe`).
     let mut beacon_port = None;
+    let volumes = compose_volume_backing(vm.volume_pool.as_ref()).await?;
     match compose_vm_driver(
         cgroup_root_path,
         overdrive_core::vm::config::clone_index_dir(&config.data_dir),
@@ -3370,6 +3386,7 @@ pub async fn run_server(
         Arc::clone(&guest_listener_board),
         guest_network_exec.gate(),
         vm,
+        volumes,
         config.vsock_ports.beacon(),
     )
     .await
@@ -3560,6 +3577,22 @@ const OVERDRIVE_VMM_STAGING_MODE: u32 = 0o710;
 /// files ceiling, so the confined limit is strictly below serve's (S-VM-49).
 const OVERDRIVE_VMM_RLIMIT_NOFILE: u64 = 256;
 
+/// Boot step: probe the node's volume pool (GH #348, ADR-0314). `None` logs
+/// `volume_backing.not_composed`; a present but broken pool refuses startup with
+/// `health.startup.refused`, reason `volume_backing.probe`.
+///
+/// RED scaffold (DISTILL): passes the probed backing through and treats every other
+/// outcome as "no pool", so existing boots are unchanged until DELIVER lands the
+/// event and the refusal.
+async fn compose_volume_backing(
+    probe: &dyn overdrive_core::traits::volume_backing::VolumePoolProbe,
+) -> std::result::Result<
+    Option<Arc<dyn overdrive_core::traits::volume_backing::VolumeBacking>>,
+    error::ControlPlaneError,
+> {
+    Ok(probe.probe().await.ok().flatten())
+}
+
 #[allow(
     clippy::too_many_arguments,
     reason = "the composition helper receives the existing VM ports and the single trusted ProbeRunner without introducing a configuration wrapper"
@@ -3574,6 +3607,7 @@ async fn compose_vm_driver(
     guest_listener_board: Arc<overdrive_worker::GuestListenerBoard>,
     guest_network_exec: Arc<overdrive_core::guest_network::GuestNetworkExecGate>,
     vm: VmAdapters,
+    volumes: Option<Arc<dyn overdrive_core::traits::volume_backing::VolumeBacking>>,
     beacon_port: overdrive_core::guest_transport::VsockListenPort,
 ) -> std::result::Result<
     (overdrive_worker::vm_driver::VmDriver, overdrive_core::vm::config::VsockPort),
@@ -3587,7 +3621,8 @@ async fn compose_vm_driver(
     // (the root constructed the VMM and declares the capability present) →
     // `Refused`; `Optional` (capability may be absent) → `NotAvailable`.
     let injected = vm.capability == VmCapability::Required;
-    let VmAdapters { vmm, beacon: beacon_io, cgroup_accounting, capability: _ } = vm;
+    let VmAdapters { vmm, beacon: beacon_io, cgroup_accounting, capability: _, volume_pool: _ } =
+        vm;
     // Earned Trust is UNCONDITIONAL here: `.probe()` runs against
     // WHATEVER adapter is bound, production or injected — there is no
     // `if injected { skip probe }` branch anywhere in this function.
@@ -3723,6 +3758,7 @@ async fn compose_vm_driver(
             layout,
             beacon,
             guest_listener_board,
+            volumes,
         ),
         bound,
     ))
@@ -5797,7 +5833,9 @@ mod tests {
                     vmm: Arc::new(sim_vmm),
                     cgroup_accounting: Arc::new(SimCgroupAccounting::new()),
                     capability: VmCapability::Required,
+                    volume_pool: Arc::new(overdrive_sim::SimVolumePoolProbe::absent()),
                 },
+                None,
                 VsockListenPort::KernelAssigned,
             )
             .await
@@ -5870,7 +5908,9 @@ mod tests {
                     vmm: Arc::new(sim_vmm),
                     cgroup_accounting: Arc::new(SimCgroupAccounting::new()),
                     capability: VmCapability::Optional,
+                    volume_pool: Arc::new(overdrive_sim::SimVolumePoolProbe::absent()),
                 },
+                None,
                 VsockListenPort::KernelAssigned,
             )
             .await
@@ -5920,7 +5960,9 @@ mod tests {
                     vmm: Arc::new(sim_vmm),
                     cgroup_accounting: Arc::new(sim_cgroup_accounting),
                     capability: VmCapability::Required,
+                    volume_pool: Arc::new(overdrive_sim::SimVolumePoolProbe::absent()),
                 },
+                None,
                 VsockListenPort::KernelAssigned,
             )
             .await

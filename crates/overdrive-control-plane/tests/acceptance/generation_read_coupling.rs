@@ -35,7 +35,7 @@
 //!
 //! Driving port: `run_convergence_tick` (the production convergence tick
 //! — hydrate desired reads the store through `generation_value`).
-//! Observable: the persisted `WorkloadLifecycleView.observed_generation`
+//! Observable: the persisted `WorkloadLifecycleView.issued_generation` (max stamp)
 //! via the runtime's `loaded_workload_lifecycle_views_for_test` accessor.
 //!
 //! In-process, real redb over `TempDir` (Strategy C). Gated behind
@@ -125,7 +125,7 @@ async fn build_state(
 /// `IntentKey::for_workload_generation` — the exact op `overdrive workload
 /// restart` commits) —
 /// WHEN one `run_convergence_tick` fires for `workload-lifecycle` against it —
-/// THEN the persisted `WorkloadLifecycleView.observed_generation` is `1`.
+/// THEN the persisted `WorkloadLifecycleView.issued_generation` (max stamp) is `1`.
 ///
 /// See the module docstring for why `observed_generation == 1` is a true
 /// coupling discriminator for the read path (`generation_value`).
@@ -209,13 +209,13 @@ async fn reconciler_observes_generation_written_at_for_workload_generation_key()
          its absence means desired.generation read 0 (read-side drift), so restart_pending was \
          false and next_view stayed default()",
     );
+    let stamped = view.issued_generation.values().copied().max().unwrap_or(0);
     assert_eq!(
-        view.observed_generation, 1,
+        stamped, 1,
         "the reconciler must observe generation 1 read from \
-         `workloads/payments/generation` and stamp `observed_generation = 1`; got {} — a non-1 \
+         `workloads/payments/generation` and stamp `observed_generation = 1`; got {stamped} — a non-1 \
          value means the read side (`generation_value`) drifted from the writer's key \
          (`IntentKey::for_workload_generation`) or the `IncrementU64` decode \
          (`TxnOp::decode_counter`)",
-        view.observed_generation,
     );
 }

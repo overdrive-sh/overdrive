@@ -654,7 +654,7 @@ fn run_with_failed_alloc_and_attempts(attempts: u32) -> Vec<Action> {
         restart_counts,
         last_failure_seen_at: BTreeMap::new(),
         released_for_deletion: ::std::collections::BTreeSet::new(),
-        observed_generation: 0,
+        issued_generation: BTreeMap::new(),
         reclaim_attempts: BTreeMap::new(),
         reclaim_emitted_at: BTreeMap::new(),
     };
@@ -794,7 +794,7 @@ fn run_with_failed_alloc_and_seen_at(now_unix: UnixInstant, seen_at: UnixInstant
         restart_counts: BTreeMap::new(),
         last_failure_seen_at,
         released_for_deletion: ::std::collections::BTreeSet::new(),
-        observed_generation: 0,
+        issued_generation: BTreeMap::new(),
         reclaim_attempts: BTreeMap::new(),
         reclaim_emitted_at: BTreeMap::new(),
     };
@@ -1218,7 +1218,7 @@ fn stop_branch_clears_last_failure_seen_at_when_no_running_allocs() {
         restart_counts,
         last_failure_seen_at,
         released_for_deletion: ::std::collections::BTreeSet::new(),
-        observed_generation: 0,
+        issued_generation: BTreeMap::new(),
         reclaim_attempts: BTreeMap::new(),
         reclaim_emitted_at: BTreeMap::new(),
     };
@@ -1516,7 +1516,7 @@ fn absent_workload_with_no_allocs_clears_view_backoff() {
             restart_counts,
             last_failure_seen_at,
             released_for_deletion: BTreeSet::new(),
-            observed_generation: 0,
+            issued_generation: BTreeMap::new(),
             reclaim_attempts: BTreeMap::new(),
             reclaim_emitted_at: BTreeMap::new(),
         };
@@ -1602,7 +1602,7 @@ fn absent_workload_with_only_terminal_allocs_is_idempotent() {
             restart_counts: BTreeMap::new(),
             last_failure_seen_at,
             released_for_deletion: BTreeSet::new(),
-            observed_generation: 0,
+            issued_generation: BTreeMap::new(),
             reclaim_attempts: BTreeMap::new(),
             reclaim_emitted_at: BTreeMap::new(),
         };

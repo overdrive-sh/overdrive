@@ -98,7 +98,7 @@ const fn empty_view() -> WorkloadLifecycleView {
         restart_counts: BTreeMap::new(),
         last_failure_seen_at: BTreeMap::new(),
         released_for_deletion: ::std::collections::BTreeSet::new(),
-        observed_generation: 0,
+        issued_generation: BTreeMap::new(),
         reclaim_attempts: std::collections::BTreeMap::new(),
         reclaim_emitted_at: std::collections::BTreeMap::new(),
     }

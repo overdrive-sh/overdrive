@@ -203,7 +203,7 @@ fn workload_lifecycle_stamps_backoff_exhausted_terminal_when_attempts_reach_ceil
         restart_counts,
         last_failure_seen_at: BTreeMap::new(),
         released_for_deletion: ::std::collections::BTreeSet::new(),
-        observed_generation: 0,
+        issued_generation: BTreeMap::new(),
         reclaim_attempts: BTreeMap::new(),
         reclaim_emitted_at: BTreeMap::new(),
     };
@@ -416,7 +416,7 @@ fn workload_lifecycle_emits_no_terminal_when_failed_with_budget_remaining() {
         restart_counts,
         last_failure_seen_at: BTreeMap::new(),
         released_for_deletion: ::std::collections::BTreeSet::new(),
-        observed_generation: 0,
+        issued_generation: BTreeMap::new(),
         reclaim_attempts: BTreeMap::new(),
         reclaim_emitted_at: BTreeMap::new(),
     };
@@ -524,7 +524,7 @@ proptest! {
             aid("alloc-payments-0"),
             UnixInstant::from_unix_duration(Duration::from_secs(seen_at_secs)),
         );
-        let view = WorkloadLifecycleView { restart_counts, last_failure_seen_at, released_for_deletion: ::std::collections::BTreeSet::new(), observed_generation: 0, reclaim_attempts: BTreeMap::new(), reclaim_emitted_at: BTreeMap::new() };
+        let view = WorkloadLifecycleView { restart_counts, last_failure_seen_at, released_for_deletion: ::std::collections::BTreeSet::new(), issued_generation: BTreeMap::new(), reclaim_attempts: BTreeMap::new(), reclaim_emitted_at: BTreeMap::new() };
 
         // Use a tick well past any seen_at + backoff so the deadline
         // gate never blocks the restart branch — ensures the
@@ -745,7 +745,7 @@ fn view_at_ceiling(alloc: &str) -> WorkloadLifecycleView {
         restart_counts,
         last_failure_seen_at: BTreeMap::new(),
         released_for_deletion: ::std::collections::BTreeSet::new(),
-        observed_generation: 0,
+        issued_generation: BTreeMap::new(),
         reclaim_attempts: BTreeMap::new(),
         reclaim_emitted_at: BTreeMap::new(),
     }

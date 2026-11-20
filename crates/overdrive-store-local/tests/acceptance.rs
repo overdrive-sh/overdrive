@@ -56,4 +56,8 @@ mod acceptance {
 
     // SVID issuance failure occurrence (R-46): the workload failure record.
     mod workload_svid_issue_status;
+
+    // node-local-persistent-volume (GH #348): `TransitionReason::VmVolumeUnavailable`
+    // crosses the observation-store envelope.
+    mod volume_unavailable_row_roundtrip;
 }

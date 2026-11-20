@@ -142,9 +142,13 @@ impl Driver for ParkedStopDriver {
     fn r#type(&self) -> DriverType {
         DriverType::Vm
     }
-    async fn start(&self, spec: &AllocationSpec) -> Result<AllocationHandle, DriverError> {
+    async fn start(
+        &self,
+        spec: &AllocationSpec,
+        supersession: &dyn overdrive_core::traits::LaunchSupersession,
+    ) -> Result<AllocationHandle, DriverError> {
         self.started.lock().push(spec.alloc.clone());
-        self.inner.start(spec).await
+        self.inner.start(spec, supersession).await
     }
     async fn stop(&self, handle: &AllocationHandle) -> Result<(), DriverError> {
         self.inner.stop(handle).await?;

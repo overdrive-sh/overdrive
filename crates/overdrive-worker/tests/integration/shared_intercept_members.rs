@@ -770,6 +770,7 @@ fn member_spec(alloc: &str, address: Ipv4Addr) -> AllocationSpec {
         identity: SpiffeId::new("spiffe://overdrive.local/workload/sa/alloc/01")
             .expect("a valid SPIFFE id"),
         driver: DriverPayload::Vm(VmPayload {
+            volume: None,
             command: "/bin/true".to_owned(),
             args: Vec::new(),
             kernel: "/nonexistent/kernel".into(),

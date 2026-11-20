@@ -13,8 +13,7 @@ use std::time::Duration;
 use overdrive_core::gateway_identity::{GatewayIdentityDesired, GatewayIdentityFacts};
 use overdrive_core::id::{ContentHash, CorrelationKey, NodeId, SpiffeId};
 use overdrive_core::reconcilers::{
-    Action, HydrateError, HydrationContext, Reconciler, ReconcilerName, TargetResource,
-    TickContext,
+    Action, HydrateError, HydrationContext, Reconciler, ReconcilerName, TargetResource, TickContext,
 };
 use overdrive_core::traits::observation_store::ObservationRowKind;
 use overdrive_core::wall_clock::UnixInstant;

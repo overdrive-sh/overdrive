@@ -99,6 +99,7 @@ fn vm_spec(alloc: &AllocationId, probe_descriptors: Vec<ProbeDescriptor>) -> All
         identity: SpiffeId::new("spiffe://overdrive.local/workload/probe-to-stable/alloc/test")
             .expect("valid SPIFFE ID"),
         driver: DriverPayload::Vm(VmPayload {
+            volume: None,
             command: "/bin/true".to_owned(),
             args: Vec::new(),
             kernel: PathBuf::from("/nonexistent/kernel"),

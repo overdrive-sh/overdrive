@@ -1102,6 +1102,7 @@ mod tests {
         let mut header = vec![0; KERNEL_MAGIC_WINDOW];
         header[..4].copy_from_slice(b"\x7fELF");
         VmConfig {
+            volume: None,
             alloc: alloc.clone(),
             kernel: KernelImage::validate(
                 PathBuf::from("/srv/vm/kernel"),
@@ -1608,6 +1609,7 @@ mod launch_seccomp_kernel {
                 .expect("make the stand-in binary executable");
 
             let config = VmConfig {
+                volume: None,
                 alloc: alloc.clone(),
                 kernel: KernelImage::validate(kernel, HostArch::X86_64, &header)
                     .expect("kernel image header"),
