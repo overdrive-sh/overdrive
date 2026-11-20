@@ -1,0 +1,352 @@
+{
+  "roadmap": {
+    "project_id": "guest-benchmark-substrate",
+    "created_at": "2026-11-19T22:00:00Z",
+    "total_steps": 12
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Walking skeleton (slices 01 and 02): a guest benchmark runs through the benchmark form and returns a validating record with the guest's conditions",
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "Registry accepts the guest substrate and the guest monotonic clock source",
+          "description": "substrate = guest is accepted as a bare identifier beside native; an unregistered substrate is refused naming both registered ones; the guest clock vocabulary gains guest_monotonic (record string 'CLOCK_MONOTONIC (in-guest Instant, 1 ns)') per DDD-1.",
+          "implementation_notes": "Scenario count 5 (GS1, GS2, GT1, GT2, GT3). Exact contract: feature-delta DDD-1; no API beyond it. SUBSTRATES = [native, guest]; the 'guest substrates are not available' refusal and its registry tests are already removed by DISTILL. GuestClock::Monotonic lives in overdrive_bench::registry (as_str is the only home of the record string); the macro holds the guest clock identifier list (init_elapsed_ms, guest_monotonic) as it does for units. A guest benchmark declares no bpf_stats: enforced by review and the catalogue, NOT a build error (PD-1 option d rejected). TRYBUILD ACTIVATION: remove the should_panic markers of GT1, GT2, GT3. GT2 (guest_substrate_accepted.rs): the fixture must build whole and NO .stderr file may be created or changed for it. GT1 (unknown_substrate.stderr) and GT3 (unknown_guest_clock_source.stderr) are already pinned: run git diff on them and every pinned 'error:' line must be unchanged; regenerate with TRYBUILD=overwrite only if rustc renders span/label lines differently, and re-diff. Do not accept a GT2 that passes by a different refusal. Do not weaken or rewrite any test body; a body defect routes back to the acceptance designer. Do not introduce roadmap-step identifiers in names.",
+          "criteria": [
+            "GS1 and GS2 pass with should_panic removed: native and guest are registered, guest_xyz/empty/Native/'native '/Guest/'guest ' are not, and the refusal reads: substrate `guest_xyz` is not registered; the registered substrates are: native, guest",
+            "GT1, GT2 and GT3 pass with should_panic removed; GT2's fixture builds whole and `git status crates/overdrive-bench/tests/compile_fail/` shows no new or changed .stderr for guest_substrate_accepted",
+            "git diff of unknown_substrate.stderr and unknown_guest_clock_source.stderr shows every pinned `error:` line unchanged (only span/label lines may differ)",
+            "GuestClock::Monotonic has identifier guest_monotonic and the pinned record string; the unknown guest clock source message reads: guest clock source `<value>` is not one of init_elapsed_ms, guest_monotonic",
+            "Metal gate: `cargo xtask metal run -- cargo nextest run -p overdrive-bench --features integration-tests --lib --test compile_fail` passes",
+            "Metal gate: `cargo xtask metal run -- cargo check --workspace --all-targets --features integration-tests` and `cargo xtask metal run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings` pass; `cargo xtask metal run -- cargo xtask placement-lint` exits 0",
+            "Metal mutation gate (kill rate >= 80%): `cargo xtask metal run -- cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-bench --file crates/overdrive-bench/src/registry.rs`",
+            "git status shows the pinned .stderr files unchanged unless only span lines differ (TRYBUILD=overwrite only for span lines)"
+          ],
+          "dependencies": [],
+          "files_to_modify": [
+            "crates/overdrive-bench/src/registry.rs",
+            "crates/overdrive-testing-macros/src/bench.rs",
+            "crates/overdrive-bench/tests/compile_fail.rs",
+            "crates/overdrive-bench/tests/compile_fail/unknown_substrate.stderr",
+            "crates/overdrive-bench/tests/compile_fail/unknown_guest_clock_source.stderr"
+          ],
+          "effort_hours": 6,
+          "test_file": "crates/overdrive-bench/src/registry.rs, crates/overdrive-bench/tests/compile_fail.rs",
+          "scenario_name": "native_and_guest_are_the_registered_substrates, the_refusal_names_the_substrate_and_the_registered_ones, an_unregistered_substrate_fails_the_build_naming_it_and_the_registered_ones, a_guest_benchmark_declaration_builds, an_unknown_guest_clock_source_fails_the_build_naming_the_set"
+        },
+        {
+          "id": "01-02",
+          "name": "Guest memory size is a validated positive newtype",
+          "description": "GuestMemoryMib in overdrive_bench::record per DDD-4: infallible new(NonZeroU32), FromStr decimal digits only with a typed GuestMemoryMibError, Display decimal digits, serde as the JSON integer, deserialising 0 refused naming memory_mib; re-exported at the crate root.",
+          "implementation_notes": "Scenario count 5 (GM1 green guard, GM2-GM5 RED). Replace the DISTILL scaffold (FromStr refuses every text, Serialize writes 0, Deserialize refuses every value) with the real implementation; GuestMemoryMibError shape is crafter detail (U5). Newtype completeness per .claude/rules/rust.md: FromStr + Display + Serialize/Deserialize matching exactly. GM2 and GM3 are proptests over every positive u32; GM4 and GM5 pin the refusal tables after a control (the largest count 4294967295 parses). Do not add API beyond DDD-4.",
+          "criteria": [
+            "GM1 stays green; GM2-GM5 pass with should_panic removed (text and JSON round trips over every positive u32; '', 0, 00, -1, +5, 1.5, padded, 0x10, 512mib, 4294967296 refused; 4294967295 parses; JSON 0, -1, 1.5, a string, null and 4294967296 refused with 0 naming memory_mib)",
+            "GuestMemoryMib is re-exported at the overdrive_bench crate root and no raw u32 carries a memory size in the new public surface",
+            "Metal gate: `cargo xtask metal run -- cargo nextest run -p overdrive-bench --features integration-tests --lib` passes",
+            "Metal gate: `cargo xtask metal run -- cargo check --workspace --all-targets --features integration-tests` and `cargo xtask metal run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings` pass",
+            "Metal mutation gate (kill rate >= 80%): `cargo xtask metal run -- cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-bench --file crates/overdrive-bench/src/record.rs`"
+          ],
+          "dependencies": [],
+          "files_to_modify": [
+            "crates/overdrive-bench/src/record.rs",
+            "crates/overdrive-bench/src/lib.rs"
+          ],
+          "effort_hours": 4,
+          "test_file": "crates/overdrive-bench/src/record.rs",
+          "scenario_name": "a_guest_memory_size_displays_as_its_decimal_digits, a_guest_memory_size_round_trips_through_its_text, a_guest_memory_size_round_trips_through_the_json_integer_the_record_carries, text_that_is_not_a_positive_decimal_count_is_refused, a_json_value_that_is_not_a_positive_integer_is_refused_naming_the_field"
+        },
+        {
+          "id": "01-03",
+          "name": "A guest record validates and its report states the guest's conditions",
+          "description": "Substrate::Guest, the optional run_started.guest block, the single guest_observed line, the guest clock string in clock.guest, the pinned validator rules and the guest header lines of the report per DDD-2, with HostValue made pub and GuestView and GuestArtifacts public; native records and reports stay byte-identical.",
+          "implementation_notes": "@sizing-review-needed Scenario count 15 (GV1-GV7, GP1-GP8; GV7, GP7, GP8 are green guards). Exact contract: feature-delta DDD-2 (record, validator rules, report lines; schema and methodology stay 1) and DDD-4 (GuestView, GuestArtifacts, GuestMemoryMib reuse). No API beyond DDD-2/DDD-4. SHARED-CONTROL ACTIVATION GROUP (red-classification.md 'Activate together'): GV1-GV6 and GP1-GP6 activate TOGETHER in this step because they share one control (a valid guest record validates / renders) and their per-rule assertions have never run. Procedure: remove ALL should_panic markers of GV1-GV6 and GP1-GP6, run each body once against the minimal implementation that makes the control green, and expect the semantic RED of every rule not yet implemented; route ANY body defect (wrong needle, wrong line number, an edit that does not break the rule it names) back to the acceptance designer - do NOT weaken, rewrite or complete a body - then continue one test at a time. Validator order, line-order rules (guest_observed only after the start canary, at most once, before the first ok replicate line) and exit codes (65 refusal, 64 usage, 70 unreadable, never 101) follow DDD-2. The report prints the guest lines after the host lines and before 'bpf stats'; a record with no guest_observed prints each of the seven observed lines as 'absent: no replicate returned a guest view' (U3). bench-report validate/render accept exactly one record (GV7). Add unit and proptest coverage for any crafter-owned helper (the 64-lowercase-hex digest check, line-order state machine).",
+          "criteria": [
+            "GV1-GV6 and GP1-GP6 are activated together: every should_panic marker of the twelve removed in this step, each body run once against a minimal implementation, any body defect routed back to the acceptance designer and none weakened",
+            "GV7, GP7, GP8 and the existing every_retained_record_still_validates stay green: every committed native record validates, states substrate native, has no guest block and no guest_observed, and re-renders byte-identically",
+            "bench-report validate accepts a guest record in every terminal state and refuses (exit 65 naming the field) a guest block on a native record, a guest record without one, any value outside launch=metal_host, boot=per_replicate, vcpu_scheduling=unpinned and the three settings each exactly {absent: 'not visible from a guest'}, a misplaced or repeated guest_observed, a malformed view (vcpus 0, memory_mib 0, digest not 64 lowercase hex), and any clock.guest string other than null, the 1 ms init string or the guest_monotonic string",
+            "The report header prints, between the host lines and `bpf stats`, launch 'metal host (not nested)', boot 'fresh guest per replicate', vcpu scheduling 'unpinned', governor/smt/boost 'absent: not visible from a guest', then vcpus, memory mib, kernel, clocksource and the three artifact digests; with no view the seven observed lines read 'absent: no replicate returned a guest view'; substrate prints guest",
+            "Metal gate: `cargo xtask metal run -- cargo nextest run -p overdrive-bench --features integration-tests --lib --test integration` passes",
+            "Metal gate: `cargo xtask metal run -- cargo check --workspace --all-targets --features integration-tests`, `cargo xtask metal run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings` and `cargo xtask metal run -- cargo xtask placement-lint` pass",
+            "Metal mutation gate (kill rate >= 80%): `cargo xtask metal run -- cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-bench --file crates/overdrive-bench/src/record.rs --file crates/overdrive-bench/src/report.rs`"
+          ],
+          "dependencies": [
+            "01-01",
+            "01-02"
+          ],
+          "files_to_modify": [
+            "crates/overdrive-bench/src/record.rs",
+            "crates/overdrive-bench/src/report.rs",
+            "crates/overdrive-bench/src/lib.rs",
+            "crates/overdrive-bench/tests/integration/report_validation.rs",
+            "crates/overdrive-bench/tests/integration/report_rendering.rs"
+          ],
+          "effort_hours": 14,
+          "test_file": "crates/overdrive-bench/tests/integration/report_validation.rs, crates/overdrive-bench/tests/integration/report_rendering.rs",
+          "scenario_name": "a_wellformed_guest_record_validates_in_every_terminal_state, a_guest_block_is_present_exactly_when_the_substrate_is_guest, a_guest_block_outside_its_pinned_vocabulary_is_refused_naming_the_field, a_guest_observed_line_outside_its_place_is_refused, a_malformed_guest_view_is_refused_naming_the_field, the_guest_monotonic_clock_string_validates_and_any_other_is_refused, no_command_takes_two_records, the_report_states_the_guests_conditions_between_the_host_lines_and_the_statistics_line, a_guest_record_without_a_view_prints_the_observed_values_as_absent, a_guest_run_refused_on_a_drifted_host_reports_the_refusal_and_the_static_conditions, a_killed_guest_run_is_incomplete_and_a_failed_guest_replicate_is_counted, a_one_arm_guest_report_shows_the_distribution_of_the_retained_samples, rendering_a_guest_record_twice_is_byte_identical_and_leaves_the_record_untouched, a_native_report_prints_no_guest_line_and_states_substrate_native, every_committed_native_report_re_renders_byte_identical"
+        },
+        {
+          "id": "01-04",
+          "name": "Runner records the guest's view once and retains every replicate's console",
+          "description": "Replicate::report_guest_view and Replicate::retain_console, RecordSink::write_artifact (create-new, creates parents), and the runner behaviour for a guest benchmark per DDD-2, DDD-4, DDD-9 and the runner rule M-1; .gitignore gains benchmarks/results/**/artifacts/.",
+          "implementation_notes": "@sizing-review-needed Scenario count 16 (GR1-GR16; GR13 is a green guard). Exact contract: feature-delta DDD-4 (report_guest_view: first call fixes the run's view and the runner appends the one guest_observed line before that replicate's line; later calls return Ok and change nothing; a native benchmark calling it is a ReplicateFailure; under smoke only the effect is skipped and every failure rule applies as in a real run), DDD-9 (retain_console writes artifacts/<profile>/<block>-<position>-<arm>/console.log create-new; a second call or a write failure is a ReplicateFailure) and the DDD-2 wiring order (the runner maps substrate 'guest' to Substrate::Guest, writes the static guest block on run_started including on a refused host, never calls the family body when the host is refused, fails a guest-substrate replicate that returned Ok without reporting a view with reason 'the replicate reported no guest view'). No guest port and no new dependency in overdrive-bench (ADR-0331). Replace the DISTILL scaffolds (inert Ok(())). CONSOLE-RETENTION GITIGNORE: add `benchmarks/results/**/artifacts/` to .gitignore in this step (approved with PD-9); the record and report stay committed, the consoles are not. GR12 is a proptest over scripted replicate sequences (seed printed on failure). Do not weaken any body.",
+          "criteria": [
+            "GR1-GR12 and GR14-GR16 pass with should_panic removed; GR13 stays green",
+            "A guest benchmark's record is: run_started with substrate guest and the static guest block, then (after the start canary) one guest_observed line holding the FIRST reported view immediately before that replicate's line, later views change nothing, a view reported by a replicate that then fails stays the run's view; the record validates in every script",
+            "A guest-substrate replicate returning Ok without a view is failed 'the replicate reported no guest view' (also under smoke); a drifted host writes exactly run_started (with the guest block) and run_refused and never calls the body; a native benchmark that reports a view fails its replicate",
+            "Every replicate's console lands at artifacts/<profile>/<block>-<position>-<arm>/console.log under the result directory in every outcome, create-new; a second retain_console or a failed artifact write fails the replicate and the run continues; FileSink::write_artifact writes bytes and parents and a second write is AlreadyExists with the first bytes kept",
+            "`git check-ignore -v benchmarks/results/guest-flow-forwarding/x/artifacts/p/0-0-forwarding/console.log` reports the new .gitignore rule while a record.jsonl and report.md in the same directory are not ignored",
+            "Metal gate: `cargo xtask metal run -- cargo nextest run -p overdrive-bench --features integration-tests --lib --test integration` passes",
+            "Metal gate: `cargo xtask metal run -- cargo check --workspace --all-targets --features integration-tests`, `cargo xtask metal run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings` and `cargo xtask metal run -- cargo xtask placement-lint` pass",
+            "Metal mutation gate (kill rate >= 80%): `cargo xtask metal run -- cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-bench --file crates/overdrive-bench/src/runner.rs --file crates/overdrive-bench/src/replicate.rs`"
+          ],
+          "dependencies": [
+            "01-03"
+          ],
+          "files_to_modify": [
+            "crates/overdrive-bench/src/runner.rs",
+            "crates/overdrive-bench/src/replicate.rs",
+            ".gitignore"
+          ],
+          "effort_hours": 16,
+          "test_file": "crates/overdrive-bench/src/runner.rs, crates/overdrive-bench/src/replicate.rs",
+          "scenario_name": "the_first_reported_guest_view_is_written_once_before_that_replicates_line, a_later_guest_view_writes_no_second_line_and_changes_nothing, a_guest_replicate_that_returns_ok_without_a_view_is_failed_and_the_record_still_validates, a_view_reported_by_a_replicate_that_then_fails_stays_the_runs_view, a_replicate_that_fails_before_reporting_is_counted_and_later_replicates_still_run, a_drifted_host_never_calls_a_guest_benchmarks_body_and_writes_no_view, a_native_benchmark_writes_no_guest_block_and_refuses_a_reported_view, a_replicates_console_is_retained_beside_the_record_in_every_outcome, retaining_a_console_twice_in_one_replicate_fails_it_and_keeps_the_first, a_console_write_that_fails_fails_the_replicate_and_the_run_continues, the_file_sink_writes_an_artifact_create_new_and_creates_its_parents, the_guest_record_ordering_holds_for_every_script_of_replicates, a_guest_benchmarks_smoke_run_reports_and_retains_without_effect, smoke_fails_a_guest_body_that_returns_ok_without_reporting_a_view, smoke_fails_a_guest_body_that_retains_its_console_twice, smoke_fails_a_native_body_that_reports_a_guest_view"
+        },
+        {
+          "id": "01-05",
+          "name": "Benchmark guest CID band is registered and the kit finds the checkout under the exclusive class",
+          "description": "cid_bands::REGISTERED grows to six entries with GUEST_BENCHMARK (first_offset 0x2050, width 16), and vm_fixture::workspace_root returns the exported source root in class exclusive as well as ordinary (DDD-11, CA-3).",
+          "implementation_notes": "Scenario count 4 (GK1, GK2 green, GW1, GW2 green). Exact contract: feature-delta DDD-5 (GUEST_BENCHMARK band) and DDD-11 (one-condition change in a crate-private function; no signature change; the ordinary class, unset class, unknown class and a missing root resolve through cargo locate-project exactly as today). The four kit call sites (guest_kit.rs, guest_lane.rs, forwarder_module.rs, vm_fixture.rs) all reach workspace_root, so none changes. GW1 and GW2 mutate the process environment under #[serial(env)] with an RAII guard. GK3 (GuestImageSpec::benchmark()) is NOT in this step: it activates in the step that lands the real run_in_guest_program. Do not add API beyond the band constant registration.",
+          "criteria": [
+            "GK1 passes with should_panic removed: GUEST_BENCHMARK is registered, REGISTERED has six bands and registry_is_sound still holds, offset 0x2050, width 16, 16 distinct CIDs",
+            "GW1 passes with should_panic removed: with OVERDRIVE_METAL_EXECUTION_CLASS=exclusive and a source root, workspace_root returns that root whatever the cwd; GK2 and GW2 stay green (slot 16 still panics past the end of the band; ordinary and every other context unchanged)",
+            "Metal gate: `cargo xtask metal run -- cargo nextest run -p overdrive-testing --features integration-tests --lib` passes",
+            "Metal gate: `cargo xtask metal run -- cargo check --workspace --all-targets --features integration-tests` and `cargo xtask metal run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings` pass; `cargo xtask metal run -- cargo xtask placement-lint` exits 0",
+            "Metal mutation gate (kill rate >= 80%): `cargo xtask metal run -- cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-testing --file crates/overdrive-testing/src/vm_fixture.rs --file crates/overdrive-testing/src/guest_kit.rs`"
+          ],
+          "dependencies": [],
+          "files_to_modify": [
+            "crates/overdrive-testing/src/guest_kit.rs",
+            "crates/overdrive-testing/src/vm_fixture.rs"
+          ],
+          "effort_hours": 4,
+          "test_file": "crates/overdrive-testing/src/guest_kit.rs, crates/overdrive-testing/src/vm_fixture.rs",
+          "scenario_name": "the_benchmark_guest_band_is_registered_disjoint_and_sixteen_wide, a_slot_past_the_benchmark_guest_band_is_refused, the_workspace_root_is_the_exported_source_root_in_the_exclusive_class, the_workspace_root_keeps_the_ordinary_class_and_every_other_context_unchanged"
+        },
+        {
+          "id": "01-06",
+          "name": "Guest program return is printed and parsed under one strict console grammar",
+          "description": "print_program_return and parse_program_return in overdrive_testing::guest_app: the leading newline, two guest-reading lines, one framed forwarded_round_trip_ns series block of at most 16 values per line, and a SHA-256 end line over little-endian u64 bytes; the parser matches begin and reading lines only at the start of a console line and accepts exactly one intact block of the expected count (DDD-6).",
+          "implementation_notes": "@sizing-review-needed Scenario count 17 (GA1-GA17). Exact contract: feature-delta DDD-6 (output grammar, GuestReading, ProgramReturn, ProgramReturnError, parse_program_return); the printer sits beside the parser so one owner holds the grammar (U1). LEADING NEWLINE IS LOAD-BEARING: the printer writes one '\\n' BEFORE the two reading lines and the series block, because overdrive-init writes unterminated log fragments to the shared console and a first line glued to one is lost (findings-production-init-return.md: 24 of 60 replicates lost the block without the newline, 0 of 30 with it; ADR-0330 states why a tolerant begin match is rejected). No drain, flush or sleep is needed or added. The end line carries the metric and checksum only; the count is not printed. SHARED-CONTROL ACTIVATION GROUP: GA6, GA7, GA10, GA11 and GA17 assert only Err/BlockMissing and are satisfied by the always-Err scaffold for the wrong reason, so they activate TOGETHER with the first parser that parses an intact console. Procedure: remove ALL should_panic markers of GA6, GA7, GA10, GA11, GA17, run each body once against the minimal implementation, expect the semantic RED of every rule not yet implemented, route ANY body defect to the acceptance designer (do NOT weaken or rewrite a body), then continue one test at a time. The variant for a begin line without an end line, a non-numeric value or a spliced line is crafter detail (U2); GA16 accepts CountMismatch or ChecksumMismatch for a dropped value. sha2 is already a workspace dependency of overdrive-testing. Add unit and proptest coverage for crafter helpers; GA15 and GA16 are proptests (seed printed on failure).",
+          "criteria": [
+            "GA1-GA17 pass with should_panic removed; the five shared-control tests GA6, GA7, GA10, GA11, GA17 were activated together, each body run once against a minimal implementation, any body defect routed back to the acceptance designer and none weakened",
+            "An intact console parses to its two readings (text, absent:<reason>, unreadable:<error>) and its values in order, through kernel lines and an unterminated overdrive-init fragment ended by the program's leading newline; glued to the fragment the first reading is ReadingMissing naming kernel",
+            "Every damaged return is refused and never shortened: no begin line BlockMissing, two blocks BlockRepeated, count mismatch CountMismatch{expected,found} with a Display naming both numbers, changed value ChecksumMismatch, missing or repeated reading naming its key, a reading line without '=' is Err; for every non-empty u64 series print then parse returns exactly what was printed (GA15) and a damaged block never parses to a different series (GA16)",
+            "The checksum is the SHA-256 of the values as consecutive little-endian u64 bytes and the fixed vectors of GA3 pass",
+            "Metal gate: `cargo xtask metal run -- cargo nextest run -p overdrive-testing --features integration-tests --lib` passes",
+            "Metal gate: `cargo xtask metal run -- cargo check --workspace --all-targets --features integration-tests` and `cargo xtask metal run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings` pass; `cargo xtask metal run -- cargo xtask placement-lint` exits 0",
+            "Metal mutation gate (kill rate >= 80%): `cargo xtask metal run -- cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-testing --file crates/overdrive-testing/src/guest_app.rs`"
+          ],
+          "dependencies": [],
+          "files_to_modify": [
+            "crates/overdrive-testing/src/guest_app.rs",
+            "crates/overdrive-testing/src/guest_app/program_return_tests.rs"
+          ],
+          "effort_hours": 12,
+          "test_file": "crates/overdrive-testing/src/guest_app/program_return_tests.rs",
+          "scenario_name": "an_intact_console_parses_to_its_readings_and_values_in_order, a_reading_the_guest_could_not_provide_parses_as_absent_or_unreadable, the_checksum_is_the_sha256_of_the_values_as_little_endian_bytes, a_block_parses_at_every_value_line_boundary, a_return_after_an_unterminated_fragment_parses_only_with_the_leading_newline, a_begin_line_glued_to_foreign_text_is_refused, a_console_with_no_block_for_the_metric_is_refused_as_missing, a_block_printed_twice_is_refused_as_repeated, a_reading_that_is_missing_or_repeated_is_refused_naming_its_key, a_cut_or_malformed_block_is_refused_and_never_read_as_a_shorter_series, foreign_text_spliced_into_a_block_line_is_refused_never_shortened, a_block_of_a_different_count_is_refused_naming_both_counts, a_block_whose_values_do_not_match_its_checksum_is_refused, every_error_names_its_cause, a_printed_return_parses_back_to_exactly_what_was_printed, a_damaged_block_never_parses_to_a_different_series, a_reading_line_without_a_value_is_refused"
+        },
+        {
+          "id": "01-07",
+          "name": "A guest program run reports its exit and console in every outcome and leaves no VMM",
+          "description": "The real run_in_guest_program and ProgramRun per DDD-5/DDD-6: boots a production-init guest, plays the node beacon, runs the program as the operator command after loading the vsock loopback module, waits for EXIT within the bound, ends the guest and reaps the VMM in every outcome; GuestImageSpec::benchmark() carries the loopback module; run_in_guest_cell shares the body and reads the two shape constants.",
+          "implementation_notes": "Scenario count 7 (GF1-GF6, GK3). Exact contract: feature-delta 'DDD-5 and DDD-6' signatures (run_in_guest_program, ProgramRun, LANE_GUEST_VCPUS, LANE_GUEST_MEMORY_MIB, GuestImageSpec::benchmark) and G-2. run_in_guest_cell keeps its behaviour and shares its body with run_in_guest_program; the lane's inline 512 and 2 become the two constants both read. Postconditions: the VMM has exited and been reaped before return in EVERY outcome; the console is complete only when the VMM exited on its own after EXIT; a VMM still running after the post-EXIT wait makes exit an Err (the wait result is NEVER discarded); the outer Err is only for failure before a VMM exists. THE EXIT BOUND IS MEASURED FROM THE EXEC WRITE exactly as run_in_guest_cell does (GF4). GuestImageSpec::benchmark() must equal the pinned literal (OverdriveInit, forwarder_module, loopback_module, no extra files; GK3) or every program exits 65. GF1-GF6 use benchmark-band CID slots 10-15, one per case, each in its own cgroup-default nested-launch outer guest; the REGISTERED band count stays six. Whenever the guest peer binary changes, rerun `cargo xtask metal run -- cargo xtask guest-kit-prepare` before the Metal tests (the scripted-init seam GF6 uses is already in bin/guest_peer.rs). Remove the six should_panic markers and GK3's; do not write, replace or weaken any body; a missing fixture or oracle routes back to the acceptance designer. Do not add API beyond the DDD-5/6 signatures.",
+          "criteria": [
+            "GF1-GF6 and GK3 pass with should_panic removed: no READY, a guest stalled past READY_BOUND, death after READY, a missed EXIT bound (bound counted from the EXEC write), a VMM that outlives its guest's EXIT, and the clean-exit control each report the pinned exit Ok/Err, the retained console, a reaped VMM (no vhost-vsock holder, no /proc/<pid>) and a CID that boots the next guest",
+            "GuestImageSpec::benchmark() equals production init with forwarder_module true, loopback_module true and no extra files, and differs from workload()",
+            "run_in_guest_cell behaviour is unchanged: the existing in-guest lane tests still pass, and the lane reads LANE_GUEST_VCPUS and LANE_GUEST_MEMORY_MIB instead of the inline 2 and 512",
+            "Metal prerequisites run first: `cargo xtask metal run -- env OVERDRIVE_BPF_NATIVE=1 cargo xtask bpf-build`, `cargo xtask metal run -- cargo xtask guest-kit-prepare`, `cargo xtask metal run --exclusive -- cargo xtask kmod-load`",
+            "Metal gate: `cargo xtask metal run -- cargo nextest run -p overdrive-testing --features integration-tests,kvm-tests` passes (the guest_program_failures file takes about 2.5 minutes)",
+            "Metal gate: `cargo xtask metal run -- cargo check --workspace --all-targets --features integration-tests` and `cargo xtask metal run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings` pass; `cargo xtask metal run -- cargo xtask placement-lint` exits 0"
+          ],
+          "dependencies": [
+            "01-05"
+          ],
+          "files_to_modify": [
+            "crates/overdrive-testing/src/guest_lane.rs",
+            "crates/overdrive-testing/src/guest_kit.rs",
+            "crates/overdrive-testing/tests/integration/guest_program_failures.rs"
+          ],
+          "effort_hours": 16,
+          "test_file": "crates/overdrive-testing/tests/integration/guest_program_failures.rs, crates/overdrive-testing/src/guest_kit.rs",
+          "scenario_name": "a_guest_that_sends_no_ready_is_a_failed_run_that_keeps_its_console_and_leaves_no_vmm, a_guest_stalled_past_the_ready_bound_is_ended_and_its_program_never_runs, a_guest_that_dies_after_ready_is_a_failed_run_that_keeps_its_console_and_leaves_no_vmm, a_program_that_misses_the_exit_bound_is_a_failed_run_that_keeps_its_console_and_ends_the_guest, a_program_that_exits_within_the_bound_reports_its_exit_keeps_its_console_and_frees_the_cid, a_vmm_that_outlives_its_guests_exit_is_a_failed_run_that_keeps_its_console_and_is_ended, the_benchmark_image_boots_production_init_with_both_modules_and_no_extra_files"
+        },
+        {
+          "id": "01-08",
+          "name": "The guest flow forwarding family runs in a fresh guest per replicate with its smoke test",
+          "description": "Family guest-flow-forwarding (benchmark guest_flow_forwarding) per DDD-8: the forwarding-bench guest-peer subcommand drives the production guest flow owner through its vsock wire seam and prints the readings and the series block; the family host half boots one fresh guest per replicate, parses the return, reports the guest view and records one series metric forwarded_round_trip_ns; the declaration and its macro-generated smoke test land together.",
+          "implementation_notes": "Scenario count 1 generated smoke plus four native smokes plus crafter-owned unit tests. Exact contract: feature-delta DDD-8 (declaration: family guest-flow-forwarding, substrate guest, arms [forwarding], replicates 30, ONE metric forwarded_round_trip_ns unit ns table forwarded-path series, clock(guest = guest_monotonic), smoke(guest = \"cgroup-default\", profile = \"nested-launch\"); NO bpf_stats, NO reference, no A/A), DDD-5/DDD-6 (per-replicate order and failure reasons), DDD-10 (no new staging) and ADR-0332. The program is a subcommand of the existing overdrive-guest-peer (forwarding-bench): confirm where subcommands register (guest_app.rs, src/guest_peer.rs, bin/guest_peer.rs) and touch only what is needed; no prepare step, no GuestFile, no new bin; after ANY change to the peer rerun `cargo xtask metal run -- cargo xtask guest-kit-prepare`. W = 200 unrecorded, R = 5,000 timed 64-byte closed-loop round trips; the program prints through the step 01-06 printer (leading newline first) and exits non-zero when a flow cannot be driven; no failure is printed as a series line. Host half: artifact SHA-256 digests (init_bin, peer_bin, forwarder_module) computed ONCE per run; CID = GUEST_BENCHMARK.cid(n) with n a family-private counter of replicates this process started, modulo the band width 16 (the first replicate of the run, then wrap at replicate 17); workload address and launch token derived from lane_workload_addr(cid) and LANE_LAUNCH_TOKEN as the in-guest lane does; GuestView.vcpus/memory_mib from LANE_GUEST_VCPUS/LANE_GUEST_MEMORY_MIB; retain_console in every outcome that produced a console; every failure is Err(ReplicateFailure::fixture(..)), never a metric failure returned Ok. CRAFTER-OWNED UNIT COVERAGE (test-scenarios.md): the replicate counter modulo 16 that picks the CID; artifact digests computed once per run; the mapping of each ProgramReturnError to `the guest returned no intact readings: <cause>` or `the guest returned no intact forwarded_round_trip_ns block: <cause>`; the argv of forwarding-bench; GuestKitError::LaneNotPrepared mapping to the replicate failure `guest boot: <cause>` with the cause naming `cargo xtask guest-kit-prepare` (an unprepared kit fails every replicate before any guest launches, CA-4); a non-zero exit mapping to `the in-guest program exited <n>`; an outer Err mapping to `guest boot: <cause>`; exit Err mapping to `guest run: <cause>`. The family declaration and its generated smoke test MUST land in this ONE step; nothing in nextest proves the family before it. The docs (catalogue row, methodology section) are written in 03-02 with the measured figures.",
+          "criteria": [
+            "The family declaration builds and its macro-generated smoke test (smoke_guest_flow_forwarding or the name the macro generates) passes in the cgroup-default nested-launch guest after one replicate per arm with no timing assertion; the four native smoke tests (cgroup-connect-hook, dns-responder, mtls-path, vm-lifecycle) pass unchanged",
+            "Crafter-owned unit tests pass: LaneNotPrepared becomes the replicate failure `guest boot: <cause>` naming `cargo xtask guest-kit-prepare` with no guest launched; a non-zero program exit becomes `the in-guest program exited <n>`; each ProgramReturnError maps to its pinned failure text; the replicate counter wraps modulo 16 onto GUEST_BENCHMARK.cid; artifact digests are computed once per run",
+            "A broken or missing series block makes the smoke test fail naming the benchmark (the replicate fails with the pinned reason and smoke panics), never passes over a guest that returned nothing",
+            "The family never launches the overdrive or benchmark binary and declares no bpf_stats and no reference",
+            "Metal prerequisites: `cargo xtask metal run -- env OVERDRIVE_BPF_NATIVE=1 cargo xtask bpf-build`, `cargo xtask metal run -- cargo xtask kmod-build`, `cargo xtask metal run -- cargo xtask guest-kit-prepare`, `cargo xtask metal run --exclusive -- cargo xtask kmod-load`",
+            "Metal gate: `cargo xtask metal run -- cargo xtask placement-lint` exits 0 with the generated smoke test placed",
+            "Metal gate: `cargo xtask metal run -- cargo nextest run -p overdrive-bench-families --features integration-tests` passes: the guest smoke test and the four native smoke tests",
+            "Metal gate: `cargo xtask metal run -- cargo check --workspace --all-targets --features integration-tests` and `cargo xtask metal run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings` pass",
+            "Metal mutation gate (kill rate >= 80%) over the family's pure helpers: `cargo xtask metal run -- cargo xtask mutants --diff origin/main --features integration-tests --package overdrive-bench-families --file crates/overdrive-bench-families/src/families/guest_flow_forwarding.rs`"
+          ],
+          "dependencies": [
+            "01-01",
+            "01-04",
+            "01-06",
+            "01-07"
+          ],
+          "files_to_modify": [
+            "crates/overdrive-bench-families/src/families/guest_flow_forwarding.rs",
+            "crates/overdrive-bench-families/src/lib.rs",
+            "crates/overdrive-bench-families/Cargo.toml",
+            "crates/overdrive-testing/src/guest_app.rs",
+            "crates/overdrive-testing/src/guest_peer.rs",
+            "crates/overdrive-testing/bin/guest_peer.rs"
+          ],
+          "effort_hours": 22,
+          "test_file": "crates/overdrive-bench-families/src/families/guest_flow_forwarding.rs (macro-generated smoke test and crafter-owned unit tests)",
+          "scenario_name": "smoke_guest_flow_forwarding (name is the macro-generated smoke_<fn>; the crafter names the function)"
+        },
+        {
+          "id": "01-09",
+          "name": "Retained run E-G1 and host-drift refusal E-G2, with the measured cycle figures V-D",
+          "description": "ORCHESTRATOR-CAPTURED EVIDENCE, not a crafter TDD step: the walking skeleton run through cargo xtask metal run --benchmark guest-flow-forwarding on the exclusive Metal host, the K3 drift refusal, and the V-D reporting figures; reviewed by a different agent.",
+          "implementation_notes": "EVIDENCE, NOT A TEST (.claude/rules/testing.md classification; verification.md): no code is written; the orchestrator captures, a different agent audits ('different fox'); narrated evidence is rejected. If a capture exposes a defect it returns to the owning code step, not patched here. Prerequisites at the measured commit: bpf-build, kmod-build, `cargo xtask metal run -- cargo xtask guest-kit-prepare`, `cargo xtask metal run --exclusive -- cargo xtask kmod-load`; raise OVERDRIVE_METAL_LEASE_TIMEOUT_SECONDS if admission starves. Consoles under artifacts/ stay uncommitted (.gitignore from 01-04). Evidence is pinned to its SHA and substrate; record uname -r. V-D figures (feed the catalogue row in 03-02): the metric's median and spread across replicates, the per-replicate cycle (launch to EXIT) and console-return time, the failed-replicate rate (prior measurement ~2.75 s per replicate, ~83 s per 30). E-G5 (CID reuse at replicate 17) is observed in this same 30-replicate run. The K3 drift helper is an ad-hoc evidence-capture command (set kernel.bpf_stats_enabled to 1, run the form, restore 0), its stdout committed as a receipt beside the record.",
+          "criteria": [
+            "E-G1: `cargo xtask metal run --benchmark guest-flow-forwarding` run on Metal with 30 replicates; record.jsonl and report.md pulled with `cargo xtask metal pull benchmarks/results/guest-flow-forwarding/<run-id>` and committed under benchmarks/results/guest-flow-forwarding/<run-id>/; `cargo bench-report validate` (via `cargo xtask metal run -- cargo run -p overdrive-bench --bin bench_report -- validate <record>` or its alias) exits 0; the report header states substrate guest, launch 'metal host (not nested)', boot 'fresh guest per replicate', vcpu scheduling unpinned, governor/smt/boost absent 'not visible from a guest', vcpus 2, memory mib 512, kernel, clocksource and the three artifact digests, and the per-arm p50/p90/p95/p99 with replicates ok; the run's command log contains no launch of the overdrive binary (US-GBS-01 AC h); K1 and K2 hold",
+            "E-G5 observed in the E-G1 run: replicates 17 to 30 reuse the CIDs of replicates 1 to 14 and none fails with a launch error on a busy CID",
+            "E-G2: with one deliberate drift (kernel.bpf_stats_enabled = 1) the run exits 78 and the record is exactly run_started (with the guest block) then run_refused naming bpf_stats_enabled found 1 pinned 0; no guest_observed line, no replicate, and the artifacts/ directory is empty or absent (no guest booted, no VMM ran); the drift helper's stdout is committed as a receipt and the sysctl is restored to 0",
+            "V-D figures recorded in a receipt beside the E-G1 record: the metric's median and spread, per-replicate cycle and console-return time, and the failed-replicate rate (replicates failed out of all)"
+          ],
+          "dependencies": [
+            "01-08"
+          ],
+          "files_to_modify": [
+            "benchmarks/results/guest-flow-forwarding/"
+          ],
+          "effort_hours": 6,
+          "test_file": "",
+          "scenario_name": ""
+        }
+      ]
+    },
+    {
+      "id": "02",
+      "name": "Guest failures are reported and no guest outlives a run (slice 03): retained failure evidence",
+      "steps": [
+        {
+          "id": "02-01",
+          "name": "Retained failure runs E-G3, E-G4 (V-C), E-G7: failed replicates counted, console kept, no VMM left",
+          "description": "ORCHESTRATOR-CAPTURED EVIDENCE, not a crafter TDD step: an unprepared kit as a run of failed replicates (CA-4), a benchmark process killed mid-replicate including past the CID band wrap at replicate 17 (V-C, US-GBS-03 AC e), and a guest that never reaches READY or stalls past the bound through the family (boundaries 2 and 4).",
+          "implementation_notes": "EVIDENCE, NOT A TEST and not a crafter TDD step; requires no code unless V-C is falsified, in which case the falsified item is a launch-side guard in test-support code and returns to DESIGN/step owner (it is not patched here). Slice 03 adds no production code of its own: its behaviour is delivered by 01-04 (failed replicates, console retention), 01-07 (reaped VMM, bounded EXIT) and 01-08 (family failure mapping, CA-1/CA-4); this step retains the proof through the real benchmark form. Fault creation uses ad-hoc evidence-capture commands only (stage the kit state aside, a SIGKILL of the benchmark unit's process, a SIGSTOP watcher on the VMM as GF2 does); their stdout is committed as receipts beside each record. The V-C post-run probe reads vhost_vsock_holders and /proc for any VMM after the unit ends. A different agent audits each (verification.md). Pull each result directory with `cargo xtask metal pull`.",
+          "criteria": [
+            "E-G3 (CA-4): with the guest kit not prepared, `cargo xtask metal run --benchmark guest-flow-forwarding` exits 0 with 30 failed replicates each `guest boot: <cause>` naming `cargo xtask guest-kit-prepare`, replicates_ok 0, no guest_observed line, no VMM launched, and the report prints the seven observed lines as 'absent: no replicate returned a guest view'; record and report validate and are committed under benchmarks/results/guest-flow-forwarding/<run-id>/",
+            "E-G4 (V-C): the benchmark process is killed with SIGKILL during replicate 17 or later (past the CID band wrap); after the unit ends vhost_vsock_holders() is empty and no VMM process remains (post-run probe receipt committed), the record has no terminal line and `bench-report render` prints status incomplete (no run_finished or run_refused), and a following run boots a guest on the same CID without a launch failure",
+            "E-G7: through the family, a guest that never reaches READY and a guest stalled past the bound are each a failed replicate with their console retained under artifacts/ and no sample used, and the run finishes with its terminal line; the other replicates run",
+            "Every retained record validates with `cargo run -p overdrive-bench --bin bench_report -- validate <record>` run through `cargo xtask metal run --`; the receipts carry exit statuses and command outputs; consoles stay uncommitted",
+            "Failure rate and reasons are listed in each report's Failures section with replicate and arm"
+          ],
+          "dependencies": [
+            "01-09"
+          ],
+          "files_to_modify": [
+            "benchmarks/results/guest-flow-forwarding/"
+          ],
+          "effort_hours": 8,
+          "test_file": "",
+          "scenario_name": ""
+        }
+      ]
+    },
+    {
+      "id": "03",
+      "name": "Spike use, smoke and native unchanged, methodology and catalogue (slice 04)",
+      "steps": [
+        {
+          "id": "03-01",
+          "name": "A spike crate declares the guest substrate and runs through --spike, retained run E-G6",
+          "description": "A throwaway spike-scratch crate declares substrate = guest, runs a guest through the kit under the benchmark form with --spike, and returns a record marked spike evidence with a guest view (O8, DDD-11).",
+          "implementation_notes": "Spike discipline (.claude/rules/spike.md): all code under spike-scratch/guest-flow-spike, self-contained Cargo.toml depending on workspace crates by path, NOTHING under crates/ is created or modified, run on the real Metal host with no compile-only gate. The spike's main is unchanged in shape (run_main(Evidence::Spike) beside a use ... as _ of the declaring crate); its body uses the existing forwarding-bench peer subcommand through run_in_guest_program, parse_program_return and report_guest_view with no new API; smoke(none) is allowed in a spike. Results stay under spike-scratch/guest-flow-spike/results/, not benchmarks/. The kit finds the checkout through the form's source root (DDD-11), so the spike's cwd does not matter. This step is orchestrator-captured evidence for the run and a thin spike-crate code step; the run is not a test.",
+          "criteria": [
+            "`cargo xtask metal run --benchmark guest-flow-forwarding --spike guest-flow-spike` runs on Metal; record.jsonl and report.md pulled with `cargo xtask metal pull` and committed under spike-scratch/guest-flow-spike/results/guest-flow-forwarding/<run-id>/",
+            "bench-report validate exits 0; the record states substrate guest, a guest view and evidence spike, and the report header says spike evidence",
+            "No file under crates/ changes for the spike (git status shows only spike-scratch/ and the retained results); `cargo xtask metal run -- cargo check --manifest-path spike-scratch/guest-flow-spike/Cargo.toml --benches` passes"
+          ],
+          "dependencies": [
+            "01-09"
+          ],
+          "files_to_modify": [
+            "spike-scratch/guest-flow-spike/Cargo.toml",
+            "spike-scratch/guest-flow-spike/benches/benchmarks.rs",
+            "spike-scratch/guest-flow-spike/src/lib.rs"
+          ],
+          "effort_hours": 6,
+          "test_file": "",
+          "scenario_name": ""
+        },
+        {
+          "id": "03-02",
+          "name": "Methodology and catalogue state the guest substrate, the family row and the nested-virtualization rule; native families unchanged",
+          "description": "benchmarks/methodology.md gains the reworded version-policy sentence, the substrate-conditional isolation sentence and a 'Guest substrate' section to the wording DDD-3 pins; benchmarks/catalogue.md gains the guest-flow-forwarding row to the wording DDD-8 pins and states that a family that launches VMs is not a guest benchmark; the final native-unchanged gate runs.",
+          "implementation_notes": "Scenario count 4 (GD1-GD4) plus the native-unchanged gate. Documents only: the wording is the wording DDD-3 (methodology: version stays 1; policy 'a change to or removal of a rule below bumps the version; an addition for a new substrate does not'; ':17-19' reworded 'A native benchmark runs on the native substrate ... a guest benchmark runs in a guest the benchmark process launches directly on that host'; section Guest substrate covering isolation (never nested, fresh guest per replicate), eligibility (full host list on the real host before any guest boots, no guest setting pinned, guest readings and artifact digests recorded from the first replicate that reports them), clock boundaries (guest clock never combined with a host stamp), vCPU marking (unpinned, #368), staged artifacts (digest recorded; run `cargo xtask guest-kit-prepare` at the commit measured), canary (a host measurement), comparability (never compared across substrates; 'never compared'), bpf_stats (a guest benchmark declares none; #371), failure accounting (a guest failure including an unprepared kit is a failed replicate, console retained, a run whose replicates all failed still exits 0, read replicates_ok)) and DDD-8 (catalogue row: boundary, arm forwarding, workload W=200 R=5,000 64-byte closed loop, 2 vCPUs, 512 MiB, fresh guest per replicate, guest CLOCK_MONOTONIC clock boundary, owners overdrive-init and overdrive-fwd, caveats citing #370, #371, #368, plus the V-D figures measured in 01-09; the D9 rule citing #347). Do not invent scope limitations or deferrals; limits are tracked by #368, #369, #370, #371, #347. ADR edits are NOT in DELIVER scope (ADRs 0325-0333 are accepted). Orchestrator, after this step commits: .claude/rules/testing.md one sentence each in the benchmark classification row and the native-host benchmark-form paragraph that a benchmark's guest substrate is a guest launched directly on the exclusive host and never a placement group, and that only the smoke variant runs a benchmark body in a test guest (not in files_to_modify). Remove the GD1-GD4 should_panic markers; do not rewrite a body. In methodology_documents.rs remove the should_panic markers only; never edit a DISTILL-authored body.",
+          "criteria": [
+            "GD1-GD4 pass with should_panic removed: the methodology has a `## Guest substrate` section stating never nested, fresh, unpinned, not visible from a guest, digest, `cargo xtask guest-kit-prepare`, never compared, bpf_stats and replicates_ok; `Methodology version 1` stays and the policy says an addition for a new substrate does not bump it; the catalogue has the guest-flow-forwarding / guest_flow_forwarding row with workload, clock and owners and the caveats citing #368, #370 and #371; the catalogue states a family that launches VMs is not a guest benchmark and cites #347",
+            "Native unchanged gate: `cargo xtask metal run -- cargo nextest run -p overdrive-bench --features integration-tests` passes including every_retained_record_still_validates and every_committed_native_report_re_renders_byte_identical; vm-lifecycle still declares the native substrate",
+            "Metal gate: `cargo xtask metal run -- cargo nextest run -p overdrive-bench-families --features integration-tests` passes (guest smoke plus four native smokes) and `cargo xtask metal run -- cargo xtask placement-lint` exits 0",
+            "Metal gate: `cargo xtask metal run -- cargo check --workspace --all-targets --features integration-tests` and `cargo xtask metal run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings` pass",
+            "Every scope limitation stated in the documents cites its tracking issue (#368, #369, #370, #371, #347); no new limitation or deferral language is introduced and no roadmap-step identifier appears in any new name"
+          ],
+          "dependencies": [
+            "02-01",
+            "03-01"
+          ],
+          "files_to_modify": [
+            "benchmarks/methodology.md",
+            "benchmarks/catalogue.md",
+            "crates/overdrive-bench/tests/integration/methodology_documents.rs"
+          ],
+          "effort_hours": 6,
+          "test_file": "crates/overdrive-bench/tests/integration/methodology_documents.rs",
+          "scenario_name": "the_methodology_has_a_guest_substrate_section_stating_its_rules, the_methodology_keeps_version_1_and_says_a_new_substrate_does_not_bump_it, the_catalogue_has_a_row_for_the_guest_family_with_its_workload_clock_owner_and_caveats, the_catalogue_states_that_a_family_that_launches_vms_is_not_a_guest_benchmark"
+        }
+      ]
+    }
+  ],
+  "implementation_scope": {
+    "source_directories": [
+      "crates/overdrive-bench/",
+      "crates/overdrive-bench-families/",
+      "crates/overdrive-testing/",
+      "crates/overdrive-testing-macros/",
+      "benchmarks/",
+      "spike-scratch/guest-flow-spike/"
+    ],
+    "test_directories": [
+      "crates/overdrive-bench/tests/",
+      "crates/overdrive-testing/tests/integration/"
+    ],
+    "evidence": [
+      "benchmarks/results/guest-flow-forwarding/ (orchestrator-captured E-G1, E-G2, E-G3, E-G4, E-G5, E-G7 and V-C, V-D receipts; steps 01-09 and 02-01)",
+      "spike-scratch/guest-flow-spike/results/ (orchestrator-captured E-G6; step 03-01)"
+    ],
+    "excluded_patterns": [
+      "target/**",
+      "vendors/**",
+      "docs/product/architecture/adr-*.md"
+    ]
+  },
+  "validation": {
+    "status": "approved",
+    "reviewer": "nw-acceptance-designer-reviewer",
+    "approved_at": "2026-11-19"
+  }
+}
