@@ -99,7 +99,6 @@ proptest! {
 /// `TiB` units.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "a whole-GiB spelling in another unit must parse as a volume size")]
 fn a_whole_gib_written_in_mib_or_bytes_is_the_same_volume_size() {
     let one_gib = parse("1GiB").expect("1GiB is the control and must parse");
     for text in ["1024MiB", "1073741824B"] {

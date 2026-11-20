@@ -10,9 +10,11 @@ use std::str::FromStr;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use utoipa::ToSchema;
 
-/// A validated volume size in bytes. Grammar `<uint><unit>`, unit
-/// case-insensitive `GiB` or `TiB`, value at least 1. `Display` emits `GiB`
-/// unless the value is an exact `TiB` multiple (ADR-0310).
+use crate::byte_size::ByteSize;
+
+/// A validated volume size in bytes: the `ByteSize` grammar refined to a
+/// non-zero whole number of GiB. `Display` is the `ByteSize` canonical form,
+/// `GiB` unless the value is an exact `TiB` multiple (ADR-0310).
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize,
 )]
@@ -35,7 +37,6 @@ impl VolumeSize {
 }
 
 const BYTES_PER_GIB: u64 = 1 << 30;
-const BYTES_PER_TIB: u64 = 1 << 40;
 
 /// Splits `<uint><unit>` into its ASCII-digit count and the remaining unit text.
 fn split_count_and_unit(s: &str) -> Option<(u64, &str)> {
@@ -48,31 +49,21 @@ impl FromStr for VolumeSize {
     type Err = VolumeSizeParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let reject =
-            |reason: &str| VolumeSizeParseError { input: s.to_owned(), reason: reason.to_owned() };
-        let (count, unit) =
-            split_count_and_unit(s).ok_or_else(|| reject("expected <uint>GiB or <uint>TiB"))?;
-        let multiple = if unit.eq_ignore_ascii_case("GiB") {
-            BYTES_PER_GIB
-        } else if unit.eq_ignore_ascii_case("TiB") {
-            BYTES_PER_TIB
-        } else {
-            return Err(reject("the unit must be GiB or TiB"));
-        };
-        if count == 0 {
-            return Err(reject("the size must be at least 1"));
+        let reject = |reason: String| VolumeSizeParseError { input: s.to_owned(), reason };
+        let size = s.parse::<ByteSize>().map_err(|e| reject(e.to_string()))?;
+        if size.bytes() == 0 {
+            return Err(reject("the size must be at least 1GiB".to_owned()));
         }
-        count.checked_mul(multiple).map(Self).ok_or_else(|| reject("the size in bytes overflows"))
+        if !size.bytes().is_multiple_of(BYTES_PER_GIB) {
+            return Err(reject("the size must be a whole number of GiB".to_owned()));
+        }
+        Ok(Self(size.bytes()))
     }
 }
 
 impl fmt::Display for VolumeSize {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.0.is_multiple_of(BYTES_PER_TIB) {
-            write!(f, "{}TiB", self.0 / BYTES_PER_TIB)
-        } else {
-            write!(f, "{}GiB", self.0 / BYTES_PER_GIB)
-        }
+        ByteSize::new(self.0).fmt(f)
     }
 }
 

@@ -38,7 +38,6 @@ fn model_canonical(millis: u32) -> String {
 /// number of cores renders as the integer, anything else as `<n>m`, zero as `0`.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "the cpu grammar must accept the pinned input")]
 fn the_pinned_accept_table_parses_to_the_pinned_quantity_and_canonical_form() {
     let table: &[(&str, u32, &str)] = &[
         ("500m", 500, "500m"),
@@ -95,7 +94,6 @@ fn assert_class(inputs: &[&str], class: &str, check: impl Fn(&CpuQuantityParseEr
 /// `Malformed`.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "the cpu grammar must accept the pinned control input")]
 fn sad_text_outside_the_grammar_is_malformed() {
     assert_control_accepted();
     assert_class(
@@ -127,7 +125,6 @@ fn sad_text_outside_the_grammar_is_malformed() {
 /// the uppercase `M` message says the milli suffix is the lowercase `m`.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "the cpu grammar must classify")]
 fn sad_an_unknown_suffix_is_named() {
     for (input, suffix) in [("500M", "M"), ("500mm", "mm"), ("2c", "c"), ("1cores", "cores")] {
         match parse(input) {
@@ -147,7 +144,6 @@ fn sad_an_unknown_suffix_is_named() {
 /// reach it, including huge digit runs (no panic).
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "the cpu grammar must classify")]
 fn sad_a_value_above_u32_millicores_is_overflow() {
     let long = format!("{}m", "9".repeat(400));
     assert_class(
@@ -169,7 +165,6 @@ fn error_text(input: &str) -> String {
 /// `sad_an_unknown_suffix_is_named`) and the four messages differ.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "the error text must")]
 fn sad_every_rejection_names_its_remedy_and_the_messages_differ() {
     let malformed = error_text("five");
     let suffix = error_text("500mm");
@@ -196,7 +191,6 @@ fn sad_every_rejection_names_its_remedy_and_the_messages_differ() {
 /// AC-2.3: a bare JSON number is a deserialization error, while the quoted quantity still
 /// deserializes. CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "a quoted quantity must deserialize")]
 fn sad_serde_refuses_a_bare_number() {
     let quoted = serde_json::from_str::<CpuQuantity>("\"500m\"")
         .expect("a quoted quantity must deserialize");
@@ -217,7 +211,6 @@ proptest! {
     /// AC-2.5: for every quantity, `parse(display(v)) == v`, and the canonical text matches the
     /// independent model. CONTRACT_SHAPE: pure-function.
     #[test]
-    #[should_panic(expected = "a cpu quantity must display canonically")]
     fn display_is_canonical_and_round_trips(millis in any::<u32>()) {
         let q = CpuQuantity::from_millis(millis);
         prop_assert_eq!(q.to_string(), model_canonical(millis), "a cpu quantity must display canonically");
@@ -228,7 +221,6 @@ proptest! {
     /// are one value with one canonical text (the precondition of AC-2.5's equal digests).
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[should_panic(expected = "every spelling of one quantity must parse")]
     fn every_spelling_of_one_quantity_is_the_same_value(millis in any::<u32>()) {
         let milli_form = format!("{millis}m");
         let core_form = format!("{}.{:03}", millis / 1000, millis % 1000);
@@ -247,7 +239,6 @@ proptest! {
 
     /// Serde JSON is exactly the quoted canonical text and reads back. CONTRACT_SHAPE: pure-function.
     #[test]
-    #[should_panic(expected = "serde must emit the quoted canonical text")]
     fn serde_json_is_the_quoted_canonical_text_and_round_trips(millis in any::<u32>()) {
         let q = CpuQuantity::from_millis(millis);
         let json = serde_json::to_string(&q).expect("serialises");
@@ -258,7 +249,6 @@ proptest! {
     /// More than three fractional digits is always `TooManyDecimals`, whatever the digits.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[should_panic(expected = "four or more fractional digits must be TooManyDecimals")]
     fn four_or_more_fractional_digits_are_always_too_many_decimals(whole in 0u32..=4000, frac in "[0-9]{4,12}") {
         let input = format!("{whole}.{frac}");
         prop_assert!(
@@ -270,7 +260,6 @@ proptest! {
     /// Text without a leading ASCII digit is `Malformed`.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[should_panic(expected = "the cpu grammar must accept the pinned control input")]
     fn text_without_a_leading_digit_is_always_malformed(text in "[^0-9][ -~]{0,12}") {
         assert_control_accepted();
         let outcome = parse(&text);
@@ -285,7 +274,6 @@ proptest! {
     /// window of two either side of `u32::MAX`, so every case sits on the boundary.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[should_panic(expected = "the u32 boundary must hold")]
     fn the_u32_boundary_is_exact(offset in 0u64..=4) {
         let millis = u64::from(u32::MAX) - 2 + offset;
         let input = format!("{millis}m");

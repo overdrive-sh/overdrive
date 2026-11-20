@@ -53,7 +53,6 @@ fn model_canonical(bytes: u64) -> String {
 /// canonical form: unit case does not matter, equal sizes share one spelling, zero is `0B`.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "the binary byte-size grammar must accept the pinned input")]
 fn the_pinned_accept_table_parses_to_the_pinned_size_and_canonical_form() {
     let table: &[(&str, u64, &str)] = &[
         ("128MiB", 134_217_728, "128MiB"),
@@ -101,7 +100,6 @@ fn assert_class(inputs: &[&str], class: &str, check: impl Fn(&ByteSizeParseError
 /// AC-1.3: decimal (SI) units are refused, in any case, as `DecimalUnit`.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "the grammar must classify")]
 fn sad_decimal_units_are_decimal_unit() {
     assert_class(
         &["128MB", "1kb", "1KB", "1Gb", "1tb", "1GB", "99999999999999999999999MB"],
@@ -113,7 +111,6 @@ fn sad_decimal_units_are_decimal_unit() {
 /// AC-1.3: a fractional count is `Fractional`, whatever follows the dot.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "the grammar must classify")]
 fn sad_fractional_counts_are_fractional() {
     assert_class(&["1.5MiB", "1.MiB", "1.", "1.5", "0.5GiB"], "Fractional", |e| {
         matches!(e, ByteSizeParseError::Fractional { .. })
@@ -124,7 +121,6 @@ fn sad_fractional_counts_are_fractional() {
 /// a missing count, a unit that is not one of the five, separators and exponents inside the number.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "the grammar must classify")]
 fn sad_text_outside_the_grammar_is_malformed() {
     assert_class(
         &[
@@ -155,7 +151,6 @@ fn sad_text_outside_the_grammar_is_malformed() {
 /// unit boundary (`16777216TiB`) and the byte boundary; a very long digit run does not panic.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "the grammar must classify")]
 fn sad_a_value_above_u64_bytes_is_overflow() {
     let long = format!("{}MiB", "9".repeat(400));
     assert_class(
@@ -170,7 +165,6 @@ fn sad_a_value_above_u64_bytes_is_overflow() {
 /// count is `Fractional` even when huge. Overflow is reserved for otherwise-valid input.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "the grammar must classify")]
 fn sad_structure_outranks_overflow() {
     let huge = "9".repeat(60);
     let cases = [
@@ -206,7 +200,6 @@ fn error_text(input: &str) -> String {
 /// overflow says the value is too large) and the five messages differ (`rust.md` — distinct failure
 /// modes, distinct text). CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "the error text must name")]
 fn sad_every_rejection_names_its_remedy_and_the_five_messages_differ() {
     let malformed = error_text("128Mi");
     let missing = error_text("128");
@@ -244,7 +237,6 @@ fn sad_every_rejection_names_its_remedy_and_the_five_messages_differ() {
 /// AC-1.3: a bare JSON number is a deserialization error whose text names the expected
 /// grammar; so is a bool and null. CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "the expected string form")]
 fn sad_serde_refuses_a_bare_number_and_names_the_expected_form() {
     for wire in ["134217728", "true", "null"] {
         let err = serde_json::from_str::<ByteSize>(wire)
@@ -265,7 +257,6 @@ proptest! {
     /// AC-1.4: for every size, `parse(display(v)) == v`, and the canonical text matches the
     /// independent model (largest exact unit, zero is `0B`). CONTRACT_SHAPE: pure-function.
     #[test]
-    #[should_panic(expected = "a byte size must display canonically")]
     fn display_is_canonical_and_round_trips(bytes in any::<u64>()) {
         let size = ByteSize::new(bytes);
         prop_assert_eq!(size.to_string(), model_canonical(bytes), "a byte size must display canonically");
@@ -279,7 +270,6 @@ proptest! {
     /// same size spelled in bytes, and renders the independent model's canonical text.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[should_panic(expected = "a count in any unit and case must parse")]
     fn any_count_in_any_unit_and_case_parses_to_count_times_unit(
         count in 0u64..=1_000_000,
         unit in prop::sample::select(vec![("B", 1u64), ("KiB", KIB), ("MiB", MIB), ("GiB", GIB), ("TiB", TIB)]),
@@ -297,7 +287,6 @@ proptest! {
     /// Serde round trip: JSON is exactly the quoted canonical text and reads back to the same size.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[should_panic(expected = "serde must emit the quoted canonical text")]
     fn serde_json_is_the_quoted_canonical_text_and_round_trips(bytes in any::<u64>()) {
         let size = ByteSize::new(bytes);
         let json = serde_json::to_string(&size).expect("serialises");
@@ -308,7 +297,6 @@ proptest! {
     /// A digit run with no unit is always `MissingUnit`, however long: a bare number is never a size.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[should_panic(expected = "a digit run without a unit must be MissingUnit")]
     fn a_digit_run_without_a_unit_is_always_missing_unit(digits in "[0-9]{1,40}") {
         prop_assert!(
             matches!(parse(&digits), Err(ByteSizeParseError::MissingUnit { .. })),
@@ -319,7 +307,6 @@ proptest! {
     /// Any text that does not start with an ASCII digit is `Malformed`.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[should_panic(expected = "text without a leading digit must be Malformed")]
     fn text_without_a_leading_digit_is_always_malformed(text in "[^0-9][ -~]{0,12}") {
         let outcome = parse(&text);
         prop_assert!(
@@ -333,7 +320,6 @@ proptest! {
     /// the largest count that fits in each unit, so every case sits on the boundary.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[should_panic(expected = "the u64 boundary must hold")]
     fn the_u64_boundary_is_exact_in_every_unit(
         offset in 0u128..=4,
         unit in prop::sample::select(vec![("B", 1u128), ("KiB", 1u128 << 10), ("MiB", 1u128 << 20), ("GiB", 1u128 << 30), ("TiB", 1u128 << 40)]),
@@ -358,7 +344,6 @@ proptest! {
 /// 1 GiB: `1024MiB` is a 1 GiB volume, `512MiB`, `0GiB`, `1.5GiB` and `1GB` are refused.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "the volume size must accept the pinned input")]
 fn the_volume_size_is_the_shared_grammar_refined_to_whole_gib() {
     use overdrive_core::volume::VolumeSize;
     for (input, canonical) in [("40GiB", "40GiB"), ("2TiB", "2TiB"), ("1024MiB", "1GiB")] {
