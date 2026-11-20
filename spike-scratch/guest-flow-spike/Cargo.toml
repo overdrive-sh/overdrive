@@ -1,0 +1,25 @@
+# Throwaway E-G6 spike (guest-benchmark-substrate, DDD-11): one retained run proving a spike
+# crate can declare the guest substrate and run through `--spike`. Not a test, not a gate.
+# Self-contained workspace; links the benchmark kit and guest lane by path only.
+[package]
+name = "guest-flow-spike"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+overdrive-bench = { path = "../../crates/overdrive-bench" }
+overdrive-testing = { path = "../../crates/overdrive-testing" }
+overdrive-testing-macros = { path = "../../crates/overdrive-testing-macros" }
+sha2 = "0.10"
+
+[lib]
+name = "guest_flow_spike"
+path = "src/lib.rs"
+
+[[bench]]
+name = "benchmarks"
+harness = false
+path = "benches/benchmarks.rs"
+
+[workspace]

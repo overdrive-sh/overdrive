@@ -190,6 +190,27 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-11-20T00:18:02Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: spike evidence step with no acceptance test (E-G6 is a retained run)",
+      "t": "2026-11-20T01:19:43Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-20T01:22:31Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-20T01:22:31Z"
     }
   ]
 }
