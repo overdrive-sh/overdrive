@@ -512,11 +512,11 @@ capability. No GitHub issue is proposed.
 
 ## Wave: DESIGN / [REF] Cloud Hypervisor memory constraint (evidence for DD-8)
 
-Read in `vendors/cloud-hypervisor` @ `f252bb20b` (Overdrive's fork, branch `overdrive/vhost-kernel-vsock`):
+Read in `vendors/cloud-hypervisor` @ `ab4ac3a31` (Overdrive's fork, the commit main pins):
 
-- Overdrive launches CH with `--memory size=<guest_bytes>` as a raw byte count (`crates/overdrive-host/src/vmm.rs:283-284`); `guest_bytes` is the operator's declared memory unchanged (`MemoryPlan::derive`, `crates/overdrive-core/src/vm/config.rs:275`).
-- With no `zones`, CH builds one default zone from `config.size`, `file: None`, `hugepages: false` (`vmm/src/memory_manager.rs:1499-1513`). Its alignment is the host page size, `sysconf(_SC_PAGESIZE)` (`memory_zone_get_align_size`, `memory_manager.rs:474-481`), and a size that is not a multiple of it is refused with `Error::MisalignedMemorySize` (`memory_manager.rs:635-637`).
-- So guest RAM must be a multiple of the host page size (4 KiB on x86_64). The only workload driver is the VM (`WorkloadDriverV1::Vm`, `aggregate/mod.rs:169-172`), so every workload's `memory` is guest RAM.
+- Overdrive launches CH with `--memory size=<guest_bytes>` as a raw byte count (`crates/overdrive-host/src/vmm.rs:283-284`); `guest_bytes` is the operator's declared memory unchanged (`MemoryPlan::derive`, `crates/overdrive-core/src/vm/config.rs:278`).
+- With no `zones`, CH builds one default zone from `config.size`, `file: None`, `hugepages: false` (`vmm/src/memory_manager.rs:2111-2118`). Its alignment is the host page size, `sysconf(_SC_PAGESIZE)` via `get_page_size` (`memory_zone_get_align_size`, `memory_manager.rs:626-631`; `vm-allocator/src/page_size.rs:19-26`), and a size that is not a multiple of it is refused with `Error::MisalignedMemorySize` (`memory_manager.rs:800-802`).
+- So guest RAM must be a multiple of the host page size (4 KiB on x86_64). The only workload driver is the VM (`WorkloadDriverV1::Vm`, `aggregate/mod.rs:191-194`), so every workload's `memory` is guest RAM.
 - **Production-reachable today:** `memory_bytes = 1000` passes `deploy` (only zero is refused) and fails at VM launch. The whole-MiB rule refuses it at `deploy`.
 - vCPUs: CH takes `--cpus boot=<vcpus_for(cpu)>` (`vmm.rs:281-282`); `vcpus_for` rounds up and floors at 1. No CPU grammar constraint follows from CH.
 
