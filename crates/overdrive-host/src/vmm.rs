@@ -1398,6 +1398,56 @@ mod tests {
             .collect();
         assert_eq!(devices, vec![format!("cid={GUEST_CID_BASE},backend=vhost-kernel")]);
     }
+
+    /// S-VOL-26e — A launch with a volume attaches the rootfs disk first and
+    /// the volume disk second; a launch without one attaches the rootfs only.
+    /// The volume argument is the one `DiskAttachment::volume(..)` renders.
+    /// CONTRACT_SHAPE: pure-function.
+    #[allow(
+        clippy::doc_markdown,
+        reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+    )]
+    #[test]
+    fn a_launch_attaches_the_rootfs_disk_first_and_the_volume_disk_second_only_when_a_volume_is_attached()
+     {
+        use overdrive_core::vm::config::VolumeAttachment;
+
+        let wrapper = vec!["prlimit".to_owned(), "--fsize=1073741824".to_owned()];
+        let vmm = CloudHypervisorVmm::new().with_binary(PathBuf::from("/usr/bin/cloud-hypervisor"));
+        let disk_args = |config: &VmConfig| -> Vec<String> {
+            let command =
+                vmm.build_confined_command(config, &wrapper, "cid=1,backend=vhost-kernel");
+            let args: Vec<_> =
+                command.as_std().get_args().map(|arg| arg.to_string_lossy().into_owned()).collect();
+            // Cloud Hypervisor takes every disk as a value of the one `--disk`
+            // flag, so the disks are the arguments from the flag to the next flag.
+            let flags: Vec<_> =
+                args.iter().enumerate().filter(|(_, arg)| *arg == "--disk").collect();
+            assert_eq!(flags.len(), 1, "exactly one --disk flag: {args:?}");
+            args[flags[0].0 + 1..]
+                .iter()
+                .take_while(|arg| !arg.starts_with("--"))
+                .cloned()
+                .collect()
+        };
+
+        let without_volume = sample_config();
+        let rootfs_disk =
+            DiskAttachment::new(without_volume.rootfs.clone_dest().to_path_buf(), false)
+                .to_disk_arg();
+        assert_eq!(disk_args(&without_volume), vec![rootfs_disk.clone()]);
+
+        let device = PathBuf::from("/dev/mapper/overdrive-ovd--0123456789abcdef0123456789abcdef");
+        let with_volume = VmConfig {
+            volume: Some(VolumeAttachment { device: device.clone() }),
+            ..sample_config()
+        };
+        assert_eq!(
+            disk_args(&with_volume),
+            vec![rootfs_disk, DiskAttachment::volume(device).to_disk_arg()],
+            "the rootfs disk is first and the volume disk is second",
+        );
+    }
 }
 
 /// E21's real-kernel cases (D-295-R22, ADR-0143) and S-ND295-40's queue
