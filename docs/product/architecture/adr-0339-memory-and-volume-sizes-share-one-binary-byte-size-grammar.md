@@ -35,7 +35,7 @@ refinement on top of this grammar: [ADR-0343](adr-0343-a-workload-memory-is-a-wh
 
 - Positive: one spelling, one canonical form, one set of grammar tests for memory and volume; the volume accepts the same spellings as
   memory (`1024MiB` is a valid volume size, canonical `1GiB`).
-- Negative: ADR-0310's unit decision changes (corrected in place, since GH #348 is not implemented). `ByteCount` (free space, `<n>B`) is a
+- Negative: ADR-0310's unit decision changes (amended 2026-11-20 in ADR-0310, because GH #348 had already shipped it). `ByteCount` (free space, `<n>B`) is a
   strict subset of this grammar and is left as it is.
 - No scope limitation is introduced.
 

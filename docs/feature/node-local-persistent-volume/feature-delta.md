@@ -93,9 +93,8 @@ crafter's.
 ### Spec surface (VD-1)
 
 `overdrive-core/src/aggregate/`: `Vm` gains `volume: Option<VmVolume>`; `VmVolume { size: VolumeSize }`. `VolumeSize` is a validated newtype of
-bytes with `FromStr`/`Display`/serde: `FromStr` parses the shared byte-size grammar (`ByteSize`, ADR-0339, feature
-`workload-resources-human-readable`) and refuses a value that is not a whole number of GiB of at least 1 GiB; `Display` is the `ByteSize` canonical
-form (`GiB`, or `TiB` for an exact `TiB` multiple). Both parser-side `VmInput`s gain `volume: Option<VmVolumeInput { size: String }>` (`deny_unknown_fields`); TOML
+bytes with `FromStr`/`Display`/serde matching `<uint><unit>`, unit case-insensitive `GiB|TiB`, value at least 1; `Display` emits `GiB` unless the
+value is an exact `TiB` multiple. Both parser-side `VmInput`s gain `volume: Option<VmVolumeInput { size: String }>` (`deny_unknown_fields`); TOML
 is `[vm.volume] size = "40GiB"`. Validation in `validate_driver_input`: `AggregateError::Validation { field: "vm.volume.size", .. }` for grammar;
 `field: "vm.volume", message` "a volume requires replicas = 1" when the workload's `replicas != 1`. The rule applies to every kind that carries
 `replicas` (Job and Service); a Schedule is rejected at submit today, so a Schedule with a volume is rejected before this rule.

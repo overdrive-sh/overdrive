@@ -30,8 +30,9 @@ The state is real on the production path: `overdrive deploy <SPEC>` parses `[res
 Historical evidence under `verification/expectations/*/evidence/`, `benchmarks/results/` and `docs/evolution/` carries the old names and is immutable record: not edited.
 
 **The issue's reuse premise is only partly true.** #372 says `memory` reuses `VolumeSize`/`ByteCount`. Neither parses `128MiB`: `VolumeSize` is
-`<uint>` followed by `GiB` or `TiB` (ADR-0310 as accepted), and `ByteCount` is `<uint>B` only. Both are still the RED scaffold at HEAD
-(`volume.rs`); #348 DELIVER has not landed them. R-1 below resolves this.
+`<uint>` followed by `GiB` or `TiB` (ADR-0310 as accepted), and `ByteCount` is `<uint>B` only. Both are implemented and shipped in
+`crates/overdrive-core/src/volume.rs` by #348 DELIVER (on main), and `VolumeSize` is archived in the workload-intent V2 payload. R-1 and the
+rebase ruling R-4 below resolve this: this feature changes the shipped `VolumeSize` parser, as an explicit amendment of ADR-0310.
 
 ## Wave: DISCUSS / [REF] Locked decisions
 
@@ -48,7 +49,8 @@ Historical evidence under `verification/expectations/*/evidence/`, `benchmarks/r
 
 ## Wave: DISCUSS / [REF] User rulings (2026-11-20)
 
-- **R-1 (memory grammar base): one shared byte-size grammar, hand-built in `overdrive-core`, no new crate dependency.** `memory` and the volume size (#348) parse and render through the same grammar; the volume keeps its own refinement on top. ADR-0310's unit decision is corrected directly in present tense (#348 is not yet implemented).
+- **R-1 (memory grammar base): one shared byte-size grammar, hand-built in `overdrive-core`, no new crate dependency.** `memory` and the volume size (#348) parse and render through the same grammar; the volume keeps its own refinement on top. ADR-0310's unit decision changes by an explicit dated amendment (see R-4).
+- **R-4 (rebase ruling, option a, 2026-11-20): keep R-1 after #348 DELIVER landed.** GH #348 (`node-local-persistent-volume`) is implemented on main, so ADR-0310 is an operative contract. The volume size is rebuilt on the shared `ByteSize` grammar with its whole-GiB refinement; this feature's DELIVER changes the shipped `VolumeSize` parser and the #348 test expectations listed under DELIVER obligations. ADR-0310 keeps its accepted text and gains a dated amendment (`design.md` § "Do not manufacture amendment history before implementation"). This feature owns the reconciliation; there is no hand-off to a #348 owner.
 - **R-2 (node capacity): rename in this feature.** `NodeSpecInput { cpu_milli, memory_bytes }` moves to the same CPU / memory newtypes and unit-free names.
 - **R-3 (cpu grammar): Kubernetes-style quantity.** `cpu = "500m"` or decimal cores (`"0.5"`, `"2"`); hand-built, no `k8s-openapi` / `kube_quantity` dependency.
 
@@ -137,7 +139,7 @@ Brownfield. Walking skeleton: not needed. `overdrive deploy` -> parse -> intent 
 
 ## Wave: DISCUSS / [REF] Pre-requisites
 
-- GH #348 (node-local volume) is not a prerequisite: `ByteSize` is created here (R-1) and `VolumeSize` follows it when #348 resumes.
+- GH #348 (node-local volume) is delivered on main. `ByteSize` is created here (R-1) and the shipped `VolumeSize` is rebuilt on it in this feature's DELIVER (R-4).
 - Rust: `rust.md` Newtypes; no `.expect()` in library code.
 
 ## Wave: DISCUSS / [REF] Outcome KPIs
@@ -169,7 +171,7 @@ OQ-1..OQ-6 of DISCUSS resolve as: cpu grammar = DD-3; memory grammar base = DD-1
 | ID | Decision | ADR | Approval |
 |---|---|---|---|
 | DD-1 | `memory` and the volume size share one `ByteSize` grammar | [0339](../../product/architecture/adr-0339-memory-and-volume-sizes-share-one-binary-byte-size-grammar.md) | R-1, 2026-11-20 |
-| DD-2 | The volume size is a `ByteSize` refined to whole GiB, at least 1 GiB; ADR-0310 corrected in place | [0310](../../product/architecture/adr-0310-vm-volume-is-declared-by-a-vm-volume-table-with-a-size.md) | R-1, 2026-11-20 |
+| DD-2 | The volume size is a `ByteSize` refined to whole GiB, at least 1 GiB; ADR-0310 carries a dated amendment (its accepted text is retained) and the shipped `VolumeSize` changes | [0310](../../product/architecture/adr-0310-vm-volume-is-declared-by-a-vm-volume-table-with-a-size.md) § Amendment 2026-11-20 | R-1 and R-4 (rebase ruling a), 2026-11-20 |
 | DD-3 | `cpu` is a `CpuQuantity` in the Kubernetes-style grammar pinned here | [0340](../../product/architecture/adr-0340-cpu-is-declared-as-a-millicore-or-decimal-core-quantity.md) | R-3, 2026-11-20 |
 | DD-4 | The resource types carry the newtypes as `cpu` and `memory`; node capacity is R-2 | [0341](../../product/architecture/adr-0341-workload-resources-carry-the-typed-quantities-from-spec-to-driver.md) | R-2 and decision 1a, 2026-11-20 |
 | DD-5 | No envelope version is added: the archived layout is unchanged (spike V-1 held) | 0341 | decision 2, 2026-11-20 |
@@ -191,7 +193,8 @@ Paths relative to the repository root. Each row includes its consumer, so there 
 |---|---|---|
 | `crates/overdrive-core/src/byte_size.rs`, `lib.rs` | CREATE NEW | `ByteSize`, `ByteSizeParseError` |
 | `crates/overdrive-core/src/cpu_quantity.rs`, `lib.rs` | CREATE NEW | `CpuQuantity`, `CpuQuantityParseError` |
-| `crates/overdrive-core/src/volume.rs` | EXTEND | `VolumeSize` parses via `ByteSize` and refines; `Display` delegates; `ByteCount` untouched |
+| `crates/overdrive-core/src/volume.rs` | EXTEND (changes shipped code) | `VolumeSize::from_str` (today a private `GiB`/`TiB` splitter) parses via `ByteSize` and refines; `Display` delegates to the `ByteSize` canonical form (identical text for every admitted value); `VolumeSizeParseError` keeps its shape; `VolumeSize(u64)`, its derives and `bytes()` unchanged; `ByteCount` untouched |
+| `crates/overdrive-core/tests/acceptance/vm_volume_size.rs` (#348 tests) | EXTEND (expectation changes) | `text_outside_the_grammar_is_rejected`: the strategy no longer draws `MiB`; see DELIVER obligation 3 |
 | `crates/overdrive-core/src/traits/driver.rs` | EXTEND | `Resources { cpu, memory }` |
 | `crates/overdrive-core/src/aggregate/workload_spec.rs` | EXTEND | parser `ResourcesInput { cpu, memory }` (archived inside `ServiceSpecV1`) |
 | `crates/overdrive-core/src/aggregate/mod.rs` | EXTEND | `from_submit` and the service constructor admit `memory`; wire `ResourcesInput`; the two reverse projections; `Node::new`; `NodeSpecInput` |
@@ -256,9 +259,10 @@ memory refusal of DD-8 applies to a Schedule too.
 
 | Existing | Verdict | Reason and contract shape |
 |---|---|---|
-| `ByteCount` (`volume.rs`, RED scaffold) | KEEP unchanged | free space, `<n>B`, any `u64`; a strict subset of the grammar. Unifying it into `ByteSize` rewrites GH #348's pinned scaffold and its S-VOL-26a scenario, which no requirement here needs |
+| `VolumeSize` (`volume.rs`, shipped by #348) | EXTEND | parse path only: `ByteSize` parse plus the whole-GiB, at least 1 GiB refinement. Contract shape: pure-function (`FromStr`/`Display`/serde, no effect). Universe: every previously accepted input stays accepted with the same value and the same `Display`; only the accepted set grows (`1024MiB`, `1073741824B`). Archived layout (`u64`) unchanged. Assertion: the existing `vm_volume_size.rs` and `volume_value_types.rs` tests plus the pinned refinement test here |
+| `ByteCount` (`volume.rs`, shipped by #348) | KEEP unchanged | free space, `<n>B`, any `u64`; a strict subset of the grammar. Unifying it into `ByteSize` rewrites #348's shipped type and its S-VOL-26a scenario, which no requirement here needs |
 | `MemoryPlan`, `reserve_bytes` (`vm/config.rs`) | KEEP unchanged | byte arithmetic whose outputs are foreign-protocol numbers (`memory.max`, the VMM `size=`); the caller unwraps with `.bytes()` |
-| `ByteSize` | CREATE NEW | no existing type parses `128MiB`; `VolumeSize` is GiB-only and `ByteCount` is `B`-only. pure-function |
+| `ByteSize` | CREATE NEW | no existing type parses `128MiB`; the shipped `VolumeSize` is GiB/TiB-only and `ByteCount` is `B`-only. pure-function |
 | `CpuQuantity` | CREATE NEW | no CPU value type exists; `u32` primitives today. pure-function |
 
 Every other overlapping component is EXTEND in § Component decomposition: field types and names only, bounded-change (universe: the
@@ -368,7 +372,8 @@ spelling only.
 `VolumeSize::from_str` parses a `ByteSize`, then refuses a value that is zero or not a multiple of 1 GiB. A refusal at either step is a
 `VolumeSizeParseError` (the existing scaffold struct, unchanged in shape: `Display` text names the cause). `VolumeSize::bytes(self) -> u64` and
 the derives are as pinned in GH #348. `Display` is the `ByteSize` canonical form of the same value, which for a multiple of GiB is `<n>GiB`, or
-`<n>TiB` for an exact TiB multiple: the rule ADR-0310 already stated.
+`<n>TiB` for an exact TiB multiple: the text the shipped `Display` already emits, so the serde string and the wire form of every admitted value
+are unchanged. This modifies shipped #348 code and amends ADR-0310 (§ Amendment 2026-11-20), which carries the compatibility statement.
 
 | Input | Volume result |
 |---|---|
@@ -459,7 +464,10 @@ the spelling is not stored.
 DELIVER obligations: update the struct-literal field names and types in `crates/overdrive-core/tests/schema_evolution/workload_intent.rs`,
 `service_spec.rs` and the `AllocStatusRow` fixtures; the hex literals `FIXTURE_V1` stay byte-identical and must still decode and equal the canonical
 projection (the default-lane regression guard for V-1). If a fixture fails to decode, the layout claim is false for that envelope: stop and
-surface it to the user. If GH #348 lands first, its V2 payloads embed the same `Resources`; the two changes do not conflict in either order.
+surface it to the user. GH #348 has landed: its V2 payloads (and `FIXTURE_V2`, carrying `VmVolume { size: VolumeSize }`) embed the same `Resources`
+and an archived `VolumeSize(u64)`. The same obligation covers them: the V2 fixtures in `workload_intent.rs` and `service_spec.rs` decode unchanged and
+their hex literals are untouched; `VolumeSize` stays a `u64` of bytes (a single-field newtype archives as its inner primitive, V-1). The spike
+probed `CpuQuantity`/`ByteSize` in a `V1`-shaped envelope, not `VolumeSize` in V2, so the unchanged V2 fixtures are the regression check for the volume.
 
 ## Wave: DESIGN / [REF] Lifecycle Gate Ownership
 
@@ -480,14 +488,15 @@ No contract-shaping item is Open. The Cloud Hypervisor claim behind DD-8 is sour
 
 ## Wave: DESIGN / [REF] Corrections to other artifacts (listed for the user)
 
-Per R-1, in present tense, no amendment narration:
+GH #348 is implemented, so its artifacts are history and are not rewritten (R-4):
 
-1. `docs/product/architecture/adr-0310-...md`: Decision says the size is a `ByteSize` refined to whole GiB, at least 1 GiB (`1024MiB`
-   accepted, `512MiB` refused); the volume-grammar alternative is reworded as "a volume-only `GiB`/`TiB` grammar".
-2. `docs/feature/node-local-persistent-volume/feature-delta.md` § Spec surface: the `VolumeSize` grammar sentence points at ADR-0339 instead of
-   restating `GiB|TiB`. `design/wave-decisions.md` VD-1 row follows.
-3. Not edited, for the GH #348 DISTILL owner to reconcile when DELIVER resumes: `distill/test-scenarios.md` grammar scenarios for `VolumeSize`
-   (a unit-restriction assertion, if any, becomes a refinement assertion) and the scaffold in `crates/overdrive-core/src/volume.rs`.
+1. `docs/product/architecture/adr-0310-...md`: the accepted text is retained and gains § Amendment 2026-11-20 (GH #372, R-1 and R-4): the size
+   is a `ByteSize` refined to whole GiB, at least 1 GiB (`1024MiB` accepted, `512MiB` refused), with `Display`, wire and archived-layout
+   compatibility stated.
+2. `docs/feature/node-local-persistent-volume/` (`feature-delta.md` § Spec surface, `design/wave-decisions.md` VD-1, `distill/test-scenarios.md`):
+   not edited. They record what #348 delivered; ADR-0310's amendment is the pointer for the change.
+3. The shipped `VolumeSize` in `crates/overdrive-core/src/volume.rs` and #348's `vm_volume_size.rs` expectations change in this feature's
+   DELIVER (§ DELIVER obligations 3), authorised by the R-4 ruling.
 
 ## Wave: DESIGN / [REF] Scope limitations
 
@@ -498,7 +507,7 @@ capability. No GitHub issue is proposed.
 
 - DISTILL: the exact `Display` text of each parse-error variant is the acceptance designer's to assert at the level of "names the grammar and
   the remedy"; the variant set above is the contract.
-- DISTILL: GH #348's grammar scenarios need reconciling with the shared grammar (§ Corrections, item 3).
+- GH #348's grammar tests are reconciled by this feature's DELIVER (§ DELIVER obligations 3), not by a #348 owner.
 - No open question blocks DISTILL. DISTILL covers the whole-MiB rows at the `from_submit` and service entry points.
 
 ## Wave: DESIGN / [REF] Cloud Hypervisor memory constraint (evidence for DD-8)
@@ -597,7 +606,7 @@ No driven adapter is added or changed (DESIGN § Driven ports): the parsers are 
 | `crates/overdrive-core/src/cpu_quantity.rs` (`// SCAFFOLD: true`) | `CpuQuantity(u32)` with `from_millis`, `millis` (real, total), `CpuQuantityParseError { Malformed, UnknownSuffix { input, suffix }, TooManyDecimals, Overflow }`, `FromStr`, `Display`, `Serialize`, `Deserialize`; derives as pinned | same shape: refuses every input, renders nothing |
 | `crates/overdrive-core/src/lib.rs` | `pub mod byte_size; pub mod cpu_quantity;` (two lines; no re-export, none is pinned) | |
 
-Both follow the `volume.rs` precedent (file-level `#![allow(...)]` for the scaffold lints). `VolumeSize` and `ByteCount` are untouched; the volume refinement test is RED against the existing `VolumeSize` scaffold. No production field is renamed. Scaffold grep: `grep -rn "SCAFFOLD: true" crates/overdrive-core/src/byte_size.rs crates/overdrive-core/src/cpu_quantity.rs`.
+Both follow the `volume.rs` precedent (file-level `#![allow(...)]` for the scaffold lints). `VolumeSize` and `ByteCount` are untouched by DISTILL; the volume refinement test is RED against the shipped `VolumeSize` parser (it refuses `1024MiB`). No production field is renamed. Scaffold grep: `grep -rn "SCAFFOLD: true" crates/overdrive-core/src/byte_size.rs crates/overdrive-core/src/cpu_quantity.rs`.
 
 ## Wave: DISTILL / [REF] Test placement
 
@@ -647,7 +656,11 @@ AC-1.10 (node capacity carries `CpuQuantity` and `ByteSize`) has no new test. Th
 
 1. Remove the `#[should_panic]` marker of each pending test when its behaviour lands, and run the body unchanged. The tests whose RED is the string wire (`red-classification.md` § "Tests whose RED is the string wire") are unreachable past the decode until the rename step; DELIVER removes their markers in that step and confirms the next semantic RED, if any, before changing production code.
 2. Existing assertions made stale by DD-7 and the renames, to be updated in DELIVER with the fixtures sweep: the `Memory:        1024` goldens in `overdrive-cli/tests/acceptance/render_workload_describe.rs` (`ND295_SERVICE_GOLDEN`, `ND295_JOB_GOLDEN` gain a `CPU:` line and a canonical memory), the `Memory:` line in `guest_stack_mtls_egress.rs`, and the `memory_bytes` assertion in `vm_resources_sizing.rs`.
-3. Reconcile `overdrive-core/tests/acceptance/vm_volume_size.rs` (GH #348, DESIGN § Corrections item 3): its `text_outside_the_grammar_is_rejected` strategy draws `[0-9]{0,6}MiB`, and `1024MiB` is now an accepted volume size; `the_volume_size_is_the_shared_grammar_refined_to_whole_gib` here pins the refinement rows.
+3. Change `VolumeSize` and the #348 test expectations it reverses (R-4; ADR-0310 § Amendment 2026-11-20). This is a spec change authorised by the user's ruling, not a weakening by the crafter; `.claude/rules/testing.md` still forbids a crafter from weakening any other acceptance body. Only the listed expectation changes:
+   - `crates/overdrive-core/tests/acceptance/vm_volume_size.rs`, `text_outside_the_grammar_is_rejected`: its strategy draws `[0-9]{0,6}MiB`, and a multiple of 1024 MiB (`1024MiB`) is now accepted. Remove `MiB` from the near-miss alternation (the sub-GiB `MiB` sizes stay refused and are pinned by the rows of `the_volume_size_is_the_shared_grammar_refined_to_whole_gib`). The other alternatives (`GB|KiB|PiB|G|T`, padding, `.5GiB`, no unit) stay refused and unchanged.
+   - Unchanged and must stay green: `a_declared_size_round_trips_through_text_and_serde_in_any_unit_case`, `tib_and_gib_spellings_of_one_size_are_equal`, `display_prefers_tib_only_for_exact_multiples`, `sad_malformed_declarations_are_rejected_with_a_typed_error` (`40MiB` stays refused: sub-GiB, now by the refinement), `sad_a_size_whose_bytes_overflow_is_rejected`, `sad_serde_rejects_an_invalid_wire_size`; in `volume_value_types.rs` the `VolumeSize::bytes` and `ByteCount` tests. Any other test that fails after the parser change is surfaced to the user, not edited.
+   - The pinned refinement test `the_volume_size_is_the_shared_grammar_refined_to_whole_gib` (`byte_size_grammar.rs`) rows are the new contract: `40GiB`, `2TiB`, `1024MiB` accepted (canonical `40GiB`, `2TiB`, `1GiB`); `512MiB`, `0GiB`, `1.5GiB`, `1GB` refused.
+   - The V2 golden fixtures (`workload_intent.rs`, `service_spec.rs`) are not edited and must decode unchanged.
 4. The refusal text assertions are stated at the wording DESIGN pins and no further: `Malformed` names the grammar (the five units for a byte size; no wording is pinned for a CPU quantity), a decimal unit names the binary units, `Fractional` says "smaller", `UnknownSuffix` for `M` says "lowercase", `TooManyDecimals` says "three", `Overflow` says "too large", the whole-MiB refusal says "whole number of MiB" and the received canonical value. Wrapped surfaces (TOML, deploy, JSON) assert the key or field name and the class keyword only.
 
 ## Wave: DISTILL / [REF] Review dispositions, round 1

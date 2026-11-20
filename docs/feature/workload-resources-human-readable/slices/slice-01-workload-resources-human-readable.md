@@ -25,7 +25,7 @@ An operator writes `memory = "128MiB"` and `cpu = "500m"`, deploys, and `overdri
 
 ## OUT of scope
 
-- Resource limits vs requests, CPU pinning; `[vm.volume]` restructuring; reconciling GH #348's scaffold and scenarios (its DISTILL owner); no migration or compatibility read (D-8).
+- Resource limits vs requests, CPU pinning; `[vm.volume]` restructuring; (GH #348's shipped `VolumeSize` and its `vm_volume_size.rs` expectation are IN scope, per R-4;) no migration or compatibility read (D-8).
 
 ## Learning hypothesis
 
