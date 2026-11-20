@@ -1589,7 +1589,7 @@ mod mid_boot_volume_reclamation {
 
             let wiring = GuestNetworkExecWiring::new(Arc::clone(&clock) as Arc<dyn Clock>);
             let root = self.artifacts.path().join(format!("serve-{seed}"));
-            std::fs::create_dir_all(&root).expect("per-process root");
+            tokio::fs::create_dir_all(&root).await.expect("per-process root");
             let beacon = Arc::new(SimBeaconIo::stepped(self.sim_vmm.clone()));
             let intake = BeaconIntake::bind(
                 Arc::clone(&beacon) as Arc<dyn BeaconIo>,
