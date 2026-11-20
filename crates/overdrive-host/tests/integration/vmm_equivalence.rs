@@ -239,7 +239,7 @@ async fn vmm_equivalence_cloud_hypervisor_vmm() {
 // ---------------------------------------------------------------------
 
 /// Every directory in `PATH` EXCEPT the one containing `cloud-hypervisor`
-/// — leaves `systemd-detect-virt` / `uname` / `mkfs.ext4` / `which` (every
+/// — leaves `uname` / `mkfs.ext4` / `which` (every
 /// OTHER tool `VmFixture::provision` needs) resolvable, so the ONLY
 /// prerequisite this test deliberately breaks is `cloud-hypervisor`
 /// itself.

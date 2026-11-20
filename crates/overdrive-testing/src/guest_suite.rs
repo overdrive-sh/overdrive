@@ -1089,7 +1089,6 @@ fn nested_vm_test_support(
     extra.push(bash);
     let sleep = tool("sleep");
     extra.push(GuestFile { guest: PathBuf::from("/bin/sleep"), ..sleep });
-    extra.push(tool("systemd-detect-virt"));
     extra.push(workspace_forwarder_module(kit));
     extra.push(workspace_bpf_artifact());
     for relative in NESTED_GUEST_KIT_MODULE_SOURCES {

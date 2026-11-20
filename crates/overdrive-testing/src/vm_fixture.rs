@@ -10,7 +10,7 @@
 //! `staging_root` without racing. It:
 //!
 //! 1. Runs the [`preflight_kvm_capability`] check (`/dev/kvm` reachable,
-//!    host is not nested-Apple-virtualized) — ADR-0082 §D5 / roadmap AC3.
+//!    openable `O_RDWR`) — ADR-0082 §D5 / roadmap AC3.
 //! 2. Confirms `cloud-hypervisor` is present and has the `--landlock`
 //!    capability the driver depends on (brief.md §109's "name the floor
 //!    against a capability, not a number") — AC2.
@@ -337,13 +337,12 @@ pub(crate) fn acquire_provision_lock(staging_root: &Path) -> Result<fs::File, Vm
 
 /// Capability preflight (roadmap AC3/AC4).
 ///
-/// Confirms `/dev/kvm` is reachable `O_RDWR` under the current identity
-/// and the host is not nested-Apple-virtualized. This is the runtime
-/// DEFENSE for the case the `kvm-tests` Cargo feature is enabled on an
-/// incapable host — the feature gate is the primary control; this
-/// function is what fires when that gate was crossed anyway. It never
-/// silently skips: every call performs both checks and returns a real
-/// verdict.
+/// Confirms `/dev/kvm` is reachable `O_RDWR` under the current identity.
+/// This is the runtime DEFENSE for the case the `kvm-tests` Cargo feature
+/// is enabled on an incapable host — the feature gate is the primary
+/// control; this function is what fires when that gate was crossed anyway.
+/// It never silently skips: every call performs the check and returns a
+/// real verdict.
 ///
 /// # Errors
 ///
@@ -352,19 +351,8 @@ pub(crate) fn acquire_provision_lock(staging_root: &Path) -> Result<fs::File, Vm
 ///   current identity cannot open it `O_RDWR`.
 /// - [`VmFixtureError::KvmDeviceIo`] — any other failure opening the
 ///   device.
-/// - [`VmFixtureError::SystemdDetectVirtUnavailable`] — `systemd-detect-
-///   virt` itself could not be run.
-/// - [`VmFixtureError::SystemdDetectVirtEmptyOutput`] — it ran but
-///   produced no usable output (D12).
-/// - [`VmFixtureError::NestedAppleHost`] — the host reports
-///   `systemd-detect-virt=apple`.
 pub fn preflight_kvm_capability() -> Result<(), VmFixtureError> {
-    open_kvm_device()?;
-    let virt = detect_virt()?;
-    if virt == "apple" {
-        return Err(VmFixtureError::NestedAppleHost);
-    }
-    Ok(())
+    open_kvm_device()
 }
 
 /// Opens [`KVM_DEVICE_PATH`] `O_RDWR` and classifies the failure, if any,
@@ -389,30 +377,6 @@ fn describe_kvm_device_mode() -> String {
         Ok(meta) => format!("uid={} gid={} mode={:o}", meta.uid(), meta.gid(), meta.mode() & 0o777),
         Err(source) => format!("(could not stat {KVM_DEVICE_PATH}: {source})"),
     }
-}
-
-/// Runs `systemd-detect-virt` and returns its trimmed stdout verbatim
-/// (`"apple"`, `"kvm"`, `"none"`, …). A non-zero exit is NOT a spawn
-/// failure — `systemd-detect-virt` exits non-zero precisely when it
-/// detects no virtualization at all, while still printing `"none"`.
-///
-/// A well-behaved `systemd-detect-virt` ALWAYS prints something (a virt
-/// type name or `"none"`); blank stdout (garbage output, or an internal
-/// tool failure that still exits 0) is therefore its OWN distinct
-/// failure mode (D12) and is never silently read as "not apple" — the
-/// caller's `virt == "apple"` check would otherwise treat "no usable
-/// signal at all" as a clean pass.
-fn detect_virt() -> Result<String, VmFixtureError> {
-    let output = Command::new("systemd-detect-virt")
-        .output()
-        .map_err(VmFixtureError::systemd_detect_virt_unavailable)?;
-    let virt = String::from_utf8_lossy(&output.stdout).trim().to_owned();
-    if virt.is_empty() {
-        return Err(VmFixtureError::systemd_detect_virt_empty_output(
-            String::from_utf8_lossy(&output.stderr).into_owned(),
-        ));
-    }
-    Ok(virt)
 }
 
 /// Confirms `cloud-hypervisor` is on `PATH`, runnable, and carries the
@@ -853,7 +817,8 @@ fn build_staging_tree(
             )
         })?;
     }
-    for sub in ["proc", "sys", "dev", "tmp", "sbin", "lib/overdrive", "lib/overdrive-testing/modules"]
+    for sub in
+        ["proc", "sys", "dev", "tmp", "sbin", "lib/overdrive", "lib/overdrive-testing/modules"]
     {
         fs::create_dir_all(stage_dir.join(sub)).map_err(|source| {
             VmFixtureError::rootfs_staging_failed(
@@ -1331,40 +1296,6 @@ pub enum VmFixtureError {
         source: io::Error,
     },
 
-    /// `systemd-detect-virt` itself could not be spawned — distinct from
-    /// "ran and reported a virtualization type" so a missing tool is never
-    /// silently read as "not nested".
-    #[error("systemd-detect-virt could not be run to check for nested virtualization: {source}")]
-    SystemdDetectVirtUnavailable {
-        #[source]
-        source: io::Error,
-    },
-
-    /// `systemd-detect-virt` was spawned successfully but produced no
-    /// usable output (blank stdout) — distinct from
-    /// [`Self::SystemdDetectVirtUnavailable`] (the tool itself could not
-    /// be run) and never silently folded into "not apple" (D12): a
-    /// well-behaved `systemd-detect-virt` always prints a virt type or
-    /// `"none"`.
-    #[error(
-        "systemd-detect-virt ran but produced no output (expected a virtualization type or \
-         \"none\"); stderr: {stderr}"
-    )]
-    SystemdDetectVirtEmptyOutput { stderr: String },
-
-    /// The host reports `systemd-detect-virt=apple` — nested virtualization
-    /// on Apple Silicon. Cites the spike's own settled finding by name so
-    /// this is never mistaken for a driver or Cloud Hypervisor bug.
-    #[error(
-        "host reports systemd-detect-virt=apple (nested virtualization on Apple Silicon); \
-         microVM boots stall roughly 1-in-3 on this substrate and never produce a WRONG \
-         answer, only a MISSING one -- see docs/feature/microvm-driver-cloud-hypervisor/\
-         spike/findings.md § \"The nested-virt stall -- SETTLED 2026-08-10 by removing the \
-         nesting\". kvm-tests must run on real x86_64 hardware via `cargo xtask metal run --`, \
-         never a nested Lima VM"
-    )]
-    NestedAppleHost,
-
     /// `cloud-hypervisor` could not be spawned at all — not on `PATH`, or
     /// not executable.
     #[error("cloud-hypervisor binary not found or not executable on PATH: {source}")]
@@ -1547,16 +1478,6 @@ impl VmFixtureError {
     #[must_use]
     pub const fn kvm_device_io(source: io::Error) -> Self {
         Self::KvmDeviceIo { source }
-    }
-
-    #[must_use]
-    pub const fn systemd_detect_virt_unavailable(source: io::Error) -> Self {
-        Self::SystemdDetectVirtUnavailable { source }
-    }
-
-    #[must_use]
-    pub fn systemd_detect_virt_empty_output(stderr: impl Into<String>) -> Self {
-        Self::SystemdDetectVirtEmptyOutput { stderr: stderr.into() }
     }
 
     #[must_use]
