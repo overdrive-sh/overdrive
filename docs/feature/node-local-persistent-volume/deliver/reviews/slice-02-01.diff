@@ -1,0 +1,212 @@
+commit 75edce501f59edbe07d2e025d6a9271f9bdb1736
+Author: Marcus Schack Abildskov <work@marcus-sa.dev>
+Date:   Fri Nov 20 15:53:01 2026 +0100
+
+    feat(node-local-persistent-volume): implement VolumeSize and ByteCount grammars
+    
+    VolumeSize parses <uint>GiB|TiB (unit case-insensitive, at least 1,
+    overflow refused) and displays TiB only for exact TiB multiples. ByteCount
+    parses and displays <n>B over all of u64, so the insufficient-space cause
+    carries free space as a string on the wire.
+    
+    Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+    Step-Id: 02-01
+    Task-Id: node-local-persistent-volume
+
+diff --git a/crates/overdrive-core/src/volume.rs b/crates/overdrive-core/src/volume.rs
+index a28520c3e..436a8f725 100644
+--- a/crates/overdrive-core/src/volume.rs
++++ b/crates/overdrive-core/src/volume.rs
+@@ -45,25 +45,53 @@ impl VolumeSize {
+     }
+ }
+ 
++const BYTES_PER_GIB: u64 = 1 << 30;
++const BYTES_PER_TIB: u64 = 1 << 40;
++
++/// Splits `<uint><unit>` into its ASCII-digit count and the remaining unit text.
++fn split_count_and_unit(s: &str) -> Option<(u64, &str)> {
++    let digits_end = s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len());
++    let (digits, unit) = s.split_at(digits_end);
++    if digits.is_empty() {
++        return None;
++    }
++    digits.parse::<u64>().ok().map(|count| (count, unit))
++}
++
++impl VolumeSize {
++    fn parse_bytes(s: &str) -> Result<u64, &'static str> {
++        let (count, unit) = split_count_and_unit(s).ok_or("expected <uint>GiB or <uint>TiB")?;
++        let multiple = if unit.eq_ignore_ascii_case("GiB") {
++            BYTES_PER_GIB
++        } else if unit.eq_ignore_ascii_case("TiB") {
++            BYTES_PER_TIB
++        } else {
++            return Err("the unit must be GiB or TiB");
++        };
++        if count == 0 {
++            return Err("the size must be at least 1");
++        }
++        count.checked_mul(multiple).ok_or("the size in bytes overflows")
++    }
++}
++
+ impl FromStr for VolumeSize {
+     type Err = VolumeSizeParseError;
+ 
+     fn from_str(s: &str) -> Result<Self, Self::Err> {
+-        // RED scaffold: the grammar is DELIVER's. The scaffold refuses every input, so a test
+-        // that needs a size without being about the grammar builds one with
+-        // `testing::volume::volume_size_gib`, and a test about the grammar fails on its own
+-        // accept or reject assertion rather than on a panic inside the scaffold.
+-        Err(VolumeSizeParseError {
+-            input: s.to_owned(),
+-            reason: "volume size grammar not implemented".to_owned(),
+-        })
++        Self::parse_bytes(s)
++            .map(Self)
++            .map_err(|reason| VolumeSizeParseError { input: s.to_owned(), reason: reason.to_owned() })
+     }
+ }
+ 
+ impl fmt::Display for VolumeSize {
+-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
+-        // RED scaffold: renders nothing until DELIVER implements the canonical GiB/TiB text.
+-        Ok(())
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        if self.0.is_multiple_of(BYTES_PER_TIB) {
++            write!(f, "{}TiB", self.0 / BYTES_PER_TIB)
++        } else {
++            write!(f, "{}GiB", self.0 / BYTES_PER_GIB)
++        }
+     }
+ }
+ 
+@@ -113,15 +141,16 @@ impl FromStr for ByteCount {
+     type Err = ByteCountParseError;
+ 
+     fn from_str(s: &str) -> Result<Self, Self::Err> {
+-        // RED scaffold: refuses every input until DELIVER implements `<uint>B`.
+-        Err(ByteCountParseError { input: s.to_owned() })
++        split_count_and_unit(s)
++            .filter(|(_, unit)| unit.eq_ignore_ascii_case("B"))
++            .map(|(count, _)| Self(count))
++            .ok_or_else(|| ByteCountParseError { input: s.to_owned() })
+     }
+ }
+ 
+ impl fmt::Display for ByteCount {
+-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
+-        // RED scaffold: renders nothing until DELIVER implements `<n>B`.
+-        Ok(())
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        write!(f, "{}B", self.0)
+     }
+ }
+ 
+diff --git a/crates/overdrive-core/tests/acceptance/vm_volume_size.rs b/crates/overdrive-core/tests/acceptance/vm_volume_size.rs
+index fe9b8c0d6..67310dddc 100644
+--- a/crates/overdrive-core/tests/acceptance/vm_volume_size.rs
++++ b/crates/overdrive-core/tests/acceptance/vm_volume_size.rs
+@@ -43,7 +43,6 @@ proptest! {
+     /// A declared size survives text and serde unchanged, in any unit case.
+     /// CONTRACT_SHAPE: pure-function.
+     #[test]
+-    #[should_panic(expected = "a positive count of GiB or TiB must parse")]
+     fn a_declared_size_round_trips_through_text_and_serde_in_any_unit_case(
+         n in 1u64..=1_000_000,
+         unit in prop::sample::select(vec!["GiB", "TiB", "gib", "tib", "GIB", "TIB"]),
+@@ -61,7 +60,6 @@ proptest! {
+     /// A count of GiB equals the same size written in TiB when it is an exact multiple.
+     /// CONTRACT_SHAPE: pure-function.
+     #[test]
+-    #[should_panic(expected = "a TiB spelling and its GiB spelling must be the same size")]
+     fn tib_and_gib_spellings_of_one_size_are_equal(t in 1u64..=4096) {
+         let tib = parse(&format!("{t}TiB")).ok();
+         let gib = parse(&format!("{}GiB", t * 1024)).ok();
+@@ -74,7 +72,6 @@ proptest! {
+     /// Anything outside `<uint><GiB|TiB>` is a typed error, never a size.
+     /// CONTRACT_SHAPE: pure-function.
+     #[test]
+-    #[should_panic(expected = "the grammar must accept 40GiB while it refuses the near-miss")]
+     fn text_outside_the_grammar_is_rejected(
+         text in "[0-9]{0,6}(MiB|GB|KiB|PiB|G|T| GiB|GiB | TiB|\\.5GiB|)",
+     ) {
+@@ -90,7 +87,6 @@ proptest! {
+ 
+ /// CONTRACT_SHAPE: pure-function.
+ #[test]
+-#[should_panic(expected = "40 GiB must display as 40GiB")]
+ fn display_prefers_tib_only_for_exact_multiples() {
+     let shown = |gib: u64| volume_size_gib(gib).to_string();
+     assert_eq!(shown(40), "40GiB", "40 GiB must display as 40GiB");
+@@ -103,9 +99,6 @@ fn display_prefers_tib_only_for_exact_multiples() {
+ /// Sad: each malformed declaration an operator can plausibly write.
+ /// CONTRACT_SHAPE: pure-function.
+ #[test]
+-#[should_panic(
+-    expected = "the grammar must accept a valid size while it refuses each malformed declaration"
+-)]
+ fn sad_malformed_declarations_are_rejected_with_a_typed_error() {
+     assert!(
+         parse("40GiB").is_ok(),
+@@ -136,7 +129,6 @@ fn sad_malformed_declarations_are_rejected_with_a_typed_error() {
+ /// Sad: the value is bytes; a size whose byte count overflows u64 is rejected, not wrapped.
+ /// CONTRACT_SHAPE: pure-function.
+ #[test]
+-#[should_panic(expected = "the largest size whose bytes fit u64 must parse")]
+ fn sad_a_size_whose_bytes_overflow_is_rejected() {
+     assert_eq!(
+         parse("16777215TiB").expect("the largest size whose bytes fit u64 must parse").bytes(),
+@@ -150,7 +142,6 @@ fn sad_a_size_whose_bytes_overflow_is_rejected() {
+ /// Sad: a wire value that is not a valid size fails deserialisation.
+ /// CONTRACT_SHAPE: pure-function.
+ #[test]
+-#[should_panic(expected = "the wire form of a valid size must deserialise")]
+ fn sad_serde_rejects_an_invalid_wire_size() {
+     serde_json::from_str::<VolumeSize>("\"40GiB\"")
+         .expect("the wire form of a valid size must deserialise");
+diff --git a/crates/overdrive-core/tests/acceptance/volume_value_types.rs b/crates/overdrive-core/tests/acceptance/volume_value_types.rs
+index 592392456..4340eac4e 100644
+--- a/crates/overdrive-core/tests/acceptance/volume_value_types.rs
++++ b/crates/overdrive-core/tests/acceptance/volume_value_types.rs
+@@ -32,7 +32,6 @@ proptest! {
+     /// unit letter is case-insensitive, as for `VolumeSize`.
+     /// CONTRACT_SHAPE: pure-function.
+     #[test]
+-    #[should_panic(expected = "a byte count must display as <n>B")]
+     fn a_byte_count_round_trips_through_text_and_serde(
+         bytes in any::<u64>(),
+         unit in prop::sample::select(vec!["B", "b"]),
+@@ -58,7 +57,6 @@ proptest! {
+     /// Sad: text that is not `<uint>B` (no unit, another unit, a sign, padding, non-digits) is refused.
+     /// CONTRACT_SHAPE: pure-function.
+     #[test]
+-    #[should_panic(expected = "the grammar must accept <n>B while it refuses text outside it")]
+     fn text_outside_the_byte_count_grammar_is_rejected(
+         text in prop_oneof![
+             "[0-9]{1,10}",
+@@ -82,7 +80,6 @@ proptest! {
+ /// Sad: a byte count above `u64::MAX` is refused, never wrapped.
+ /// CONTRACT_SHAPE: pure-function.
+ #[test]
+-#[should_panic(expected = "u64::MAX bytes must parse")]
+ fn sad_a_byte_count_above_the_u64_range_is_rejected() {
+     assert_eq!(
+         "18446744073709551615B".parse::<ByteCount>().expect("u64::MAX bytes must parse").get(),
+@@ -96,7 +93,6 @@ fn sad_a_byte_count_above_the_u64_range_is_rejected() {
+ /// The one accessor the host adapter and the sim read the size through yields the declared bytes.
+ /// CONTRACT_SHAPE: pure-function.
+ #[test]
+-#[should_panic(expected = "40GiB must parse to 40 binary gibibytes")]
+ fn the_size_in_bytes_is_the_declared_binary_multiple() {
+     assert_eq!(
+         "40GiB".parse::<VolumeSize>().expect("40GiB must parse to 40 binary gibibytes").bytes(),
+@@ -130,7 +126,6 @@ fn guard_volume_operation_labels_match_serde() {
+ /// The free space on the wire is the `<n>B` string, never a bare number.
+ /// CONTRACT_SHAPE: pure-function.
+ #[test]
+-#[should_panic(expected = "the free space must travel as the <n>B string beside the declared size")]
+ fn the_insufficient_space_cause_carries_free_space_as_a_string() {
+     let cause = VolumeUnavailableCause::InsufficientSpace {
+         needed: volume_size_gib(40),
