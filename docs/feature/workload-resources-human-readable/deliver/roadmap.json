@@ -1,0 +1,152 @@
+{
+  "roadmap": {
+    "project_id": "workload-resources-human-readable",
+    "created_at": "2026-11-20T00:00:00Z",
+    "total_steps": 3
+  },
+  "test_paradigm": "Rust, per .claude/rules/testing.md. Every acceptance body is PRE-AUTHORED by DISTILL (feature-delta.md DISTILL sections, distill/test-scenarios.md, distill/red-classification.md); crafters only remove the #[should_panic] marker of the tests the step names, run the body unchanged, confirm the semantic RED before changing production code, implement to the pinned contract (feature-delta.md Interface contracts) and confirm GREEN. Crafters never write, replace, weaken or complete an acceptance body and never invent public API: a missing shape is a blocker surfaced to the orchestrator (CLAUDE.md 'Implement to the design'). The only sanctioned edits to existing (non-pending) tests are the mechanical field renames and literal rewrites the single-cut type change forces, the DD-7 stale goldens listed in DELIVER obligation 2, and the one reversed #348 expectation of DELIVER obligation 3, which is a user-authorized spec change performed by the orchestrator via nw-acceptance-designer. Pure functions get proptest (already authored for both grammars). Every command runs on the metal box (cargo xtask metal run -- ...), never Lima, never --exclusive for tests; this feature has no kvm-tests, guest-placed or native_launcher test. Mutation testing is per-feature (CLAUDE.md: cargo xtask metal run -- cargo xtask mutants --diff origin/main --features integration-tests, kill rate >= 80%): per step scope it with --package and --file over that step's production files, and run the full per-package diff once before the PR. No roadmap step id or issue number in any new identifier, filename or log message (.claude/rules/domain-naming.md). Validator length warnings are cosmetic.",
+  "phases": [
+    {
+      "id": "01",
+      "name": "Human-readable cpu and memory in [resources]: one slice, three green steps (GH #372)",
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "ByteSize and CpuQuantity grammars; VolumeSize rebuilt on ByteSize with the whole-GiB refinement",
+          "description": "Implement the two pure value types exactly as feature-delta.md Interface contracts pins them: ByteSize (u64 bytes; units B, KiB, MiB, GiB, TiB case-insensitive; five typed ParseError variants classified in the pinned order; canonical Display in the largest exactly dividing unit, zero is 0B; serde string) and CpuQuantity (u32 millicores; 500m, decimal cores to three fractional digits, whole cores; four typed variants; canonical Display whole cores when exact else <n>m; serde string). Rebuild VolumeSize::from_str on ByteSize and refuse zero or a non-multiple of 1 GiB; Display delegates to the ByteSize canonical form. Additive: no existing consumer changes, so the workspace stays green. @sizing-review-needed (three types in three files that share one grammar contract and one test binary; kept as one step because the volume refinement is proven by the shared grammar tests).",
+          "criteria": [
+            "byte_size_grammar.rs: all 15 pending tests lose their should_panic and pass unchanged: pinned accept table, canonical display, any count in any unit and case, serde round trip, the five rejection classes and their order, error text, u64 boundary, bare serde number refused naming the expected form, and the_volume_size_is_the_shared_grammar_refined_to_whole_gib (1024MiB accepted as 1GiB; 512MiB, 0GiB, 1.5GiB, 1GB refused)",
+            "cpu_quantity_grammar.rs: all 12 pending tests lose their should_panic and pass unchanged: 500m, 0.5 and 0.500 are 500; 2, 2000m and 2.0 are 2000; zero accepted; UnknownSuffix (uppercase M names the lowercase m), TooManyDecimals (0.5000), Overflow at the u32 millicore boundary, Malformed, serde bare number refused, and parse(display(v)) == v",
+            "vm_volume_size.rs: the pending test a_whole_gib_written_in_mib_or_bytes_is_the_same_volume_size loses its should_panic marker and passes unchanged (marker removal only, no body edit); text_outside_the_grammar_is_rejected was ALREADY re-drawn (no MiB) by the acceptance designer under the user-authorized spec change R-4, is green today and stays green, and the step does not edit it; every other #348 volume test (round trip in any unit case, TiB/GiB equality, display prefers TiB only when exact, 40MiB refused, overflow, serde rejects invalid) and the volume_value_types.rs bytes and ByteCount tests pass untouched",
+            "No public item beyond the pinned ByteSize, ByteSizeParseError, CpuQuantity, CpuQuantityParseError, their constructors and accessors is added; VolumeSize(u64), its derives and bytes() and ByteCount are unchanged; the serde string and archived u64 of every previously admitted volume size are unchanged",
+            "Gates on metal all exit 0: cargo check and cargo clippy --workspace --all-targets -D warnings with and without --features integration-tests; scoped nextest of overdrive-core; cargo xtask dst-lint; cargo test --doc -p overdrive-core; cargo xtask placement-lint"
+          ],
+          "test_file": "crates/overdrive-core/tests/acceptance/byte_size_grammar.rs",
+          "scenario_name": "byte_size_grammar.rs (15): the_pinned_accept_table_parses_to_the_pinned_size_and_canonical_form, display_is_canonical_and_round_trips, any_count_in_any_unit_and_case_parses_to_count_times_unit, serde_json_is_the_quoted_canonical_text_and_round_trips, sad_decimal_units_are_decimal_unit, sad_fractional_counts_are_fractional, sad_text_outside_the_grammar_is_malformed, sad_a_value_above_u64_bytes_is_overflow, sad_structure_outranks_overflow, sad_every_rejection_names_its_remedy_and_the_five_messages_differ, sad_serde_refuses_a_bare_number_and_names_the_expected_form, a_digit_run_without_a_unit_is_always_missing_unit, text_without_a_leading_digit_is_always_malformed, the_u64_boundary_is_exact_in_every_unit, the_volume_size_is_the_shared_grammar_refined_to_whole_gib; cpu_quantity_grammar.rs (12): the_pinned_accept_table_parses_to_the_pinned_quantity_and_canonical_form, display_is_canonical_and_round_trips, every_spelling_of_one_quantity_is_the_same_value, serde_json_is_the_quoted_canonical_text_and_round_trips, sad_text_outside_the_grammar_is_malformed, sad_an_unknown_suffix_is_named, sad_a_value_above_u32_millicores_is_overflow, sad_every_rejection_names_its_remedy_and_the_messages_differ, sad_serde_refuses_a_bare_number, four_or_more_fractional_digits_are_always_too_many_decimals, text_without_a_leading_digit_is_always_malformed, the_u32_boundary_is_exact (crates/overdrive-core/tests/acceptance/cpu_quantity_grammar.rs); crates/overdrive-core/tests/acceptance/vm_volume_size.rs (1 pending): a_whole_gib_written_in_mib_or_bytes_is_the_same_volume_size; already re-drawn and green, unchanged: vm_volume_size.rs::text_outside_the_grammar_is_rejected",
+          "implementation_notes": "Contract shape pure-function (return-only); no adapter, so no probe. DD-1, DD-2, DD-3 (ADR-0339, ADR-0310 amendment 2026-11-20, ADR-0340); grammar rules live only in feature-delta.md Interface contracts. Start from the DISTILL scaffolds byte_size.rs and cpu_quantity.rs (remove the SCAFFOLD marker and the scaffold-only allow block once real); lib.rs already declares both modules and pins no re-export. Hand-built scanners, no new dependency (bytesize, byte-unit, k8s-openapi, kube_quantity are rejected). Newtype rules: constructors validate and return Result, Display/FromStr/serde agree, no .expect() in library code, thiserror variants each with their own remedy Display. Checked arithmetic for overflow (never wrap). VolumeSize::from_str parses a ByteSize then refuses zero or a non-multiple of 1 GiB, as VolumeSizeParseError (existing shape unchanged). If any #348 test other than the one listed fails after the parser change, surface it to the user; do not edit it. Gates: cargo xtask metal run -- cargo check --workspace --all-targets [--features integration-tests]; cargo xtask metal run -- cargo clippy --workspace --all-targets [--features integration-tests] -- -D warnings; cargo xtask metal run -- cargo nextest run -p overdrive-core --features integration-tests; cargo xtask metal run -- cargo test --doc -p overdrive-core; cargo xtask metal run -- cargo xtask dst-lint; cargo xtask metal run -- cargo xtask placement-lint. MUTATION scope (>= 80%): --package overdrive-core --file crates/overdrive-core/src/byte_size.rs --file crates/overdrive-core/src/cpu_quantity.rs --file crates/overdrive-core/src/volume.rs.",
+          "files_to_modify": [
+            "crates/overdrive-core/src/byte_size.rs",
+            "crates/overdrive-core/src/cpu_quantity.rs",
+            "crates/overdrive-core/src/volume.rs",
+            "crates/overdrive-core/tests/acceptance/byte_size_grammar.rs",
+            "crates/overdrive-core/tests/acceptance/cpu_quantity_grammar.rs",
+            "crates/overdrive-core/tests/acceptance/vm_volume_size.rs"
+          ],
+          "depends_on": [],
+          "effort_hours": 8
+        },
+        {
+          "id": "01-02",
+          "name": "Single-cut type change: cpu and memory typed fields from spec to driver, whole-MiB admission, OpenAPI, describe",
+          "description": "Replace cpu_milli and memory_bytes with CpuQuantity cpu and ByteSize memory in one commit: Resources, both ResourcesInput twins (deny_unknown_fields refuses the removed keys), NodeSpecInput, ResourceEnvelope, ResourcesBody. Admission refuses zero memory and non-whole-MiB memory at Job::from_submit and the service constructor (field memory, DD-8); Node::new keeps only the non-zero check. vcpus_for, cpu_weight_for, the scheduler arithmetic, MemoryPlan callers, the cgroup memory.max write and the Cloud Hypervisor raw byte argument consume .millis()/.bytes(). Regenerate api/openapi.yaml; render::workload_describe prints canonical Memory: and a new CPU: line. Sweep every consumer and fixture: about 242 Rust files, raw TOML/JSON literals, non-.rs goldens and proptest-regression seeds, the four sub-MiB sim fixtures raised to at least 1 MiB, the 35 example TOML specs that tests read, and the stale describe goldens DD-7 makes stale. @sizing-review-needed (cannot be split: Resources, the two input twins and ResourcesBody share fields, so any partial rename leaves the workspace red; the example TOML specs move here because existing tests parse them and the new parser refuses the old keys).",
+          "criteria": [
+            "Through the production parser, submit handler and renderer: cpu = \"500m\" with memory = \"128MiB\" is admitted for Job, Service and Schedule shapes and reads back canonically (1024MiB reads back 1GiB with one spec digest); cpu_milli and memory_bytes, a bare number, a missing key and malformed values are refused naming the removed or unknown key and the expected grammar; zero CPU is admitted; zero, 1000B and 1048575B memory refused naming memory; 1048576B admitted",
+            "All 27 pending tests of this step lose their should_panic and pass unchanged: workload_resources_spec.rs (10), workload_resources_projections.rs (1), workload_resources_examples.rs (1, now satisfied by the swept example specs), schema_evolution workload_resources_fixtures.rs (2), deploy_workload_resources.rs (5), render_workload_resources.rs (4), workload_resources_wire.rs (3) and workload_resources_submit_refusal.rs (1, a 400 validation naming memory, store unchanged, describe 404); where a body still fails after the marker is removed, confirm the semantic RED first and implement to the contract, never edit the body",
+            "Existing golden fixtures decode unchanged: the V1 and V2 hex literals in schema_evolution workload_intent.rs and service_spec.rs and the AllocStatusRow fixtures are byte-identical, only struct-literal field names and types change; a fixture that fails to decode is a blocker to the user, not a re-pin. workload_resources_fixtures.rs proves the archived resources read back as canonical strings",
+            "api/openapi.yaml is regenerated (cpu and memory as type string with the pinned examples in ResourcesInput, ResourcesBody and ResourceEnvelope) and the openapi check passes; render::workload_describe prints Memory: 128MiB and CPU: 500m (zero CPU renders 0, no line without a resolved size) and the stale ND295 goldens, guest_stack_mtls_egress and vm_resources_sizing assertions follow the DD-7 canonical forms; the guest still receives raw byte counts (cgroup memory.max, Cloud Hypervisor --memory size=)",
+            "Gates on metal all exit 0: cargo check and cargo clippy --workspace --all-targets -D warnings with and without --features integration-tests; nextest of the touched crates (overdrive-core, overdrive-reconcilers, overdrive-control-plane, overdrive-cli, overdrive-worker, overdrive-sim, overdrive-host and tests/conformance) with --features integration-tests; the openapi check; cargo xtask placement-lint, dst-lint and conformance-lint; cargo test --doc for the touched crates",
+            "Owned-path list for des-commit --owned-paths: before the sweep the crafter runs rg -l 'cpu_milli|memory_bytes' over crates/ and tests/conformance/ (Rust and non-Rust) and records the output; the final owned-path list is that rg output plus every other file the step edited (the files_to_modify entries, regenerated api/openapi.yaml, the example specs); the list is enumerated explicitly and passed to des-commit, and a file edited but absent from it, or a match left unedited, blocks the commit"
+          ],
+          "test_file": "crates/overdrive-core/tests/acceptance/workload_resources_spec.rs",
+          "scenario_name": "workload_resources_spec.rs (10): a_non_canonical_spelling_is_read_back_canonically, an_admitted_workload_carries_the_declared_size_in_its_intent_resources, sad_the_removed_keys_are_refused_naming_the_unknown_key_and_the_expected_ones, sad_a_missing_cpu_or_memory_is_refused_naming_it, sad_each_malformed_memory_is_refused_at_parse_time_naming_the_grammar, sad_each_malformed_cpu_is_refused_at_parse_time_naming_the_grammar, sad_admission_follows_the_non_zero_and_whole_mib_rules_at_both_sites, sad_the_wire_refuses_the_removed_keys, equal_sizes_in_different_spellings_have_the_same_spec_digest, describe_reads_back_the_canonical_form; workload_resources_projections.rs: no_capacity_prose_renders_the_canonical_quantities; workload_resources_examples.rs: every_example_spec_parses_with_the_human_readable_resources; crates/overdrive-core/tests/schema_evolution/workload_resources_fixtures.rs: the_workload_intent_fixture_decodes_unchanged_and_reads_back_canonically, the_service_spec_fixture_decodes_unchanged_and_reads_back_canonically; crates/overdrive-cli/tests/acceptance/deploy_workload_resources.rs: a_spec_in_the_new_shape_passes_local_validation, sad_deploy_refuses_the_removed_keys_naming_the_unknown_key, sad_deploy_refuses_malformed_memory_naming_the_expected_form, sad_deploy_refuses_malformed_cpu_naming_the_expected_grammar, sad_deploy_refuses_zero_and_sub_mib_aligned_memory_naming_the_memory_field; crates/overdrive-cli/tests/acceptance/render_workload_resources.rs: describe_prints_the_canonical_memory_and_cpu_lines_for_every_kind, describe_prints_the_size_once_for_a_multi_replica_workload, describe_prints_a_zero_cpu_as_the_canonical_zero, describe_omits_both_size_lines_without_a_resolved_size; crates/overdrive-control-plane/tests/acceptance/workload_resources_wire.rs: the_resources_block_is_emitted_as_canonical_strings, sad_the_resources_block_refuses_the_removed_keys, openapi_describes_cpu_and_memory_as_strings_in_the_three_schemas; crates/overdrive-control-plane/tests/acceptance/workload_resources_submit_refusal.rs: sad_memory_that_is_not_a_whole_number_of_mib_is_refused_and_nothing_is_stored",
+          "implementation_notes": "ADR-0341 (DD-4, DD-5), ADR-0342 (DD-6), ADR-0343 (DD-8), DD-7, R-2; exact field types and admission contract are pinned in feature-delta.md Interface contracts, component rows in Component decomposition; add nothing beyond them. Suggested order inside the one commit so each compile error points at the next site: (1) core types (Resources, both ResourcesInput twins, NodeSpecInput, ResourceEnvelope, scheduler, vcpus_for, aggregate admission) then reconcilers, worker, host, sim and control-plane consumers; (2) mechanical rename and literal rewrite across crates/ (about 242 files) plus raw string literals a compile cannot find (node_volume_boundaries.rs, quint_node_volume.rs, tests/conformance/src/gateway.rs, tests/conformance/tests/shared_guest_network_fail_stop_recovery.rs), the non-.rs goldens and proptest-regressions, and the vm_lifecycle.rs generated spec; (3) the 35 example TOML specs under examples/ (33 plus the two under node-local-volume); (4) regenerate OpenAPI: cargo xtask metal run -- cargo run -p overdrive-control-plane --bin openapi -- generate, then -- check; (5) render CPU line and stale goldens. Sub-MiB fixtures are NOT mechanical: raise netns_density_activation_order.rs, netns_density_retiring_cleanup.rs, netns_density_reclaim.rs and DEMAND_MEMORY_BYTES in netns_density_node_admission.rs to at least 1 MiB keeping the paired Resources literals consistent; proptest strategies drawing arbitrary u64 memory (describe_round_trip) generate whole-MiB memory. Node::new refuses only zero memory (a sub-MiB node capacity is admitted). MemoryPlan and reserve_bytes are unchanged; a ByteSize Display is never passed to a foreign protocol (cgroup memory.max and --memory size= stay decimal byte counts from .bytes()). Operator-facing describe change goes through render::workload_describe (the live renderer). Newtype and ordering rules: derive Ord comparisons, saturating arithmetic in the scheduler. The reconcile-trajectory and hydration goldens change only in the field text; any other diff is a defect. Gates: cargo xtask metal run -- cargo check --workspace --all-targets [--features integration-tests]; cargo xtask metal run -- cargo clippy --workspace --all-targets [--features integration-tests] -- -D warnings; cargo xtask metal run -- cargo nextest run -p overdrive-core -p overdrive-reconcilers -p overdrive-control-plane -p overdrive-cli -p overdrive-worker -p overdrive-sim -p overdrive-host --features integration-tests; cargo xtask metal run -- cargo run -p overdrive-control-plane --bin openapi -- check; cargo xtask metal run -- cargo xtask placement-lint; cargo xtask metal run -- cargo xtask dst-lint; cargo xtask metal run -- cargo xtask conformance-lint; cargo xtask metal run -- cargo test --doc --workspace. The crafter enumerates the final owned-path list for des-commit --owned-paths (rg -l output before the sweep plus every file edited). MUTATION scope (>= 80% on diff), run per package: --package overdrive-core --file crates/overdrive-core/src/aggregate/mod.rs --file crates/overdrive-core/src/aggregate/workload_spec.rs (the spec parser ResourcesInput twin and the job/service admission) --file crates/overdrive-core/src/scheduler.rs --file crates/overdrive-core/src/vm/config.rs --file crates/overdrive-core/src/transition_reason.rs; --package overdrive-control-plane --file crates/overdrive-control-plane/src/handlers.rs --file crates/overdrive-control-plane/src/api.rs; --package overdrive-worker --file crates/overdrive-worker/src/cgroup_manager.rs --file crates/overdrive-worker/src/vm_driver.rs; --package overdrive-cli --file crates/overdrive-cli/src/render.rs --file crates/overdrive-cli/src/commands/deploy.rs; --package overdrive-reconcilers --file crates/overdrive-reconcilers/src/workload_lifecycle.rs; the 01-01 value types are covered by 01-01. Surface to the user instead of editing: any non-sub-MiB test whose assertion fails for a reason other than the rename, canonical text or DD-7 goldens.",
+          "files_to_modify": [
+            "crates/overdrive-core/src/traits/driver.rs",
+            "crates/overdrive-core/src/aggregate/workload_spec.rs",
+            "crates/overdrive-core/src/aggregate/mod.rs",
+            "crates/overdrive-core/src/scheduler.rs",
+            "crates/overdrive-core/src/vm/config.rs",
+            "crates/overdrive-core/src/transition_reason.rs",
+            "crates/overdrive-core/src/api/describe.rs",
+            "crates/overdrive-core/src/api/submit.rs",
+            "crates/overdrive-control-plane/src/api.rs",
+            "crates/overdrive-control-plane/src/handlers.rs",
+            "crates/overdrive-control-plane/src/node_volume_boundaries.rs",
+            "crates/overdrive-control-plane/src/quint_node_volume.rs",
+            "crates/overdrive-cli/src/commands/deploy.rs",
+            "crates/overdrive-cli/src/render.rs",
+            "crates/overdrive-worker/src/cgroup_manager.rs",
+            "crates/overdrive-worker/src/vm_driver.rs",
+            "crates/overdrive-reconcilers/src/workload_lifecycle.rs",
+            "crates/overdrive-bench-families/src/families/vm_lifecycle.rs",
+            "api/openapi.yaml",
+            "crates/overdrive-core/tests/schema_evolution/workload_intent.rs",
+            "crates/overdrive-core/tests/schema_evolution/service_spec.rs",
+            "crates/overdrive-core/tests/acceptance/aggregate_validation.rs",
+            "crates/overdrive-core/tests/acceptance/workload_resources_spec.rs",
+            "crates/overdrive-core/tests/acceptance/workload_resources_projections.rs",
+            "crates/overdrive-core/tests/acceptance/workload_resources_examples.rs",
+            "crates/overdrive-core/tests/schema_evolution/workload_resources_fixtures.rs",
+            "crates/overdrive-cli/tests/acceptance/deploy_workload_resources.rs",
+            "crates/overdrive-cli/tests/acceptance/render_workload_resources.rs",
+            "crates/overdrive-cli/tests/acceptance/render_workload_describe.rs",
+            "crates/overdrive-cli/tests/integration/guest_stack_mtls_egress.rs",
+            "crates/overdrive-cli/tests/integration/vm_resources_sizing.rs",
+            "crates/overdrive-control-plane/tests/acceptance/workload_resources_wire.rs",
+            "crates/overdrive-control-plane/tests/acceptance/workload_resources_submit_refusal.rs",
+            "crates/overdrive-control-plane/tests/acceptance/fixtures/hydration_golden/workload_lifecycle.txt",
+            "crates/overdrive-sim/tests/acceptance/fixtures/hydration_trajectory/workload_lifecycle_trajectory.txt",
+            "crates/overdrive-control-plane/tests/integration/describe_round_trip.proptest-regressions",
+            "crates/overdrive-core/tests/acceptance/scheduler_determinism.proptest-regressions",
+            "crates/overdrive-sim/tests/acceptance/netns_density_activation_order.rs",
+            "crates/overdrive-sim/tests/acceptance/netns_density_retiring_cleanup.rs",
+            "crates/overdrive-sim/tests/integration/netns_density_reclaim.rs",
+            "crates/overdrive-sim/tests/integration/netns_density_node_admission.rs",
+            "tests/conformance/src/gateway.rs",
+            "tests/conformance/tests/shared_guest_network_fail_stop_recovery.rs",
+            "examples/coinflip.toml",
+            "examples/dns-resolver.toml",
+            "examples/nightly-backup.toml",
+            "examples/quick-bind-service.toml",
+            "examples/liveness-absent-service.toml",
+            "examples/liveness-fails-service.toml",
+            "examples/liveness-holds-service.toml",
+            "examples/dial-by-name-responder/",
+            "examples/guest-stack-transparent-mtls-intercept/",
+            "examples/public-ingress-gateway/service.toml",
+            "examples/service-kind-vm-workloads/",
+            "examples/node-local-volume/volume-service.toml",
+            "examples/node-local-volume/volume-oversized.toml",
+            "SWEEP SET (mechanical, enumerated by rg -l 'cpu_milli|memory_bytes' and not hand-listed): crates/**/*.rs",
+            "SWEEP SET: crates/** non-Rust fixtures (goldens, proptest-regressions, TOML/JSON/YAML literals) matched by rg -l 'cpu_milli|memory_bytes'",
+            "SWEEP SET: tests/conformance/**/*.rs matched by rg -l 'cpu_milli|memory_bytes'"
+          ],
+          "depends_on": [
+            "01-01"
+          ],
+          "effort_hours": 20
+        },
+        {
+          "id": "01-03",
+          "name": "Docs, scripts, benchmark catalogue and the cpu_milli/memory_bytes grep gate",
+          "description": "Sweep the remaining non-compiled surfaces to the new spelling and close the KPI: the capacity log label in examples/service-kind-vm-workloads-v2/run-example.sh (renamed to memory=, host capacity, no parser reads it), the live E06 runner script's spec heredoc, the field name in benchmarks/catalogue.md, the website how-to and home page spec, any README under examples/ that names the old keys, and the workload spec example in docs/product/architecture/brief.md. Then run the grep gate over the whole surface. Evidence directories, benchmarks/results and docs/evolution are immutable record and are not edited. Docs and blog posts are the FINALIZE gate, not this step.",
+          "criteria": [
+            "The grep gate returns zero matches: rg -n 'cpu_milli|memory_bytes' over crates/ tests/ examples/ verification/expectations/ (excluding every evidence/ directory) benchmarks/catalogue.md website/content/docs website/app/(home)/page.tsx api/ docs/product/architecture/brief.md, except two explicit exceptions: (1) the memory_bytes metric label in crates/overdrive-bench-families/src/families/mtls_path.rs (a measurement name, not the resource field, not touched); (2) verification/expectations/O08-workload-resources-human-readable-refusal-and-describe/README.md (names the removed key as the refusal case under test). Retained verification/expectations/*/evidence/ directories, benchmarks/results and docs/ history (docs/evolution and feature artifacts) are outside the gate surface and excluded",
+    "website/content/docs/how-to/deploy-a-workload.mdx and website/app/(home)/page.tsx show cpu = \"...\" and memory = \"...\" strings with the canonical forms and describe output; the website gates bun run typecheck and bun run build run locally in website/ (the website is exempt from the Rust and metal gates) and both pass (frontmatter YAML errors pass typecheck and fail build)",
+            "examples/service-kind-vm-workloads-v2/run-example.sh logs memory= instead of memory_bytes= for host capacity and still runs its capacity logic unchanged; verification/expectations/E06-vm-job-deploy-reaches-running/runner.sh deploys a spec in the new shape; no file under any evidence/ directory, benchmarks/results or docs/evolution changed",
+            "Every example spec still parses through the production parser: workload_resources_examples.rs and the full nextest of overdrive-core pass after the sweep; the full workspace check and clippy with and without --features integration-tests stay green"
+          ],
+          "test_file": "crates/overdrive-core/tests/acceptance/workload_resources_examples.rs",
+          "scenario_name": "Grep gate (AC-2.7, AC-1.8) and the docs sweep; no pending test is activated here (every_example_spec_parses_with_the_human_readable_resources, activated in 01-02, must keep passing)",
+          "implementation_notes": "Scripts, docs and catalogue text only; no Rust production code. DD sweep rows: examples/service-kind-vm-workloads-v2/run-example.sh, verification/expectations/E06-vm-job-deploy-reaches-running/runner.sh, benchmarks/catalogue.md, website docs, brief.md. Do not touch the evidence/ directories of any expectation, benchmarks/results/ or docs/evolution/. Do not edit the metric label in mtls_path.rs. Gates: the grep gate above (run it on the metal checkout: cargo xtask metal run -- rg ... is not in the ordinary grammar, so run the rg over the local checkout and record the empty result); cargo xtask metal run -- cargo nextest run -p overdrive-core --features integration-tests; cargo xtask metal run -- cargo check --workspace --all-targets --features integration-tests; cargo xtask metal run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings; in website/: bun run typecheck and bun run build (website is exempt from Rust gates). No mutation scope: no production Rust file changes. The EDD expectation O08 capture is a separate point-in-time event by a different agent (.claude/rules/verification.md) and the docs page and blog post are the FINALIZE gate (.claude/rules/finalize.md); neither is a roadmap gate.",
+          "files_to_modify": [
+            "examples/service-kind-vm-workloads-v2/run-example.sh",
+            "verification/expectations/E06-vm-job-deploy-reaches-running/runner.sh",
+            "benchmarks/catalogue.md",
+            "website/content/docs/how-to/deploy-a-workload.mdx",
+            "website/app/(home)/page.tsx",
+            "docs/product/architecture/brief.md"
+          ],
+          "depends_on": [
+            "01-02"
+          ],
+          "effort_hours": 5
+        }
+      ]
+    }
+  ],
+  "validation": {
+    "status": "approved",
+    "notes": "Conditionally approved by nw-acceptance-designer-reviewer 2026-11-20; findings resolved (grep-gate exceptions and evidence exclusions, sweep-set owned paths, vm_volume_size pending test assigned to 01-01, mutation scope extended, benchmarks/catalogue.md retained because it still names memory_bytes, website gates stated local). Every one of the 55 DISTILL pending tests maps to exactly one step: 01-01 activates 28 (15 byte_size_grammar, 12 cpu_quantity_grammar, 1 vm_volume_size), 01-02 activates 27 (10 workload_resources_spec, 1 projections, 1 examples, 2 fixtures, 5 deploy, 4 render, 3 wire, 1 submit refusal), 01-03 activates none (grep gate and docs). The example-spec sweep moved from the suggested 01-03 into 01-02 because existing tests read the example TOML specs and the new parser refuses the old keys, so leaving them for 01-03 would leave the suite red between steps."
+  }
+}
