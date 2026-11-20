@@ -1,21 +1,23 @@
 # Benchmark methodology
 
 Methodology version 1. The runner (`crates/overdrive-bench`) owns this protocol and stamps the
-version into every record's header; a record states which version produced it, and a change to
-any rule below bumps the version. Normative definitions live in ADR-0300 (statistics), ADR-0301
+version into every record's header; a record states which version produced it. A change to or
+removal of a rule below bumps the version; an addition for a new substrate does not. Normative definitions live in ADR-0300 (statistics), ADR-0301
 (record and report), ADR-0302 (host eligibility), ADR-0303 (BPF statistics), ADR-0305 (clocks).
 
 A benchmark is not a test. It runs only through `cargo xtask metal run --benchmark <family>`
 under exclusive admission on the test host, and its result is a retained record, never a
 nextest outcome. Each benchmark's declaration also generates a smoke test that runs one
-replicate per arm in a guest and asserts no timing.
+replicate per arm in a guest and asserts no timing; for a guest benchmark that test guest boots the
+family's measuring guest and still takes no measurement.
 
 ## Runner isolation
 
 - The benchmark form holds exclusive admission for the whole run: no other Metal run, test or
   maintenance command shares the host while samples are taken.
-- The benchmark runs on the native substrate (the host itself, no namespace, no wrapper). The
-  record carries the substrate; records of different substrates are never compared, and the
+- A native benchmark runs on the native substrate (the host itself, no namespace, no wrapper); a
+  guest benchmark runs in a guest the benchmark process launches directly on that host (see
+  Guest substrate). The record carries the substrate; records of different substrates are never compared, and the
   report tool compares only the arms of one record.
 - Every replicate builds a fresh fixture and tears it down on exit; no state survives from one
   replicate to the next.
@@ -96,3 +98,31 @@ the statistics and each failure is recorded and counted. A failed replicate does
 entries appear in each report table. A run that finishes with failed replicates still exits 0;
 the failures are in the report, not the status. Refusals exit 78, usage errors 64 and internal
 errors (including a failed statistics enable) 70.
+
+## Guest substrate
+
+A guest benchmark measures code that runs inside a guest. Every rule above applies to it unless
+this section says otherwise.
+
+- **Isolation.** The benchmark process launches the guest directly on the exclusively held host;
+  a guest is never nested inside another guest. Every replicate boots a fresh guest and the guest
+  is gone when the replicate ends.
+- **Eligibility.** The full host list above is read on the real host before any guest boots, and
+  a drifted host is refused with no guest booted. No guest setting is pinned. The CPU governor,
+  SMT and boost are recorded absent with the reason "not visible from a guest". The guest's
+  kernel and clocksource, its vCPU count and memory, and the digests of the staged guest
+  artifacts are recorded from the first replicate that reports them; later replicates are not
+  compared with that reading.
+- **Clock boundaries.** The guest clock is the guest's own `CLOCK_MONOTONIC`. A guest duration is
+  never combined with a host stamp.
+- **vCPU marking.** The record states the vCPU count and that vCPU scheduling is unpinned.
+- **Staged artifacts.** The record names the guest artifacts that ran by digest. The benchmark
+  form does not rebuild them: run `cargo xtask guest-kit-prepare` at the commit being measured.
+- **Canary.** The loopback canary is a host measurement and says nothing about the guest.
+- **Comparability.** Records of different substrates are never compared. Arms are compared only
+  inside one record.
+- **BPF statistics.** A guest benchmark declares no `bpf_stats`; its record states `off`.
+- **Failure accounting.** A guest failure, including a guest kit that was not prepared, is a
+  failed replicate; its console is retained beside the record and the run continues. A run whose
+  replicates all failed still exits 0, so exit status 0 does not imply that any replicate was ok:
+  read `replicates_ok`.

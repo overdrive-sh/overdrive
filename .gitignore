@@ -57,3 +57,6 @@ lefthook-local.yml
 
 # Guest consoles a guest benchmark retains beside its record; the record and report stay committed.
 benchmarks/results/**/artifacts/
+
+# Guest consoles a spike crate retains beside its record, like a benchmark's.
+spike-scratch/*/results/**/artifacts/

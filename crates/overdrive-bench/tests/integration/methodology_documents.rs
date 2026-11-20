@@ -82,7 +82,6 @@ fn section_of(text: &str, heading: &str) -> Option<String> {
 /// (`replicates_ok`). US-GBS-01 DoD; DDD-3.
 /// CONTRACT_SHAPE: pure-function (document text in, verdict out).
 #[test]
-#[should_panic(expected = "the methodology must have a `## Guest substrate` section")]
 fn the_methodology_has_a_guest_substrate_section_stating_its_rules() {
     let text = document("methodology.md");
     let section = section_of(&text, "Guest substrate")
@@ -109,9 +108,6 @@ fn the_methodology_has_a_guest_substrate_section_stating_its_rules() {
 /// does. The native run's requirement is word for word what it was, now substrate-conditional.
 /// CONTRACT_SHAPE: pure-function (document text in, verdict out).
 #[test]
-#[should_panic(
-    expected = "the version policy must say an addition for a new substrate does not bump"
-)]
 fn the_methodology_keeps_version_1_and_says_a_new_substrate_does_not_bump_it() {
     let text = document("methodology.md").to_lowercase();
     assert!(text.contains("methodology version 1"), "the methodology still states version 1");
@@ -130,7 +126,6 @@ fn the_methodology_keeps_version_1_and_says_a_new_substrate_does_not_bump_it() {
 /// unpinned, the unmeasured paths, no BPF statistics inside a guest. US-GBS-01 AC (g); DDD-8.
 /// CONTRACT_SHAPE: pure-function (document text in, verdict out).
 #[test]
-#[should_panic(expected = "the catalogue must have a row for the guest family")]
 fn the_catalogue_has_a_row_for_the_guest_family_with_its_workload_clock_owner_and_caveats() {
     let text = document("catalogue.md");
     let row = text
@@ -166,9 +161,6 @@ fn the_catalogue_has_a_row_for_the_guest_family_with_its_workload_clock_owner_an
 /// native benchmark. US-GBS-01 AC (e); D9.
 /// CONTRACT_SHAPE: pure-function (document text in, verdict out).
 #[test]
-#[should_panic(
-    expected = "the catalogue must state that a family that launches VMs is not a guest benchmark"
-)]
 fn the_catalogue_states_that_a_family_that_launches_vms_is_not_a_guest_benchmark() {
     let text = document("catalogue.md").to_lowercase();
     assert!(
