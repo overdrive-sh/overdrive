@@ -1,10 +1,12 @@
 //! Node-local persistent volume (GH #348, ADR-0310): the `VolumeSize` value an
 //! operator writes as `[vm.volume] size = "40GiB"`.
 //!
-//! Scenarios: the grammar `<uint><unit>` accepts `GiB` and `TiB` in any case,
-//! rejects everything else with a typed error, round-trips through its
-//! canonical text and through serde, and renders canonically (`GiB` unless an
-//! exact `TiB` multiple).
+//! Scenarios: the volume size is a byte size (ADR-0339) refined to a whole
+//! number of GiB, at least 1 GiB. `GiB` and `TiB` spellings are accepted in any
+//! case, and so is any other spelling of a whole-GiB size (`1024MiB`,
+//! `1073741824B`; GH #372, R-4). Everything else is a typed error. A size
+//! round-trips through its canonical text and through serde, and renders
+//! canonically (`GiB` unless an exact `TiB` multiple).
 //!
 //! Every test here is about the grammar. The tests that reject text carry a
 //! positive control (a valid size the grammar must accept), so a parser that
@@ -67,19 +69,50 @@ proptest! {
         );
     }
 
-    /// Anything outside `<uint><GiB|TiB>` is a typed error, never a size.
+    /// Anything the volume size refuses is a typed error, never a size: a decimal or unknown
+    /// unit, padding, a fraction, no unit, and a `MiB` or `B` spelling below one GiB.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
     fn text_outside_the_grammar_is_rejected(
-        text in "[0-9]{0,6}(MiB|GB|KiB|PiB|G|T| GiB|GiB | TiB|\\.5GiB|)",
+        text in prop_oneof![
+            "[0-9]{0,6}(GB|PiB|G|T| GiB|GiB | TiB|\\.5GiB|)",
+            // Below 1 GiB (1024 MiB): at most 999 MiB.
+            "[0-9]{1,3}MiB",
+            // Below 1 GiB (1073741824 bytes): at most 999999999 bytes.
+            "[0-9]{1,9}B",
+            // Below 1 GiB (1048576 KiB): at most 999999 KiB.
+            "[0-9]{1,6}KiB",
+        ],
     ) {
         // The control: a grammar that refuses everything refuses the near-miss too.
         prop_assert!(
             parse("40GiB").is_ok(),
             "the grammar must accept 40GiB while it refuses the near-miss"
         );
-        // The strategy only yields near-misses: a unit outside GiB/TiB, padding, a fraction, or no unit.
+        // The strategy only yields what the contract refuses.
         prop_assert!(parse(&text).is_err(), "{text:?} must not parse");
+    }
+}
+
+/// R-4 (GH #372): a whole number of GiB written in MiB or bytes is the same volume size as its
+/// GiB spelling, and renders canonically. Pending: the shipped parser accepts only `GiB` and
+/// `TiB` units.
+/// CONTRACT_SHAPE: pure-function.
+#[test]
+#[should_panic(expected = "a whole-GiB spelling in another unit must parse as a volume size")]
+fn a_whole_gib_written_in_mib_or_bytes_is_the_same_volume_size() {
+    let one_gib = parse("1GiB").expect("1GiB is the control and must parse");
+    for text in ["1024MiB", "1073741824B"] {
+        let size = parse(text).unwrap_or_else(|e| {
+            panic!("a whole-GiB spelling in another unit must parse as a volume size {text:?}: {e}")
+        });
+        assert_eq!(size, one_gib, "{text:?} is one GiB");
+        assert_eq!(size.bytes(), 1 << 30, "{text:?} is 2^30 bytes");
+        assert_eq!(size.to_string(), "1GiB", "{text:?} must display canonically");
+        let back: VolumeSize = serde_json::from_str(&format!("\"{text}\""))
+            .expect("the wire form of a whole-GiB size in another unit must deserialise");
+        assert_eq!(back, one_gib);
+        assert_eq!(serde_json::to_string(&size).expect("serialises"), "\"1GiB\"");
     }
 }
 
@@ -110,6 +143,8 @@ fn sad_malformed_declarations_are_rejected_with_a_typed_error() {
         "40",
         "40GB",
         "40MiB",
+        "512MiB",
+        "1073741823B",
         "40 GiB",
         "-1GiB",
         "4.5GiB",
