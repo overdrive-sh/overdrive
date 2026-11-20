@@ -518,7 +518,7 @@ Status of every item: **APPROVED 2026-11-19** (verdicts in "User approval"). Eac
 **PD-9 — A replicate retains its guest console beside the record.** ADR-0333. **APPROVED 2026-11-19, option (a): retain every replicate's console in every outcome, not committed; `benchmarks/results/**/artifacts/` goes into `.gitignore`.**
 - *Context.* US-GBS-03 requires the guest console to be retained with the result in every outcome (AC (d): "when a guest run ends in any state"). A body cannot write a file next to the record. A series metric keeps raw values only up to 1,000 per replicate and a histogram above that; the family returns about 5,000 values, so a replicate's console is the only raw copy of its samples.
 - *Problem.* Without retention a guest that boots but misbehaves leaves nothing to look at; the record only says it failed. Retaining every console costs about 40 KB per replicate (about 1.2 MB per run of 30, up to about 3 MB at 105 KB) and the directory is pulled with the result.
-- *Options.* (a) `Replicate::retain_console(text)` writes `artifacts/<profile>/<block>-<position>-<arm>/console.log` under the result directory, create-new, for every replicate in every outcome; no schema change and no note; a no-op under smoke; `benchmarks/results/**/artifacts/` goes into `.gitignore` (the record and report stay committed as today, the consoles are kept with the pulled directory). (b) The same call, made only for failed replicates; AC (d) is reworded to "a failed guest's console is retained", the result directory shrinks, and a successful replicate's raw values survive only as the histogram. (c) As (a) and commit the consoles: about 1.2 to 3 MB per committed run. (d) The console as a record field: grows every line by tens of kilobytes. (e) The family writes the file itself: the directory is not exposed to bodies.
+- *Options.* (a) `Replicate::retain_console(text)` records the console and the runner writes `artifacts/<profile>/<block>-<position>-<arm>/console.log` under the result directory, create-new, after the body returns, for every replicate in every outcome; no schema change and no note; nothing written under smoke; `benchmarks/results/**/artifacts/` goes into `.gitignore` (the record and report stay committed as today, the consoles are kept with the pulled directory). (b) The same call, made only for failed replicates; AC (d) is reworded to "a failed guest's console is retained", the result directory shrinks, and a successful replicate's raw values survive only as the histogram. (c) As (a) and commit the consoles: about 1.2 to 3 MB per committed run. (d) The console as a record field: grows every line by tens of kilobytes. (e) The family writes the file itself: the directory is not exposed to bodies.
 - *Decision.* (a). It keeps AC (d) as written and keeps the raw evidence of a surprising result. The `.gitignore` line is approved with it.
 - *Depends on.* nothing.
 
@@ -537,6 +537,9 @@ The user ruled on every decision on 2026-11-19.
 | PD-7 | APPROVED as recommended, including the workspace-root change (DDD-11); the shape follows PD-4 (no port) | 2026-11-19 | 0331 |
 | PD-8 | APPROVED: option (a), one metric `forwarded_round_trip_ns` | 2026-11-19 | 0332 |
 | PD-9 | APPROVED: option (a), every replicate's console retained and not committed; `benchmarks/results/**/artifacts/` in `.gitignore` | 2026-11-19 | 0333 |
+| DDD-9 amendment | APPROVED: `retain_console` records the console and the runner writes it after the body returns (a write failure fails the replicate; nothing written under smoke). Reason: writing in place would make `Replicate` borrow the sink, so non-`Send` | 2026-11-20 | 0333 |
+
+Changed assumption (2026-11-20): `run_in_guest_cell` shares `run_in_guest_program`'s post-EXIT rule (a VMM still running after the post-EXIT wait is an error; the wait result is never discarded), so DDD-5's "keeps its behaviour" is reworded.
 
 Scope-limit rulings (2026-11-19): the first family's unmeasured paths (host-driven vsock leg, other flow kinds, the owner's accept-and-pair work) are tracked by [#370](https://github.com/overdrive-sh/overdrive/issues/370); BPF program statistics inside a guest by [#371](https://github.com/overdrive-sh/overdrive/issues/371); the console's throughput is ruled a property of the mechanism and has no issue. Already tracked: unpinned vCPUs #368, fixed guest shape #369, VM-launching guest families #347, regression gating #361, in-guest kernel mTLS #303.
 
@@ -697,7 +700,7 @@ impl GuestImageSpec { pub const fn benchmark() -> Self }   // OverdriveInit, for
 // cid_bands: GUEST_BENCHMARK = CidBand { name: "overdrive-bench guest benchmark", first_offset: 0x2050, width: 16 }; REGISTERED grows to 6 entries (registry_is_sound still holds)
 ```
 
-`run_in_guest_cell` keeps its behaviour and shares its body with `run_in_guest_program`.
+`run_in_guest_cell` shares its body with `run_in_guest_program` and so shares its post-EXIT rule: a VMM still running after the post-EXIT wait is an error, and the wait result is never discarded. Its other behaviour is unchanged.
 
 CID per replicate: the family takes `GUEST_BENCHMARK.cid(n)` with `n` a family-private counter of the replicates this process has started, modulo the band width (16). Replicates run sequentially (one guest at a time on an exclusive host), so a CID is in use by at most one guest, and from the seventeenth replicate on a CID is reused. Reuse is safe because `run_in_guest_program` reaps the VMM before it returns (its postcondition), the VMM's exit releases its vhost-vsock file and removes the CID from the hash (`drivers/vhost/vsock.c:946`, body `:753-786 @ v7.0`), and V-C checks that the CID is reusable after the VMM is gone, including the wrap to replicate 17. The V-A and V-B2 spikes do not show reuse: they cycled 256-wide and unbounded CID ranges (V-A's probe `next_cid` modulo 256; V-B2's CIDs `0x1003000` to `0x1003059` over 90 cycles), so no CID was used twice in 90 cycles; the reuse rests on V-C and the kit's unchanged launch path, and a launch that fails on a busy CID is a failed replicate (`guest boot: <cause>`).
 
@@ -754,9 +757,14 @@ Catalogue row (DELIVER writes it): boundary "the `ovd_fwd` forwarder's data path
 
 ```rust
 impl Replicate {
-    /// Writes `text` to `<result dir>/artifacts/<profile>/<block>-<position>-<arm>/console.log`
-    /// (create-new). A second call by the same replicate, or a write failure, is a
-    /// `ReplicateFailure`. Under `smoke` only the effect (the file) is skipped and `Ok(())` is returned: a guest-substrate precondition failure, the M-1 failure and a second `retain_console` call fail the replicate exactly as in a real run.
+    /// Records the replicate's console. A second call by the same replicate is a
+    /// `ReplicateFailure`. The runner writes the recorded console to
+    /// `<result dir>/artifacts/<profile>/<block>-<position>-<arm>/console.log` (create-new,
+    /// through `RecordSink::write_artifact`) after the body returns, in every outcome. A write
+    /// failure fails the replicate: with the write error as the reason when the body returned
+    /// Ok, appended to the body's own reason when the body already failed. The call itself
+    /// writes nothing, so `Replicate` holds no borrow of the sink and stays `Send`. Under `smoke`
+    /// nothing is written and `Ok(())` is returned: a guest-substrate precondition failure, the M-1 failure and a second `retain_console` call fail the replicate exactly as in a real run.
     pub fn retain_console(&mut self, text: &str) -> Result<(), ReplicateFailure>;
 }
 // RecordSink gains: fn write_artifact(&self, dir: &Path, relative: &Path, bytes: &[u8]) -> io::Result<()>;  // create-new, creates parents

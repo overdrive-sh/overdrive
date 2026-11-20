@@ -10,7 +10,7 @@ US-GBS-03 requires the guest console to be retained with the result directory, s
 
 ## Decision
 
-`Replicate::retain_console(text)` writes `<result dir>/artifacts/<profile>/<block>-<position>-<arm>/console.log` through the runner's `RecordSink` with create-new semantics (a second call, or a write failure, is a `ReplicateFailure`). The path derives from the replicate's own coordinates, which every `replicate` line carries, so no record field and no note is added. Under `smoke` there is no result directory: it writes nothing and returns `Ok`. A guest family retains each replicate's console in every outcome (which replicates, PD-9). The `artifacts/` directory is pulled with the result directory and is not committed.
+`Replicate::retain_console(text)` records the replicate's console (a second call by the same replicate is a `ReplicateFailure`). After the body returns, in every outcome, the runner writes it to `<result dir>/artifacts/<profile>/<block>-<position>-<arm>/console.log` through `RecordSink::write_artifact` with create-new semantics; a write failure fails the replicate, with the write error as the reason when the body returned Ok and appended to the body's reason when it already failed. Writing in place would make `Replicate` borrow the sink and so not `Send`. The path derives from the replicate's own coordinates, which every `replicate` line carries, so no record field and no note is added. Under `smoke` there is no result directory: nothing is written and `Ok` is returned. A guest family retains each replicate's console in every outcome (which replicates, PD-9). The `artifacts/` directory is pulled with the result directory and is not committed.
 
 ## Alternatives
 
