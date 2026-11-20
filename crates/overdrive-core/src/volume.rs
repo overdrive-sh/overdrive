@@ -45,25 +45,53 @@ impl VolumeSize {
     }
 }
 
+const BYTES_PER_GIB: u64 = 1 << 30;
+const BYTES_PER_TIB: u64 = 1 << 40;
+
+/// Splits `<uint><unit>` into its ASCII-digit count and the remaining unit text.
+fn split_count_and_unit(s: &str) -> Option<(u64, &str)> {
+    let digits_end = s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len());
+    let (digits, unit) = s.split_at(digits_end);
+    if digits.is_empty() {
+        return None;
+    }
+    digits.parse::<u64>().ok().map(|count| (count, unit))
+}
+
+impl VolumeSize {
+    fn parse_bytes(s: &str) -> Result<u64, &'static str> {
+        let (count, unit) = split_count_and_unit(s).ok_or("expected <uint>GiB or <uint>TiB")?;
+        let multiple = if unit.eq_ignore_ascii_case("GiB") {
+            BYTES_PER_GIB
+        } else if unit.eq_ignore_ascii_case("TiB") {
+            BYTES_PER_TIB
+        } else {
+            return Err("the unit must be GiB or TiB");
+        };
+        if count == 0 {
+            return Err("the size must be at least 1");
+        }
+        count.checked_mul(multiple).ok_or("the size in bytes overflows")
+    }
+}
+
 impl FromStr for VolumeSize {
     type Err = VolumeSizeParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        // RED scaffold: the grammar is DELIVER's. The scaffold refuses every input, so a test
-        // that needs a size without being about the grammar builds one with
-        // `testing::volume::volume_size_gib`, and a test about the grammar fails on its own
-        // accept or reject assertion rather than on a panic inside the scaffold.
-        Err(VolumeSizeParseError {
-            input: s.to_owned(),
-            reason: "volume size grammar not implemented".to_owned(),
-        })
+        Self::parse_bytes(s)
+            .map(Self)
+            .map_err(|reason| VolumeSizeParseError { input: s.to_owned(), reason: reason.to_owned() })
     }
 }
 
 impl fmt::Display for VolumeSize {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // RED scaffold: renders nothing until DELIVER implements the canonical GiB/TiB text.
-        Ok(())
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.0.is_multiple_of(BYTES_PER_TIB) {
+            write!(f, "{}TiB", self.0 / BYTES_PER_TIB)
+        } else {
+            write!(f, "{}GiB", self.0 / BYTES_PER_GIB)
+        }
     }
 }
 
@@ -113,15 +141,16 @@ impl FromStr for ByteCount {
     type Err = ByteCountParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        // RED scaffold: refuses every input until DELIVER implements `<uint>B`.
-        Err(ByteCountParseError { input: s.to_owned() })
+        split_count_and_unit(s)
+            .filter(|(_, unit)| unit.eq_ignore_ascii_case("B"))
+            .map(|(count, _)| Self(count))
+            .ok_or_else(|| ByteCountParseError { input: s.to_owned() })
     }
 }
 
 impl fmt::Display for ByteCount {
-    fn fmt(&self, _f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // RED scaffold: renders nothing until DELIVER implements `<n>B`.
-        Ok(())
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}B", self.0)
     }
 }
 

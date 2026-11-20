@@ -32,7 +32,6 @@ proptest! {
     /// unit letter is case-insensitive, as for `VolumeSize`.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[should_panic(expected = "a byte count must display as <n>B")]
     fn a_byte_count_round_trips_through_text_and_serde(
         bytes in any::<u64>(),
         unit in prop::sample::select(vec!["B", "b"]),
@@ -58,7 +57,6 @@ proptest! {
     /// Sad: text that is not `<uint>B` (no unit, another unit, a sign, padding, non-digits) is refused.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[should_panic(expected = "the grammar must accept <n>B while it refuses text outside it")]
     fn text_outside_the_byte_count_grammar_is_rejected(
         text in prop_oneof![
             "[0-9]{1,10}",
@@ -82,7 +80,6 @@ proptest! {
 /// Sad: a byte count above `u64::MAX` is refused, never wrapped.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "u64::MAX bytes must parse")]
 fn sad_a_byte_count_above_the_u64_range_is_rejected() {
     assert_eq!(
         "18446744073709551615B".parse::<ByteCount>().expect("u64::MAX bytes must parse").get(),
@@ -96,7 +93,6 @@ fn sad_a_byte_count_above_the_u64_range_is_rejected() {
 /// The one accessor the host adapter and the sim read the size through yields the declared bytes.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "40GiB must parse to 40 binary gibibytes")]
 fn the_size_in_bytes_is_the_declared_binary_multiple() {
     assert_eq!(
         "40GiB".parse::<VolumeSize>().expect("40GiB must parse to 40 binary gibibytes").bytes(),
@@ -130,7 +126,6 @@ fn guard_volume_operation_labels_match_serde() {
 /// The free space on the wire is the `<n>B` string, never a bare number.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "the free space must travel as the <n>B string beside the declared size")]
 fn the_insufficient_space_cause_carries_free_space_as_a_string() {
     let cause = VolumeUnavailableCause::InsufficientSpace {
         needed: volume_size_gib(40),

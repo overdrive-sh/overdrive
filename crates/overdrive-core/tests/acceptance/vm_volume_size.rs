@@ -43,7 +43,6 @@ proptest! {
     /// A declared size survives text and serde unchanged, in any unit case.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[should_panic(expected = "a positive count of GiB or TiB must parse")]
     fn a_declared_size_round_trips_through_text_and_serde_in_any_unit_case(
         n in 1u64..=1_000_000,
         unit in prop::sample::select(vec!["GiB", "TiB", "gib", "tib", "GIB", "TIB"]),
@@ -61,7 +60,6 @@ proptest! {
     /// A count of GiB equals the same size written in TiB when it is an exact multiple.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[should_panic(expected = "a TiB spelling and its GiB spelling must be the same size")]
     fn tib_and_gib_spellings_of_one_size_are_equal(t in 1u64..=4096) {
         let tib = parse(&format!("{t}TiB")).ok();
         let gib = parse(&format!("{}GiB", t * 1024)).ok();
@@ -74,7 +72,6 @@ proptest! {
     /// Anything outside `<uint><GiB|TiB>` is a typed error, never a size.
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[should_panic(expected = "the grammar must accept 40GiB while it refuses the near-miss")]
     fn text_outside_the_grammar_is_rejected(
         text in "[0-9]{0,6}(MiB|GB|KiB|PiB|G|T| GiB|GiB | TiB|\\.5GiB|)",
     ) {
@@ -90,7 +87,6 @@ proptest! {
 
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "40 GiB must display as 40GiB")]
 fn display_prefers_tib_only_for_exact_multiples() {
     let shown = |gib: u64| volume_size_gib(gib).to_string();
     assert_eq!(shown(40), "40GiB", "40 GiB must display as 40GiB");
@@ -103,9 +99,6 @@ fn display_prefers_tib_only_for_exact_multiples() {
 /// Sad: each malformed declaration an operator can plausibly write.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(
-    expected = "the grammar must accept a valid size while it refuses each malformed declaration"
-)]
 fn sad_malformed_declarations_are_rejected_with_a_typed_error() {
     assert!(
         parse("40GiB").is_ok(),
@@ -136,7 +129,6 @@ fn sad_malformed_declarations_are_rejected_with_a_typed_error() {
 /// Sad: the value is bytes; a size whose byte count overflows u64 is rejected, not wrapped.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "the largest size whose bytes fit u64 must parse")]
 fn sad_a_size_whose_bytes_overflow_is_rejected() {
     assert_eq!(
         parse("16777215TiB").expect("the largest size whose bytes fit u64 must parse").bytes(),
@@ -150,7 +142,6 @@ fn sad_a_size_whose_bytes_overflow_is_rejected() {
 /// Sad: a wire value that is not a valid size fails deserialisation.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "the wire form of a valid size must deserialise")]
 fn sad_serde_rejects_an_invalid_wire_size() {
     serde_json::from_str::<VolumeSize>("\"40GiB\"")
         .expect("the wire form of a valid size must deserialise");
