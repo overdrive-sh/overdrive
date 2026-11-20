@@ -140,8 +140,10 @@ pub enum GuestKitError {
         /// Where the setup step leaves it.
         path: PathBuf,
     },
-    /// A file could not be staged into an image.
-    #[error("staging the guest image: {detail}: {source}")]
+    /// A guest image or lane step failed; `detail` names the step (staging a
+    /// file, waiting for the beacon, running a selected attempt), so the
+    /// message does not claim a stage the step was not in.
+    #[error("{detail}: {source}")]
     Staging {
         /// What was being staged.
         detail: String,

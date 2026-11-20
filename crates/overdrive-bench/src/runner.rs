@@ -592,11 +592,14 @@ fn run_one(
     let console_failure = finished.console.as_deref().and_then(|text| {
         sink.write_artifact(dir, &console_path(profile, planned), text.as_bytes())
             .err()
-            .map(|source| format!("the console could not be retained: {source}"))
+            .map(|source| format!("console not retained: {source}"))
     });
     let ineffective = hold.and_then(|hold| ineffective_program(&hold.take_reads()));
     let failure = match body {
-        Err(failure) => Some(failure.to_string()),
+        Err(failure) => Some(console_failure.map_or_else(
+            || failure.to_string(),
+            |not_retained| format!("{failure}; {not_retained}"),
+        )),
         Ok(()) => finished.failure.or(console_failure).or_else(|| {
             ineffective.map(|id| ReplicateFailure::stats_not_effective(id).to_string())
         }),
@@ -1564,6 +1567,60 @@ mod tests {
         assert_eq!(replicates.len(), 9, "every replicate still ran");
         for line in replicates {
             assert_eq!(line["outcome"], "failed", "a failed console write must fail the replicate");
+        }
+    }
+
+    /// A body that fails and whose console write also fails keeps its own reason first and carries
+    /// the write failure after it.
+    #[test]
+    fn a_failed_body_with_a_failed_console_write_reports_both_reasons() {
+        fn retains(replicate: &mut Replicate) -> Result<(), ReplicateFailure> {
+            replicate.report_guest_view(view("7.0.0-38-generic"))?;
+            replicate.retain_console("console")?;
+            Err(ReplicateFailure::measurement("the in-guest program exited 3"))
+        }
+        let decl = guest_decl(retains);
+        let dir = marker_dir();
+        let declared = std::slice::from_ref(&decl);
+        let sink = MemorySink::default();
+        sink.artifact_writes_fail.set(true);
+        let mut canary = CountingCanary::default();
+        let mut stdout = Vec::new();
+        let environment = Environment {
+            source_root: Some(dir.path().to_owned()),
+            run_id: RUN_ID.to_owned(),
+            seed: 42,
+        };
+        let arguments: Vec<String> = format!(
+            "run --family unit-family --results-root {}/benchmarks/results --bench",
+            dir.path().display()
+        )
+        .split_whitespace()
+        .map(str::to_owned)
+        .collect();
+        let probe = Fixture::eligible();
+        let enabler = Enabler(None);
+        let result = Runner {
+            evidence: Evidence::Maintained,
+            debug_assertions: false,
+            declared,
+            probe: &probe,
+            enabler: &enabler,
+            sink: &sink,
+            canary: &mut canary,
+            stdout: &mut stdout,
+        }
+        .run(&arguments, &environment);
+        result.expect("a failed console write does not end the run");
+        let lines = sink.lines();
+        let replicates: Vec<_> = lines.iter().filter(|line| line["t"] == "replicate").collect();
+        assert_eq!(replicates.len(), 9, "every replicate still ran");
+        for line in replicates {
+            let reason = line["failure"].as_str().expect("a failed replicate carries its reason");
+            assert!(
+                reason.starts_with("the in-guest program exited 3; console not retained: "),
+                "{reason}"
+            );
         }
     }
 
