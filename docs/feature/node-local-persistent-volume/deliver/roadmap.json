@@ -1,0 +1,551 @@
+{
+  "roadmap": {
+    "project_id": "node-local-persistent-volume",
+    "created_at": "2026-11-20T00:00:00Z",
+    "total_steps": 20
+  },
+  "test_paradigm": "Rust, per .claude/rules/testing.md. Test files listed in files_to_modify are edited only by the acceptance designer, via the orchestrator; the crafter never edits acceptance bodies or markers.Every acceptance body is PRE-AUTHORED by DISTILL (distill/test-scenarios.md, distill/red-classification.md); crafters only remove the pending marker (#[should_panic] / #[ignore]), confirm the semantic RED, implement to the pinned contract (feature-delta.md Interface contracts), and confirm GREEN. Crafters never write, replace, weaken or complete an acceptance body, and never invent public API: a missing shape is a blocker surfaced to the orchestrator (CLAUDE.md 'Implement to the design'). Pure functions get proptest; DST invariants are seeded (seed printed); quint-connect conformance replays the in-place specs. Every command runs on metal (cargo xtask metal run -- ...), never Lima, never --exclusive for tests. Tests that need the volume-pool guest or a VMM carry kvm-tests on top of integration-tests. Marker retargets listed under 'Markers that move' in red-classification.md are test-file edits owned by the acceptance designer, performed by the orchestrator via nw-acceptance-designer at activation, not by the crafter. No roadmap step id or issue number in any new identifier, filename or log message (.claude/rules/domain-naming.md). Validator length warnings are cosmetic.",
+  "phases": [
+    {
+      "id": "01",
+      "name": "Prerequisites: guest pool and the Cloud Hypervisor fork (activation row 1 and the fork obligation)",
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "Guest-kit volume-pool profile provisions the labelled partition, PV/VG and LVM tooling; Tier-3 volume tests run and are proven RED",
+          "description": "Provision the volume pool for guests of the volume-pool profile of cgroup-default: a fresh backing disk per guest holding a wiped GPT partition labelled overdrive-volumes with the PV and the overdrive VG (4 MiB extents), prepared by guest-kit preparation (never by Overdrive); the staged rootfs carries lvm with its library closure, writable /run, sfdisk, flock, dmsetup, losetup with loop-device support, the dm-flakey module with its loader, and a static busybox with dd/head/printf (upstream-issues N-5). A guest of any other profile has no pool. Second-disk launch support (amended 2026-11-20 by user ruling): the guest-kit launches its test guests through Overdrive's production VM launcher (the Cloud Hypervisor Vmm in crates/overdrive-host/src/vmm.rs), which ignores VmConfig.volume, so the volume-pool guest could not be given its pool backing disk. When VmConfig.volume is set the launcher renders it as the second --disk exactly as feature-delta.md pins it (DiskAttachment::volume: serial ovd-volume, write-back, direct=on, the device path), and the pre-authored golden disk-argument test lands GREEN with it. @sizing-review-needed (guest-kit provisioning, the production second-disk launch rendering and seven test files across three crates; kept as one step because the tests cannot be proven RED until the pool exists and the guest-kit cannot attach the pool disk until the launcher renders it).",
+          "criteria": [
+            "A volume-pool guest finds exactly one partition with PARTNAME overdrive-volumes, the overdrive VG with 4 MiB extents, and every tool named in N-5; a guest of any other profile composes no pool (soft case)",
+            "The #[ignore] is removed from every volume-pool test in overdrive-host volume_pool_backing.rs and volume_pool_probe_pool.rs and in overdrive-cli volume_survives.rs; each runs and is proven RED on the should_panic marker it already carries",
+            "The backing disk is fresh for each guest and target-scoped; nothing is created at runtime by Overdrive code",
+            "guard_a_node_without_a_labelled_partition_composes_no_volume_pool (base profile) keeps passing",
+            "cargo xtask placement-lint exits 0",
+            "When VmConfig.volume is set the production launcher renders it as the second Cloud Hypervisor --disk exactly as feature-delta.md pins it (serial ovd-volume, write-back, direct=on, the device path), proven by volume_value_types.rs::the_volume_disk_renders_the_golden_argument going GREEN with its should_panic removed; guard_the_rootfs_disk_argument_is_unchanged keeps passing and a VmConfig with no volume launches exactly one disk as before"
+          ],
+          "test_file": "crates/overdrive-host/tests/integration/volume_pool_probe_pool.rs",
+          "scenario_name": "S-VOL-T3-02, S-VOL-T3-03 (ignore removed, proven RED on the existing marker); S-VOL-T3-04, S-VOL-T3-05 (volume_pool_backing.rs), S-VOL-T3-07, 09, 11, 12, 13 (volume_survives.rs) likewise; S-VOL-T3-01 guard unchanged; S-VOL-26c (crates/overdrive-core/tests/acceptance/volume_value_types.rs::the_volume_disk_renders_the_golden_argument, pending to GREEN)",
+          "implementation_notes": "Guest-kit provisioning plus the production second-disk launch support (feature-delta Provisioning obligation, ADR-0313). Amended 2026-11-20 by user ruling: the guest-kit launches its test guests through the production Vmm, which ignored VmConfig.volume, so the second-disk rendering moved in from 03-01 and 04-02. Implement exactly the rendering feature-delta.md pins: DiskAttachment::volume(device).to_disk_arg() renders path=<device>,image_type=raw,direct=on,serial=ovd-volume (write-back), and Vmm::launch in crates/overdrive-host/src/vmm.rs passes it as the second --disk after the rootfs disk when VmConfig.volume is Some; no new public API beyond the pinned DiskAttachment::volume, VolumeAttachment and VmConfig.volume (a missing shape is a blocker). The golden test is a marker removal only, performed by the orchestrator via the acceptance designer; the crafter does not edit its body. The driver's launch path that passes the ensured volume into VmConfig.volume stays in 04-02. Prepare and load prerequisites as separate commands: cargo xtask metal run -- env OVERDRIVE_BPF_NATIVE=1 cargo xtask bpf-build; cargo xtask metal run -- cargo xtask guest-kit-prepare; cargo xtask metal run --exclusive -- cargo xtask kmod-load (physical-maintenance module load only, already a standing prerequisite). Gates: cargo xtask metal run -- cargo check --workspace --all-targets --features integration-tests,kvm-tests; ... cargo clippy --workspace --all-targets --features integration-tests,kvm-tests -- -D warnings; cargo xtask metal run -- cargo nextest run -p overdrive-host -p overdrive-cli --features integration-tests,kvm-tests (the removed-ignore tests must fail on their own marker text, not pass and not fail elsewhere); cargo xtask metal run -- cargo xtask placement-lint. The loop-device and dm-flakey needs are guest content, not repository tooling (N-5); if a named test needs more than N-5 lists, return a blocker. The volume-pool profile is already registered in crates/overdrive-testing/src/placement/groups.rs; touch that file only if the profile definition itself has to change.",
+          "files_to_modify": [
+            "xtask/src/guest_kit_prepare.rs",
+            "crates/overdrive-testing/src/guest_kit.rs",
+            "crates/overdrive-host/src/vmm.rs",
+            "crates/overdrive-core/src/vm/config.rs",
+            "crates/overdrive-host/tests/integration/volume_pool_backing.rs",
+            "crates/overdrive-host/tests/integration/volume_pool_probe_pool.rs",
+            "crates/overdrive-cli/tests/integration/volume_survives.rs",
+            "crates/overdrive-core/tests/acceptance/volume_value_types.rs"
+          ],
+          "depends_on": [],
+          "effort_hours": 10
+        },
+        {
+          "id": "01-02",
+          "name": "Cloud Hypervisor fork carries F1 to F3 with the V-3 regression test; pin and checksums bumped",
+          "description": "Land fork patches F1 (a failed write-through fsync completes the request with VIRTIO_BLK_S_IOERR on every engine), F2 (a writable block device is opened O_EXCL) and F3 (an explicit image type skips format sniffing) in overdrive-sh/cloud-hypervisor from spike/fork-patches, with the F1 regression test mirroring spike run-030's cells (io_uring, AIO, sync; no acknowledgement, no wedge on sync). Bump the pinned revision and release checksums and the vendors/cloud-hypervisor submodule per ADR-0161, ADR-0316, ADR-0319, ADR-0320.",
+          "criteria": [
+            "In the fork, for each engine a write-through request whose post-write fsync fails completes with VIRTIO_BLK_S_IOERR, with no acknowledgement and no wedge on the sync engine (V-3 discharged)",
+            "A second exclusive open of a writable block device held by a VMM fails EBUSY; an explicit image_type=raw block device is attached without format sniffing",
+            "The pinned fork revision, release checksums and vendors/cloud-hypervisor submodule pointer name the patched revision and the provisioned binary on the metal host and guests is that release",
+            "The stock-fork behaviour of every existing VM test is unchanged"
+          ],
+          "test_file": "vendors/cloud-hypervisor (fork-side F1 regression test; no in-repo acceptance test)",
+          "scenario_name": "V-3 (fork-side F1 regression test); enables S-VOL-T3-07, 09, 11, 12, 13",
+          "implementation_notes": "Fork work happens in overdrive-sh/cloud-hypervisor (branch overdrive/vhost-kernel-vsock); the submodule pointer and infra/provision/versions.env / common-system.sh pins change in this repo. There is no in-repo acceptance body. BLOCKER-class items for the orchestrator: the new revision's release artifact and checksums do not exist until the fork release is built and published, which needs the user. Overdrive runs only with this fork; add no capability probe for other VMM builds. Gates: cargo xtask metal run -- cargo check --workspace --all-targets --features integration-tests; the existing VM guest tests still pass on the new binary: cargo xtask metal run -- cargo nextest run -p overdrive-cli --features integration-tests,kvm-tests.",
+          "files_to_modify": [
+            "vendors/cloud-hypervisor",
+            "infra/provision/versions.env",
+            "infra/provision/common-system.sh"
+          ],
+          "depends_on": [],
+          "effort_hours": 8
+        }
+      ]
+    },
+    {
+      "id": "02",
+      "name": "Spec surface, value types, typed failure and describe (activation rows 2, 3, 4)",
+      "steps": [
+        {
+          "id": "02-01",
+          "name": "VolumeSize and ByteCount grammars, size bytes accessor, insufficient-space cause serde",
+          "description": "Implement the FromStr and Display grammars of VolumeSize (<uint>GiB|TiB, unit case-insensitive, at least 1, canonical TiB only when exact, overflow refused) and ByteCount (<n>B over all u64), VolumeSize::bytes, and the string form of free in the insufficient-space cause, exactly as pinned in feature-delta Spec surface and Port value types.",
+          "criteria": [
+            "vm_volume_size.rs: every pending test (round trip in any unit case, TiB/GiB equality, canonical display, near-miss and malformed rejected, overflow rejected, serde equals FromStr) loses its should_panic and passes",
+            "volume_value_types.rs: the ByteCount round-trip and refusal properties, the_size_in_bytes_is_the_declared_binary_multiple and the_insufficient_space_cause_carries_free_space_as_a_string pass",
+            "guard_volume_operation_labels_match_serde and guard_the_rootfs_disk_argument_is_unchanged still pass; the golden-argument test is activated by 01-01",
+            "No public item beyond the pinned VolumeSize, ByteCount, VolumeSize::bytes and ByteCount::new/get is added"
+          ],
+          "test_file": "crates/overdrive-core/tests/acceptance/vm_volume_size.rs",
+          "scenario_name": "S-VOL-01..07, S-VOL-26a",
+          "implementation_notes": "Contract shape pure-function; proptest already authored. Gates: cargo xtask metal run -- cargo nextest run -p overdrive-core --features integration-tests; cargo xtask metal run -- cargo test --doc -p overdrive-core; cargo check/clippy workspace as in 01-01 (without kvm-tests). Newtypes rule: no raw u64 for bytes outside the pinned accessors.",
+          "files_to_modify": [
+            "crates/overdrive-core/src/volume.rs",
+            "crates/overdrive-core/tests/acceptance/vm_volume_size.rs",
+            "crates/overdrive-core/tests/acceptance/volume_value_types.rs"
+          ],
+          "depends_on": [],
+          "effort_hours": 5
+        },
+        {
+          "id": "02-02",
+          "name": "[vm.volume] spec surface, workload intent envelope V2, Vm::to_payload and the three reconciler projection sites",
+          "description": "Add Vm.volume and VmVolume, parser-side VmVolumeInput with deny_unknown_fields, validation (vm.volume.size grammar; a volume requires replicas = 1 for Job and Service), the echo on the spec outputs, VmPayload.volume and the one pure Vm::to_payload used by the three WorkloadLifecycle projection sites. Bump the workload intent envelope and ServiceSpecEnvelope to V2 in ONE atomic commit with the development.md version-bump procedure: frozen explicit Envelope::V1 fixtures, known_discriminants [0, 1], FIXTURE_V2. @sizing-review-needed (the envelope bump must be one atomic commit with the spec surface it versions, so it is not split).",
+          "criteria": [
+            "vm_volume_spec.rs: every pending test passes (job and service parse, echo and canonical spelling, vm.volume.size named on a malformed size, replicas != 1 refused, single replica admitted, intent round trip, spec_digest changes, envelope discriminants [0, 1])",
+            "workload_volume_projection.rs: the Start action, the Restart action and allocation_spec_for_live_intent each carry the declared VolumePayload; every other VmPayload construction states volume: None",
+            "The V2 schema-evolution fixtures exist (S-VOL-21): the V1 fixtures are re-pinned as explicit frozen Envelope::V1 values, FIXTURE_V2 is added, and the reconcile-trajectory golden carries the added volume: None line (D-3)",
+            "guard_a_job_without_a_volume_echoes_no_volume still passes; api/openapi.yaml is regenerated for these types only"
+          ],
+          "test_file": "crates/overdrive-core/tests/acceptance/vm_volume_spec.rs",
+          "scenario_name": "S-VOL-11..20; S-VOL-21 (V2 fixtures, authored in this commit per the version-bump procedure); S-VOL-60..62 (crates/overdrive-reconcilers/tests/acceptance/workload_volume_projection.rs)",
+          "implementation_notes": "Single commit for the envelope bump (development.md steps 1-6; never touch an existing FIXTURE_Vn; regenerate FIXTURE_V1 as an explicit Envelope::V1(frozen) not via latest()). Larger-variant caveat: a larger V2 changes the rkyv root size, so re-pin per memory 'rkyv envelope larger-variant'; known_discriminants -> [0,1]. This step also moves markers of dependent tests (alloc_status_volume, node_volume_boundaries volume tests, M7, quint_vol_*, volume_survives, a_deployed_volume_workload_launches...) to their next RED: acceptance-designer edit by the orchestrator. Gates: cargo xtask metal run -- cargo nextest run -p overdrive-core -p overdrive-reconcilers -p overdrive-control-plane -p overdrive-sim --features integration-tests; cargo xtask metal run -- cargo run -p overdrive-control-plane --bin openapi -- check; cargo xtask metal run -- cargo xtask dst-lint; doctests. Do not invent surface beyond the pinned VmVolume, VmVolumeInput, VolumePayload, Vm::to_payload. MODEL CONFORMANCE (row 11): no quint_node_volume.rs run goes GREEN in this step, because every named run reaches the launch path of 04-02; the orchestrator has the acceptance designer retarget the quint_vol_* markers to their next RED alongside the other marker moves above. The crafter never edits acceptance bodies or markers.",
+          "files_to_modify": [
+            "crates/overdrive-core/src/aggregate/mod.rs",
+            "crates/overdrive-core/src/traits/driver.rs",
+            "crates/overdrive-reconcilers/src/workload_lifecycle.rs",
+            "api/openapi.yaml",
+            "crates/overdrive-core/tests/schema_evolution/",
+            "crates/overdrive-core/tests/acceptance/vm_volume_spec.rs",
+            "crates/overdrive-reconcilers/tests/acceptance/workload_volume_projection.rs"
+          ],
+          "depends_on": [
+            "02-01"
+          ],
+          "effort_hours": 12
+        },
+        {
+          "id": "02-03",
+          "name": "VolumeUnavailable maps to a typed VmVolumeUnavailable reason with operator wording",
+          "description": "Map every DriverStartFailure volume-unavailable class (PoolAbsent, InsufficientSpace with both figures, PoolCommandFailed with its operation, unit Held) to TransitionReason::VmVolumeUnavailable { cause } instead of DriverInternalError, with human_readable naming the volume, the cause and the remedy. The variant is appended at the end of the enum; if the archived size of AllocStatusRowV1 changes, re-pin the V1 fixtures as explicit frozen V1 and the discriminant offset in the same commit.",
+          "criteria": [
+            "volume_unavailable_reason.rs: PoolAbsent and Held map to VmVolumeUnavailable (not DriverInternalError); InsufficientSpace keeps needed and free; PoolCommandFailed keeps its operation (property over VolumeOperation)",
+            "Operator wording names the volume, the cause and the remedy and contains both figures for insufficient space",
+            "guard_a_volume_failure_is_a_failure still passes; From<&DriverStartFailure> stays total",
+            "The store round trip guard (every cause survives write, reopen, read) keeps passing"
+          ],
+          "test_file": "crates/overdrive-core/tests/acceptance/volume_unavailable_reason.rs",
+          "scenario_name": "S-VOL-22..26 (S-VOL-64 guard: crates/overdrive-store-local/tests/acceptance/volume_unavailable_row_roundtrip.rs)",
+          "implementation_notes": "Contract shape pure-function. Gates: cargo xtask metal run -- cargo nextest run -p overdrive-core -p overdrive-store-local --features integration-tests; schema-evolution tests for alloc_status_row must still pass untouched. If the archived AllocStatusRowV1 size changes, follow the version-bump rule of 02-02 (single commit, explicit frozen V1). EXAMPLE (user ruling 2026-11-20): the oversized-volume spec in examples/node-local-volume/ demonstrates this typed InsufficientSpace reason and its operator wording in describe; 04-03 proves the example parses and its README is accurate, and E16 captures it in 08-03.",
+          "files_to_modify": [
+            "crates/overdrive-core/src/transition_reason.rs",
+            "crates/overdrive-core/src/volume.rs",
+            "crates/overdrive-core/tests/acceptance/volume_unavailable_reason.rs"
+          ],
+          "depends_on": [
+            "02-01"
+          ],
+          "effort_hours": 4
+        },
+        {
+          "id": "02-04",
+          "name": "alloc_status response carries the declared volume and describe prints the Volume section",
+          "description": "The alloc_status handler fills AllocStatusResponse.volume from the workload's declared volume, and render::workload_describe prints a Volume line with the size and the static serial. A workload with no volume prints no section.",
+          "criteria": [
+            "alloc_status_volume.rs: the response for a service workload with [vm.volume] size = 40GiB carries the declared size",
+            "workload_describe_volume.rs: describe shows the size and the static serial ovd-volume",
+            "guard_a_workload_without_a_volume_prints_no_volume_section still passes",
+            "The operator change goes through render::workload_describe (the live renderer)"
+          ],
+          "test_file": "crates/overdrive-cli/tests/acceptance/workload_describe_volume.rs",
+          "scenario_name": "S-VOL-27, S-VOL-28, S-VOL-63 (crates/overdrive-control-plane/tests/acceptance/alloc_status_volume.rs)",
+          "implementation_notes": "Gates: cargo xtask metal run -- cargo nextest run -p overdrive-cli -p overdrive-control-plane --features integration-tests; openapi check as in 02-02. Wire type AllocStatusResponse.volume already exists; do not add fields.",
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/handlers.rs",
+            "crates/overdrive-cli/src/render.rs",
+            "crates/overdrive-cli/tests/acceptance/workload_describe_volume.rs",
+            "crates/overdrive-control-plane/tests/acceptance/alloc_status_volume.rs"
+          ],
+          "depends_on": [
+            "02-02"
+          ],
+          "effort_hours": 4
+        }
+      ]
+    },
+    {
+      "id": "03",
+      "name": "The VolumeBacking port: simulation twin and host adapter (activation rows 5 and 6)",
+      "steps": [
+        {
+          "id": "03-01",
+          "name": "SimVolumeBacking honours the port contract",
+          "description": "Implement every SimVolumeBacking body and its scripted hooks (ensure/claim_state calls, parked ensure, parked claim_state, one-shot claim_state failure, scripted deadline outcome, hold_claim_while_live, volumes_created) and the port docstrings pinning preconditions, postconditions, edge cases and invariants. The volume disk's golden --disk rendering (DiskAttachment::volume, to_disk_arg) moved to 01-01 by user ruling 2026-11-20.",
+          "criteria": [
+            "sim_volume_backing_contract.rs: every pending test passes, including the precondition stops, the four golden name vectors and a_claim_linked_to_a_vmm_is_released_when_the_vmm_dies",
+            "Port trait docstrings state bound, owner, at-the-deadline and after-the-deadline properties for ensure and the claim_state contract (NotFound for absent or inactive)",
+            "No sim method beyond the pinned port and the hooks the authored tests call is added"
+          ],
+          "test_file": "crates/overdrive-sim/tests/acceptance/sim_volume_backing_contract.rs",
+          "scenario_name": "S-VOL-30..39b, the name-derivation golden (S-VOL-26c, the volume disk's golden argument, moved to 01-01)",
+          "implementation_notes": "Contract shape bounded-change. Sim is adapter-sim: BTreeMap, no wall clock. Gates: cargo xtask metal run -- cargo nextest run -p overdrive-sim -p overdrive-core --features integration-tests; dst-lint; doctests. The three DST volume invariants stay outside Invariant::ALL until 04-02.",
+          "files_to_modify": [
+            "crates/overdrive-sim/src/adapters/volume_backing.rs",
+            "crates/overdrive-core/src/traits/volume_backing.rs",
+            "crates/overdrive-sim/tests/acceptance/sim_volume_backing_contract.rs"
+          ],
+          "depends_on": [
+            "02-01"
+          ],
+          "effort_hours": 8
+        },
+        {
+          "id": "03-02",
+          "name": "LvmVolumePoolProbe and LvmVolumeBacking against the real pool",
+          "description": "Implement the host adapter: LvmVolumePoolProbe (discover the labelled partition by PARTNAME from sysfs, probe the four scenarios, create and remove the ovd-probe scratch volume, report typed VolumeProbeError details) and LvmVolumeBacking (the only spawner of lvm with the pinned --config and LVM_SYSTEM_DIR=/run/lvm; ensure with one adapter-owned 30 s deadline; claim_state by O_EXCL open of the dm node). The pub(crate) constructor takes the discovered node.",
+          "criteria": [
+            "volume_pool_probe_pool.rs: a healthy pool probes clean and leaves nothing; each of the five sad scenarios fails with its typed VolumeProbeDetail variant",
+            "volume_pool_backing.rs: ensure reserves the exact size, activates, is idempotent, activates an inactive volume, reports InsufficientSpace figures and PoolCommand; a stalled lvm yields the typed TimedOut within the bound and is not killed; claim_state reports Held, Free and NotFound as the kernel does",
+            "The real adapter derives the same name vector as the sim golden for dev-box",
+            "guard_a_node_without_a_labelled_partition_composes_no_volume_pool still passes on the base profile"
+          ],
+          "test_file": "crates/overdrive-host/tests/integration/volume_pool_backing.rs",
+          "scenario_name": "S-VOL-T3-02, S-VOL-T3-03, S-VOL-T3-04, S-VOL-T3-05 (crates/overdrive-host/tests/integration/volume_pool_probe_pool.rs)",
+          "implementation_notes": "Tier-3, guest placement volume-pool (already declared on each test). Run: cargo xtask metal run -- cargo nextest run -p overdrive-host --features integration-tests,kvm-tests (the guest placement boots the guest per test). Honour rust.md: no blocking std::fs in an async fn (use tokio::fs or spawn_blocking). Pool-space and discovery code has no kernel claim uncited: cite vendors/linux path:line @ v7.0 for any kernel behaviour asserted in docstrings.",
+          "files_to_modify": [
+            "crates/overdrive-host/src/volume_backing.rs",
+            "crates/overdrive-host/tests/integration/volume_pool_backing.rs",
+            "crates/overdrive-host/tests/integration/volume_pool_probe_pool.rs"
+          ],
+          "depends_on": [
+            "01-01",
+            "03-01"
+          ],
+          "effort_hours": 14
+        }
+      ]
+    },
+    {
+      "id": "04",
+      "name": "Launch path: composition, ensure and claim wait, attachment, and the end-to-end journeys (activation row 7)",
+      "steps": [
+        {
+          "id": "04-01",
+          "name": "compose_volume_backing refuses startup on a broken pool and logs not_composed when there is none",
+          "description": "compose_volume_backing distinguishes the probe outcomes: Some passes the backing through, None logs volume_backing.not_composed and returns Ok(None), Err logs health.startup.refused with reason volume_backing.probe and returns the dedicated ControlPlaneError::VolumeBackingBoot, independent of VM capability.",
+          "criteria": [
+            "volume_boot_probe.rs sad_a_broken_volume_pool_refuses_startup passes for every row (tools_or_device_mapper_unusable, volume_group_missing, scratch create/node failure, scratch remove failure, injected CommandFailed exit 4, 5 and none, NodeMissing): startup refused naming the probe",
+            "a_node_with_no_labelled_partition_boots_and_logs_not_composed passes: boots, logs volume_backing.not_composed",
+            "guard_a_healthy_pool_boots_without_a_refusal_or_a_not_composed_event keeps passing",
+            "The typed variant is dedicated (#[from]), never ControlPlaneError::Internal"
+          ],
+          "test_file": "crates/overdrive-cli/tests/integration/volume_boot_probe.rs",
+          "scenario_name": "S-VOL-BOOT-1..4 (sad_a_broken_volume_pool_refuses_startup), S-VOL-BOOT-5, S-VOL-BOOT-6 guard",
+          "implementation_notes": "Gates: cargo xtask metal run -- cargo nextest run -p overdrive-cli -p overdrive-control-plane --features integration-tests,kvm-tests; check/clippy workspace. The H2 test a_deployed_volume_workload_launches_through_the_composed_volume_pool is activated in 04-03.",
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/lib.rs",
+            "crates/overdrive-cli/tests/integration/volume_boot_probe.rs"
+          ],
+          "depends_on": [
+            "03-01"
+          ],
+          "effort_hours": 4
+        },
+        {
+          "id": "04-02",
+          "name": "VmDriver launch path ensures the volume, waits for its claim and attaches it as the second disk",
+          "description": "In VmDriver::provision_vmm, for a payload with a volume and after the supervision claim and before the first host artifact: await ensure to its return (no driver timer), poll claim_state on the driver Clock until Free or 30 s, then pass the ensured volume device into VmConfig.volume (the Vmm's second-disk rendering is already landed by 01-01); typed VolumeUnavailable for PoolAbsent, InsufficientSpace, PoolCommandFailed (any claim_state Err ends the launch at once) and Held; a launch without a volume never touches the pool. Add the three volume DST invariants to Invariant::ALL and update the catalogue count. @sizing-review-needed (not split: the launch path, its typed failures and the invariants that observe it only make sense together, and a split would leave a driver path no invariant checks).",
+          "criteria": [
+            "node_volume_launch.rs: ensure then attach as the second disk, the typed sad paths (pool absent, no space with both figures, failing lvm command, failing ensure, claim_state error ends at once, held past 30 s), replacement waits for the claim, pool faults after launch do not reach the running allocation, reboot and restart-between-create-and-attach reuse the volume, no driver ensure timer",
+            "volume_launch_invariants.rs: volume-single-writer, volume-data-survives-restart and volume-no-drain-failure-charges-budget pass for seeds 1..=8 (seeds printed), now members of Invariant::ALL with the printed catalogue count updated",
+            "a_launch_held_past_its_bound_writes_the_typed_failed_row_and_charges_the_restart_budget passes (typed Failed row, budget charged)",
+            "Both mid_boot_volume_reclamation tests pass: the successor attaches with nothing charged and the orphan not live at the one create",
+            "guard_a_workload_without_a_volume_launches_unchanged_on_a_node_with_no_pool and guard_a_composed_pool_is_untouched_by_a_workload_without_a_volume keep passing"
+          ],
+          "test_file": "crates/overdrive-worker/tests/acceptance/node_volume_launch.rs",
+          "scenario_name": "S-VOL-40..46 (S-VOL-47 not authored); S-VOL-48..50 (crates/overdrive-sim/tests/acceptance/volume_launch_invariants.rs); S-VOL-65 and S-SUP-37 marker move (crates/overdrive-control-plane/src/node_volume_boundaries.rs); S-M7-1, S-M7-2 (crates/overdrive-control-plane/src/vm_reclamation_boot.rs); S-SUP-08 a_volume_launch_whose_signal_is_never_raised_is_the_ordinary_volume_launch",
+          "implementation_notes": "Contract shapes: bounded-change. The five volume tests of launch_supersession at points 2, 3, 4 move to their <what> must end StartSuperseded RED here (acceptance-designer retarget by the orchestrator) and a_stop_interrupts_the_start_and_its_result_is_never_used moves to its row-8 RED. D-2: the invariants join Invariant::ALL here per N-18 (recommended option a); if the user rules option b first, follow that ruling. Gates: cargo xtask metal run -- cargo nextest run -p overdrive-worker -p overdrive-sim -p overdrive-control-plane -p overdrive-host --features integration-tests; cargo xtask metal run -- cargo run -p overdrive-sim --bin dst -- --seed 7 (printed count matches the updated catalogue); dst-lint; conformance-lint; doctests. Keep the claim poll interval the crafter's choice; never default a port binding in VmDriver::new. MODEL CONFORMANCE (row 11, driving row 7): these quint_node_volume.rs runs become GREEN in this step: happy_path_deploy_to_running, restart_waits_for_drain_then_attaches, stop_keeps_volume_and_restart_reattaches, crash_after_create_before_attach_reuses_volume, node_reboot_reactivates_and_data_survives, launch_bound_exceeded_fails_typed_and_charges_budget, no_space_fails_typed_and_never_attaches, store_absent_fails_typed_and_never_attaches. The orchestrator has the acceptance designer lift the markers of these eight runs to GREEN before the step's gate; the crafter never edits acceptance bodies or markers. The four supersession runs stay pending until 05-02.",
+          "files_to_modify": [
+            "crates/overdrive-worker/src/vm_driver.rs",
+            "crates/overdrive-sim/src/invariants/volume_launch.rs",
+            "crates/overdrive-sim/src/invariants/mod.rs",
+            "crates/overdrive-worker/tests/acceptance/node_volume_launch.rs",
+            "crates/overdrive-sim/tests/acceptance/volume_launch_invariants.rs"
+          ],
+          "depends_on": [
+            "01-01",
+            "02-02",
+            "02-03",
+            "03-01",
+            "04-01"
+          ],
+          "effort_hours": 16
+        },
+        {
+          "id": "04-03",
+          "name": "Volume survives restart, kill, stop and a draining writer through serve and deploy on the real pool; volume node owner and mode",
+          "description": "Close the loop on the production path: prepare_confined_paths chowns the symlink-resolved volume node to root:<VMM gid> mode 0660 (failure is the existing ConfinementUnavailable UidDrop), and a real overdrive serve with a deployed [vm.volume] workload runs the Tier-3 journeys on the volume-pool guest against the real LvmVolumeBacking and the patched fork.",
+          "criteria": [
+            "volume_survives.rs: data survives workload restart (node mode root:<gid> 0660, argv golden and disk order read from the live process, describe shows the volume); a flushed record survives a SIGKILLed VMM; stop keeps the volume and resume reattaches",
+            "a_replacement_waits_for_the_claim_while_the_old_writers_io_drains: second exclusive open refused EBUSY with the old pid gone, successor neither running nor failed, attaches after resume with the data",
+            "a_failed_host_flush_reaches_the_guests_fsync_as_an_error passes in the production write-back attachment (volume dm device reports write back; guest fsync returns an error under dm-flakey error_writes)",
+            "a_deployed_volume_workload_launches_through_the_composed_volume_pool (nested-launch) passes: the recording Vmm receives the volume attachment through run_server -> compose_volume_backing -> VmDriver::new",
+            "The stop-during-held-claim and stop-during-boot tests move to their supersession RED (their GREEN is 05-02); no operator artifact's mode widens",
+            "Every spec under examples/node-local-volume/ (the single-replica [vm.volume] Service spec and the oversized-volume spec) parses through the production spec parser",
+            "Once this step lands, examples/node-local-volume/README.md is accurate for what works end to end through serve + deploy (commands, expected describe output, the volume surviving restart); any statement the landed behaviour makes false is corrected"
+          ],
+          "test_file": "crates/overdrive-cli/tests/integration/volume_survives.rs",
+          "scenario_name": "S-VOL-T3-07, S-VOL-T3-09, S-VOL-T3-11, S-VOL-BOOT-7 (crates/overdrive-cli/tests/integration/volume_boot_probe.rs::a_deployed_volume_workload_launches_through_the_composed_volume_pool)",
+          "implementation_notes": "Tier-3: guest = cgroup-default profile volume-pool, kvm-tests. Run: cargo xtask metal run -- cargo nextest run -p overdrive-cli -p overdrive-host --features integration-tests,kvm-tests (after guest-kit-prepare and the exclusive kmod-load of 01-01). Needs the patched fork of 01-02 (F2 gives the single-writer refusal, F3 the raw attach). No product test is native_launcher; if a test seems to need the host, return a blocker (guest-kit gap). Assertions are on observable kernel effects (stat of the node, dmsetup, the live process argv), not on internal branches. Leaked cgroup/dm/loop state after an aborted run: use the documented cleanups, not defensive retries. Describe volume rendering (the size and the static serial) comes from 02-04, which this step's journeys read. When S-VOL-T3-12 and S-VOL-T3-13 are moved to their supersession RED, the orchestrator has the acceptance designer confirm that the moved marker actually fails today (T3-13's assertions hold either way, so its marker must be checked, not assumed). MODEL CONFORMANCE: no quint_* run becomes GREEN in this step; the Tier-3 journeys are not conformance drivers. EXAMPLE (user ruling 2026-11-20): examples/node-local-volume/README.md is in files_to_modify only so the README can be corrected to match what works; the example's specs are already authored and are not edited by this step. The parse criterion runs the specs through the production spec parser.",
+          "files_to_modify": [
+            "crates/overdrive-host/src/vmm.rs",
+            "crates/overdrive-cli/tests/integration/volume_survives.rs",
+            "crates/overdrive-cli/tests/integration/volume_boot_probe.rs",
+            "examples/node-local-volume/README.md"
+          ],
+          "depends_on": [
+            "01-01",
+            "01-02",
+            "02-04",
+            "03-02",
+            "04-02"
+          ],
+          "effort_hours": 12
+        }
+      ]
+    },
+    {
+      "id": "05",
+      "name": "Launch supersession (activation row 8)",
+      "steps": [
+        {
+          "id": "05-01",
+          "name": "A superseded launch ends cleanly: VmDriver observation points 1 to 6 and the shim's no-row StartSuperseded arm",
+          "description": "VmDriver::start observes the LaunchSupersession signal at points 1 to 6 (entry; after ensure, which is never interrupted; each claim poll and its sleep; after the claim wait and before the first host artifact; the guest-boot race; the second boot wait) and returns DriverError::StartSuperseded, tearing the VMM down where one exists and keeping the volume; superseded wins over a typed failure at the same point and a teardown failure stays StartRejected. The shim's start and restart arms handle StartSuperseded as a no-row success: release the lease, SVID and supervision claim, emit launch.superseded, and in the restart arm still run finish_restart. This is a component step that feeds 05-02: the signal has no producer until 05-02, where serve plus stop/restart close the loop through the production entry points. @sizing-review-needed (six observation points plus the shim arm; kept whole because the points share one signal contract and the shim arm has no other driver).",
+          "criteria": [
+            "launch_supersession.rs: every pending test passes (points 1 to 6, the same-instant 'wins' tests, teardown failure is StartRejected, only its own launch is abandoned); the three guards keep passing",
+            "The five volume tests of points 2, 3 and 4 and a_volume_launch_whose_signal_is_never_raised... pass; a superseded volume launch creates nothing on the host before the claim wait ends",
+            "start_arm_superseded_launch_writes_no_row_and_releases_lease_svid_and_claim and restart_arm_superseded_successor_runs_exact_old_predecessor_cleanup pass in prelaunch_outcome_acceptance.rs",
+            "Every impl Driver and every exhaustive match on DriverError already carries StartSuperseded; a driver that ignores the signal behaves unchanged"
+          ],
+          "test_file": "crates/overdrive-worker/tests/acceptance/launch_supersession.rs",
+          "scenario_name": "S-SUP-01..08; S-SHIM-01 (crates/overdrive-control-plane/src/action_shim/prelaunch_outcome_acceptance.rs)",
+          "implementation_notes": "ADR-0334: ensure and Vmm::create run to their end and are never dropped mid-effect (reconcilers.md 'Superseded in-flight work runs to its bound'); no abort(). Guards that depend on a no-op lane table (a_launch_that_won_its_boot_race_before_the_stop_signal_is_stopped_as_an_ordinary_running_allocation) must still pass after 05-02. Gates: cargo xtask metal run -- cargo nextest run -p overdrive-worker -p overdrive-control-plane --features integration-tests; check/clippy workspace; dst-lint. MODEL CONFORMANCE: no quint_* run becomes GREEN in this step, because no producer raises the signal until 05-02.",
+          "files_to_modify": [
+            "crates/overdrive-worker/src/vm_driver.rs",
+            "crates/overdrive-control-plane/src/action_shim/mod.rs",
+            "crates/overdrive-worker/tests/acceptance/launch_supersession.rs",
+            "crates/overdrive-control-plane/src/action_shim/prelaunch_outcome_acceptance.rs"
+          ],
+          "depends_on": [
+            "04-02"
+          ],
+          "effort_hours": 12
+        },
+        {
+          "id": "05-02",
+          "name": "Lane table, the stop and restart producers and node shutdown raise the supersession signal",
+          "description": "ReconcilerRuntime owns the lane table: a lane opened in the tick before hydration as a child of one shutdown token, removed by key when the tick returns; supersede_lane and supersede_all_lanes raise the lanes; lane_supersession returns the lane's signal. stop_workload (Inserted and KeyExists) and restart_workload raise the lane after their commit; the convergence loop's shutdown arm cancels the shutdown token once. @sizing-review-needed (not split: the lane table, the producers and the shutdown arm are one signal path, and a split would leave a producer-less table, which production cannot drive).",
+          "criteria": [
+            "launch_lane_supersession.rs: every pending test except the hydrated-restart one passes (a signal after the lane opens and before hydration, no cross-workload leak, the shutdown token never cancelled by supersede_lane, seeded schedule seeds 0..4, lane guard removes only its own key, repeated stop raises the lane)",
+            "a_restart_while_a_launch_waits..., a_stop_while_a_launch_waits..., a_second_restart_while_the_replacement_launch_waits... end the launch at once with no row and no charge; node_shutdown_ends_a_waiting_launch_with_no_row_and_the_loop_exits and a_stop_interrupts_the_start_and_its_result_is_never_used pass",
+            "In restart_generation_invariant.rs the stop, second-restart and crash-restart-successor-shutdown cells pass; quint_rg_second_restart_loses_launch_then_one_placement passes",
+            "a_workload_stop_during_a_held_claim_returns_promptly_with_no_failed_row and a_workload_stop_during_guest_boot_terminates_the_vmm_and_keeps_the_volume pass on the real pool"
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/launch_lane_supersession.rs",
+          "scenario_name": "S-SUP-12, 13, 14, 18, 19/20, 22, 26, 27, 28, 34, 37; S-INV-01 stop, second-restart and crash-restart-shutdown cells (crates/overdrive-control-plane/tests/integration/restart_generation_invariant.rs); S-Q-15; S-VOL-T3-12, S-VOL-T3-13 (crates/overdrive-cli/tests/integration/volume_survives.rs)",
+          "implementation_notes": "ADR-0334; ADR-0102 amended. The two shutdown cells and the hydrated-restart test keep their markers, retargeted by the orchestrator (acceptance designer) to the row-9 RED, GREEN in 06-01. Producers signal after the commit and before the evaluation is enqueued; submit_workload, resync and observation wakes never raise a lane. Guards: S-SUP-10, 24, 25, 29, 31, 32, 36 must keep passing. Gates: cargo xtask metal run -- cargo nextest run -p overdrive-control-plane -p overdrive-sim --features integration-tests; cargo xtask metal run -- cargo nextest run -p overdrive-cli --features integration-tests,kvm-tests (T3-12/13); dst-lint; conformance-lint. MODEL CONFORMANCE (row 11, driving row 8): these runs become GREEN in this step: quint_node_volume.rs superseded_launch_result_discarded, stop_during_boot_wait_terminates_vmm_and_keeps_volume, stop_during_ensure_lets_ensure_finish_then_abandons, shutdown_abandons_every_launch_including_one_admitted_late; quint_restart_generation.rs second_restart_loses_launch_then_one_placement. The orchestrator has the acceptance designer lift or retarget those markers before the gate; the crafter never edits acceptance bodies or markers.",
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/reconciler_runtime.rs",
+            "crates/overdrive-control-plane/src/handlers.rs",
+            "crates/overdrive-control-plane/src/node_volume_boundaries.rs",
+            "crates/overdrive-control-plane/tests/acceptance/launch_lane_supersession.rs",
+            "crates/overdrive-control-plane/tests/integration/restart_generation_invariant.rs",
+            "crates/overdrive-cli/tests/integration/volume_survives.rs"
+          ],
+          "depends_on": [
+            "05-01",
+            "04-03"
+          ],
+          "effort_hours": 12
+        }
+      ]
+    },
+    {
+      "id": "06",
+      "name": "Restart generation and pre-driver launch outcomes (activation row 9)",
+      "steps": [
+        {
+          "id": "06-01",
+          "name": "A restart generation is handled when its successor is observed",
+          "description": "Adopt generation_replacement_pending at the four reconciler sites and in restart_status_for_alloc and delete the private compat rule restart_pending_until_successor_observed and its inline restatement: pending iff the current row exists, is not a finished Job row (kind Job with a terminal), and its issued_generation entry is below the committed generation. A relaunch of an abandoned replacement charges nothing; a restart never gives a finished, failed or operator-stopped Job a new allocation.",
+          "criteria": [
+            "generation_replacement_pending.rs: the 14 examples and two properties pass (iff against an independent restatement; agreement with allocation_attempt_transition NoChange)",
+            "restart_generation_reconcile.rs: a_lost_launch_is_relaunched_once_for_the_pending_generation, an_abandoned_replacement_relaunch_charges_nothing and a_restart_never_gives_an_operator_stopped_job_a_new_allocation pass; the seven guards keep passing",
+            "a_restart_the_evaluation_already_hydrated_sees_its_own_start_superseded_once and both shutdown cells and both control-plane-crash cells (restart and resume) pass; a_restart_of_a_running_job_ends_it_and_issues_nothing_after passes",
+            "quint_rg_control_plane_crash_during_restart_launch_relaunches_once and quint_rg_resume_of_stopped_job_does_nothing_and_issues_no_id pass; the compat rule no longer exists"
+          ],
+          "test_file": "crates/overdrive-reconcilers/tests/acceptance/generation_replacement_pending.rs",
+          "scenario_name": "S-RG-01, S-RG-02; S-SUP-33; S-INV-01 shutdown and crash cells and the running-Job restart; S-Q-14, S-Q-23",
+          "implementation_notes": "ADR-0335 (amends ADR-0073); H1 is a no-op restart of a finished Job (L9, #301 changes it, not this step). Gates: cargo xtask metal run -- cargo nextest run -p overdrive-reconcilers -p overdrive-core -p overdrive-control-plane -p overdrive-sim --features integration-tests; dst-lint; conformance-lint; check/clippy workspace. MODEL CONFORMANCE (row 11, driving row 9): these quint_restart_generation.rs runs become GREEN in this step: control_plane_crash_during_restart_launch_relaunches_once and resume_of_stopped_job_does_nothing_and_issues_no_id. The orchestrator has the acceptance designer lift their markers before the gate. resume_while_running_stops_and_replaces and restart_of_completed_job_does_nothing_and_issues_no_id are guards (no #[should_panic]; they pass against production today) and must keep passing. The crafter never edits acceptance bodies or markers.",
+          "files_to_modify": [
+            "crates/overdrive-reconcilers/src/workload_lifecycle.rs",
+            "crates/overdrive-control-plane/src/reconciler_runtime.rs",
+            "crates/overdrive-reconcilers/tests/acceptance/generation_replacement_pending.rs",
+            "crates/overdrive-reconcilers/tests/acceptance/restart_generation_reconcile.rs",
+            "crates/overdrive-control-plane/src/quint_restart_generation.rs"
+          ],
+          "depends_on": [
+            "05-02"
+          ],
+          "effort_hours": 10
+        },
+        {
+          "id": "06-02",
+          "name": "A launch failure before the driver is a recorded, charged Failed row",
+          "description": "The shim writes a Failed row for the failed id when ensure_intercept_identity fails (MtlsInterceptInstallFailed { stage identity_issue } carrying the cause) in both launch arms and when the driver registry is empty in a restart (DriverInternalError successor row), with the lease released, the predecessor cleanup run in the restart arm, a teardown failure not suppressing the row, and a Job's failure final (Failed exit_code Some(0), never relaunched).",
+          "criteria": [
+            "prelaunch_outcome_acceptance.rs: the identity-issue tests (start and restart arms, a Job's row, teardown not suppressing the row), the empty-registry restart test and the charge tests (charged to the restart ceiling then BackoffExhausted; Job final) pass",
+            "restart_generation_invariant.rs: persistent identity failure ends BackoffExhausted within the bounded launches (replacement plus at most one ungated crash restart in one window, then one per window); transient recovers to Running; a transient fault then an interrupted launch places once; a Job's persistent failure is finalised and never relaunched",
+            "quint_rg runs restart_of_exhausted_workload_relaunches_uncharged, generation_replacement_forgives_predecessor_failure, persistent_prelaunch_failure_ends_in_backoff_exhausted and transient_prelaunch_failure_recovers pass",
+            "The existing outcome guards (S1, R2, R6, R9, S10, R14, the boot-race stop) keep passing"
+          ],
+          "test_file": "crates/overdrive-control-plane/src/action_shim/prelaunch_outcome_acceptance.rs",
+          "scenario_name": "S-SHIM-02, S-SHIM-03, S-SHIM-08; S-INV-01 persistent, transient and Job pre-launch cells; S-Q-17, 18, 19, 20",
+          "implementation_notes": "ADR-0337 (J-1, DE-1: a non-start DriverError stays an internal typed error with no row; no S8/R10 test). The held-clock windows in the persistent bounded-launches test were only compile-checked until now: confirm they run RED then GREEN. Gates: cargo xtask metal run -- cargo nextest run -p overdrive-control-plane --features integration-tests; conformance-lint; dst-lint. MODEL CONFORMANCE (row 11): the quint_restart_generation.rs runs restart_of_exhausted_workload_relaunches_uncharged, generation_replacement_forgives_predecessor_failure, persistent_prelaunch_failure_ends_in_backoff_exhausted and transient_prelaunch_failure_recovers become GREEN in this step. The orchestrator has the acceptance designer lift or retarget those markers before the gate; the crafter never edits acceptance bodies or markers.",
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/action_shim/mod.rs",
+            "crates/overdrive-control-plane/src/action_shim/prelaunch_outcome_acceptance.rs",
+            "crates/overdrive-control-plane/tests/integration/restart_generation_invariant.rs",
+            "crates/overdrive-control-plane/src/quint_restart_generation.rs"
+          ],
+          "depends_on": [
+            "06-01"
+          ],
+          "effort_hours": 8
+        }
+      ]
+    },
+    {
+      "id": "07",
+      "name": "Capacity wait (activation row 10)",
+      "steps": [
+        {
+          "id": "07-01",
+          "name": "start_blocked_only_by_capacity is the reconciler's single capacity predicate",
+          "description": "Implement start_blocked_only_by_capacity(kind, run_desired, rows, view, desired_generation, observation) in overdrive-reconcilers from the reconciler's own helpers and use it in the reconciler's start rules, so a withheld start and the predicate agree in both directions.",
+          "criteria": [
+            "start_blocked_only_by_capacity.rs: the class table (each row class at cap-1, cap, cap+1), the three agreement properties against WorkloadLifecycle::reconcile and the verdict-reach test pass; the non-vacuity guard keeps passing",
+            "after_a_start_arm_admission_refusal_the_wait_predicate_is_true and after_a_restart_arm_admission_refusal_the_wait_predicate_is_true pass",
+            "No behaviour change for a start that capacity does not block; the failure_persistence: None setting of the proptest config goes with the markers"
+          ],
+          "test_file": "crates/overdrive-reconcilers/tests/acceptance/start_blocked_only_by_capacity.rs",
+          "scenario_name": "S-CAP-01; S-SHIM-07",
+          "implementation_notes": "ADR-0336, H2. Gates: cargo xtask metal run -- cargo nextest run -p overdrive-reconcilers -p overdrive-control-plane --features integration-tests; dst-lint. MODEL CONFORMANCE (row 11, driving row 10): quint_restart_generation.rs admission_refusal_leaves_no_row_and_waits_for_capacity is a guard (no #[should_panic]; it passes against production today) and must keep passing once the predicate lands. The crafter never edits acceptance bodies or markers.",
+          "files_to_modify": [
+            "crates/overdrive-reconcilers/src/workload_lifecycle.rs",
+            "crates/overdrive-reconcilers/tests/acceptance/start_blocked_only_by_capacity.rs",
+            "crates/overdrive-control-plane/src/action_shim/prelaunch_outcome_acceptance.rs"
+          ],
+          "depends_on": [
+            "06-01"
+          ],
+          "effort_hours": 8
+        },
+        {
+          "id": "07-02",
+          "name": "describe shows a workload waiting for guest-network capacity",
+          "description": "The alloc_status handler fills capacity_wait { resource, held, cap } exactly while the start is blocked only by capacity (generation pending read from the committed generation and view_for_workload_lifecycle), and the render prints the Waiting line right after the kind-aware body and suppresses the generic eligibility hint when capacity_wait is present.",
+          "criteria": [
+            "alloc_status_capacity_wait.rs (integration): a withheld first placement on a full node carries the pool's wait; a running workload, a finished Job and an operator-stopped workload on a full node carry none; the two acceptance guards keep passing",
+            "capacity_wait_composition.rs: a deploy onto a full node and a restart that loses its slot wait with no row, no Failed row and restart_counts unchanged, and resume to Running when a slot frees",
+            "workload_describe_capacity_wait.rs: the Waiting line renders for a Service and a Job and output is byte-identical when capacity_wait is None",
+            "capacity_wait_empty_state passes: the generic eligibility hint is suppressed when waiting and unchanged otherwise"
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/integration/alloc_status_capacity_wait.rs",
+          "scenario_name": "S-CAP-02, S-CAP-03 (crates/overdrive-control-plane/tests/integration/capacity_wait_composition.rs), S-CAP-04 (crates/overdrive-cli/tests/acceptance/workload_describe_capacity_wait.rs), S-CAP-05 (crates/overdrive-cli/tests/integration/workload_describe.rs, module capacity_wait_empty_state)",
+          "implementation_notes": "No nextest override: the two fill tests take about 56 s each on a debug build within the 120 s default. L6-L8 are tracked limitations (#265, #261, #367); add no history, no CPU or memory wait, no workload list. Gates: cargo xtask metal run -- cargo nextest run -p overdrive-control-plane -p overdrive-cli --features integration-tests,kvm-tests; openapi check; conformance-lint.",
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/handlers.rs",
+            "crates/overdrive-cli/src/render.rs",
+            "crates/overdrive-control-plane/tests/integration/alloc_status_capacity_wait.rs",
+            "crates/overdrive-control-plane/tests/integration/capacity_wait_composition.rs",
+            "crates/overdrive-cli/tests/acceptance/workload_describe_capacity_wait.rs",
+            "crates/overdrive-cli/tests/integration/workload_describe.rs"
+          ],
+          "depends_on": [
+            "07-01",
+            "02-04"
+          ],
+          "effort_hours": 8
+        }
+      ]
+    },
+    {
+      "id": "08",
+      "name": "Conformance and closure (activation row 11) and the metal host pool",
+      "steps": [
+        {
+          "id": "08-01",
+          "name": "The node-volume conformance driver replays every named run and randomized traces against production",
+          "description": "Close the node-volume conformance driver. The twelve named runs have already come off their markers in 04-02 and 05-02 as rows 7 and 8 landed; this step activates quint_vol_randomized last and confirms the whole driver replays specs/quint/node-local-volume against the production owner, the Reclaim arm draining the sim claim on holder death. @sizing-review-needed (small by marker count, but it is the first run of the full driver and may expose a divergence to return).",
+          "criteria": [
+            "quint_vol_* (the twelve named runs, activated in 04-02 and 05-02) still pass with the state compared after every step",
+            "quint_vol_randomized passes with the seed printed on failure",
+            "cargo xtask conformance-lint exits 0 (no empty handler, no always-false cfg, projection only through the pinned accessors, the one sim-arbiter-ok read cites S-VOL-T3-04 and S-VOL-T3-13)",
+            "cargo xtask quint check --ci for specs/quint/node-local-volume is unchanged and green"
+          ],
+          "test_file": "crates/overdrive-control-plane/src/quint_node_volume.rs",
+          "scenario_name": "S-Q-01..13",
+          "implementation_notes": "Drivers drive the production owner, never a copy; spec referenced in place, never copied. Gates: cargo xtask metal run -- cargo nextest run -p overdrive-control-plane --features integration-tests; cargo xtask metal run -- cargo xtask conformance-lint; cargo xtask metal run -- cargo xtask quint typecheck; cargo xtask metal run -- cargo xtask quint check --ci. The orchestrator has the acceptance designer lift the quint_vol_randomized marker; the crafter never edits acceptance bodies or markers. Any divergence a named run exposes is a design or implementation defect to return, not a marker to re-add.",
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/quint_node_volume.rs"
+          ],
+          "depends_on": [
+            "05-02",
+            "04-03"
+          ],
+          "effort_hours": 6
+        },
+        {
+          "id": "08-02",
+          "name": "Randomized restart-generation traces pass and the whole feature is green on metal",
+          "description": "Activate quint_rg_randomized last (every pending quint_rg named run came off its marker in 05-02, 06-01, 06-02 and 07-01) and run the full feature suites and lints over the final tree, closing every remaining pending marker.",
+          "criteria": [
+            "quint_rg_randomized passes with the seed printed on failure; no #[should_panic] pending marker or #[ignore] remains in the feature's tests",
+            "cargo xtask metal run -- cargo xtask placement-lint and conformance-lint and dst-lint exit 0",
+            "The nine-crate nextest run with --features integration-tests --no-fail-fast passes except the pre-existing vm_lifecycle_latency_283_spike admission_close_drains_owned_starts_without_admitting_ninth, and cargo test --doc passes"
+          ],
+          "test_file": "crates/overdrive-control-plane/src/quint_restart_generation.rs",
+          "scenario_name": "S-Q-24 (quint_rg_randomized); closes S-Q-14..23 and every guard",
+          "implementation_notes": "Gates: cargo xtask metal run -- cargo check --workspace --all-targets --features integration-tests,kvm-tests; ... cargo clippy --workspace --all-targets --features integration-tests,kvm-tests -- -D warnings; cargo xtask metal run -- cargo nextest run --workspace --features integration-tests --no-fail-fast; cargo xtask metal run -- cargo test --doc --workspace; cargo xtask metal run -- cargo run -p overdrive-sim --bin dst -- --seed 7. The EDD expectation E16 is a separate capture event under .claude/rules/verification.md (host reboot needs the host owner's authorisation); it is not a roadmap gate.",
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/quint_restart_generation.rs"
+          ],
+          "depends_on": [
+            "06-02",
+            "07-02",
+            "08-01"
+          ],
+          "effort_hours": 6
+        },
+        {
+          "id": "08-03",
+          "name": "The metal test host provisions the volume pool so serve and deploy can drive the slice there",
+          "description": "Extend the metal host's provisioning with a wiped GPT partition labelled overdrive-volumes, a physical volume on it and the volume group overdrive with 4 MiB extents, in partitions.json and provision.sh, with the provisioning self-test.",
+          "criteria": [
+            "After provisioning, the host has exactly one partition with PARTNAME overdrive-volumes and the overdrive VG with 4 MiB extents; re-running provisioning does not destroy existing volumes",
+            "The provisioning self-test verifies the partition, the PV and the VG and fails closed otherwise",
+            "A real overdrive serve on the host composes the pool (no volume_backing.not_composed) and deploys a [vm.volume] workload. No automated check covers this criterion; the EDD expectation E16 capture is its evidence"
+          ],
+          "test_file": "infra/metal (provisioning self-test; no in-repo acceptance test)",
+          "scenario_name": "Provisioning obligation (feature-delta); enables EDD E16",
+          "implementation_notes": "Destructive physical maintenance on the shared metal host: provisioning and any partition change run only with the user's explicit authorisation and under exclusive maintenance (cargo xtask metal run --exclusive -- ...); a crafter prepares and reviews the change but must not execute it unprompted. Gates: shellcheck/format of provision.sh as the repo does, cargo xtask metal run -- cargo check --workspace --all-targets. E16 CAPTURE: the E16 capture deploys the checked-in example specs under examples/node-local-volume/ by path (the single-replica volume Service spec, and the oversized spec for the typed InsufficientSpace reason); it does not use ad hoc specs.",
+          "files_to_modify": [
+            "infra/metal/partitions.json",
+            "infra/metal/provision.sh"
+          ],
+          "depends_on": [
+            "04-03"
+          ],
+          "effort_hours": 4
+        }
+      ]
+    }
+  ],
+  "validation": {
+    "status": "approved",
+    "reviewer": "nw-acceptance-designer-reviewer",
+    "approved_at": "2026-11-20T01:46:03+00:00",
+    "notes": "Approved after two review rounds; final round's three wording findings applied. 01-01 amended 2026-11-20 by user ruling: second-disk launch support moved in from 03-01/04-02. 2026-11-20: example under examples/ added by user ruling; 04-03 proves it parses and its README is accurate; E16 captures it in 08-03."
+  }
+}

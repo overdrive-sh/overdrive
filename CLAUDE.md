@@ -388,7 +388,7 @@ model error, not a datapath defect. RCA:
 
 ## Mutation Testing Strategy
 
-This project uses **per-feature** mutation testing. Per-PR runs are diff-scoped via `cargo mutants --in-diff origin/main` with a kill-rate gate of ≥80%. A nightly job runs the full workspace against the baseline in `mutants-baseline/main/` to catch drift. Mutations to `unsafe` blocks, `aya-rs` eBPF programs, generated code, and async scheduling logic are excluded per `.claude/rules/testing.md`.
+Mutation testing is **disabled**. DELIVER runs no mutation gate, per step or per feature.
 
 ## nWave design dispatches — priority scope
 

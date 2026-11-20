@@ -1,0 +1,48 @@
+{
+  "schema_version": "3.0",
+  "feature_id": "node-local-persistent-volume",
+  "events": [
+    {
+      "sid": "01-01",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: guest-kit cannot attach the pool backing disk; vmm.rs ignores VmConfig.volume until step 04-02 (needs user decision)",
+      "t": "2026-11-20T01:57:10Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: guest-kit cannot attach the pool backing disk; vmm.rs ignores VmConfig.volume until step 04-02 (needs user decision)",
+      "t": "2026-11-20T01:57:10Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: guest-kit cannot attach the pool backing disk; vmm.rs ignores VmConfig.volume until step 04-02 (needs user decision)",
+      "t": "2026-11-20T01:57:10Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-20T10:33:26Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-20T10:50:00Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-20T10:50:21Z"
+    }
+  ]
+}

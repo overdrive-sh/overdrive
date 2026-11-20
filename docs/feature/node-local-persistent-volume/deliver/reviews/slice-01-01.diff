@@ -1,0 +1,758 @@
+commit 7318b8e91bab41fff4c8ac0060b030512a1ca67e
+Author: Marcus Schack Abildskov <work@marcus-sa.dev>
+Date:   Fri Nov 20 11:50:12 2026 +0100
+
+    feat(node-local-persistent-volume): volume-pool guest provisioning and second-disk launch
+    
+    The production Vmm now renders VmConfig.volume as the second --disk
+    (DiskAttachment::volume: direct=on, serial=ovd-volume). Guest-kit
+    preparation builds a sparse backing disk template holding a GPT
+    partition labelled overdrive-volumes with the PV and the overdrive VG
+    (4 MiB extents); each volume-pool guest boots a fresh copy as its second
+    disk, with the LVM toolchain, sfdisk, flock, dmsetup and the dm-flakey
+    module staged. The Tier-3 volume tests run in that guest and are proven
+    RED on their own markers.
+    
+    Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+    Step-Id: 01-01
+    Task-Id: node-local-persistent-volume
+
+diff --git a/crates/overdrive-cli/tests/integration/volume_survives.rs b/crates/overdrive-cli/tests/integration/volume_survives.rs
+index 4a251a4f1..6e8ed9293 100644
+--- a/crates/overdrive-cli/tests/integration/volume_survives.rs
++++ b/crates/overdrive-cli/tests/integration/volume_survives.rs
+@@ -379,7 +379,6 @@ impl Journey {
+ #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
+ #[tokio::test]
+ #[serial(cgroup)]
+-#[ignore = "needs the volume-pool guest's pool: the guest-kit volume-pool step provisions it (prerequisite 1)"]
+ #[should_panic(expected = "a VM workload that declares [vm.volume] must deploy (vol-restart)")]
+ async fn data_written_by_the_guest_survives_a_workload_restart() {
+     let journey = Journey::new();
+@@ -442,7 +441,6 @@ async fn data_written_by_the_guest_survives_a_workload_restart() {
+ #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
+ #[tokio::test]
+ #[serial(cgroup)]
+-#[ignore = "needs the volume-pool guest's pool: the guest-kit volume-pool step provisions it (prerequisite 1)"]
+ #[should_panic(expected = "a VM workload that declares [vm.volume] must deploy (vol-killed)")]
+ async fn a_record_the_guest_flushed_survives_a_killed_vmm() {
+     let journey = Journey::new();
+@@ -464,7 +462,6 @@ async fn a_record_the_guest_flushed_survives_a_killed_vmm() {
+ #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
+ #[tokio::test]
+ #[serial(cgroup)]
+-#[ignore = "needs the volume-pool guest's pool: the guest-kit volume-pool step provisions it (prerequisite 1)"]
+ #[should_panic(expected = "a VM workload that declares [vm.volume] must deploy (vol-stop)")]
+ async fn an_operator_stop_keeps_the_volume_and_a_resume_reattaches_it() {
+     let journey = Journey::new();
+@@ -504,7 +501,6 @@ async fn an_operator_stop_keeps_the_volume_and_a_resume_reattaches_it() {
+ #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
+ #[tokio::test]
+ #[serial(cgroup)]
+-#[ignore = "needs the volume-pool guest's pool: the guest-kit volume-pool step provisions it (prerequisite 1)"]
+ #[should_panic(expected = "a VM workload that declares [vm.volume] must deploy (vol-drain)")]
+ async fn a_replacement_waits_for_the_claim_while_the_old_writers_io_drains() {
+     let journey = Journey::new();
+@@ -597,7 +593,6 @@ fn flakey_table(current: &str, down_seconds: u32) -> String {
+ #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
+ #[tokio::test]
+ #[serial(cgroup)]
+-#[ignore = "needs the volume-pool guest's pool: the guest-kit volume-pool step provisions it (prerequisite 1), with dmsetup and the dm-flakey module and loader"]
+ #[should_panic(expected = "a VM workload that declares [vm.volume] must deploy (vol-flush)")]
+ async fn a_failed_host_flush_reaches_the_guests_fsync_as_an_error() {
+     let journey = Journey::new();
+@@ -729,7 +724,6 @@ fn assert_nothing_failed_or_charged(
+ #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
+ #[tokio::test]
+ #[serial(cgroup)]
+-#[ignore = "needs the volume-pool guest's pool, dmsetup and a real VMM: the guest-kit volume-pool step provisions them (prerequisite 1)"]
+ #[should_panic(expected = "a VM workload that declares [vm.volume] must deploy (vol-stop-held)")]
+ async fn a_workload_stop_during_a_held_claim_returns_promptly_with_no_failed_row() {
+     let journey = Journey::new();
+@@ -825,7 +819,6 @@ async fn a_workload_stop_during_a_held_claim_returns_promptly_with_no_failed_row
+ #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
+ #[tokio::test]
+ #[serial(cgroup)]
+-#[ignore = "needs the volume-pool guest's pool and a real VMM: the guest-kit volume-pool step provisions them (prerequisite 1)"]
+ #[should_panic(expected = "a VM workload that declares [vm.volume] must deploy (vol-stop-boot)")]
+ async fn a_workload_stop_during_guest_boot_terminates_the_vmm_and_keeps_the_volume() {
+     let journey = Journey::new();
+diff --git a/crates/overdrive-core/src/vm/config.rs b/crates/overdrive-core/src/vm/config.rs
+index 7bb186236..d8217f597 100644
+--- a/crates/overdrive-core/src/vm/config.rs
++++ b/crates/overdrive-core/src/vm/config.rs
+@@ -218,9 +218,7 @@ impl KernelImage {
+ pub struct DiskAttachment {
+     path: PathBuf,
+     readonly: bool,
+-    #[allow(dead_code, reason = "DISTILL RED scaffold: to_disk_arg renders serial in DELIVER")]
+     serial: Option<&'static str>,
+-    #[allow(dead_code, reason = "DISTILL RED scaffold: to_disk_arg renders direct in DELIVER")]
+     direct: bool,
+ }
+ 
+@@ -233,9 +231,6 @@ impl DiskAttachment {
+     /// The workload volume's attachment: writable, `direct` on, serial
+     /// [`VOLUME_DISK_SERIAL`] (ADR-0315). The one constructor of a serial-tagged
+     /// or direct attachment.
+-    ///
+-    /// SCAFFOLD: true — the fields are set, but `to_disk_arg` still renders the
+-    /// rootfs shape until DELIVER renders `direct` and `serial`.
+     #[must_use]
+     pub const fn volume(device: PathBuf) -> Self {
+         Self { path: device, readonly: false, serial: Some(VOLUME_DISK_SERIAL), direct: true }
+@@ -250,6 +245,13 @@ impl DiskAttachment {
+         if self.readonly {
+             arg.push_str(",readonly=on");
+         }
++        if self.direct {
++            arg.push_str(",direct=on");
++        }
++        if let Some(serial) = self.serial {
++            arg.push_str(",serial=");
++            arg.push_str(serial);
++        }
+         arg
+     }
+ }
+diff --git a/crates/overdrive-core/tests/acceptance/volume_value_types.rs b/crates/overdrive-core/tests/acceptance/volume_value_types.rs
+index b2a43172e..592392456 100644
+--- a/crates/overdrive-core/tests/acceptance/volume_value_types.rs
++++ b/crates/overdrive-core/tests/acceptance/volume_value_types.rs
+@@ -150,7 +150,6 @@ fn the_insufficient_space_cause_carries_free_space_as_a_string() {
+ /// serial: the argv golden of the single render site.
+ /// CONTRACT_SHAPE: pure-function.
+ #[test]
+-#[should_panic(expected = "the volume --disk argument must render direct=on and serial=ovd-volume")]
+ fn the_volume_disk_renders_the_golden_argument() {
+     let device = PathBuf::from("/dev/mapper/overdrive-ovd--0123456789abcdef0123456789abcdef");
+     assert_eq!(
+diff --git a/crates/overdrive-host/src/vmm.rs b/crates/overdrive-host/src/vmm.rs
+index 945c52c8b..633d4c956 100644
+--- a/crates/overdrive-host/src/vmm.rs
++++ b/crates/overdrive-host/src/vmm.rs
+@@ -291,8 +291,13 @@ impl CloudHypervisorVmm {
+             .arg("--cmdline")
+             .arg(config.cmdline.as_str())
+             .arg("--disk")
+-            .arg(DiskAttachment::new(config.rootfs.clone_dest().to_path_buf(), false).to_disk_arg())
+-            .arg("--serial")
++            .arg(
++                DiskAttachment::new(config.rootfs.clone_dest().to_path_buf(), false).to_disk_arg(),
++            );
++        if let Some(volume) = &config.volume {
++            cmd.arg(DiskAttachment::volume(volume.device.clone()).to_disk_arg());
++        }
++        cmd.arg("--serial")
+             .arg(format!("file={}", config.run_dir.console_log().display()))
+             .arg("--console")
+             .arg("off")
+diff --git a/crates/overdrive-host/tests/integration/volume_pool_backing.rs b/crates/overdrive-host/tests/integration/volume_pool_backing.rs
+index ff9d60653..1e49b11aa 100644
+--- a/crates/overdrive-host/tests/integration/volume_pool_backing.rs
++++ b/crates/overdrive-host/tests/integration/volume_pool_backing.rs
+@@ -56,7 +56,6 @@ fn open_exclusive(device: &Path) -> std::fs::File {
+ /// CONTRACT_SHAPE: bounded-change.
+ #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
+ #[test]
+-#[ignore = "needs the volume-pool guest's pool: the guest-kit volume-pool step provisions it (prerequisite 1)"]
+ #[should_panic(
+     expected = "the guest's pool is found (ensure_creates_the_declared_size_activated_under_the_hashed_name)"
+ )]
+@@ -96,7 +95,6 @@ fn ensure_creates_the_declared_size_activated_under_the_hashed_name() {
+ /// CONTRACT_SHAPE: bounded-change.
+ #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
+ #[test]
+-#[ignore = "needs the volume-pool guest's pool: the guest-kit volume-pool step provisions it (prerequisite 1)"]
+ #[should_panic(
+     expected = "the guest's pool is found (ensure_is_idempotent_and_does_not_compare_the_existing_size)"
+ )]
+@@ -120,7 +118,6 @@ fn ensure_is_idempotent_and_does_not_compare_the_existing_size() {
+ /// CONTRACT_SHAPE: bounded-change.
+ #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
+ #[test]
+-#[ignore = "needs the volume-pool guest's pool: the guest-kit volume-pool step provisions it (prerequisite 1)"]
+ #[should_panic(
+     expected = "the guest's pool is found (an_inactive_volume_is_activated_by_ensure_and_reads_not_found_until_then)"
+ )]
+@@ -148,7 +145,6 @@ fn an_inactive_volume_is_activated_by_ensure_and_reads_not_found_until_then() {
+ /// CONTRACT_SHAPE: bounded-change.
+ #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
+ #[test]
+-#[ignore = "needs the volume-pool guest's pool: the guest-kit volume-pool step provisions it (prerequisite 1)"]
+ #[should_panic(
+     expected = "the guest's pool is found (claim_state_reports_held_free_and_not_found_as_the_kernel_does)"
+ )]
+@@ -179,7 +175,6 @@ fn claim_state_reports_held_free_and_not_found_as_the_kernel_does() {
+ /// CONTRACT_SHAPE: pure-function.
+ #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
+ #[test]
+-#[ignore = "needs the volume-pool guest's pool: the guest-kit volume-pool step provisions it (prerequisite 1)"]
+ #[should_panic(
+     expected = "the guest's pool is found (sad_claim_state_of_an_absent_volume_is_not_found)"
+ )]
+@@ -198,7 +193,6 @@ fn sad_claim_state_of_an_absent_volume_is_not_found() {
+ /// CONTRACT_SHAPE: bounded-change.
+ #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
+ #[test]
+-#[ignore = "needs the volume-pool guest's pool: the guest-kit volume-pool step provisions it (prerequisite 1)"]
+ #[should_panic(
+     expected = "the guest's pool is found (sad_insufficient_space_names_both_figures_and_creates_nothing)"
+ )]
+@@ -226,7 +220,6 @@ fn sad_insufficient_space_names_both_figures_and_creates_nothing() {
+ /// CONTRACT_SHAPE: bounded-change.
+ #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
+ #[test]
+-#[ignore = "needs the volume-pool guest's pool: the guest-kit volume-pool step provisions it (prerequisite 1)"]
+ #[should_panic(
+     expected = "the guest's pool is found (sad_a_failing_lvm_command_is_a_pool_command_error)"
+ )]
+@@ -271,7 +264,6 @@ fn sad_a_failing_lvm_command_is_a_pool_command_error() {
+ /// CONTRACT_SHAPE: bounded-change.
+ #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
+ #[test]
+-#[ignore = "needs the volume-pool guest's pool: the guest-kit volume-pool step provisions it (prerequisite 1)"]
+ #[should_panic(
+     expected = "the guest's pool is found (sad_an_ensure_blocked_on_the_group_lock_times_out_as_a_command_failure)"
+ )]
+@@ -321,7 +313,6 @@ fn sad_an_ensure_blocked_on_the_group_lock_times_out_as_a_command_failure() {
+ /// CONTRACT_SHAPE: bounded-change.
+ #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
+ #[test]
+-#[ignore = "needs the volume-pool guest's pool: the guest-kit volume-pool step provisions it (prerequisite 1)"]
+ #[should_panic(
+     expected = "the guest's pool is found (two_workloads_ensured_at_once_each_get_their_own_volume)"
+ )]
+diff --git a/crates/overdrive-host/tests/integration/volume_pool_probe_pool.rs b/crates/overdrive-host/tests/integration/volume_pool_probe_pool.rs
+index 1bd8d45cf..a3fed795b 100644
+--- a/crates/overdrive-host/tests/integration/volume_pool_probe_pool.rs
++++ b/crates/overdrive-host/tests/integration/volume_pool_probe_pool.rs
+@@ -61,7 +61,6 @@ fn lvm_binary() -> String {
+ /// CONTRACT_SHAPE: bounded-change.
+ #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
+ #[test]
+-#[ignore = "needs the volume-pool guest's pool: the guest-kit volume-pool step provisions it (prerequisite 1)"]
+ #[should_panic(
+     expected = "the labelled partition is found (a_healthy_pool_probes_clean_and_leaves_nothing_behind)"
+ )]
+@@ -82,7 +81,6 @@ fn a_healthy_pool_probes_clean_and_leaves_nothing_behind() {
+ /// CONTRACT_SHAPE: bounded-change.
+ #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
+ #[test]
+-#[ignore = "needs the volume-pool guest's pool: the guest-kit volume-pool step provisions it (prerequisite 1)"]
+ #[should_panic(
+     expected = "the labelled partition is found (a_scratch_volume_left_by_a_crashed_probe_is_removed_first)"
+ )]
+@@ -104,7 +102,6 @@ fn a_scratch_volume_left_by_a_crashed_probe_is_removed_first() {
+ /// CONTRACT_SHAPE: bounded-change.
+ #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
+ #[test]
+-#[ignore = "needs the volume-pool guest's pool: the guest-kit volume-pool step provisions it (prerequisite 1)"]
+ #[should_panic(expected = "the labelled partition is found (the_probe_touches_no_workload_volume)")]
+ fn the_probe_touches_no_workload_volume() {
+     lvm_ok(&["lvcreate", "-L", "4m", "-n", "ovd-0123456789abcdef0123456789abcdef", "overdrive"]);
+@@ -123,7 +120,6 @@ fn the_probe_touches_no_workload_volume() {
+ /// CONTRACT_SHAPE: bounded-change.
+ #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
+ #[test]
+-#[ignore = "needs the volume-pool guest's pool: the guest-kit volume-pool step provisions it (prerequisite 1)"]
+ #[should_panic(
+     expected = "the labelled partition is found (a_pool_with_no_free_extent_still_probes_clean)"
+ )]
+@@ -150,7 +146,6 @@ fn a_pool_with_no_free_extent_still_probes_clean() {
+ /// CONTRACT_SHAPE: bounded-change.
+ #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
+ #[test]
+-#[ignore = "needs the volume-pool guest's pool: the guest-kit volume-pool step provisions it (prerequisite 1)"]
+ #[should_panic(
+     expected = "a broken pool must fail its probe (sad_an_unusable_lvm_tool_fails_the_probe_tools_or_device_mapper_unusable)"
+ )]
+@@ -170,7 +165,6 @@ fn sad_an_unusable_lvm_tool_fails_the_probe_tools_or_device_mapper_unusable() {
+ /// CONTRACT_SHAPE: bounded-change.
+ #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
+ #[test]
+-#[ignore = "needs the volume-pool guest's pool: the guest-kit volume-pool step provisions it (prerequisite 1)"]
+ #[should_panic(
+     expected = "a broken pool must fail its probe (sad_a_missing_volume_group_fails_the_probe_volume_group_missing)"
+ )]
+@@ -190,7 +184,6 @@ fn sad_a_missing_volume_group_fails_the_probe_volume_group_missing() {
+ /// CONTRACT_SHAPE: bounded-change.
+ #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
+ #[test]
+-#[ignore = "needs the volume-pool guest's pool: the guest-kit volume-pool step provisions it (prerequisite 1)"]
+ #[should_panic(
+     expected = "a broken pool must fail its probe (sad_an_ambiguous_label_fails_the_probe_volume_group_missing_naming_the_ambiguity)"
+ )]
+@@ -222,7 +215,6 @@ fn sad_an_ambiguous_label_fails_the_probe_volume_group_missing_naming_the_ambigu
+ /// CONTRACT_SHAPE: bounded-change.
+ #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
+ #[test]
+-#[ignore = "needs the volume-pool guest's pool: the guest-kit volume-pool step provisions it (prerequisite 1)"]
+ #[should_panic(
+     expected = "a broken pool must fail its probe (sad_a_scratch_node_that_cannot_appear_fails_the_probe_scratch_create_or_node_failed)"
+ )]
+@@ -255,7 +247,6 @@ fn sad_a_scratch_node_that_cannot_appear_fails_the_probe_scratch_create_or_node_
+ /// CONTRACT_SHAPE: bounded-change.
+ #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
+ #[test]
+-#[ignore = "needs the volume-pool guest's pool: the guest-kit volume-pool step provisions it (prerequisite 1)"]
+ #[should_panic(
+     expected = "a broken pool must fail its probe (sad_a_scratch_volume_held_open_fails_the_probe_scratch_remove_failed)"
+ )]
+diff --git a/crates/overdrive-testing/src/guest_kit.rs b/crates/overdrive-testing/src/guest_kit.rs
+index d8d252f4a..7670919ec 100644
+--- a/crates/overdrive-testing/src/guest_kit.rs
++++ b/crates/overdrive-testing/src/guest_kit.rs
+@@ -73,7 +73,7 @@ use overdrive_core::guest_transport::{GUEST_FORWARDER_MODULE_PATH, GuestCid};
+ use overdrive_core::traits::vmm::{VmControl, Vmm, VmmExit};
+ use overdrive_core::vm::config::{
+     Gid, HostArch, KernelCmdline, KernelImage, MemoryPlan, OVERDRIVE_VMM_UID, RootfsPlan, VmConfig,
+-    VmConfinement, VmRunDir, VmmIdentity,
++    VmConfinement, VmRunDir, VmmIdentity, VolumeAttachment,
+ };
+ use overdrive_host::CloudHypervisorVmm;
+ 
+@@ -398,6 +398,20 @@ pub struct GuestImage {
+     pub rootfs: PathBuf,
+     /// Which PID 1 behavior this image carries.
+     pub init: GuestInit,
++    /// The volume-pool backing disk template (ADR-0313): when set, every boot of
++    /// this image attaches a fresh copy of it as the guest's second disk. `None`
++    /// is a guest with no pool.
++    pub volume_pool: Option<PathBuf>,
++}
++
++impl GuestImage {
++    /// This image with the volume-pool backing disk `template` (see
++    /// [`prepared_volume_pool_disk`]) attached to every guest booted from it.
++    #[must_use]
++    pub fn with_volume_pool(mut self, template: PathBuf) -> Self {
++        self.volume_pool = Some(template);
++        self
++    }
+ }
+ 
+ /// A provisioned guest kit.
+@@ -616,7 +630,7 @@ impl GuestKit {
+         vm_fixture::mknod_char_device(&stage.join("dev/null"), 1, 3, 0o666)?;
+         let rootfs = dir.join(format!("{name}.ext4"));
+         mkfs(&stage, &rootfs)?;
+-        Ok(GuestImage { rootfs, init: spec.init })
++        Ok(GuestImage { rootfs, init: spec.init, volume_pool: None })
+     }
+ 
+     /// Launches a VMM over `boot.image` at `boot.cid`, through the
+@@ -676,8 +690,14 @@ impl GuestKit {
+         }
+         let vcpus =
+             NonZeroU8::new(boot.vcpus).unwrap_or_else(|| panic!("a guest has at least one vCPU"));
++        let volume = boot
++            .image
++            .volume_pool
++            .as_deref()
++            .map(|template| fresh_volume_pool_disk(template, boot.run_dir, boot.cid))
++            .transpose()?;
+         let config = VmConfig {
+-            volume: None,
++            volume,
+             alloc: alloc.clone(),
+             kernel,
+             // Keep the production FICLONE target on the caller's
+@@ -1255,6 +1275,49 @@ pub(crate) fn prepared(path: PathBuf, artifact: &str) -> Result<PathBuf, GuestKi
+     }
+ }
+ 
++/// The volume-pool backing disk template the lane setup step prepared.
++///
++/// A raw disk holding a wiped GPT partition labelled `overdrive-volumes` with
++/// the physical volume and the volume group `overdrive` (ADR-0313), at the
++/// `xtask::guest_kit_prepare` contract path
++/// `<target>/guest-kit/volume-pool/pool.img`.
++///
++/// # Errors
++///
++/// [`GuestKitError::LaneNotPrepared`] when the setup step left none.
++pub fn prepared_volume_pool_disk() -> Result<PathBuf, GuestKitError> {
++    let root = vm_fixture::workspace_root();
++    let disk = vm_fixture::cargo_target_dir(&root).join("guest-kit/volume-pool/pool.img");
++    prepared(disk, "volume-pool backing disk")
++}
++
++/// A fresh, private copy of the backing disk `template` for the guest at `cid`,
++/// owned by the confined VMM identity (it opens the disk after dropping to it).
++fn fresh_volume_pool_disk(
++    template: &Path,
++    run_dir: &Path,
++    cid: u32,
++) -> Result<VolumeAttachment, GuestKitError> {
++    let disk = run_dir.join(format!("volume-pool-{cid}.img"));
++    let copied = Command::new("cp")
++        .args(["--sparse=always", "--reflink=auto"])
++        .arg(template)
++        .arg(&disk)
++        .output()
++        .map_err(staging(format!("spawning cp for {}", disk.display())))?;
++    if !copied.status.success() {
++        return Err(GuestKitError::Staging {
++            detail: format!("copying {} to {}", template.display(), disk.display()),
++            source: io::Error::other(String::from_utf8_lossy(&copied.stderr).into_owned()),
++        });
++    }
++    std::os::unix::fs::chown(&disk, Some(OVERDRIVE_VMM_UID), Some(OVERDRIVE_VMM_UID))
++        .map_err(staging(format!("giving {} to the VMM identity", disk.display())))?;
++    fs::set_permissions(&disk, fs::Permissions::from_mode(0o600))
++        .map_err(staging(format!("restricting {}", disk.display())))?;
++    Ok(VolumeAttachment { device: disk })
++}
++
+ /// The module the lane setup step built for `release` from this
+ /// workspace's source (EVMOD-BUILD, round 13: workspace-scoped,
+ /// `<workspace>/target/kmod/<release>/ovd_fwd.ko`, or under
+diff --git a/crates/overdrive-testing/src/guest_suite.rs b/crates/overdrive-testing/src/guest_suite.rs
+index 33e8a8d0d..e7bcb786e 100644
+--- a/crates/overdrive-testing/src/guest_suite.rs
++++ b/crates/overdrive-testing/src/guest_suite.rs
+@@ -44,6 +44,7 @@ use crate::guest_kit::cid_bands::{FWD_GUEST_BOUNDARY, INIT_IN_GUEST_LANE};
+ use crate::guest_kit::{
+     DUMMY_MODULE_GUEST_PATH, GuestFile, GuestImageSpec, GuestInit, GuestKit, GuestKitError,
+     LOOPBACK_MODULE_GUEST_PATH, ScriptedBootExtra, WorkDir, host_module_file,
++    prepared_volume_pool_disk,
+ };
+ use crate::guest_lane::{
+     InGuestTests, lane_attempt, run_in_guest_cell_attempt, run_in_guest_owner_cell_attempt,
+@@ -687,6 +688,13 @@ impl NestedVmGuestResources {
+     const VM_COHORT: Self = Self { memory_mib: VM_COHORT_OUTER_GUEST_MIB, vcpus: 8 };
+ }
+ 
++/// A suite guest's size and, for a `volume-pool` guest, its backing disk template.
++struct GuestSize {
++    memory_mib: u32,
++    vcpus: u8,
++    volume_pool: Option<PathBuf>,
++}
++
+ struct GuestRun {
+     guest: crate::guest_kit::ScriptedGuest,
+     module_paths: Vec<String>,
+@@ -700,9 +708,9 @@ impl GuestRun {
+         slot: u32,
+         extra: Vec<GuestFile>,
+         module_paths: Vec<String>,
+-        memory_mib: u32,
+-        vcpus: u8,
++        size: &GuestSize,
+     ) -> Result<Self, GuestKitError> {
++        let GuestSize { memory_mib, vcpus, volume_pool } = size;
+         let staging = default_staging_root();
+         let work = WorkDir::create(&staging, &format!("fwd-suite-{name}"))?;
+         let image = kit.image(
+@@ -715,14 +723,18 @@ impl GuestRun {
+                 extra,
+             },
+         )?;
++        let image = match volume_pool {
++            Some(template) => image.with_volume_pool(template.clone()),
++            None => image,
++        };
+         let guest = kit.boot_scripted_with(
+             &image,
+             FWD_GUEST_BOUNDARY.raw(slot),
+             &work.path().join("run"),
+             &ScriptedBootExtra {
+                 cmdline: Vec::new(),
+-                memory_mib: Some(memory_mib),
+-                vcpus: Some(vcpus),
++                memory_mib: Some(*memory_mib),
++                vcpus: Some(*vcpus),
+             },
+         )?;
+         Ok(Self { guest, module_paths, _work: work })
+@@ -1179,6 +1191,7 @@ const NESTED_GUEST_LAUNCH_PASSWD: &str = "root:x:0:0:root:/root:/usr/bin/sh\n";
+ /// lane driver (`IN_GUEST_LANE_DRIVERS`) also finds the prepared in-guest cell
+ /// binary at its workspace path, as it does on the host.
+ fn nested_guest_launch_support(
++    kit: &GuestKit,
+     dir: &Path,
+     environment: AttemptEnvironment,
+     extra: &mut Vec<GuestFile>,
+@@ -1210,6 +1223,9 @@ fn nested_guest_launch_support(
+         guest: PathBuf::from("/etc/passwd"),
+         with_shared_libraries: false,
+     });
++    if environment == AttemptEnvironment::VolumePool {
++        volume_pool_guest_support(kit, dir, extra)?;
++    }
+     if environment == AttemptEnvironment::NestedLaunchRustc {
+         nested_guest_build_support(extra)?;
+         stage_prepare_overdrive_init(extra)?;
+@@ -1225,6 +1241,54 @@ fn nested_guest_launch_support(
+     Ok(())
+ }
+ 
++/// The loadable modules of a volume-pool guest (the guest kernel is the metal
++/// host's own): `dm-flakey` always, `loop` when the kernel ships it as a module.
++const VOLUME_POOL_FLAKEY_MODULE: &str = "/lib/overdrive-testing/modules/dm-flakey.ko";
++const VOLUME_POOL_LOOP_MODULE: &str = "/lib/overdrive-testing/modules/loop.ko";
++
++/// What a `volume-pool` guest carries beyond `nested-launch` (ADR-0313,
++/// upstream-issues N-5): the LVM toolchain with its library closure, `sfdisk`,
++/// `flock`, `dmsetup`, `losetup` (staged with the nested substrate), the
++/// `dm-flakey` module and its loader, the loop module when the kernel ships
++/// one, and the coreutils the journeys call. The static busybox is staged for
++/// every launching guest. The backing disk itself is attached at boot.
++fn volume_pool_guest_support(
++    kit: &GuestKit,
++    dir: &Path,
++    extra: &mut Vec<GuestFile>,
++) -> Result<(), GuestKitError> {
++    for name in ["lvm", "sfdisk", "flock", "dmsetup", "insmod", "dd", "head", "printf"] {
++        extra.push(tool(name));
++    }
++    extra.push(host_module_file(
++        kit,
++        dir,
++        "drivers/md/dm-flakey",
++        Path::new(VOLUME_POOL_FLAKEY_MODULE),
++    )?);
++    let loop_module = format!("/lib/modules/{}/kernel/drivers/block/loop.ko", kit.kernel_release);
++    if Path::new(&loop_module).exists() || Path::new(&format!("{loop_module}.zst")).exists() {
++        extra.push(host_module_file(
++            kit,
++            dir,
++            "drivers/block/loop",
++            Path::new(VOLUME_POOL_LOOP_MODULE),
++        )?);
++    }
++    Ok(())
++}
++
++/// Per-guest setup of a `volume-pool` guest: the directories `lvm` writes to,
++/// and the modules a test needs loaded.
++const VOLUME_POOL_GUEST_SETUP: &str = r"
++set -eu
++mkdir -p /run/lock /run/lvm /etc/lvm
++/usr/bin/insmod /lib/overdrive-testing/modules/dm-flakey.ko
++if [ -f /lib/overdrive-testing/modules/loop.ko ]; then
++  /usr/bin/insmod /lib/overdrive-testing/modules/loop.ko
++fi
++";
++
+ /// `rustc --print sysroot` on the runner: the toolchain the metal host's
+ /// bodies compile with.
+ fn rust_sysroot() -> Result<PathBuf, GuestKitError> {
+@@ -2030,7 +2094,7 @@ fn nested_cgroup_default_plan(
+ ) -> Result<NextestGuestPlan, GuestKitError> {
+     let (mut extra, module_paths) = nested_vm_test_support(kit, support_dir)?;
+     if environment.launches_guests() {
+-        nested_guest_launch_support(support_dir, environment, &mut extra)?;
++        nested_guest_launch_support(kit, support_dir, environment, &mut extra)?;
+     }
+     Ok(NextestGuestPlan {
+         name: "cgroup-default",
+@@ -2206,6 +2270,9 @@ fn prepare_nextest_guest(
+             // creates both here, before the body makes its own directory under
+             // the staging root and before it takes its baseline observation.
+             guest.command(&["/usr/bin/sh", "-c", NESTED_GUEST_LAUNCH_NODE_SETUP])?;
++            if plan.environment == AttemptEnvironment::VolumePool {
++                guest.command(&["/usr/bin/sh", "-c", VOLUME_POOL_GUEST_SETUP])?;
++            }
+         }
+         Ok(())
+     } else if plan.cgroup {
+@@ -2396,14 +2463,17 @@ fn boot_group_guest(
+     plan.extra =
+         guest_attempt_files(plan.extra, attempt_files, &source_root, binary_id, test_name)?;
+     let staged = started.elapsed();
++    let volume_pool = (plan.environment == AttemptEnvironment::VolumePool)
++        .then(prepared_volume_pool_disk)
++        .transpose()
++        .map_err(|error| kit_failure(&error))?;
+     let mut guest = GuestRun::boot_with_files(
+         &kit,
+         &format!("nextest-{}", plan.name),
+         plan.cid,
+         std::mem::take(&mut plan.extra),
+         std::mem::take(&mut plan.module_paths),
+-        plan.memory_mib,
+-        plan.vcpus,
++        &GuestSize { memory_mib: plan.memory_mib, vcpus: plan.vcpus, volume_pool },
+     )
+     .map_err(|error| NextestDispatchFailure::GuestExecution(format!("{error:?}")))?;
+     let booted = started.elapsed();
+diff --git a/xtask/src/guest_kit_prepare.rs b/xtask/src/guest_kit_prepare.rs
+index 7d8676793..28063ce22 100644
+--- a/xtask/src/guest_kit_prepare.rs
++++ b/xtask/src/guest_kit_prepare.rs
+@@ -32,6 +32,7 @@
+ //! | the static production init binary | `<target>/<musl-triple>/release/overdrive-init` | `vm_fixture::build_overdrive_init_static` |
+ //! | an in-guest libtest binary | `guest-kit/in-guest/<package>--<bin>` | `guest_lane::InGuestTests::prepared` |
+ //! | the shared-guest owner | `<target>/debug/overdrive-shared-guest-owner` | `placement::attach_shared` (refused as `LaneNotPrepared` naming this path when absent) |
++//! | the volume-pool backing disk template (GPT partition `overdrive-volumes`, PV, VG `overdrive`) | `<target>/guest-kit/volume-pool/pool.img` | `guest_kit::prepared_volume_pool_disk` |
+ //! | the existing Quint CLI runtime closure | `<target>/guest-kit/quint-test-runtime` | the exact active Gateway conformance-test placement |
+ 
+ use std::os::unix::fs::PermissionsExt as _;
+@@ -223,6 +224,22 @@ fn shared_guest_owner_path(target_dir: &Path) -> PathBuf {
+ /// `overdrive-testing` consumes this exact target-scoped directory; it does
+ /// not discover or install a tool from the selected-test wrapper.
+ const QUINT_RUNTIME_DIR: &str = "guest-kit/quint-test-runtime";
++/// The volume-pool backing disk template (a contract with
++/// `overdrive_testing::guest_kit::prepared_volume_pool_disk`). A volume-pool
++/// guest boots a fresh copy of it as its second disk (ADR-0313).
++const VOLUME_POOL_DISK: &str = "guest-kit/volume-pool/pool.img";
++const VOLUME_POOL_DISK_BYTES: u64 = 4 << 30;
++const SECTOR_BYTES: u64 = 512;
++/// The partition starts at 1 MiB and spans 3 GiB; the rest of the disk is
++/// unallocated, so a test can append a further partition.
++const VOLUME_POOL_PARTITION_START_SECTORS: u64 = 2048;
++const VOLUME_POOL_PARTITION_SECTORS: u64 = (3 << 30) / SECTOR_BYTES;
++/// The partition label the node's probe discovers (kernel `PARTNAME`).
++const VOLUME_POOL_PARTITION_LABEL: &str = "overdrive-volumes";
++const VOLUME_POOL_GROUP: &str = "overdrive";
++const VOLUME_POOL_EXTENT_BYTES: u64 = 4 << 20;
++/// The GPT partition type GUID of a Linux LVM partition.
++const LINUX_LVM_PARTITION_TYPE: &str = "E6D6D379-F507-44C2-A23C-238F2A3DF928";
+ const QUINT_RUNTIME_FILES_DIR: &str = "files";
+ const QUINT_RUNTIME_MANIFEST: &str = "manifest.v1";
+ const QUINT_RUNTIME_FORMAT: &str = "overdrive-quint-test-runtime-v1";
+@@ -637,6 +654,8 @@ pub fn run(workspace_root: &Path, target_dir: &Path) -> Result<()> {
+         eprintln!("guest-kit-prepare: {} {} -> {}", lane.package, lane.bin, staged.display());
+     }
+     let quint_runtime = prepare_quint_runtime(target_dir)?;
++    let volume_pool = prepare_volume_pool_disk(target_dir)?;
++    eprintln!("guest-kit-prepare: volume-pool backing disk template {}", volume_pool.display());
+     let mut shared_guest_owner_build = Command::new("cargo");
+     shared_guest_owner_build
+         .args([
+@@ -660,6 +679,132 @@ pub fn run(workspace_root: &Path, target_dir: &Path) -> Result<()> {
+     Ok(())
+ }
+ 
++/// A loop device over the pool partition's byte range, detached on drop.
++struct LoopDevice(String);
++
++impl Drop for LoopDevice {
++    fn drop(&mut self) {
++        // Detach failure leaves a loop device on the lane host; it names itself.
++        if let Err(error) = run_step(
++            Command::new("losetup").args(["-d", &self.0]),
++            &format!("detaching {}", self.0),
++        ) {
++            eprintln!("guest-kit-prepare: {error}");
++        }
++    }
++}
++
++/// Creates the volume-pool backing disk template: a sparse raw disk holding a
++/// wiped GPT partition labelled `overdrive-volumes` with a physical volume and
++/// the volume group `overdrive` (4 MiB extents). Overdrive creates none of it
++/// (ADR-0313). Every volume-pool guest boots a fresh copy.
++fn prepare_volume_pool_disk(target_dir: &Path) -> Result<PathBuf> {
++    let prepared = target_dir.join(VOLUME_POOL_DISK);
++    let dir = prepared.parent().ok_or_else(|| eyre!("no parent of {}", prepared.display()))?;
++    std::fs::create_dir_all(dir).wrap_err_with(|| format!("creating {}", dir.display()))?;
++    let staging = dir.join("pool.img.staging");
++    let lvm_dir = dir.join("lvm-system-dir");
++    for path in [&prepared, &staging] {
++        if path.exists() {
++            std::fs::remove_file(path)
++                .wrap_err_with(|| format!("clearing stale {}", path.display()))?;
++        }
++    }
++    if lvm_dir.exists() {
++        std::fs::remove_dir_all(&lvm_dir)
++            .wrap_err_with(|| format!("clearing {}", lvm_dir.display()))?;
++    }
++    std::fs::create_dir_all(&lvm_dir)
++        .wrap_err_with(|| format!("creating {}", lvm_dir.display()))?;
++    std::fs::File::create(&staging)
++        .and_then(|file| file.set_len(VOLUME_POOL_DISK_BYTES))
++        .wrap_err_with(|| format!("creating the sparse disk {}", staging.display()))?;
++
++    let script = format!(
++        "label: gpt\nstart={VOLUME_POOL_PARTITION_START_SECTORS}, size={VOLUME_POOL_PARTITION_SECTORS}, type={LINUX_LVM_PARTITION_TYPE}, name=\"{VOLUME_POOL_PARTITION_LABEL}\"\n"
++    );
++    let mut sfdisk = Command::new("sfdisk")
++        .arg(&staging)
++        .stdin(std::process::Stdio::piped())
++        .stdout(std::process::Stdio::null())
++        .stderr(std::process::Stdio::piped())
++        .spawn()
++        .wrap_err("spawning sfdisk (the lane host needs util-linux)")?;
++    std::io::Write::write_all(
++        &mut sfdisk.stdin.take().ok_or_else(|| eyre!("sfdisk has no stdin"))?,
++        script.as_bytes(),
++    )
++    .wrap_err("writing the partition table script to sfdisk")?;
++    let partitioned = sfdisk.wait_with_output().wrap_err("waiting for sfdisk")?;
++    if !partitioned.status.success() {
++        bail!("sfdisk failed: {}", String::from_utf8_lossy(&partitioned.stderr));
++    }
++
++    // The loop device covers exactly the partition's byte range, so the PV
++    // label lands at the partition-relative offset the guest will read it at,
++    // with no dependence on host partition scanning or udev.
++    let partition_offset = VOLUME_POOL_PARTITION_START_SECTORS * SECTOR_BYTES;
++    let partition_bytes = VOLUME_POOL_PARTITION_SECTORS * SECTOR_BYTES;
++    let attached = run_step(
++        Command::new("losetup")
++            .args([
++                "--find",
++                "--show",
++                "--offset",
++                &partition_offset.to_string(),
++                "--sizelimit",
++                &partition_bytes.to_string(),
++            ])
++            .arg(&staging),
++        "attaching the pool partition to a loop device",
++    )?;
++    let device = LoopDevice(String::from_utf8_lossy(&attached.stdout).trim().to_owned());
++    let config = format!(
++        "devices {{ filter = [ \"a|^{}$|\", \"r|.*|\" ] use_devicesfile = 0 }} activation {{ udev_sync = 0 udev_rules = 0 monitoring = 0 }}",
++        device.0
++    );
++    let lvm = |args: &[&str], what: &str| {
++        run_step(
++            Command::new("lvm")
++                .args(args)
++                .args(["--config", &config])
++                .env("LVM_SYSTEM_DIR", &lvm_dir),
++            what,
++        )
++    };
++    lvm(&["pvcreate", "--yes", "--force", &device.0], "creating the pool physical volume")?;
++    let extent = format!("{VOLUME_POOL_EXTENT_BYTES}b");
++    lvm(
++        &["vgcreate", "--physicalextentsize", &extent, VOLUME_POOL_GROUP, &device.0],
++        "creating the pool volume group",
++    )?;
++    let reported = lvm(
++        &[
++            "vgs",
++            "--noheadings",
++            "--nosuffix",
++            "--units",
++            "b",
++            "-o",
++            "vg_extent_size",
++            VOLUME_POOL_GROUP,
++        ],
++        "reading the pool volume group's extent size",
++    )?;
++    let reported = String::from_utf8_lossy(&reported.stdout).trim().to_owned();
++    if reported != VOLUME_POOL_EXTENT_BYTES.to_string() {
++        bail!(
++            "the pool volume group has extent size {reported:?} bytes, not {VOLUME_POOL_EXTENT_BYTES}"
++        );
++    }
++    drop(device);
++    std::fs::remove_dir_all(&lvm_dir)
++        .wrap_err_with(|| format!("removing {}", lvm_dir.display()))?;
++    std::fs::rename(&staging, &prepared)
++        .wrap_err_with(|| format!("publishing {}", prepared.display()))?;
++    Ok(prepared)
++}
++
+ fn prepare_quint_runtime(target_dir: &Path) -> Result<Option<(String, String, String, usize)>> {
+     let prepared = target_dir.join(QUINT_RUNTIME_DIR);
+     let staging = target_dir.join(format!("{QUINT_RUNTIME_DIR}.staging"));
