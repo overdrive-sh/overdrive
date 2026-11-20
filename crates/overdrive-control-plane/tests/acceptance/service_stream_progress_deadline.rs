@@ -223,6 +223,7 @@ async fn a_job_stream_keeps_the_streaming_cap_and_its_timeout_line() {
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            volume: None,
             command: "/bin/sleep".into(),
             args: vec!["3600".into()],
             kernel: "/kernel".to_owned(),

@@ -91,6 +91,7 @@ async fn service_workload_convergence_tick_does_not_panic() {
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            volume: None,
             command: "/bin/serve".to_string(),
             args: vec![],
             kernel: "/kernel".to_owned(),

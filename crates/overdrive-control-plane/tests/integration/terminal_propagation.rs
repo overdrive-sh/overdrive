@@ -171,6 +171,7 @@ async fn terminal_backoff_exhausted_appears_on_alloc_status_and_streaming() {
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 50, memory_bytes: 64 * 1024 * 1024 },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            volume: None,
             command: "/nonexistent/binary".to_string(),
             args: vec![],
             kernel: "/kernel".to_owned(),
@@ -270,6 +271,7 @@ async fn terminal_stopped_appears_on_both_surfaces() {
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            volume: None,
             command: "/bin/sleep".to_string(),
             args: vec!["3600".to_string()],
             kernel: "/kernel".to_owned(),
@@ -391,6 +393,7 @@ async fn non_terminal_transitions_emit_none() {
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            volume: None,
             command: "/bin/sleep".to_string(),
             args: vec!["3600".to_string()],
             kernel: "/kernel".to_owned(),

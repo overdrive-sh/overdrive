@@ -76,6 +76,7 @@ async fn submitted_job_reaches_running_via_simulated_vm_driver() {
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            volume: None,
             command: "/bin/sleep".to_string(),
             args: vec!["3600".to_string()],
             kernel: "/kernel".to_owned(),

@@ -179,6 +179,7 @@ async fn submit_job_then_describe_round_trips_via_http_client() {
         replicas: 3,
         resources: ResourcesInput { cpu_milli: 500, memory_bytes: 536_870_912 },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            volume: None,
             command: "/bin/true".to_string(),
             args: vec![],
             kernel: "/kernel".to_owned(),
@@ -289,6 +290,7 @@ async fn submit_with_invalid_spec_returns_http_status_400_with_error_body() {
         replicas: 0,
         resources: ResourcesInput { cpu_milli: 500, memory_bytes: 536_870_912 },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            volume: None,
             command: "/bin/true".to_string(),
             args: vec![],
             kernel: "/kernel".to_owned(),

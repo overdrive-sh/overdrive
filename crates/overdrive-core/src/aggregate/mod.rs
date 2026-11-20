@@ -15,7 +15,7 @@
 //! `Policy` and `Investigation` (Phase 2+).
 
 use std::num::NonZeroU32;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use rkyv::util::AlignedVec;
 use serde::{Deserialize, Serialize};
@@ -26,8 +26,9 @@ use crate::id::{
     AllocationId, ContentHash, CorrelationKey, InvestigationId, NodeId, PolicyId,
     PublicCertifiedKeyId, Region, WorkloadId,
 };
-use crate::traits::driver::Resources;
+use crate::traits::driver::{Resources, VmPayload, VolumePayload};
 use crate::traits::intent_store::{IntentStore, IntentStoreError};
+use crate::volume::VolumeSize;
 
 // ---------------------------------------------------------------------------
 // Re-exports for the workload-kind-discriminator parser surface.
@@ -38,7 +39,9 @@ use crate::traits::intent_store::{IntentStore, IntentStoreError};
 pub use self::probe_descriptor::{
     JOB_PROBES_GUIDANCE, ProbeDescriptor, ProbeMechanic, SCHEDULE_PROBES_GUIDANCE,
 };
-pub use self::service_spec::{ServiceSpec, ServiceSpecEnvelope, ServiceSpecLatest, ServiceSpecV1};
+pub use self::service_spec::{
+    ServiceSpec, ServiceSpecEnvelope, ServiceSpecLatest, ServiceSpecV1, ServiceSpecV2,
+};
 
 // Re-export the parser-side `ResourcesInput` and VM input under
 // disambiguating aliases. The parser-side variants are what
@@ -48,8 +51,9 @@ pub use self::workload_spec::{
     WorkloadSpecInput,
 };
 pub use self::workload_spec::{
-    DriverInput as ParserDriverInput, ResourcesInput as ParserResourcesInput,
-    VmInput as ParserVmInput,
+    DriverInput as ParserDriverInput, DriverInputV1 as ParserDriverInputV1,
+    ResourcesInput as ParserResourcesInput, VmInput as ParserVmInput, VmInputV1 as ParserVmInputV1,
+    VmVolumeInput,
 };
 
 mod workload_spec;
@@ -114,7 +118,7 @@ pub enum AggregateError {
 /// `driver: WorkloadDriver` field instead of flat `command` / `args`.
 /// `WorkloadDriver::Vm(Vm { .. })` is the current microVM execution
 /// contract. Future microVM-family variants append additively; validation
-/// lives in `JobV1::from_submit`.
+/// lives in `JobV2::from_submit`.
 ///
 /// # Canonicalisation (rkyv)
 ///
@@ -135,13 +139,13 @@ pub enum AggregateError {
 ///
 /// Per ADR-0050 single-cut migration: the `Job` payload is wrapped
 /// at the persistence boundary by [`WorkloadIntentEnvelope`] via
-/// the [`WorkloadIntentV1::Job`] variant — NOT by a per-type
-/// `JobEnvelope`. Public callers construct `Job { ... }` (= `JobV1`
+/// the [`WorkloadIntentV2::Job`] variant — NOT by a per-type
+/// `JobEnvelope`. Public callers construct `Job { ... }` (= `JobV2`
 /// values) via struct-literal syntax and wrap with
 /// `WorkloadIntent::Job(job)` at the persistence boundary; the
-/// codec ([`WorkloadIntentV1::archive_for_store`]) is the SOLE
+/// codec ([`WorkloadIntentV2::archive_for_store`]) is the SOLE
 /// wrapping site.
-pub type Job = JobV1;
+pub type Job = JobV2;
 
 /// Validated intent-side counterpart to wire-shape [`DriverInput`].
 /// Current VM-only tagged workload driver declaration.
@@ -151,7 +155,7 @@ pub type Job = JobV1;
 /// (per ADR-0030 §1). The trait is the driver implementation surface
 /// (`Driver::start(&AllocationSpec)`); this enum is the operator's
 /// declared driver-class intent on the [`Job`] aggregate.
-pub type WorkloadDriver = WorkloadDriverV1;
+pub type WorkloadDriver = WorkloadDriverV2;
 
 /// Current workload driver declaration persisted in the VM-only intent
 /// envelope.
@@ -166,17 +170,13 @@ pub type WorkloadDriver = WorkloadDriverV1;
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub enum WorkloadDriverV1 {
+pub enum WorkloadDriverV2 {
     /// Cloud Hypervisor microVM driver.
     Vm(Vm),
 }
 
-/// microVM-driver invocation fields (ADR-0083 Amendment 2026-08-12,
-/// GH #42). Mirrors the runtime `VmPayload` shape (ADR-0083 § D3) —
-/// `String`, not `PathBuf`, for both `kernel` and `rootfs`
-/// (rkyv/serde-clean). Per-VM volumes
-/// are out of scope for this feature (deferred to overdrive-fs, GH #97
-/// / virtiofsd, GH #43).
+/// **FROZEN.** V1 workload driver declaration, carried only so
+/// [`WorkloadIntentEnvelope::V1`] keeps its archived layout (ADR-0048).
 #[derive(
     Debug,
     Clone,
@@ -188,7 +188,36 @@ pub enum WorkloadDriverV1 {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
-pub struct Vm {
+pub enum WorkloadDriverV1 {
+    /// Cloud Hypervisor microVM driver.
+    Vm(VmV1),
+}
+
+impl From<WorkloadDriverV1> for WorkloadDriverV2 {
+    fn from(v1: WorkloadDriverV1) -> Self {
+        match v1 {
+            WorkloadDriverV1::Vm(vm) => Self::Vm(vm.into()),
+        }
+    }
+}
+
+/// microVM-driver invocation fields (ADR-0083 Amendment 2026-08-12,
+/// GH #42). Mirrors the runtime `VmPayload` shape (ADR-0083 § D3) —
+/// `String`, not `PathBuf`, for both `kernel` and `rootfs`
+/// (rkyv/serde-clean). The optional `volume` is the workload's node-local
+/// persistent volume (GH #348, ADR-0310).
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct VmV2 {
     /// Command run INSIDE the guest.
     pub command: String,
     /// Argv passed verbatim to the in-guest command.
@@ -199,6 +228,83 @@ pub struct Vm {
     /// Operator-supplied rootfs artifact path (BYO — host filesystem
     /// path to a root filesystem image).
     pub rootfs: String,
+    /// The workload's node-local persistent volume, when it declares one.
+    pub volume: Option<VmVolume>,
+}
+
+/// Public payload alias for the current microVM declaration.
+pub type Vm = VmV2;
+
+/// **FROZEN.** V1 microVM declaration, before `[vm.volume]` existed.
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct VmV1 {
+    /// Command run INSIDE the guest.
+    pub command: String,
+    /// Argv passed verbatim to the in-guest command.
+    pub args: Vec<String>,
+    /// Operator-supplied kernel artifact path (BYO).
+    pub kernel: String,
+    /// Operator-supplied rootfs artifact path (BYO).
+    pub rootfs: String,
+}
+
+impl From<VmV1> for VmV2 {
+    fn from(v1: VmV1) -> Self {
+        Self {
+            command: v1.command,
+            args: v1.args,
+            kernel: v1.kernel,
+            rootfs: v1.rootfs,
+            volume: None,
+        }
+    }
+}
+
+/// The node-local persistent volume a workload declares (GH #348, ADR-0310):
+/// the validated form of `[vm.volume]`.
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct VmVolume {
+    /// The declared size.
+    pub size: VolumeSize,
+}
+
+impl VmV2 {
+    /// The one projection from the persisted intent to the driver payload
+    /// (ADR-0310). Converts `kernel` and `rootfs` to paths and carries the
+    /// declared volume, owned by `workload`, when there is one.
+    #[must_use]
+    pub fn to_payload(&self, workload: &WorkloadId) -> VmPayload {
+        VmPayload {
+            command: self.command.clone(),
+            args: self.args.clone(),
+            kernel: PathBuf::from(&self.kernel),
+            rootfs: PathBuf::from(&self.rootfs),
+            volume: self
+                .volume
+                .as_ref()
+                .map(|volume| VolumePayload { workload: workload.clone(), size: volume.size }),
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -211,13 +317,33 @@ pub struct Vm {
 // `Job::spec_digest`) was deleted in this commit. The `Job` payload
 // is now persisted as the inner variant of
 // [`WorkloadIntent::Job`]; the codec lives on
-// [`WorkloadIntent`]. `JobV1` carries the validating constructor and is
+// [`WorkloadIntent`]. `JobV2` carries the validating constructor and is
 // the current payload behind the `Job` alias. Every CLI and server
 // handler routes through `Job::from_submit`. Callers wrap the value via
 // `WorkloadIntent::Job(job)` at the persistence boundary.
 
-/// **FROZEN.** Inner V1 payload of the intent-side workload
-/// aggregate. The current VM-only workload intent payload.
+/// Inner V2 payload of the intent-side `Job`: the current VM-only workload
+/// intent payload.
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct JobV2 {
+    pub id: WorkloadId,
+    pub replicas: NonZeroU32,
+    pub resources: Resources,
+    pub driver: WorkloadDriverV2,
+}
+
+/// **FROZEN.** Inner V1 payload of the intent-side `Job`, before
+/// `[vm.volume]` existed.
 #[derive(
     Debug,
     Clone,
@@ -236,7 +362,13 @@ pub struct JobV1 {
     pub driver: WorkloadDriverV1,
 }
 
-impl JobV1 {
+impl From<JobV1> for JobV2 {
+    fn from(v1: JobV1) -> Self {
+        Self { id: v1.id, replicas: v1.replicas, resources: v1.resources, driver: v1.driver.into() }
+    }
+}
+
+impl JobV2 {
     /// Validating constructor for the wire-side
     /// [`crate::api::submit::SubmitSpecInput::Job`] payload per
     /// ADR-0051 § 4 / OQ-6. Renames the legacy `from_spec` entry point
@@ -262,7 +394,7 @@ impl JobV1 {
                 message: "memory capacity must be non-zero".to_string(),
             });
         }
-        let driver = validate_driver_input(driver)?;
+        let driver = validate_driver_input(driver, replicas)?;
         Ok(Self {
             id,
             replicas,
@@ -299,18 +431,18 @@ impl JobV1 {
 /// Callers construct values via `WorkloadIntent::Job(job)` /
 /// `WorkloadIntent::Service(svc)` / `WorkloadIntent::Schedule(sched)`
 /// and pass the value to the persistence-boundary codec
-/// ([`WorkloadIntentV1::archive_for_store`]).
-pub type WorkloadIntent = WorkloadIntentV1;
+/// ([`WorkloadIntentV2::archive_for_store`]).
+pub type WorkloadIntent = WorkloadIntentV2;
 
 /// Documentation alias for "the latest payload variant of
 /// [`WorkloadIntentEnvelope`].
-pub type WorkloadIntentLatest = WorkloadIntentV1;
+pub type WorkloadIntentLatest = WorkloadIntentV2;
 
 /// Per-type rkyv versioned envelope for the intent-side workload
 /// aggregate per ADR-0048 § 4 + ADR-0050 § 4.
 ///
 /// Codec-internal — named only inside the typed
-/// [`WorkloadIntentV1::archive_for_store`] / [`WorkloadIntentV1::from_store_bytes`]
+/// [`WorkloadIntentV2::archive_for_store`] / [`WorkloadIntentV2::from_store_bytes`]
 /// codec methods and the persistence-boundary call sites that consume
 /// them. Public callers use the [`WorkloadIntent`] alias and
 /// construct payloads via the per-variant struct-literal syntax;
@@ -329,6 +461,7 @@ pub type WorkloadIntentLatest = WorkloadIntentV1;
 )]
 pub enum WorkloadIntentEnvelope {
     V1(WorkloadIntentV1),
+    V2(WorkloadIntentV2),
 }
 
 /// Current VM-only workload intent payload. Its three variants preserve
@@ -345,18 +478,76 @@ pub enum WorkloadIntentEnvelope {
     rkyv::Serialize,
     rkyv::Deserialize,
 )]
+pub enum WorkloadIntentV2 {
+    /// Run-to-completion workload.
+    Job(JobV2),
+    /// Long-running supervised workload — Phase 1 minimal shape per
+    /// ADR-0050 OQ-3.
+    Service(ServiceV2),
+    /// Cron-scheduled Job — embedded-job shape per ADR-0050 OQ-4.
+    Schedule(ScheduleV2),
+}
+
+/// **FROZEN.** V1 workload intent payload, before `[vm.volume]` existed.
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
 pub enum WorkloadIntentV1 {
     /// Run-to-completion workload.
     Job(JobV1),
-    /// Long-running supervised workload — Phase 1 minimal shape per
-    /// ADR-0050 OQ-3.
+    /// Long-running supervised workload.
     Service(ServiceV1),
-    /// Cron-scheduled Job — embedded-job shape per ADR-0050 OQ-4.
+    /// Cron-scheduled Job.
     Schedule(ScheduleV1),
+}
+
+impl From<WorkloadIntentV1> for WorkloadIntentV2 {
+    fn from(v1: WorkloadIntentV1) -> Self {
+        match v1 {
+            WorkloadIntentV1::Job(job) => Self::Job(job.into()),
+            WorkloadIntentV1::Service(service) => Self::Service(service.into()),
+            WorkloadIntentV1::Schedule(schedule) => Self::Schedule(schedule.into()),
+        }
+    }
 }
 
 /// Current VM-only `Service` payload per ADR-0050 § 2 + OQ-3, extended
 /// with health-check probe descriptors per ADR-0057.
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ServiceV2 {
+    pub id: WorkloadId,
+    pub replicas: NonZeroU32,
+    pub resources: Resources,
+    pub driver: WorkloadDriverV2,
+    pub listeners: Vec<Listener>,
+    pub startup_probes: Vec<ProbeDescriptor>,
+    pub readiness_probes: Vec<ProbeDescriptor>,
+    pub liveness_probes: Vec<ProbeDescriptor>,
+}
+
+/// Public payload alias for the intent-side `Service` aggregate.
+pub type Service = ServiceV2;
+
+/// **FROZEN.** Inner V1 payload of the intent-side `Service`, before
+/// `[vm.volume]` existed.
 #[derive(
     Debug,
     Clone,
@@ -379,10 +570,43 @@ pub struct ServiceV1 {
     pub liveness_probes: Vec<ProbeDescriptor>,
 }
 
-/// Public payload alias for the intent-side `Service` aggregate.
-pub type Service = ServiceV1;
+impl From<ServiceV1> for ServiceV2 {
+    fn from(v1: ServiceV1) -> Self {
+        Self {
+            id: v1.id,
+            replicas: v1.replicas,
+            resources: v1.resources,
+            driver: v1.driver.into(),
+            listeners: v1.listeners,
+            startup_probes: v1.startup_probes,
+            readiness_probes: v1.readiness_probes,
+            liveness_probes: v1.liveness_probes,
+        }
+    }
+}
 
 /// Current VM-only `Schedule` payload per ADR-0050 § 2 + OQ-4.
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Serialize,
+    Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub struct ScheduleV2 {
+    pub id: WorkloadId,
+    pub job: JobV2,
+    pub cron_expr: CronExpr,
+}
+
+pub type Schedule = ScheduleV2;
+
+/// **FROZEN.** Inner V1 payload of the intent-side `Schedule`, before
+/// `[vm.volume]` existed.
 #[derive(
     Debug,
     Clone,
@@ -400,9 +624,13 @@ pub struct ScheduleV1 {
     pub cron_expr: CronExpr,
 }
 
-pub type Schedule = ScheduleV1;
+impl From<ScheduleV1> for ScheduleV2 {
+    fn from(v1: ScheduleV1) -> Self {
+        Self { id: v1.id, job: v1.job.into(), cron_expr: v1.cron_expr }
+    }
+}
 
-impl ServiceV1 {
+impl ServiceV2 {
     /// Validating constructor for the wire-side
     /// [`crate::api::submit::SubmitSpecInput::Service`] payload per
     /// ADR-0051 § 4. Mirrors [`Job::from_submit`]'s validation
@@ -450,7 +678,7 @@ impl ServiceV1 {
             });
         }
 
-        let driver = validate_driver_input(driver)?;
+        let driver = validate_driver_input(driver, replicas)?;
 
         let validated = validate_service_listeners(listeners)?;
 
@@ -588,7 +816,10 @@ fn validate_guest_probe_count(
 ///
 /// Commands must be non-empty after trimming. Kernel and rootfs path
 /// existence remains a VMM create-time concern.
-fn validate_driver_input(driver: DriverInput) -> Result<WorkloadDriver, AggregateError> {
+fn validate_driver_input(
+    driver: DriverInput,
+    replicas: NonZeroU32,
+) -> Result<WorkloadDriver, AggregateError> {
     match driver {
         DriverInput::Vm(vm) => {
             if vm.command.trim().is_empty() {
@@ -597,13 +828,42 @@ fn validate_driver_input(driver: DriverInput) -> Result<WorkloadDriver, Aggregat
                     message: "command must be non-empty".to_string(),
                 });
             }
+            let volume = validate_volume_input(vm.volume, replicas)?;
             Ok(WorkloadDriver::Vm(Vm {
                 command: vm.command,
                 args: vm.args,
                 kernel: vm.kernel,
                 rootfs: vm.rootfs,
+                volume,
             }))
         }
+    }
+}
+
+/// Validate the `[vm.volume]` declaration: the size grammar, then the
+/// single-writer rule (a volume requires `replicas = 1`, ADR-0310).
+fn validate_volume_input(
+    volume: Option<VmVolumeInput>,
+    replicas: NonZeroU32,
+) -> Result<Option<VmVolume>, AggregateError> {
+    let Some(volume) = volume else { return Ok(None) };
+    let size = volume.size.parse::<VolumeSize>().map_err(|error| AggregateError::Validation {
+        field: "vm.volume.size",
+        message: error.to_string(),
+    })?;
+    if replicas.get() != 1 {
+        return Err(AggregateError::Validation {
+            field: "vm.volume",
+            message: "a volume requires replicas = 1".to_string(),
+        });
+    }
+    Ok(Some(VmVolume { size }))
+}
+
+/// The wire spelling of a validated volume declaration.
+impl From<&VmVolume> for VmVolumeInput {
+    fn from(volume: &VmVolume) -> Self {
+        Self { size: volume.size.to_string() }
     }
 }
 
@@ -683,7 +943,7 @@ fn validate_guest_listener_sole_startup(startup: &[ProbeDescriptor]) -> Result<(
     Ok(())
 }
 
-impl ScheduleV1 {
+impl ScheduleV2 {
     /// Validating constructor for the wire-side
     /// [`crate::api::submit::SubmitSpecInput::Schedule`] payload per
     /// ADR-0051 § 4 / OQ-5.
@@ -696,27 +956,29 @@ impl ScheduleV1 {
     /// Schedule streaming endpoint ships.
     #[expect(
         clippy::todo,
-        reason = "RED scaffold for ScheduleV1::from_submit — lands in a future slice per ADR-0051 OQ-5"
+        reason = "RED scaffold for ScheduleV2::from_submit — lands in a future slice per ADR-0051 OQ-5"
     )]
     pub fn from_submit(
         _input: crate::api::submit::ScheduleSpecInput,
     ) -> Result<Self, AggregateError> {
         todo!(
-            "RED scaffold: ScheduleV1::from_submit lands in a future slice — Schedule wire-arm wiring is intentionally deferred per ADR-0051 OQ-5"
+            "RED scaffold: ScheduleV2::from_submit lands in a future slice — Schedule wire-arm wiring is intentionally deferred per ADR-0051 OQ-5"
         )
     }
 }
 
 impl VersionedEnvelope for WorkloadIntentEnvelope {
-    type Latest = WorkloadIntentV1;
+    type Latest = WorkloadIntentV2;
 
     fn latest(payload: Self::Latest) -> Self {
-        Self::V1(payload)
+        Self::V2(payload)
     }
 
     fn into_latest(self) -> Result<Self::Latest, EnvelopeError> {
-        let Self::V1(payload) = self;
-        Ok(payload)
+        match self {
+            Self::V1(payload) => Ok(payload.into()),
+            Self::V2(payload) => Ok(payload),
+        }
     }
 
     // mutants: skip — `discriminant_offset_from_end` is intentionally
@@ -741,13 +1003,13 @@ impl VersionedEnvelope for WorkloadIntentEnvelope {
     // `discriminant_offset_from_end` returns `None` (see the
     // COUPLING note on that method above — the two are pinned
     // together and must be re-derived together). Mutations that
-    // replace the `&[0]` slice with `Vec::leak(vec![])` /
+    // replace the `&[0, 1]` slice with `Vec::leak(vec![])` /
     // `Vec::leak(vec![1])` produce no
     // observable behaviour change while the offset probe is a
     // no-op.
     fn known_discriminants() -> &'static [u8] {
-        // The sole current V1 variant carries rkyv discriminant 0.
-        &[0]
+        // V1 carries rkyv discriminant 0, V2 carries 1.
+        &[0, 1]
     }
 
     // mutants: skip — `type_name` feeds only the `EnvelopeError`
@@ -763,14 +1025,14 @@ impl VersionedEnvelope for WorkloadIntentEnvelope {
     }
 }
 
-impl WorkloadIntentV1 {
+impl WorkloadIntentV2 {
     /// Archive a [`WorkloadIntent`] for persistence through the
     /// [`IntentStore`].
     ///
     /// # Postconditions
     ///
     /// On `Ok(bytes)`, `bytes` is the canonical rkyv-archived byte
-    /// sequence of `WorkloadIntentEnvelope::V1(self.clone())`. Two
+    /// sequence of `WorkloadIntentEnvelope::V2(self.clone())`. Two
     /// archivals of the same logical [`WorkloadIntent`] produce
     /// byte-identical output. Callers pass `bytes.as_ref()` to the
     /// `IntentStore` trait's `&[u8]` write surface.
@@ -841,7 +1103,7 @@ impl WorkloadIntentV1 {
     /// Per ADR-0050: `WorkloadIntent::Job(j).spec_digest()` produces
     /// a value distinct from `j.spec_digest()` would have produced
     /// pre-migration — the bytes hashed are now the outer enum's
-    /// archive (with discriminant + padding), not the bare `JobV1`.
+    /// archive (with discriminant + padding), not the bare `JobV2`.
     /// This is the operator-observable single-cut migration boundary
     /// for content-addressed identity. The `ServiceVipAllocator`
     /// memo (ADR-0049) keys by the value this method returns —
@@ -917,9 +1179,8 @@ pub enum DriverInput {
 /// Operator-facing `[vm]` table fields (ADR-0082 / ADR-0083, GH #42).
 /// Mirrors the runtime `traits::driver::VmPayload` shape — `String`,
 /// not `PathBuf`, for both `kernel` and `rootfs` (serde-clean wire
-/// shape). Per-VM volumes are out
-/// of scope for this feature (deferred to overdrive-fs, GH #97 /
-/// virtiofsd, GH #43).
+/// shape). The optional `volume` is the workload's node-local persistent
+/// volume (GH #348, ADR-0310).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct VmInput {
@@ -931,6 +1192,9 @@ pub struct VmInput {
     pub kernel: String,
     /// Operator-supplied rootfs artifact path (BYO).
     pub rootfs: String,
+    /// The `[vm.volume]` declaration, when the workload has one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub volume: Option<VmVolumeInput>,
 }
 
 /// Reverse conversion — reconstruct the wire-shape `JobSpecInput` from a
@@ -952,6 +1216,7 @@ impl From<&Job> for JobSpecInput {
                 args: vm.args.clone(),
                 kernel: vm.kernel.clone(),
                 rootfs: vm.rootfs.clone(),
+                volume: vm.volume.as_ref().map(VmVolumeInput::from),
             }),
         };
         Self {
@@ -974,7 +1239,7 @@ impl From<&Job> for JobSpecInput {
 // `crate::api::describe`.
 // ---------------------------------------------------------------------------
 
-impl JobV1 {
+impl JobV2 {
     /// Project a persisted `Job` onto its describe-wire shape per
     /// ADR-0064 § 3. The Job arm carries no platform-derived field, so
     /// this delegates to the existing [`From<&Job>`] impl. (`Job =
@@ -985,7 +1250,7 @@ impl JobV1 {
     }
 }
 
-impl ServiceV1 {
+impl ServiceV2 {
     /// The **single source** for this Service's operator-declared
     /// listener-port set, in declaration order (D-BLOCKER1
     /// one-source/two-readers, GH #241).
@@ -1041,6 +1306,7 @@ impl ServiceV1 {
                 args: vm.args.clone(),
                 kernel: vm.kernel.clone(),
                 rootfs: vm.rootfs.clone(),
+                volume: vm.volume.as_ref().map(VmVolumeInput::from),
             }),
         };
         let listeners = self
@@ -1068,7 +1334,7 @@ impl ServiceV1 {
     }
 }
 
-impl ScheduleV1 {
+impl ScheduleV2 {
     /// RED scaffold per `.claude/rules/testing.md` § "Production-side
     /// scaffolds": Schedule describe is unreachable in Phase 1 (no
     /// Schedule can be persisted — [`Schedule::from_submit`] is itself

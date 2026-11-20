@@ -407,6 +407,7 @@ fn vm_job(workload_id: &WorkloadId) -> Job {
         replicas: NonZeroU32::new(1).unwrap_or_else(|| unreachable!("1 is non-zero")),
         resources: Resources { cpu_milli: 500, memory_bytes: 512 * 1024 * 1024 },
         driver: WorkloadDriver::Vm(Vm {
+            volume: None,
             command: "/sbin/init".to_string(),
             args: Vec::new(),
             kernel: "/var/lib/overdrive/kernels/vmlinux".to_string(),

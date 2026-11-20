@@ -204,6 +204,7 @@ impl Node {
             replicas: 1,
             resources: ResourcesInput { cpu_milli: 500, memory_bytes: 128 * 1024 * 1024 },
             driver: DriverInput::Vm(VmInput {
+                volume: None,
                 command: "/sbin/workload".to_owned(),
                 args: Vec::new(),
                 kernel: kernel.display().to_string(),

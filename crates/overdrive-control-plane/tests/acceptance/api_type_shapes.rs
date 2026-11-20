@@ -42,6 +42,7 @@ fn sample_job_spec() -> JobSpecInput {
         replicas: 3,
         resources: ResourcesInput { cpu_milli: 500, memory_bytes: 256 * 1024 * 1024 },
         driver: DriverInput::Vm(VmInput {
+            volume: None,
             command: "/sbin/init".to_string(),
             args: vec![],
             kernel: "/srv/vm/kernel".to_string(),

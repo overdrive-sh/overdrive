@@ -178,6 +178,7 @@ fn exec_job(id: &str) -> Job {
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            volume: None,
             command: "/bin/serve".to_owned(),
             args: vec!["--job".to_owned()],
             kernel: "/kernel".to_owned(),
@@ -193,6 +194,7 @@ fn service_with_startup_probe(id: &str) -> Service {
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            volume: None,
             command: "/bin/serve".to_owned(),
             args: vec![],
             kernel: "/kernel".to_owned(),

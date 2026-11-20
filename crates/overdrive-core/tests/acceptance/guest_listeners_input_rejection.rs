@@ -17,6 +17,7 @@ fn service_input() -> ServiceSpecInput {
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 134_217_728 },
         driver: DriverInput::Vm(VmInput {
+            volume: None,
             command: "/bin/serve".to_owned(),
             args: vec![],
             kernel: "/kernel".to_owned(),

@@ -66,6 +66,7 @@ fn service_with_ports(ports: &[NonZeroU16]) -> Service {
         replicas: NonZeroU32::new(1).expect("1 is non-zero"),
         resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
         driver: WorkloadDriver::Vm(Vm {
+            volume: None,
             command: "/bin/svc".to_string(),
             args: Vec::new(),
             kernel: "/kernel".to_owned(),

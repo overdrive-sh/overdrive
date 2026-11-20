@@ -856,6 +856,7 @@ impl RgCore {
     fn declare(&mut self) -> std::result::Result<(), Why> {
         let resources = ResourcesInput { cpu_milli: 100, memory_bytes: 134_217_728 };
         let driver = DriverInput::Vm(VmInput {
+            volume: None,
             command: "/sbin/init".to_owned(),
             args: vec![],
             kernel: "/kernel".to_owned(),

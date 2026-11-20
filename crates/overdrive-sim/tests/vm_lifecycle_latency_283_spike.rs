@@ -342,6 +342,7 @@ async fn submit(client: &reqwest::Client, base: &str, id: &str) {
             replicas: 1,
             resources: ResourcesInput { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
             driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+                volume: None,
                 command: "/bin/sleep".to_owned(),
                 args: vec!["3600".to_owned()],
                 kernel: "/kernel".to_owned(),
@@ -1218,6 +1219,7 @@ async fn runtime_job_input(state: &overdrive_control_plane::AppState, id: &str) 
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            volume: None,
             command: "/bin/sleep".to_owned(),
             args: vec!["3600".to_owned()],
             kernel: "/kernel".to_owned(),

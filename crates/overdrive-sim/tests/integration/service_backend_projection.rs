@@ -166,6 +166,7 @@ fn input(listeners: &[(u16, &str)], replicas: u32) -> ServiceSpecInput {
         replicas,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            volume: None,
             command: "/bin/sleep".into(),
             args: vec!["3600".into()],
             kernel: "/kernel".to_owned(),

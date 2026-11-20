@@ -206,6 +206,7 @@ pub async fn deploy(args: DeployArgs) -> Result<DeployOutput, CliError> {
                     args: vm.args,
                     kernel: vm.kernel,
                     rootfs: vm.rootfs,
+                    volume: vm.volume,
                 }),
             },
             resources: LegacyResourcesInput {
@@ -565,6 +566,7 @@ async fn deploy_streaming_job(
                 args: vm.args,
                 kernel: vm.kernel,
                 rootfs: vm.rootfs,
+                volume: vm.volume,
             }),
         },
         resources: LegacyResourcesInput {
@@ -618,6 +620,7 @@ fn project_service_driver(driver: ParserDriverInput) -> DriverInput {
             args: vm.args,
             kernel: vm.kernel,
             rootfs: vm.rootfs,
+            volume: vm.volume,
         }),
     }
 }

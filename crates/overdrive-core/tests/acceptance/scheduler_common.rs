@@ -75,6 +75,7 @@ pub fn make_job(id: &str, resources: Resources) -> Job {
         replicas: NonZeroU32::new(1).expect("1 is non-zero"),
         resources,
         driver: WorkloadDriver::Vm(Vm {
+            volume: None,
             command: "/bin/true".to_string(),
             args: vec![],
             kernel: "/kernel".to_owned(),
@@ -211,6 +212,7 @@ pub fn arb_job() -> impl Strategy<Value = Job> {
         replicas: NonZeroU32::new(replicas).expect("replicas > 0"),
         resources,
         driver: WorkloadDriver::Vm(Vm {
+            volume: None,
             command: "/bin/true".to_string(),
             args: vec![],
             kernel: "/kernel".to_owned(),

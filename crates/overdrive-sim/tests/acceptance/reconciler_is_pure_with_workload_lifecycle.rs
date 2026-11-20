@@ -48,6 +48,7 @@ fn payments_job() -> Job {
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 500, memory_bytes: 256 * 1024 * 1024 },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            volume: None,
             command: "/bin/true".to_string(),
             args: vec![],
             kernel: "/kernel".to_owned(),

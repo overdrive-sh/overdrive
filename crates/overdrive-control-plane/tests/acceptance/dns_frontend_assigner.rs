@@ -126,6 +126,7 @@ fn service_spec(id: &str, listeners: Vec<(u16, &str)>) -> ServiceSpecInput {
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 134_217_728 },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            volume: None,
             command: "/bin/true".to_string(),
             args: vec![],
             kernel: "/kernel".to_owned(),
@@ -147,6 +148,7 @@ fn job_spec(id: &str) -> JobSpecInput {
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 134_217_728 },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            volume: None,
             command: "/bin/true".to_string(),
             args: vec![],
             kernel: "/kernel".to_owned(),

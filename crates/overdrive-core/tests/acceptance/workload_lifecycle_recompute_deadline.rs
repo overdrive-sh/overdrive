@@ -88,6 +88,7 @@ fn make_job(id: &str) -> Job {
         replicas: NonZeroU32::new(1).expect("1 is non-zero"),
         resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
         driver: WorkloadDriver::Vm(Vm {
+            volume: None,
             command: "/bin/true".to_string(),
             args: vec![],
             kernel: "/kernel".to_owned(),

@@ -143,6 +143,7 @@ async fn noop_heartbeat_against_converged_target_does_not_re_enqueue() {
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            volume: None,
             command: "/bin/true".to_string(),
             args: vec![],
             kernel: "/kernel".to_owned(),
@@ -345,6 +346,7 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            volume: None,
             command: "/bin/true".to_string(),
             args: vec![],
             kernel: "/kernel".to_owned(),
@@ -586,6 +588,7 @@ async fn stop_after_failed_alloc_drains_broker() {
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            volume: None,
             command: "/does/not/exist".to_string(),
             args: vec![],
             kernel: "/kernel".to_owned(),
@@ -911,6 +914,7 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            volume: None,
             command: "/does/not/exist".to_string(),
             args: vec![],
             kernel: "/kernel".to_owned(),
@@ -1246,6 +1250,7 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            volume: None,
             command: "/bin/true".to_string(),
             args: vec![],
             kernel: "/kernel".to_owned(),

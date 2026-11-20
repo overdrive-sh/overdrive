@@ -1570,7 +1570,7 @@ impl State<NodeVolumeDriver> for NodeVolumeState {
     max_samples = 1
 )]
 #[should_panic(
-    expected = "step 2 Declare: the production spec parser must accept the [vm.volume] declaration: [vm]: unknown field `volume`"
+    expected = "LaunchEnsureCreate: the step did not settle within the settle bound: the launch's ensure parks after its create effect"
 )]
 fn quint_vol_happy_path_deploy_to_running() -> impl Driver {
     NodeVolumeDriver::new()
@@ -1585,7 +1585,7 @@ fn quint_vol_happy_path_deploy_to_running() -> impl Driver {
     max_samples = 1
 )]
 #[should_panic(
-    expected = "step 2 Declare: the production spec parser must accept the [vm.volume] declaration: [vm]: unknown field `volume`"
+    expected = "LaunchEnsureCreate: the step did not settle within the settle bound: the launch's ensure parks after its create effect"
 )]
 fn quint_vol_restart_waits_for_drain_then_attaches() -> impl Driver {
     NodeVolumeDriver::new()
@@ -1600,7 +1600,7 @@ fn quint_vol_restart_waits_for_drain_then_attaches() -> impl Driver {
     max_samples = 1
 )]
 #[should_panic(
-    expected = "step 2 Declare: the production spec parser must accept the [vm.volume] declaration: [vm]: unknown field `volume`"
+    expected = "LaunchEnsureCreate: the step did not settle within the settle bound: the launch's ensure parks after its create effect"
 )]
 fn quint_vol_stop_keeps_volume_and_restart_reattaches() -> impl Driver {
     NodeVolumeDriver::new()
@@ -1615,7 +1615,7 @@ fn quint_vol_stop_keeps_volume_and_restart_reattaches() -> impl Driver {
     max_samples = 1
 )]
 #[should_panic(
-    expected = "step 2 Declare: the production spec parser must accept the [vm.volume] declaration: [vm]: unknown field `volume`"
+    expected = "LaunchEnsureCreate: the step did not settle within the settle bound: the launch's ensure parks after its create effect"
 )]
 fn quint_vol_crash_after_create_before_attach_reuses_volume() -> impl Driver {
     NodeVolumeDriver::new()
@@ -1630,7 +1630,7 @@ fn quint_vol_crash_after_create_before_attach_reuses_volume() -> impl Driver {
     max_samples = 1
 )]
 #[should_panic(
-    expected = "step 2 Declare: the production spec parser must accept the [vm.volume] declaration: [vm]: unknown field `volume`"
+    expected = "LaunchEnsureCreate: the step did not settle within the settle bound: the launch's ensure parks after its create effect"
 )]
 fn quint_vol_node_reboot_reactivates_and_data_survives() -> impl Driver {
     NodeVolumeDriver::new()
@@ -1645,7 +1645,7 @@ fn quint_vol_node_reboot_reactivates_and_data_survives() -> impl Driver {
     max_samples = 1
 )]
 #[should_panic(
-    expected = "step 2 Declare: the production spec parser must accept the [vm.volume] declaration: [vm]: unknown field `volume`"
+    expected = "LaunchEnsureCreate: the step did not settle within the settle bound: the launch's ensure parks after its create effect"
 )]
 fn quint_vol_launch_bound_exceeded_fails_typed_and_charges_budget() -> impl Driver {
     NodeVolumeDriver::new()
@@ -1660,7 +1660,7 @@ fn quint_vol_launch_bound_exceeded_fails_typed_and_charges_budget() -> impl Driv
     max_samples = 1
 )]
 #[should_panic(
-    expected = "step 2 Declare: the production spec parser must accept the [vm.volume] declaration: [vm]: unknown field `volume`"
+    expected = "LaunchUnavailable: the step did not settle within the settle bound: the allocation row reaches the state"
 )]
 fn quint_vol_no_space_fails_typed_and_never_attaches() -> impl Driver {
     NodeVolumeDriver::new()
@@ -1675,7 +1675,7 @@ fn quint_vol_no_space_fails_typed_and_never_attaches() -> impl Driver {
     max_samples = 1
 )]
 #[should_panic(
-    expected = "step 2 Declare: the production spec parser must accept the [vm.volume] declaration: [vm]: unknown field `volume`"
+    expected = "LaunchUnavailable: the step did not settle within the settle bound: the allocation row reaches the state"
 )]
 fn quint_vol_store_absent_fails_typed_and_never_attaches() -> impl Driver {
     NodeVolumeDriver::new()
@@ -1690,7 +1690,7 @@ fn quint_vol_store_absent_fails_typed_and_never_attaches() -> impl Driver {
     max_samples = 1
 )]
 #[should_panic(
-    expected = "step 2 Declare: the production spec parser must accept the [vm.volume] declaration: [vm]: unknown field `volume`"
+    expected = "LaunchEnsureCreate: the step did not settle within the settle bound: the launch's ensure parks after its create effect"
 )]
 fn quint_vol_superseded_launch_result_discarded() -> impl Driver {
     NodeVolumeDriver::new()
@@ -1705,7 +1705,7 @@ fn quint_vol_superseded_launch_result_discarded() -> impl Driver {
     max_samples = 1
 )]
 #[should_panic(
-    expected = "step 2 Declare: the production spec parser must accept the [vm.volume] declaration: [vm]: unknown field `volume`"
+    expected = "LaunchEnsureCreate: the step did not settle within the settle bound: the launch's ensure parks after its create effect"
 )]
 fn quint_vol_stop_during_boot_wait_terminates_vmm_and_keeps_volume() -> impl Driver {
     NodeVolumeDriver::new()
@@ -1720,7 +1720,7 @@ fn quint_vol_stop_during_boot_wait_terminates_vmm_and_keeps_volume() -> impl Dri
     max_samples = 1
 )]
 #[should_panic(
-    expected = "step 2 Declare: the production spec parser must accept the [vm.volume] declaration: [vm]: unknown field `volume`"
+    expected = "LaunchEnsureCreate: the step did not settle within the settle bound: the launch's ensure parks after its create effect"
 )]
 fn quint_vol_stop_during_ensure_lets_ensure_finish_then_abandons() -> impl Driver {
     NodeVolumeDriver::new()
@@ -1735,7 +1735,7 @@ fn quint_vol_stop_during_ensure_lets_ensure_finish_then_abandons() -> impl Drive
     max_samples = 1
 )]
 #[should_panic(
-    expected = "step 2 Declare: the production spec parser must accept the [vm.volume] declaration: [vm]: unknown field `volume`"
+    expected = "LaunchEnsureCreate: the step did not settle within the settle bound: the launch's ensure parks after its create effect"
 )]
 fn quint_vol_shutdown_abandons_every_launch_including_one_admitted_late() -> impl Driver {
     NodeVolumeDriver::new()
@@ -1744,9 +1744,7 @@ fn quint_vol_shutdown_abandons_every_launch_including_one_admitted_late() -> imp
 /// Randomized `vol_conf` traces (seed printed on failure).
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_run(spec = "../../specs/quint/node-local-volume/node_volume.qnt", main = "vol_conf")]
-#[should_panic(
-    expected = "Declare: the production spec parser must accept the [vm.volume] declaration: [vm]: unknown field `volume`"
-)]
+#[should_panic(expected = "the step did not settle within the settle bound")]
 fn quint_vol_randomized() -> impl Driver {
     NodeVolumeDriver::new()
 }

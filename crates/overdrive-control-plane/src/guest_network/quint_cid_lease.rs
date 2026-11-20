@@ -1025,6 +1025,7 @@ impl CidLeaseDriver {
                     replicas: 1,
                     resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
                     driver: DriverInput::Vm(VmInput {
+                        volume: None,
                         command: "/sbin/init".to_owned(),
                         args: Vec::new(),
                         kernel: self.node.root().join("vmlinuz").display().to_string(),

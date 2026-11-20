@@ -70,7 +70,6 @@ fn validation(err: AggregateError) -> (&'static str, String) {
 /// A job declaring a 40 GiB volume parses.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "a [vm.volume] size = \"40GiB\" declaration must parse")]
 fn a_job_with_a_volume_declaration_parses() {
     WorkloadSpecInput::from_toml_str(&job_toml("\n[vm.volume]\nsize = \"40GiB\"\n"))
         .expect("a [vm.volume] size = \"40GiB\" declaration must parse");
@@ -79,7 +78,6 @@ fn a_job_with_a_volume_declaration_parses() {
 /// A service declaring a volume parses.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "a service [vm.volume] declaration must parse")]
 fn a_service_with_a_volume_declaration_parses() {
     let toml = format!(
         "[service]\nid = \"dev-box\"\n\n[[listener]]\nport = 8080\nprotocol = \"tcp\"\n\n[vm]\ncommand = \"/sbin/init\"\nargs = []\nkernel = \"/k\"\nrootfs = \"/r\"\n\n[vm.volume]\nsize = \"1TiB\"\n{RESOURCES}"
@@ -90,9 +88,6 @@ fn a_service_with_a_volume_declaration_parses() {
 /// Sad: only one volume, only `size` (limitation L1, ADR-0310: no named volumes).
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(
-    expected = "the declared [vm.volume] size = \"40GiB\" must parse before a bad key can be refused"
-)]
 fn sad_the_volume_table_refuses_unknown_keys_an_array_and_a_missing_size() {
     // The control: the same table with only a valid size must parse, otherwise a refusal below proves nothing.
     WorkloadSpecInput::from_toml_str(&job_toml("\n[vm.volume]\nsize = \"40GiB\"\n")).expect(
@@ -119,7 +114,6 @@ fn sad_the_volume_table_refuses_unknown_keys_an_array_and_a_missing_size() {
 /// An admitted job echoes its declaration back on the wire.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "a [vm.volume] declaration must be part of the wire spec")]
 fn an_admitted_job_echoes_the_declared_size() {
     let job = admit_job(1, &json!({"size": "40GiB"})).expect("one replica with a volume is valid");
     let echoed = serde_json::to_value(JobSpecInput::from(&job)).expect("echo serialises");
@@ -129,7 +123,6 @@ fn an_admitted_job_echoes_the_declared_size() {
 /// A size in TiB is echoed in its canonical spelling.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "a [vm.volume] declaration must be part of the wire spec")]
 fn the_echo_uses_the_canonical_size_spelling() {
     let job = admit_job(1, &json!({"size": "1024gib"})).expect("valid");
     let echoed = serde_json::to_value(JobSpecInput::from(&job)).expect("echo serialises");
@@ -139,7 +132,6 @@ fn the_echo_uses_the_canonical_size_spelling() {
 /// Sad: a size outside the grammar is rejected naming `vm.volume.size`.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "a [vm.volume] declaration must be part of the wire spec")]
 fn sad_a_malformed_size_is_rejected_naming_the_size_field() {
     for bad in ["0GiB", "40GB", "forty", ""] {
         let err =
@@ -151,7 +143,6 @@ fn sad_a_malformed_size_is_rejected_naming_the_size_field() {
 /// Sad: a volume is a single-writer disk, so it requires one replica (ADR-0310).
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "a [vm.volume] declaration must be part of the wire spec")]
 fn sad_a_volume_with_several_replicas_is_rejected_for_job_and_service() {
     for replicas in [2u32, 3, 100] {
         let (field, message) = validation(
@@ -169,7 +160,6 @@ fn sad_a_volume_with_several_replicas_is_rejected_for_job_and_service() {
 /// A service with one replica and a volume is admitted.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "a [vm.volume] declaration must be part of the wire spec")]
 fn a_single_replica_service_with_a_volume_is_admitted() {
     admit_service(1, &json!({"size": "2TiB"})).expect("one replica with a volume is valid");
 }
@@ -198,7 +188,6 @@ fn archived(job: Job) -> (Vec<u8>, overdrive_core::id::ContentHash, WorkloadInte
 /// A volume declaration survives the intent store round trip.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "a [vm.volume] declaration must be part of the wire spec")]
 fn the_volume_declaration_survives_the_intent_store_round_trip() {
     let (bytes, _, intent) = archived(admit_job(1, &json!({"size": "40GiB"})).unwrap());
     let decoded = WorkloadIntent::from_store_bytes(&bytes, Path::new("volume.redb"), None)
@@ -213,7 +202,6 @@ fn the_volume_declaration_survives_the_intent_store_round_trip() {
 /// volume, is a different spec.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "a [vm.volume] declaration must be part of the wire spec")]
 fn the_spec_digest_changes_with_the_volume_declaration() {
     let digest = |v: &Value| archived(admit_job(1, v).unwrap()).1;
     let forty = digest(&json!({"size": "40GiB"}));
@@ -226,7 +214,6 @@ fn the_spec_digest_changes_with_the_volume_declaration() {
 /// stays decodable (ADR-0048, development.md rkyv schema evolution).
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "the workload intent envelope must know discriminants [0, 1]")]
 fn the_intent_envelope_gains_version_two_and_keeps_version_one() {
     assert_eq!(
         WorkloadIntentEnvelope::known_discriminants(),

@@ -520,6 +520,7 @@ async fn build_harness(tmp: &TempDir) -> Result<Harness, String> {
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
         driver: DriverInput::Vm(VmInput {
+            volume: None,
             command: "/sbin/init".to_string(),
             args: vec!["--quiet".to_string()],
             kernel: "/kernel".to_string(),

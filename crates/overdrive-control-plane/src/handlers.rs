@@ -346,7 +346,7 @@ pub async fn submit_workload(
 
     // 4. Compute the canonical `spec_digest` via the typed codec
     //    method. Per ADR-0050 the digest is over the rkyv-archived
-    //    inner `WorkloadIntentV1` payload bytes — distinct from
+    //    inner `WorkloadIntentV2` payload bytes — distinct from
     //    pre-migration `Job::spec_digest`, but stable across reads
     //    and used by `ServiceVipAllocator` per ADR-0049.
     let spec_digest_hash = intent
@@ -750,7 +750,7 @@ pub async fn describe_workload(
         WorkloadIntent::from_store_bytes(&bytes, &state.intent_redb_path, Some(key.as_str()))?;
 
     // 4. Canonical spec_digest — SHA-256 over the rkyv-archived
-    //    `WorkloadIntentV1` payload bytes per ADR-0050. Computed
+    //    `WorkloadIntentV2` payload bytes per ADR-0050. Computed
     //    against the typed `WorkloadIntent` so the digest matches
     //    submit-handler output regardless of variant. The `ContentHash`
     //    object is RETAINED (not collapsed to only its `String` form):

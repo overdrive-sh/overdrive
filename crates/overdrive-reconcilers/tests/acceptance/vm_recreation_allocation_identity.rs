@@ -43,6 +43,7 @@ impl ComposedDriver {
 
     fn job(workload: &str) -> Job {
         let driver = WorkloadDriver::Vm(Vm {
+            volume: None,
             command: "/sbin/workload".to_owned(),
             args: vec!["--serve".to_owned()],
             kernel: "/srv/vm/kernel".to_owned(),

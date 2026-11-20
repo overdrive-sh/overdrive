@@ -177,6 +177,7 @@ fn workload_job() -> Job {
         replicas: NonZeroU32::new(1).expect("one replica"),
         resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
         driver: WorkloadDriver::Vm(Vm {
+            volume: None,
             command: "/sbin/workload".to_owned(),
             args: Vec::new(),
             kernel: "/srv/vm/kernel".to_owned(),

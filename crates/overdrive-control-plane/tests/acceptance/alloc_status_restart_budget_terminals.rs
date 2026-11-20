@@ -91,6 +91,7 @@ async fn install_workload(state: &AppState) -> WorkloadId {
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 500, memory_bytes: 134_217_728 },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            volume: None,
             command: "/usr/local/bin/payments".to_owned(),
             args: vec![],
             kernel: "/kernel".to_owned(),

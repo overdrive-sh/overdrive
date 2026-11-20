@@ -135,6 +135,7 @@ fn arb_service_spec_input() -> impl Strategy<Value = ServiceSpecInput> {
             replicas: 1,
             resources: ResourcesInput { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
             driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+                volume: None,
                 command: "/bin/serve".to_string(),
                 args: vec![],
                 kernel: "/kernel".to_owned(),
@@ -382,6 +383,7 @@ fn at_04_toml_to_intent_end_to_end_carries_startup_probes() {
         },
         driver: match &service_spec.driver {
             ParserDriverInput::Vm(vm) => DriverInput::Vm(overdrive_core::aggregate::VmInput {
+                volume: None,
                 command: vm.command.clone(),
                 args: vm.args.clone(),
                 kernel: vm.kernel.clone(),
@@ -450,7 +452,7 @@ proptest! {
             id: "svc-guard".to_string(),
             replicas: 1,
             resources: ResourcesInput { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
-            driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            driver: DriverInput::Vm(overdrive_core::aggregate::VmInput { volume: None,
                 command: "/bin/serve".to_string(),
                 args: vec![],
                 kernel: "/kernel".to_owned(),

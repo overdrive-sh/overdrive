@@ -123,6 +123,7 @@ fn spec_with_replicas(replicas: u32) -> JobSpecInput {
         replicas,
         resources: ResourcesInput { cpu_milli: 500, memory_bytes: 536_870_912 },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            volume: None,
             command: "/bin/true".to_string(),
             args: vec![],
             kernel: "/kernel".to_owned(),

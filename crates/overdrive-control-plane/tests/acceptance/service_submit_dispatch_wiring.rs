@@ -65,6 +65,7 @@ fn payments_service_spec() -> ServiceSpecInput {
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 500, memory_bytes: 134_217_728 },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            volume: None,
             command: "/usr/local/bin/payments".to_string(),
             args: vec![],
             kernel: "/kernel".to_owned(),

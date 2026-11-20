@@ -307,6 +307,7 @@ mod tests {
             replicas: NonZeroU32::new(1).expect("nonzero"),
             resources: Resources { cpu_milli: 500, memory_bytes: 134_217_728 },
             driver: WorkloadDriver::Vm(Vm {
+                volume: None,
                 command: "/sbin/init".to_owned(),
                 args: Vec::new(),
                 kernel: "/boot/vmlinux".to_owned(),
@@ -497,6 +498,7 @@ mod tests {
             replicas: std::num::NonZeroU32::new(1).expect("nonzero"),
             resources: Resources { cpu_milli: 500, memory_bytes: 134_217_728 },
             driver: WorkloadDriver::Vm(Vm {
+                volume: None,
                 command: "/sbin/init".to_owned(),
                 args: Vec::new(),
                 kernel: "/boot/vmlinux".to_owned(),
@@ -1834,7 +1836,7 @@ mod mid_boot_volume_reclamation {
     /// precondition, see the module documentation.
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[should_panic(expected = "a workload declaring a volume must be accepted")]
+    #[should_panic(expected = "the launch must attach the declared volume to its VMM")]
     async fn boot_reclamation_ends_a_mid_boot_vmm_before_any_launch_for_its_workload() {
         scenario(Residue::NoRow).await;
     }
@@ -1843,7 +1845,7 @@ mod mid_boot_volume_reclamation {
     /// reclamation is a `ReclaimAllocation`. PENDING on the same precondition.
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[should_panic(expected = "a workload declaring a volume must be accepted")]
+    #[should_panic(expected = "the launch must attach the declared volume to its VMM")]
     async fn boot_reclamation_ends_a_mid_boot_vmm_when_the_crash_left_a_running_row() {
         scenario(Residue::RunningRow).await;
     }

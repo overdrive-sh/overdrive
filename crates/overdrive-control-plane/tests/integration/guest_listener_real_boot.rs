@@ -198,6 +198,7 @@ impl Node {
             replicas: 1,
             resources: ResourcesInput { cpu_milli: 500, memory_bytes: LANE_VM_MEMORY_BYTES },
             driver: DriverInput::Vm(VmInput {
+                volume: None,
                 command: GUEST_PEER_GUEST_PATH.to_owned(),
                 args,
                 kernel: self.kit.kernel_path.display().to_string(),

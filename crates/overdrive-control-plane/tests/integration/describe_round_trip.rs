@@ -111,6 +111,7 @@ fn payments_spec() -> JobSpecInput {
         replicas: 3,
         resources: ResourcesInput { cpu_milli: 500, memory_bytes: 536_870_912 }, // 512 MiB
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            volume: None,
             command: "/bin/true".to_string(),
             args: vec![],
             kernel: "/kernel".to_owned(),
@@ -431,6 +432,7 @@ fn service_spec(id: &str, port: u16) -> ServiceSpecInput {
         replicas: 2,
         resources: ResourcesInput { cpu_milli: 250, memory_bytes: 268_435_456 },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            volume: None,
             command: "/bin/true".to_string(),
             args: vec![],
             kernel: "/kernel".to_owned(),
@@ -530,6 +532,7 @@ fn arb_valid_job_spec() -> impl Strategy<Value = JobSpecInput> {
             replicas,
             resources: ResourcesInput { cpu_milli, memory_bytes },
             driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+                volume: None,
                 command: "/bin/true".to_string(),
                 args: vec![],
                 kernel: "/kernel".to_owned(),

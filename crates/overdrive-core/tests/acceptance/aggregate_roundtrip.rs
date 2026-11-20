@@ -39,6 +39,7 @@ fn sample_job() -> Job {
         replicas: 3,
         resources: ResourcesInput { cpu_milli: 1500, memory_bytes: 512 * 1024 * 1024 },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            volume: None,
             command: "/opt/payments/bin/payments-server".to_string(),
             args: vec!["--port".to_string(), "8080".to_string()],
             kernel: "/kernel".to_owned(),
@@ -320,6 +321,7 @@ fn arb_job() -> impl Strategy<Value = Job> {
                 replicas,
                 resources: ResourcesInput { cpu_milli, memory_bytes },
                 driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+                    volume: None,
                     command: "/bin/true".to_string(),
                     args: vec![],
                     kernel: "/kernel".to_owned(),

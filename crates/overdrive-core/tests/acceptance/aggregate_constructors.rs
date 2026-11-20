@@ -44,6 +44,7 @@ fn job_from_spec_accepts_canonical_input() {
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 2000, memory_bytes: 4 * 1024 * 1024 * 1024 },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            volume: None,
             command: "/bin/true".to_string(),
             args: vec![],
             kernel: "/kernel".to_owned(),
@@ -136,6 +137,7 @@ fn job_resources_and_node_capacity_resolve_to_the_same_resources_type() {
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 1000, memory_bytes: 1_073_741_824 },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            volume: None,
             command: "/bin/true".to_string(),
             args: vec![],
             kernel: "/kernel".to_owned(),
@@ -268,6 +270,7 @@ fn job_public_fields_are_typed_newtypes_not_raw_primitives() {
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 1000, memory_bytes: 1_073_741_824 },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            volume: None,
             command: "/bin/true".to_string(),
             args: vec![],
             kernel: "/kernel".to_owned(),

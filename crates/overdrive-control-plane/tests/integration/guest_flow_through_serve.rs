@@ -340,6 +340,7 @@ impl Node {
             replicas: 1,
             resources: ResourcesInput { cpu_milli: 500, memory_bytes: LANE_VM_MEMORY_BYTES },
             driver: DriverInput::Vm(VmInput {
+                volume: None,
                 command: GUEST_PEER_GUEST_PATH.to_owned(),
                 args: args.to_vec(),
                 kernel: self.kit.kernel_path.display().to_string(),
@@ -367,6 +368,7 @@ impl Node {
             replicas: 1,
             resources: ResourcesInput { cpu_milli: 500, memory_bytes: LANE_VM_MEMORY_BYTES },
             driver: DriverInput::Vm(VmInput {
+                volume: None,
                 command: GUEST_PEER_GUEST_PATH.to_owned(),
                 args: args.to_vec(),
                 kernel: self.kit.kernel_path.display().to_string(),
@@ -398,6 +400,7 @@ impl Node {
             replicas: 1,
             resources: ResourcesInput { cpu_milli: 500, memory_bytes: LANE_VM_MEMORY_BYTES },
             driver: DriverInput::Vm(VmInput {
+                volume: None,
                 command: GUEST_PEER_GUEST_PATH.to_owned(),
                 args: vec![subcommand::LISTEN.to_owned(), SERVICE_PORT.to_string(), id.to_owned()],
                 kernel: self.kit.kernel_path.display().to_string(),

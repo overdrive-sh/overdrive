@@ -1,20 +1,19 @@
 //! `WorkloadLifecycle` reconciler — first real reconciler (US-03).
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
 use std::time::Duration;
 
 use overdrive_core::SpiffeId;
 use overdrive_core::aggregate::{
-    IntentKey, Job, Listener, Node, NodeSpecInput, ProbeDescriptor, Vm, WorkloadDriver,
-    WorkloadIntent, WorkloadKind,
+    IntentKey, Job, Listener, Node, NodeSpecInput, ProbeDescriptor, WorkloadDriver, WorkloadIntent,
+    WorkloadKind,
 };
 use overdrive_core::guest_network::GuestAttachmentOccupancy;
 use overdrive_core::id::{AllocationId, ContentHash, CorrelationKey, NodeId, WorkloadId};
 use overdrive_core::observation::{ProbeIdx, ProbeRole, ProbeStatus};
 use overdrive_core::reconcilers::{HydrateError, HydrationContext};
 use overdrive_core::traits::GuestAttachmentObservation;
-use overdrive_core::traits::driver::{AllocationSpec, DriverPayload, VmPayload};
+use overdrive_core::traits::driver::{AllocationSpec, DriverPayload};
 use overdrive_core::traits::intent_store::TxnOp;
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, ObservationRowKind};
 use overdrive_core::transition_reason::{
@@ -1381,15 +1380,7 @@ impl WorkloadLifecycle {
                         // `Job`, preserving the driver kind. No more
                         // literal `/bin/sleep` / `["60"]`.
                         let driver = match &job.driver {
-                            WorkloadDriver::Vm(Vm { command, args, kernel, rootfs }) => {
-                                DriverPayload::Vm(VmPayload {
-                                    volume: None,
-                                    command: command.clone(),
-                                    args: args.clone(),
-                                    kernel: PathBuf::from(kernel),
-                                    rootfs: PathBuf::from(rootfs),
-                                })
-                            }
+                            WorkloadDriver::Vm(vm) => DriverPayload::Vm(vm.to_payload(&job.id)),
                         };
                         let action = Action::StartAllocation {
                             alloc_id: alloc_id.clone(),
@@ -1686,13 +1677,7 @@ fn restart_allocation_action(
 ) -> Action {
     let identity = SpiffeId::for_allocation(&job.id, &successor_alloc_id);
     let driver = match &job.driver {
-        WorkloadDriver::Vm(Vm { command, args, kernel, rootfs }) => DriverPayload::Vm(VmPayload {
-            volume: None,
-            command: command.clone(),
-            args: args.clone(),
-            kernel: PathBuf::from(kernel),
-            rootfs: PathBuf::from(rootfs),
-        }),
+        WorkloadDriver::Vm(vm) => DriverPayload::Vm(vm.to_payload(&job.id)),
     };
     Action::RestartAllocation {
         alloc_id: predecessor.alloc_id.clone(),
@@ -2198,13 +2183,7 @@ pub fn allocation_spec_for_live_intent(
         WorkloadIntent::Schedule(_) => return None,
     };
     let driver = match driver {
-        WorkloadDriver::Vm(Vm { command, args, kernel, rootfs }) => DriverPayload::Vm(VmPayload {
-            volume: None,
-            command: command.clone(),
-            args: args.clone(),
-            kernel: PathBuf::from(kernel),
-            rootfs: PathBuf::from(rootfs),
-        }),
+        WorkloadDriver::Vm(vm) => DriverPayload::Vm(vm.to_payload(workload_id)),
     };
     Some(AllocationSpec {
         alloc: alloc.clone(),
@@ -2305,6 +2284,7 @@ mod project_service_listen_ports_tests {
             replicas: NonZeroU32::new(1).expect("1 is non-zero"),
             resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
             driver: WorkloadDriver::Vm(Vm {
+                volume: None,
                 command: "/bin/serve".to_string(),
                 args: vec![],
                 kernel: "/kernel".to_string(),
@@ -2323,6 +2303,7 @@ mod project_service_listen_ports_tests {
             replicas: 1,
             resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
             driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+                volume: None,
                 command: "/bin/serve".to_string(),
                 args: vec![],
                 kernel: "/kernel".to_string(),
@@ -2402,6 +2383,7 @@ mod project_service_listen_ports_tests {
             replicas: NonZeroU32::new(1).expect("one replica"),
             resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
             driver: WorkloadDriver::Vm(Vm {
+                volume: None,
                 command: "/bin/serve".to_owned(),
                 args: Vec::new(),
                 kernel: "/kernel".to_owned(),
@@ -2507,6 +2489,7 @@ mod service_vip_release_emission_tests {
             replicas: NonZeroU32::new(1).expect("1 is non-zero"),
             resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
             driver: WorkloadDriver::Vm(Vm {
+                volume: None,
                 command: "/bin/serve".to_string(),
                 args: vec![],
                 kernel: "/kernel".to_string(),
@@ -2999,6 +2982,7 @@ mod eligibility_tests {
             replicas: NonZeroU32::new(1).expect("one replica"),
             resources: Resources { cpu_milli: 100, memory_bytes: 1024 },
             driver: WorkloadDriver::Vm(Vm {
+                volume: None,
                 command: "/bin/true".into(),
                 args: vec![],
                 kernel: "/kernel".into(),
@@ -3112,6 +3096,7 @@ mod netns_density_lifecycle_fixture {
             replicas: NonZeroU32::new(1).expect("one replica"),
             resources: Resources { cpu_milli: 500, memory_bytes: 128 * 1024 * 1024 },
             driver: WorkloadDriver::Vm(Vm {
+                volume: None,
                 command: "/sbin/serve".to_owned(),
                 args: Vec::new(),
                 kernel: "/srv/vm/kernel".to_owned(),

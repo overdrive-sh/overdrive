@@ -74,6 +74,7 @@ fn service_submit_with_listeners(ports: &[(u16, &str)]) -> ServiceSpecInput {
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 500, memory_bytes: 134_217_728 },
         driver: DriverInput::Vm(VmInput {
+            volume: None,
             command: "/opt/frontend/bin/server".to_string(),
             args: vec![],
             kernel: "/kernel".to_owned(),

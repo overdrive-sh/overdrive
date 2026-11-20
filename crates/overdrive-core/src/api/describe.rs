@@ -142,7 +142,13 @@ mod tests {
     fn driver_strategy() -> impl Strategy<Value = DriverInput> {
         (".*", proptest::collection::vec(".*", 0..4), ".*", ".*").prop_map(
             |(command, args, kernel, rootfs)| {
-                DriverInput::Vm(crate::aggregate::VmInput { command, args, kernel, rootfs })
+                DriverInput::Vm(crate::aggregate::VmInput {
+                    command,
+                    args,
+                    kernel,
+                    rootfs,
+                    volume: None,
+                })
             },
         )
     }
@@ -274,6 +280,7 @@ mod tests {
             replicas: 2,
             resources: ResourcesInput { cpu_milli: 500, memory_bytes: 64 * 1024 * 1024 },
             driver: DriverInput::Vm(crate::aggregate::VmInput {
+                volume: None,
                 command: "/sbin/init".to_owned(),
                 args: vec!["--flag".to_owned()],
                 kernel: "/kernel".to_owned(),
@@ -317,6 +324,7 @@ mod tests {
             replicas: 3,
             resources: ResourcesInput { cpu_milli: 250, memory_bytes: 32 * 1024 * 1024 },
             driver: DriverInput::Vm(crate::aggregate::VmInput {
+                volume: None,
                 command: "/sbin/init".to_owned(),
                 args: vec![],
                 kernel: "/kernel".to_owned(),

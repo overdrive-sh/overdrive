@@ -273,7 +273,7 @@ impl overdrive_core::traits::vmm::Vmm for VolumeRecordingVmm {
 #[cfg(feature = "kvm-tests")]
 #[overdrive_test(guest = "cgroup-default", profile = "nested-launch")]
 #[tokio::test(flavor = "current_thread")]
-#[should_panic(expected = "a VM workload that declares [vm.volume] must deploy (vol-compose)")]
+#[should_panic(expected = "one workload, one volume")]
 async fn a_deployed_volume_workload_launches_through_the_composed_volume_pool() {
     let fixture = VmFixture::provision(&overdrive_testing::vm_fixture::default_staging_root())
         .expect("provision the shared VM fixture");

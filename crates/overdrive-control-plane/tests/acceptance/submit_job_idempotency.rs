@@ -105,6 +105,7 @@ fn payments_spec() -> JobSpecInput {
         replicas: 3,
         resources: ResourcesInput { cpu_milli: 500, memory_bytes: 536_870_912 },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            volume: None,
             command: "/bin/true".to_string(),
             args: vec![],
             kernel: "/kernel".to_owned(),
@@ -119,6 +120,7 @@ fn payments_spec_alt_replicas() -> JobSpecInput {
         replicas: 7,
         resources: ResourcesInput { cpu_milli: 500, memory_bytes: 536_870_912 },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            volume: None,
             command: "/bin/true".to_string(),
             args: vec![],
             kernel: "/kernel".to_owned(),

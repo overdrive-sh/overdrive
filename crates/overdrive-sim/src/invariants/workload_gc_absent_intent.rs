@@ -478,6 +478,7 @@ fn build_job_spec() -> Result<Job, String> {
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
         driver: DriverInput::Vm(VmInput {
+            volume: None,
             command: "/sbin/init".to_owned(),
             args: vec!["--quiet".to_owned()],
             kernel: "/kernel".to_owned(),

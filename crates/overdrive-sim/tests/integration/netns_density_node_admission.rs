@@ -1043,6 +1043,7 @@ impl SimNode {
             replicas: 1,
             resources: ResourcesInput { cpu_milli: 0, memory_bytes: DEMAND_MEMORY_BYTES },
             driver: DriverInput::Vm(VmInput {
+                volume: None,
                 command: "/bin/sleep".to_owned(),
                 args: vec!["3600".to_owned()],
                 kernel: "/nd295/kernel".to_owned(),
@@ -1081,6 +1082,7 @@ impl SimNode {
             replicas: 1,
             resources: ResourcesInput { cpu_milli: 0, memory_bytes: DEMAND_MEMORY_BYTES },
             driver: DriverInput::Vm(VmInput {
+                volume: None,
                 command: "/bin/sleep".to_owned(),
                 args: vec!["3600".to_owned()],
                 kernel: "/nd295/kernel".to_owned(),

@@ -362,6 +362,7 @@ impl Node {
             replicas: 1,
             resources: ResourcesInput { cpu_milli: 100, memory_bytes: 134_217_728 },
             driver: DriverInput::Vm(VmInput {
+                volume: None,
                 command: "/bin/sleep".to_owned(),
                 args: vec!["3600".to_owned()],
                 kernel: "/kernel".to_owned(),
@@ -377,6 +378,7 @@ impl Node {
             replicas: 1,
             resources: ResourcesInput { cpu_milli: 100, memory_bytes: 134_217_728 },
             driver: DriverInput::Vm(VmInput {
+                volume: None,
                 command: "/bin/sleep".to_owned(),
                 args: vec!["3600".to_owned()],
                 kernel: "/kernel".to_owned(),

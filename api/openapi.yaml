@@ -4006,9 +4006,8 @@ components:
         Operator-facing `[vm]` table fields (ADR-0082 / ADR-0083, GH #42).
         Mirrors the runtime `traits::driver::VmPayload` shape — `String`,
         not `PathBuf`, for both `kernel` and `rootfs` (serde-clean wire
-        shape). Per-VM volumes are out
-        of scope for this feature (deferred to overdrive-fs, GH #97 /
-        virtiofsd, GH #43).
+        shape). The optional `volume` is the workload's node-local persistent
+        volume (GH #348, ADR-0310).
       required:
       - command
       - args
@@ -4029,6 +4028,24 @@ components:
         rootfs:
           type: string
           description: Operator-supplied rootfs artifact path (BYO).
+        volume:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/VmVolumeInput'
+            description: The `[vm.volume]` declaration, when the workload has one.
+      additionalProperties: false
+    VmVolumeInput:
+      type: object
+      description: |-
+        The `[vm.volume]` table (GH #348, ADR-0310): one field, `size`, validated
+        as a [`crate::volume::VolumeSize`] at admission. `deny_unknown_fields`
+        refuses every other key.
+      required:
+      - size
+      properties:
+        size:
+          type: string
+          description: The declared size, `<uint>GiB` or `<uint>TiB`.
       additionalProperties: false
     VolumeOperation:
       type: string

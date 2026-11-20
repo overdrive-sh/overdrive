@@ -531,6 +531,7 @@ mod service_vm_boot_redrive {
             replicas: 1,
             resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
             driver: DriverInput::Vm(VmInput {
+                volume: None,
                 command: "/bin/serve".to_owned(),
                 args: Vec::new(),
                 kernel: "/kernel".to_owned(),

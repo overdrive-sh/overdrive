@@ -38,6 +38,7 @@ fn vm_input() -> ServiceSpecInput {
             memory_bytes: 1_048_576,
         },
         driver: DriverInput::Vm(VmInput {
+            volume: None,
             command: "/bin/server".to_owned(),
             args: vec![],
             kernel: "/kernel".to_owned(),
@@ -76,8 +77,8 @@ fn service_vm_http_tcp_spec_parses_to_vm_driver_without_rewriting_probe_intent()
 /// CONTRACT_SHAPE: pure-function.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-fn service_spec_v1_is_the_sole_direct_envelope_arm() {
-    assert_eq!(ServiceSpecEnvelope::known_discriminants(), &[0]);
+fn service_spec_envelope_knows_versions_one_and_two() {
+    assert_eq!(ServiceSpecEnvelope::known_discriminants(), &[0, 1]);
 }
 
 /// CONTRACT_SHAPE: pure-function.

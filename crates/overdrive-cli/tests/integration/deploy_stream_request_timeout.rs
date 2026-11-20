@@ -81,6 +81,7 @@ fn service_request() -> SubmitWorkloadRequest {
             replicas: 1,
             resources: ResourcesInput { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
             driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+                volume: None,
                 command: "/bin/sleep".to_owned(),
                 args: vec!["3600".to_owned()],
                 kernel: "/kernel".to_owned(),

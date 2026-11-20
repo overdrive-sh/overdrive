@@ -83,7 +83,7 @@ mod acceptance {
     use bytes::Bytes;
     use futures::Stream;
     use overdrive_core::aggregate::{
-        CronExpr, IntentKey, Job, Listener, Schedule, ServiceV1, Vm, WorkloadDriver, WorkloadIntent,
+        CronExpr, IntentKey, Job, Listener, Schedule, Service, Vm, WorkloadDriver, WorkloadIntent,
     };
     use overdrive_core::dataplane::Proto;
     use overdrive_core::id::{ContentHash, IdParseError, ServiceVip, WorkloadId};
@@ -162,6 +162,7 @@ mod acceptance {
 
     fn vm() -> WorkloadDriver {
         WorkloadDriver::Vm(Vm {
+            volume: None,
             command: "/bin/true".to_owned(),
             args: Vec::new(),
             kernel: "/kernel".to_owned(),
@@ -178,7 +179,7 @@ mod acceptance {
     }
 
     fn service(id: &WorkloadId, listeners: Vec<Listener>) -> WorkloadIntent {
-        WorkloadIntent::Service(ServiceV1 {
+        WorkloadIntent::Service(Service {
             id: id.clone(),
             replicas: NonZeroU32::MIN,
             resources: resources(),

@@ -55,7 +55,11 @@ fn volume_job() -> Job {
     Job::from_submit(spec).expect("a one-replica volume workload is valid")
 }
 
-fn state(job: &Job, allocations: BTreeMap<AllocationId, AllocStatusRow>) -> WorkloadLifecycleState {
+fn state(
+    job: &Job,
+    kind: WorkloadKind,
+    allocations: BTreeMap<AllocationId, AllocStatusRow>,
+) -> WorkloadLifecycleState {
     WorkloadLifecycleState {
         current_startup_probe: None,
         workload_id: job.id.clone(),
@@ -71,7 +75,7 @@ fn state(job: &Job, allocations: BTreeMap<AllocationId, AllocStatusRow>) -> Work
             },
         )]),
         allocations,
-        workload_kind: WorkloadKind::Job,
+        workload_kind: kind,
         service_spec_digest: None,
         probe_descriptors: Vec::new(),
         declared_listeners: Vec::new(),
@@ -82,6 +86,8 @@ fn state(job: &Job, allocations: BTreeMap<AllocationId, AllocStatusRow>) -> Work
     }
 }
 
+/// A crashed `Service` allocation: the only kind a crash restarts. A `Job`'s `Failed` row is a
+/// natural exit the reconciler finalizes rather than restarts.
 fn failed_predecessor() -> AllocStatusRow {
     AllocStatusRow {
         alloc_id: AllocationId::new("alloc-dev-box-0").expect("valid allocation id"),
@@ -97,7 +103,7 @@ fn failed_predecessor() -> AllocStatusRow {
         detail: None,
         terminal: None,
         stderr_tail: None,
-        kind: WorkloadKind::Job,
+        kind: WorkloadKind::Service,
         listeners: Vec::new(),
         started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(10))),
         workload_addr: None,
@@ -106,10 +112,10 @@ fn failed_predecessor() -> AllocStatusRow {
     }
 }
 
-fn reconcile(job: &Job, rows: Vec<AllocStatusRow>) -> Vec<Action> {
+fn reconcile(job: &Job, kind: WorkloadKind, rows: Vec<AllocStatusRow>) -> Vec<Action> {
     let allocations = rows.into_iter().map(|row| (row.alloc_id.clone(), row)).collect();
-    let desired = state(job, BTreeMap::new());
-    let actual = state(job, allocations);
+    let desired = state(job, kind, BTreeMap::new());
+    let actual = state(job, kind, allocations);
     let now = Instant::now();
     let tick = TickContext {
         now,
@@ -142,10 +148,9 @@ fn assert_carries_volume(site: &str, spec: &AllocationSpec) {
 /// The start action carries the workload's volume.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "a [vm.volume] workload must be admitted by the production wire spec")]
 fn the_start_action_carries_the_declared_volume() {
     let job = volume_job();
-    let actions = reconcile(&job, Vec::new());
+    let actions = reconcile(&job, WorkloadKind::Job, Vec::new());
     let spec = actions
         .iter()
         .find_map(|action| match action {
@@ -159,17 +164,16 @@ fn the_start_action_carries_the_declared_volume() {
 /// The restart action carries the workload's volume.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "a [vm.volume] workload must be admitted by the production wire spec")]
 fn the_restart_action_carries_the_declared_volume() {
     let job = volume_job();
-    let actions = reconcile(&job, vec![failed_predecessor()]);
+    let actions = reconcile(&job, WorkloadKind::Service, vec![failed_predecessor()]);
     let spec = actions
         .iter()
         .find_map(|action| match action {
             Action::RestartAllocation { spec, .. } => Some(spec),
             _ => None,
         })
-        .expect("a failed allocation is replaced by a restart");
+        .expect("a crashed single-replica service allocation is replaced by a restart");
     assert_carries_volume("the restart action", spec);
 }
 
@@ -177,7 +181,6 @@ fn the_restart_action_carries_the_declared_volume() {
 /// workload's volume: the third projection site cannot diverge from the first two.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "a [vm.volume] workload must be admitted by the production wire spec")]
 fn the_spec_rebuilt_for_a_live_allocation_carries_the_declared_volume() {
     let job = volume_job();
     let alloc = AllocationId::new("alloc-dev-box-0").expect("valid allocation id");

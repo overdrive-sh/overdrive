@@ -231,6 +231,7 @@ impl World {
             replicas: 1,
             resources: ResourcesInput { cpu_milli: 500, memory_bytes: 134_217_728 },
             driver: DriverInput::Vm(VmInput {
+                volume: None,
                 command: "/bin/true".to_owned(),
                 args: vec![],
                 kernel: "/kernel".to_owned(),

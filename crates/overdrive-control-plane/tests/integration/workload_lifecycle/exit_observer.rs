@@ -159,6 +159,7 @@ async fn build_harness(tmp: &TempDir) -> Harness {
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            volume: None,
             command: "/bin/sleep".to_string(),
             args: vec!["3600".to_string()],
             kernel: "/kernel".to_owned(),
@@ -719,6 +720,7 @@ async fn exit_observer_writes_failed_and_does_not_name_consumers_on_observed_exi
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            volume: None,
             command: "/bin/sleep".to_string(),
             args: vec!["3600".to_string()],
             kernel: "/kernel".to_owned(),

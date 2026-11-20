@@ -140,6 +140,7 @@ impl VmComposition {
 
 fn service_intent(workload: &str) -> WorkloadIntent {
     let driver = DriverInput::Vm(VmInput {
+        volume: None,
         command: "/sbin/workload".to_owned(),
         args: vec!["--serve".to_owned()],
         kernel: "/srv/vm/kernel".to_owned(),

@@ -256,6 +256,7 @@ fn service_spec(id: &str, memory_bytes: u64) -> ServiceSpecInput {
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 100, memory_bytes },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            volume: None,
             command: "/sbin/init".to_owned(),
             args: vec![],
             kernel: "/kernel".to_owned(),

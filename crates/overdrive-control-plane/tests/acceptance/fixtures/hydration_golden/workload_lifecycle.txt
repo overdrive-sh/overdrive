@@ -11,7 +11,7 @@ WorkloadLifecycle(
             "job-app",
         ),
         job: Some(
-            JobV1 {
+            JobV2 {
                 id: WorkloadId(
                     "job-app",
                 ),
@@ -21,13 +21,14 @@ WorkloadLifecycle(
                     memory_bytes: 134217728,
                 },
                 driver: Vm(
-                    Vm {
+                    VmV2 {
                         command: "/bin/serve",
                         args: [
                             "--job",
                         ],
                         kernel: "/kernel",
                         rootfs: "/rootfs",
+                        volume: None,
                     },
                 ),
             },

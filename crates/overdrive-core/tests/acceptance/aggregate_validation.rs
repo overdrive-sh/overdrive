@@ -51,6 +51,7 @@ fn job_from_spec_rejects_zero_replicas_with_validation_variant_naming_replicas_f
         replicas: 0,
         resources: ResourcesInput { cpu_milli: 2000, memory_bytes: 4 * 1024 * 1024 * 1024 },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            volume: None,
             command: "/bin/true".to_string(),
             args: vec![],
             kernel: "/kernel".to_owned(),
@@ -91,6 +92,7 @@ fn job_from_spec_rejects_forbidden_space_in_id_via_id_parse_error_passthrough_wi
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 2000, memory_bytes: 4 * 1024 * 1024 * 1024 },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            volume: None,
             command: "/bin/true".to_string(),
             args: vec![],
             kernel: "/kernel".to_owned(),
@@ -143,6 +145,7 @@ fn job_from_spec_rejects_zero_memory_with_validation_variant_naming_memory_bytes
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 2000, memory_bytes: 0 },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            volume: None,
             command: "/bin/true".to_string(),
             args: vec![],
             kernel: "/kernel".to_owned(),
@@ -311,6 +314,7 @@ fn err_branch_of_from_spec_carries_no_job_value_by_construction() {
         replicas: 0, // triply-invalid, picks up whichever fails first
         resources: ResourcesInput { cpu_milli: 2000, memory_bytes: 0 },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            volume: None,
             command: "/bin/true".to_string(),
             args: vec![],
             kernel: "/kernel".to_owned(),
@@ -362,7 +366,7 @@ mod property {
                     id: "payments".to_string(),
                     replicas: 0,
                     resources: ResourcesInput { cpu_milli: cpu, memory_bytes: mem },
-                    driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+                    driver: DriverInput::Vm(overdrive_core::aggregate::VmInput { volume: None,
                         command: "/bin/true".to_string(),
                         args: vec![],
                         kernel: "/kernel".to_owned(),
@@ -393,7 +397,7 @@ mod property {
                     id: "payments".to_string(),
                     replicas,
                     resources: ResourcesInput { cpu_milli: cpu, memory_bytes: 0 },
-                    driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+                    driver: DriverInput::Vm(overdrive_core::aggregate::VmInput { volume: None,
                         command: "/bin/true".to_string(),
                         args: vec![],
                         kernel: "/kernel".to_owned(),
@@ -451,6 +455,7 @@ fn canonical_service_spec() -> ServiceSpecInput {
         replicas: 1,
         resources: ResourcesInput { cpu_milli: 500, memory_bytes: 128 * 1024 * 1024 },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
+            volume: None,
             command: "/bin/true".to_string(),
             args: vec![],
             kernel: "/kernel".to_owned(),
