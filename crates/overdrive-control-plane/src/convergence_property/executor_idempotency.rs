@@ -170,7 +170,7 @@ fn applying_the_hydrators_dataplane_update_twice_equals_applying_it_once() {
                 service_id: sid,
                 vip: vip.try_as_ipv4().expect("v4"),
                 backends: vec![Backend {
-                    alloc: SpiffeId::from_str(
+                    workload_identity: SpiffeId::from_str(
                         "spiffe://overdrive.local/workload/payments/alloc/a0",
                     )
                     .expect("spiffe"),

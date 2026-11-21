@@ -508,7 +508,7 @@ impl BackendIndex {
             // A backend whose SpiffeId is not the `/workload/<workload>/alloc/<alloc>`
             // shape (or whose `<workload>` is not a v1 mesh name) contributes no
             // frontend key — it is not mesh-dialable by name.
-            let Some(workload) = workload_of(&backend.alloc) else { continue };
+            let Some(workload) = workload_of(&backend.workload_identity) else { continue };
             // READ the shared allocator's EXISTING binding (REV-3 pure reader).
             // WITHHOLD a `<workload>` the allocator does not yet bind.
             let Some(&frontend_ip) = frontend_snapshot.get(&workload) else { continue };
@@ -1027,7 +1027,7 @@ mod tests {
     /// A `Backend` at the given V4 addr with the given readiness.
     fn backend(addr: SocketAddrV4, healthy: bool) -> Backend {
         Backend {
-            alloc: SpiffeId::new(&format!("spiffe://test/b/{}-{}", addr.ip(), addr.port()))
+            workload_identity: SpiffeId::new(&format!("spiffe://test/b/{}-{}", addr.ip(), addr.port()))
                 .expect("valid spiffe id"),
             addr: SocketAddr::V4(addr),
             weight: 1,
@@ -1677,7 +1677,7 @@ mod tests {
         let backend_port = 8080;
         let backend_addr = v4(10, 99, 0, 6, backend_port);
         let mk_backend = |job_label: &str, addr: SocketAddrV4, healthy: bool| Backend {
-            alloc: SpiffeId::for_allocation(
+            workload_identity: SpiffeId::for_allocation(
                 &WorkloadId::new(job_label).expect("valid workload id"),
                 &AllocationId::new("alloc-1").expect("valid alloc id"),
             ),

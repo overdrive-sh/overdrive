@@ -224,7 +224,7 @@ fn host_and_sim_read_the_same_programmed_fingerprint_after_every_call() {
         // A mixed IPv4/IPv6 set is refused before any write: the read is unchanged.
         let mut mixed = udp_set.clone();
         mixed.push(Backend {
-            alloc: backend(4, 4, true).alloc,
+            workload_identity: backend(4, 4, true).workload_identity,
             addr: SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 9000),
             weight: 1,
             healthy: true,

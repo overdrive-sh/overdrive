@@ -166,7 +166,7 @@ async fn persist_and_allocate(
 
 fn backend_for(workload: &str, idx: usize) -> Backend {
     Backend {
-        alloc: SpiffeId::from_str(&format!(
+        workload_identity: SpiffeId::from_str(&format!(
             "spiffe://overdrive.local/workload/{workload}/alloc/a{idx}"
         ))
         .expect("spiffe"),

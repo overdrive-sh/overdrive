@@ -220,7 +220,7 @@ impl ResolvableIndex {
         // The `healthy == true` filter IS the WITHHOLD seam (resolvability).
         let mut contributed: BTreeMap<MeshServiceName, BTreeSet<SocketAddr>> = BTreeMap::new();
         for backend in backends.iter().filter(|backend| backend.healthy) {
-            if let Some(workload) = workload_of(&backend.alloc) {
+            if let Some(workload) = workload_of(&backend.workload_identity) {
                 contributed.entry(workload).or_default().insert(backend.addr);
             }
         }

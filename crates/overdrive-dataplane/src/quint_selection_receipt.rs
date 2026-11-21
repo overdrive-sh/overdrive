@@ -253,7 +253,7 @@ fn workload_identity(workload: i64) -> SpiffeId {
 /// identity. The single place the `Backend` field holding the identity is named.
 fn backend(addr: u8, workload: i64) -> Backend {
     Backend {
-        alloc: workload_identity(workload),
+        workload_identity: workload_identity(workload),
         addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, addr)), 9000 + u16::from(addr)),
         weight: 1,
         healthy: true,

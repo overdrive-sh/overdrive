@@ -406,27 +406,27 @@ impl Dataplane for SimDataplane {
 
         // Identity preflight, before any mutation (mirrors the host's commit
         // guard): an endpoint that still holds a live allocator association
-        // may not be re-leased to a different `Backend.alloc`, and one
+        // may not be re-leased to a different `Backend.workload_identity`, and one
         // endpoint may not carry two allocations in one update.
         let mut named: BTreeMap<SocketAddr, &SpiffeId> = BTreeMap::new();
         for backend in &backends {
-            if let Some(held) = named.insert(backend.addr, &backend.alloc)
-                && *held != backend.alloc
+            if let Some(held) = named.insert(backend.addr, &backend.workload_identity)
+                && *held != backend.workload_identity
             {
                 return Err(DataplaneError::LoadFailed(format!(
                     "backend endpoint {} carries two allocations: {held} and {}",
-                    backend.addr, backend.alloc
+                    backend.addr, backend.workload_identity
                 )));
             }
             let Some(backend_id) = state.backend_memo.get(&(backend.addr, proto)) else {
                 continue;
             };
             let current = state.identities.get(backend_id);
-            if let Some(current) = current.filter(|current| **current != backend.alloc) {
+            if let Some(current) = current.filter(|current| **current != backend.workload_identity) {
                 return Err(DataplaneError::BackendIdentityConflict {
                     backend_id: *backend_id,
                     current: current.clone(),
-                    attempted: backend.alloc.clone(),
+                    attempted: backend.workload_identity.clone(),
                 });
             }
         }
@@ -453,7 +453,7 @@ impl Dataplane for SimDataplane {
                 DataplaneError::LoadFailed("backend id counter exhausted".to_owned())
             })?;
             state.backend_memo.insert((backend.addr, proto), backend_id);
-            state.identities.insert(backend_id, backend.alloc.clone());
+            state.identities.insert(backend_id, backend.workload_identity.clone());
         }
 
         // Snapshot prior reverse-NAT keys for this `(vip, proto)`

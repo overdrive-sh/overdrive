@@ -234,7 +234,7 @@ fn running_healthy_backend(id: &str) -> Backend {
     let spiffe = SpiffeId::new(&format!("spiffe://overdrive.local/workload/{id}/alloc/a1"))
         .expect("valid spiffe id");
     Backend {
-        alloc: spiffe,
+        workload_identity: spiffe,
         addr: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(10, 99, 0, 1), 8080)),
         weight: 1,
         healthy: true,

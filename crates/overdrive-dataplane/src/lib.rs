@@ -1377,14 +1377,14 @@ impl EbpfDataplane {
             let pod = BackendEntryPod::from_backend(backend)?;
             let endpoint = (pod.ipv4_host, pod.port_host);
             if let Some((_, held)) = by_endpoint.get(&endpoint)
-                && **held != backend.alloc
+                && **held != backend.workload_identity
             {
                 return Err(DataplaneError::LoadFailed(format!(
                     "backend endpoint {} carries two allocations: {held} and {}",
-                    backend.addr, backend.alloc
+                    backend.addr, backend.workload_identity
                 )));
             }
-            by_endpoint.insert(endpoint, (pod, &backend.alloc));
+            by_endpoint.insert(endpoint, (pod, &backend.workload_identity));
         }
 
         // Planning order: the identity conflict is reported first, then R-59.

@@ -80,7 +80,7 @@ fn make_tick(now_secs: u64) -> TickContext {
 /// programmed with something else", so a purge or a reprogram is due.
 fn previously_programmed(vip: &ServiceVip) -> BackendSetFingerprint {
     let earlier = Backend {
-        alloc: SpiffeId::new("spiffe://overdrive.local/workload/web/alloc/web-0")
+        workload_identity: SpiffeId::new("spiffe://overdrive.local/workload/web/alloc/web-0")
             .expect("valid SpiffeId"),
         addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 96, 0, 99)), 8080),
         weight: 1,
@@ -104,7 +104,7 @@ fn actual_previously_programmed(
 fn desired_with_backend(backend_ip: Ipv4Addr) -> ServiceDesired {
     let vip = ServiceVip::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))).expect("valid ServiceVip");
     let backends = vec![Backend {
-        alloc: SpiffeId::new("spiffe://overdrive.local/workload/web/alloc/web-0")
+        workload_identity: SpiffeId::new("spiffe://overdrive.local/workload/web/alloc/web-0")
             .expect("valid SpiffeId"),
         addr: SocketAddr::new(IpAddr::V4(backend_ip), 8080),
         weight: 1,
@@ -237,7 +237,7 @@ fn desired_with_backends(backend_ips: &[Ipv4Addr]) -> ServiceDesired {
     let backends: Vec<Backend> = backend_ips
         .iter()
         .map(|ip| Backend {
-            alloc: SpiffeId::new("spiffe://overdrive.local/workload/web/alloc/web-0")
+            workload_identity: SpiffeId::new("spiffe://overdrive.local/workload/web/alloc/web-0")
                 .expect("valid SpiffeId"),
             addr: SocketAddr::new(IpAddr::V4(*ip), 8080),
             weight: 1,
@@ -422,7 +422,7 @@ fn v6_vip_desired_with_backends(vip6: Ipv6Addr, backend_ips: &[Ipv4Addr]) -> Ser
     let backends: Vec<Backend> = backend_ips
         .iter()
         .map(|ip| Backend {
-            alloc: SpiffeId::new("spiffe://overdrive.local/workload/web/alloc/web-0")
+            workload_identity: SpiffeId::new("spiffe://overdrive.local/workload/web/alloc/web-0")
                 .expect("valid SpiffeId"),
             addr: SocketAddr::new(IpAddr::V4(*ip), 8080),
             weight: 1,
@@ -670,7 +670,7 @@ proptest! {
             // remote-only happy path — UNCHANGED: the surviving remote backend
             // is in the payload and the programmed fingerprint is over it.
             let remote_backend = Backend {
-                alloc: SpiffeId::new("spiffe://overdrive.local/workload/web/alloc/web-0")
+                workload_identity: SpiffeId::new("spiffe://overdrive.local/workload/web/alloc/web-0")
                     .expect("valid SpiffeId"),
                 addr: SocketAddr::new(IpAddr::V4(backend_ip), 8080),
                 weight: 1,

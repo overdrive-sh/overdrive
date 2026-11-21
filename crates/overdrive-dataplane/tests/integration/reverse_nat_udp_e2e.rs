@@ -477,7 +477,7 @@ fn build_udp_service(
     runtime
         .block_on(dataplane.update_service(
             udp_frontend(VIP, UDP_PORT),
-            vec![Backend { alloc: backend_alloc, addr: backend_addr, weight: 1, healthy: true }],
+            vec![Backend { workload_identity: backend_alloc, addr: backend_addr, weight: 1, healthy: true }],
         ))
         .expect("update_service (udp)");
     drop(_ns_guard);

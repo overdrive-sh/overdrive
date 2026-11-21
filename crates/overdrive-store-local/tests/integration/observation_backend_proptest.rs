@@ -55,7 +55,7 @@ fn make_lts(counter: u64) -> LogicalTimestamp {
 
 fn make_backend(addr_octet: u8) -> Backend {
     Backend {
-        alloc: SpiffeId::new(&format!("spiffe://test/x/{addr_octet}")).expect("valid spiffe id"),
+        workload_identity: SpiffeId::new(&format!("spiffe://test/x/{addr_octet}")).expect("valid spiffe id"),
         addr: std::net::SocketAddr::V4(std::net::SocketAddrV4::new(
             Ipv4Addr::new(10, 0, 0, addr_octet),
             8080,

@@ -473,7 +473,7 @@ impl RestartWorld {
             .expect("backend rows")
             .into_iter()
             .flat_map(|row| row.backends)
-            .find(|backend| backend.alloc == spiffe)
+            .find(|backend| backend.workload_identity == spiffe)
             .map(|backend| backend.healthy)
     }
 
@@ -491,7 +491,7 @@ impl RestartWorld {
         }
         let spiffe = SpiffeId::for_allocation(&self.workload, alloc);
         let backend =
-            rows.iter().flat_map(|row| row.backends.iter()).find(|b| b.alloc == spiffe)?;
+            rows.iter().flat_map(|row| row.backends.iter()).find(|b| b.workload_identity == spiffe)?;
         let std::net::SocketAddr::V4(addr) = backend.addr else { return None };
         Some(matches!(index.classify(addr, Proto::Tcp), MtlsResolution::Mesh(_)))
     }

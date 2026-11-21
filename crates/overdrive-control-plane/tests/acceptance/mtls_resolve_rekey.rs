@@ -51,7 +51,7 @@ const fn v4(a: u8, b: u8, c: u8, d: u8, port: u16) -> SocketAddrV4 {
 /// `healthy`).
 fn backend(addr: SocketAddrV4, healthy: bool) -> Backend {
     Backend {
-        alloc: SpiffeId::new(&format!(
+        workload_identity: SpiffeId::new(&format!(
             "spiffe://overdrive.local/workload/svc/alloc/{}",
             addr.port()
         ))

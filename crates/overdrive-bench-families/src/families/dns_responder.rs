@@ -355,7 +355,7 @@ async fn build_responder(names: u32, observer: Arc<Recorder>) -> Result<Arc<DnsR
         let service_id = ServiceId::new(u64::from(index) + 1)
             .map_err(|error| format!("service id {index}: {error}"))?;
         let backend = Backend {
-            alloc: SpiffeId::for_allocation(&workload, &alloc),
+            workload_identity: SpiffeId::for_allocation(&workload, &alloc),
             addr: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(10, 99, 0, 6), 8080)),
             weight: 1,
             healthy: true,

@@ -113,7 +113,7 @@ async fn exchange(
         .assign(&MeshServiceName::new("server.svc.overdrive.local").expect("mesh name"))
         .expect("assign F");
     let backend = Backend {
-        alloc: SpiffeId::for_allocation(
+        workload_identity: SpiffeId::for_allocation(
             &WorkloadId::new("server").expect("workload id"),
             &AllocationId::new("alloc-1").expect("alloc id"),
         ),

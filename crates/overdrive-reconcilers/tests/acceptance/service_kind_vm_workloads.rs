@@ -223,7 +223,7 @@ fn startup_probed_running_allocations_are_unhealthy_before_stable() {
         ] if reconciler.as_str() == "service-map-hydrator"
             && target.as_str() == "service/42"
             && row.backends.len() == 1
-            && Some(&row.backends[0].alloc)
+            && Some(&row.backends[0].workload_identity)
                 == actual.allocs[&alloc_id].backend().map(|backend| &backend.spiffe)
             && !row.backends[0].healthy
             && action_alloc_id == &alloc_id
@@ -362,7 +362,7 @@ fn vm_readiness_flaps_only_backend_eligibility_and_recovers() {
 
     let withdrawn_row = service_backend_row(&withdraw_actions);
     assert!(!withdrawn_row.backends[0].healthy, "readiness Fail withdraws eligibility");
-    assert_eq!(withdrawn_row.backends[0].alloc, initial_row.backends[0].alloc);
+    assert_eq!(withdrawn_row.backends[0].workload_identity, initial_row.backends[0].workload_identity);
     assert_eq!(actual.allocs[&alloc_id].state(), AllocState::Running);
     assert!(actual.allocs[&alloc_id].stable_committed);
     assert!(unready_view.liveness_last_acted_run.is_empty());
@@ -379,7 +379,7 @@ fn vm_readiness_flaps_only_backend_eligibility_and_recovers() {
 
     let restored_row = service_backend_row(&restore_actions);
     assert!(restored_row.backends[0].healthy, "readiness Pass restores eligibility");
-    assert_eq!(restored_row.backends[0].alloc, initial_row.backends[0].alloc);
+    assert_eq!(restored_row.backends[0].workload_identity, initial_row.backends[0].workload_identity);
     assert_eq!(actual.allocs[&alloc_id].state(), AllocState::Running);
     assert!(actual.allocs[&alloc_id].stable_committed);
     assert!(ready_view.liveness_last_acted_run.is_empty());

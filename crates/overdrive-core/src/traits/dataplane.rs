@@ -66,7 +66,7 @@ pub enum DataplaneError {
     )]
     IfaceXdpSlotBusy { iface: String },
     /// `update_service` found one `BackendId` already bound to a different
-    /// backend identity (the memo hit names another `Backend.alloc`). Returned
+    /// backend identity (the memo hit names another `Backend.workload_identity`). Returned
     /// before any map is mutated; no identity is reserved and no id is minted.
     #[error("backend id {backend_id} is bound to {current}, refusing {attempted}")]
     BackendIdentityConflict { backend_id: BackendId, current: SpiffeId, attempted: SpiffeId },
@@ -112,10 +112,12 @@ pub enum Verdict {
     Deny,
 }
 
-/// A single service backend — IP/port and load-balancing weight.
+/// A single service backend — its workload identity, IP/port and
+/// load-balancing weight. `workload_identity` is the backend's workload SPIFFE
+/// identity.
 #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct Backend {
-    pub alloc: SpiffeId,
+    pub workload_identity: SpiffeId,
     pub addr: std::net::SocketAddr,
     pub weight: u16,
     pub healthy: bool,

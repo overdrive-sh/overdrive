@@ -222,7 +222,7 @@ fn fresh_store() -> Arc<SimObservationStore> {
 /// alloc SpiffeId is the `/workload/<workload>/alloc/<alloc>` shape `workload_of` parses.
 fn job_backend_row(service_id: u64, job: &str, addr: SocketAddrV4) -> ServiceBackendRow {
     let backend = Backend {
-        alloc: SpiffeId::for_allocation(
+        workload_identity: SpiffeId::for_allocation(
             &WorkloadId::new(job).expect("valid workload id"),
             &AllocationId::new("alloc-1").expect("valid alloc id"),
         ),

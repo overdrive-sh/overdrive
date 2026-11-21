@@ -287,7 +287,7 @@ fn endpoint(octet: u8) -> SocketAddrV4 {
 
 fn backend(octet: u8, healthy: bool) -> Backend {
     Backend {
-        alloc: SpiffeId::new(&format!("spiffe://overdrive.local/workload/rollback/alloc/a{octet}"))
+        workload_identity: SpiffeId::new(&format!("spiffe://overdrive.local/workload/rollback/alloc/a{octet}"))
             .expect("allocation SpiffeId"),
         addr: SocketAddr::V4(endpoint(octet)),
         weight: 1,

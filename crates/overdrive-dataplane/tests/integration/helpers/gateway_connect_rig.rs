@@ -141,7 +141,7 @@ pub fn alloc(n: u8) -> SpiffeId {
 pub fn backend(address: u16, allocation: u8, healthy: bool) -> Backend {
     let [hi, lo] = address.to_be_bytes();
     Backend {
-        alloc: alloc(allocation),
+        workload_identity: alloc(allocation),
         addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 1, hi, lo)), BACKEND_PORT),
         weight: 1,
         healthy,

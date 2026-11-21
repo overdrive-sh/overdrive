@@ -413,7 +413,7 @@ fn real_tcp_connection_completes_through_vip_with_payload_echo() {
         .block_on(dataplane.update_service(
             tcp_frontend(A_VIP, VIP_PORT),
             vec![Backend {
-                alloc: backend_alloc.clone(),
+                workload_identity: backend_alloc.clone(),
                 addr: backend_addr,
                 weight: 1,
                 healthy: true,
@@ -663,7 +663,7 @@ fn removing_backend_purges_reverse_nat_entry_no_stale_rewrite() {
         .block_on(dataplane.update_service(
             tcp_frontend(VIP, VIP_PORT),
             vec![Backend {
-                alloc: alloc_b1.clone(),
+                workload_identity: alloc_b1.clone(),
                 addr: SocketAddr::new(IpAddr::V4(BACKEND_IP), BACKEND_PORT),
                 weight: 1,
                 healthy: true,
@@ -727,13 +727,13 @@ fn removing_backend_purges_reverse_nat_entry_no_stale_rewrite() {
             tcp_frontend(VIP, VIP_PORT),
             vec![
                 Backend {
-                    alloc: alloc_b1.clone(),
+                    workload_identity: alloc_b1.clone(),
                     addr: SocketAddr::new(IpAddr::V4(BACKEND_IP), BACKEND_PORT),
                     weight: 1,
                     healthy: true,
                 },
                 Backend {
-                    alloc: alloc_b1b.clone(),
+                    workload_identity: alloc_b1b.clone(),
                     addr: SocketAddr::new(IpAddr::V4(backend_b1b_ip), BACKEND_PORT),
                     weight: 1,
                     healthy: true,
@@ -781,7 +781,7 @@ fn removing_backend_purges_reverse_nat_entry_no_stale_rewrite() {
         .block_on(dataplane.update_service(
             tcp_frontend(VIP, VIP_PORT),
             vec![Backend {
-                alloc: alloc_b2.clone(),
+                workload_identity: alloc_b2.clone(),
                 addr: SocketAddr::new(IpAddr::V4(backend_b2_ip), BACKEND_PORT),
                 weight: 1,
                 healthy: true,
@@ -897,7 +897,7 @@ fn empty_backend_update_removes_service_map_and_reverse_nat_entries() {
         .block_on(dataplane.update_service(
             tcp_frontend(VIP, VIP_PORT),
             vec![Backend {
-                alloc: alloc_b1.clone(),
+                workload_identity: alloc_b1.clone(),
                 addr: SocketAddr::new(IpAddr::V4(BACKEND_IP), BACKEND_PORT),
                 weight: 1,
                 healthy: true,
@@ -1028,7 +1028,7 @@ fn empty_backend_purge_scoped_to_frontend_leaves_other_ports_alive() {
         .block_on(dataplane.update_service(
             tcp_frontend(VIP, port_80),
             vec![Backend {
-                alloc: alloc_port80,
+                workload_identity: alloc_port80,
                 addr: SocketAddr::new(IpAddr::V4(BACKEND_IP), port_80),
                 weight: 1,
                 healthy: true,
@@ -1042,7 +1042,7 @@ fn empty_backend_purge_scoped_to_frontend_leaves_other_ports_alive() {
         .block_on(dataplane.update_service(
             tcp_frontend(VIP, port_443),
             vec![Backend {
-                alloc: alloc_port443,
+                workload_identity: alloc_port443,
                 addr: SocketAddr::new(IpAddr::V4(BACKEND_IP), port_443),
                 weight: 1,
                 healthy: true,
@@ -1175,7 +1175,7 @@ fn empty_backend_deregistration_releases_allocator_memo_entries() {
         .block_on(dataplane.update_service(
             tcp_frontend(VIP, VIP_PORT),
             vec![Backend {
-                alloc: alloc_b1.clone(),
+                workload_identity: alloc_b1.clone(),
                 addr: SocketAddr::new(IpAddr::V4(BACKEND_IP), BACKEND_PORT),
                 weight: 1,
                 healthy: true,
@@ -1203,7 +1203,7 @@ fn empty_backend_deregistration_releases_allocator_memo_entries() {
         .block_on(dataplane.update_service(
             tcp_frontend(VIP, VIP_PORT),
             vec![Backend {
-                alloc: alloc_b1.clone(),
+                workload_identity: alloc_b1.clone(),
                 addr: SocketAddr::new(IpAddr::V4(BACKEND_IP), BACKEND_PORT),
                 weight: 1,
                 healthy: true,

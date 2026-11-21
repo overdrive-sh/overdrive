@@ -131,7 +131,7 @@ fn frontend(service: u8) -> ServiceFrontend {
 fn backends(service: u8) -> Vec<Backend> {
     (0..BACKENDS_PER_SERVICE)
         .map(|index| Backend {
-            alloc: SpiffeId::new(&format!(
+            workload_identity: SpiffeId::new(&format!(
                 "spiffe://overdrive.local/workload/svc-{service}/alloc/a-{index}"
             ))
             .expect("valid SPIFFE ID"),

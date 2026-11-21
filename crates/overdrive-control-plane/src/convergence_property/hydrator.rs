@@ -126,7 +126,7 @@ fn backends_of(world: &World) -> Vec<Backend> {
         .iter()
         .enumerate()
         .map(|(i, (b, c, d))| Backend {
-            alloc: SpiffeId::from_str(&format!(
+            workload_identity: SpiffeId::from_str(&format!(
                 "spiffe://overdrive.local/workload/{SERVICE}/alloc/a{i}"
             ))
             .expect("spiffe"),

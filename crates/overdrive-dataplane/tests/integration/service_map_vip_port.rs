@@ -150,7 +150,7 @@ fn service_map_keyed_on_vip_port_not_backend_port() {
         .block_on(dataplane.update_service(
             udp_frontend(VIP, VIP_PORT),
             vec![Backend {
-                alloc,
+                workload_identity: alloc,
                 addr: SocketAddr::new(IpAddr::V4(BACKEND_IP), BACKEND_PORT),
                 weight: 1,
                 healthy: true,

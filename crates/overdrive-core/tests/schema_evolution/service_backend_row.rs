@@ -42,7 +42,7 @@ fn canonical_v1_payload() -> ServiceBackendRowLatest {
         service_id: ServiceId::new(42).expect("valid service id"),
         vip: Ipv4Addr::new(10, 0, 0, 1),
         backends: vec![Backend {
-            alloc,
+            workload_identity: alloc,
             addr: "10.0.1.1:8080".parse().expect("valid socket addr"),
             weight: 1,
             healthy: true,
@@ -134,20 +134,20 @@ fn discriminant_offset_48_is_stable_across_payload_sizes() {
     let alloc_s = SpiffeId::new("spiffe://overdrive.sh/a").expect("valid");
     let alloc_m = SpiffeId::new("spiffe://overdrive.sh/svc/payments/alloc-1").expect("valid");
     let b1 = vec![Backend {
-        alloc: alloc_m.clone(),
+        workload_identity: alloc_m.clone(),
         addr: "10.0.1.1:8080".parse().expect("addr"),
         weight: 1,
         healthy: true,
     }];
     let b2 = vec![
         Backend {
-            alloc: alloc_s,
+            workload_identity: alloc_s,
             addr: "10.0.1.1:8080".parse().expect("addr"),
             weight: 1,
             healthy: true,
         },
         Backend {
-            alloc: alloc_m,
+            workload_identity: alloc_m,
             addr: "10.0.1.2:9090".parse().expect("addr"),
             weight: 2,
             healthy: false,

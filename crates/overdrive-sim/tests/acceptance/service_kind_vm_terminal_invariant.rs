@@ -319,7 +319,7 @@ async fn terminal_state_wins_and_dead_vm_backend_never_returns_to_eligibility() 
         reconciler.reconcile(&in_flight, &in_flight, &terminal_view, &tick(3, 4));
     let replacement_row = backend_row(&replacement_actions);
     assert_eq!(replacement_row.backends.len(), 1);
-    assert_eq!(replacement_row.backends[0].alloc, successor_identity);
+    assert_eq!(replacement_row.backends[0].workload_identity, successor_identity);
     assert!(replacement_row.backends[0].healthy);
     assert!(!replacement_view.terminal_announced.contains(&successor));
     assert!(
@@ -340,7 +340,7 @@ async fn terminal_state_wins_and_dead_vm_backend_never_returns_to_eligibility() 
         .expect("sim backend observation read");
     assert_eq!(persisted.len(), 1);
     assert_eq!(persisted[0].backends.len(), 1);
-    assert_eq!(persisted[0].backends[0].alloc, successor_identity);
+    assert_eq!(persisted[0].backends[0].workload_identity, successor_identity);
     assert!(persisted[0].backends[0].healthy);
 }
 

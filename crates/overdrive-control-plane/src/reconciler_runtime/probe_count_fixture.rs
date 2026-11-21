@@ -669,7 +669,7 @@ impl ProbeWorld {
             .expect("backend rows")
             .into_iter()
             .flat_map(|row| row.backends)
-            .find(|backend| backend.alloc == spiffe)
+            .find(|backend| backend.workload_identity == spiffe)
             .map(|backend| backend.healthy)
     }
 

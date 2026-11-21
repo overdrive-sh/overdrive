@@ -377,7 +377,7 @@ fn make_service_backend_row(service_id_value: u64, counter: u64) -> ServiceBacke
         service_id: ServiceId::new(service_id_value).expect("valid service id"),
         vip: Ipv4Addr::new(10, 0, 0, 1),
         backends: vec![Backend {
-            alloc,
+            workload_identity: alloc,
             addr: "10.0.1.1:8080".parse().expect("valid socket addr"),
             weight: 1,
             healthy: true,

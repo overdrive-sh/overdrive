@@ -53,7 +53,7 @@ fn frontend(vip_octet: u8, port: u16, proto: Proto) -> ServiceFrontend {
 
 fn ipv4_backend(tag: usize, ip: Ipv4Addr, port: u16) -> Backend {
     Backend {
-        alloc: spiffe(tag),
+        workload_identity: spiffe(tag),
         addr: SocketAddr::new(IpAddr::V4(ip), port),
         weight: 1,
         healthy: true,
@@ -219,7 +219,7 @@ async fn a_set_with_an_ipv6_backend_is_refused_and_leaves_the_service_unchanged(
     // would show as a new key.
     let v4 = ipv4_backend(1, Ipv4Addr::new(10, 1, 0, 2), 5353);
     let v6 = Backend {
-        alloc: spiffe(2),
+        workload_identity: spiffe(2),
         addr: SocketAddr::new(IpAddr::V6(Ipv6Addr::LOCALHOST), 5353),
         weight: 1,
         healthy: true,

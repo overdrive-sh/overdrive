@@ -103,7 +103,7 @@ fn identity_of(intent: &WorkloadIntent, alloc: &str) -> SpiffeId {
 /// `Backend` field holding the identity is named.
 fn backend_at(identity: &SpiffeId, endpoint: u8) -> Backend {
     Backend {
-        alloc: identity.clone(),
+        workload_identity: identity.clone(),
         addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 96, 0, endpoint)), BACKEND_PORT),
         weight: 1,
         healthy: true,

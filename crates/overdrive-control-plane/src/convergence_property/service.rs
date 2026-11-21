@@ -99,7 +99,7 @@ struct Fixture {
 
 fn backend(index: usize, address: Ipv4Addr) -> Backend {
     Backend {
-        alloc: SpiffeId::from_str(&format!(
+        workload_identity: SpiffeId::from_str(&format!(
             "spiffe://overdrive.local/workload/{SERVICE}/alloc/{}",
             ALLOCS[index.min(ALLOCS.len() - 1)]
         ))

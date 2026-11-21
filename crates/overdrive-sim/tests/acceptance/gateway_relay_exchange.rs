@@ -157,7 +157,7 @@ impl Rig {
             .update_service(
                 frontend,
                 vec![Backend {
-                    alloc: backend_identity.clone(),
+                    workload_identity: backend_identity.clone(),
                     addr: std::net::SocketAddr::from((vip, SERVICE_PORT)),
                     weight: 1,
                     healthy: true,

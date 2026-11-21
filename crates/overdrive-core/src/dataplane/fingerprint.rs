@@ -92,7 +92,7 @@ mod tests {
     }
 
     fn backend(spiffe: &str, addr: SocketAddr, weight: u16, healthy: bool) -> Backend {
-        Backend { alloc: SpiffeId::new(spiffe).unwrap(), addr, weight, healthy }
+        Backend { workload_identity: SpiffeId::new(spiffe).unwrap(), addr, weight, healthy }
     }
 
     fn sample_backends() -> Vec<Backend> {

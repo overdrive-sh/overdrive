@@ -1134,7 +1134,7 @@ fn service_backend_row_actions(actual: &ServiceLifecycleState, tick: &TickContex
             .iter()
             .filter_map(|(alloc_id, fact)| {
                 fact.backend().map(|backend| Backend {
-                    alloc: backend.spiffe.clone(),
+                    workload_identity: backend.spiffe.clone(),
                     addr: SocketAddr::new(IpAddr::V4(backend.ip), identity.port.get()),
                     weight: 1,
                     healthy: healthy_by_alloc.get(alloc_id).copied().unwrap_or(false),

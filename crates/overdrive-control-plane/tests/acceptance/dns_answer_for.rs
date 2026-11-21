@@ -75,7 +75,7 @@ fn backend_for(job: &str, instance: u8, healthy: bool) -> Backend {
         SpiffeId::new(&format!("spiffe://overdrive.local/workload/{job}/alloc/a{instance}"))
             .expect("valid spiffe id");
     Backend {
-        alloc: spiffe,
+        workload_identity: spiffe,
         addr: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(10, 99, 0, instance), 8080)),
         weight: 1,
         healthy,
@@ -99,7 +99,7 @@ fn backends_row(service_id: u64, backends: Vec<Backend>) -> ServiceBackendRow {
 /// production `name_index::workload_of` extraction so the fixture can model the
 /// 01-05 deploy-time assigner binding `<workload> → F` on declaration.
 fn workload_of_backend(backend: &Backend) -> MeshServiceName {
-    let mut segments = backend.alloc.path().split('/').filter(|s| !s.is_empty());
+    let mut segments = backend.workload_identity.path().split('/').filter(|s| !s.is_empty());
     let label = loop {
         match segments.next() {
             Some("workload") => break segments.next().expect("workload segment present"),

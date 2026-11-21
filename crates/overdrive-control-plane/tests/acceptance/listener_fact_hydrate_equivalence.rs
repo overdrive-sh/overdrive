@@ -230,7 +230,7 @@ async fn persist_and_allocate(
 
 fn one_backend(workload: &str) -> Backend {
     Backend {
-        alloc: SpiffeId::from_str(&format!(
+        workload_identity: SpiffeId::from_str(&format!(
             "spiffe://overdrive.local/workload/{workload}/alloc/a1"
         ))
         .expect("spiffe"),

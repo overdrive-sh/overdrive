@@ -571,7 +571,7 @@ impl World {
                 self.seed
             );
             assert_eq!(
-                row.backends.iter().map(|backend| &backend.alloc).collect::<BTreeSet<_>>().len(),
+                row.backends.iter().map(|backend| &backend.workload_identity).collect::<BTreeSet<_>>().len(),
                 replicas
             );
         }
@@ -1036,7 +1036,7 @@ async fn complete_listener_projection_is_idempotent() {
             .collect();
         for row in &baseline {
             assert_eq!(
-                row.backends.iter().map(|backend| backend.alloc.clone()).collect::<Vec<_>>(),
+                row.backends.iter().map(|backend| backend.workload_identity.clone()).collect::<Vec<_>>(),
                 identities,
                 "seed={seed}: exact allocation identities in allocation-ID order"
             );

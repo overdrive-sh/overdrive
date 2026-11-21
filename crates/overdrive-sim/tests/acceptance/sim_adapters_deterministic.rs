@@ -282,7 +282,7 @@ async fn sim_dataplane_stores_policy_and_service_state() {
     )
     .expect("IPv4 ServiceFrontend constructs");
     let backend = Backend {
-        alloc: spiffe("workload/payments/alloc/a1b2c3"),
+        workload_identity: spiffe("workload/payments/alloc/a1b2c3"),
         addr: "127.0.0.1:8080".parse().expect("valid addr"),
         weight: 100,
         healthy: true,

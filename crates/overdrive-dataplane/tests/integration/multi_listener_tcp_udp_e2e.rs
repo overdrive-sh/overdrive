@@ -514,7 +514,7 @@ fn build_multi_listener_service(
         runtime
             .block_on(dataplane.update_service(
                 *frontend,
-                vec![Backend { alloc, addr: backend_addr, weight: 1, healthy: true }],
+                vec![Backend { workload_identity: alloc, addr: backend_addr, weight: 1, healthy: true }],
             ))
             .expect("update_service (per-listener)");
     }
@@ -806,7 +806,7 @@ fn adding_listener_on_resubmit_converges_without_breaking_existing() {
             .block_on(fixture.dataplane.update_service(
                 udp_frontend(VIP, UDP_PORT_2),
                 vec![Backend {
-                    alloc,
+                    workload_identity: alloc,
                     addr: SocketAddr::new(IpAddr::V4(BACKEND_IP), UDP_PORT_2),
                     weight: 1,
                     healthy: true,

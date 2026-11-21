@@ -57,7 +57,7 @@ const SEED: u64 = 295;
 /// The identity a published backend presents. The single place the `Backend`
 /// field holding the identity is named.
 const fn published_identity(backend: &Backend) -> &SpiffeId {
-    &backend.alloc
+    &backend.workload_identity
 }
 
 /// A Running allocation of workload `payments` is published behind
