@@ -48,7 +48,7 @@ use overdrive_control_plane::api::{
     AllocStateWire, AllocStatusResponse, AllocStatusRowBody, IssuedCertSummary, ResourcesBody,
     RestartBudget, TransitionRecord, TransitionSource,
 };
-use overdrive_control_plane::veth_provisioner::{DEFAULT_CLIENT_IFACE, WORKLOAD_SUBNET_BASE};
+use overdrive_control_plane::veth_provisioner::WORKLOAD_SUBNET_BASE;
 use overdrive_core::guest_transport::GuestCid;
 use overdrive_core::id::AllocationId;
 use overdrive_core::traits::ObservationStore as _;
@@ -59,6 +59,8 @@ use overdrive_core::transition_reason::{StoppedBy, TerminalCondition};
 use overdrive_core::vm::config::VmConfig;
 use overdrive_core::{SpiffeId, TransitionReason, aggregate::WorkloadKind};
 use overdrive_store_local::LocalObservationStore;
+use overdrive_testing::cidr_lease::TestCidrLease;
+use overdrive_testing::netns::NetNs;
 use overdrive_testing::overdrive_test;
 use overdrive_testing::vm_fixture::VmFixture;
 use proptest::prelude::*;
@@ -1664,6 +1666,71 @@ async fn durable_alloc_snapshot(
 // S-ND295-01 harness evidence: the capture helpers against a scratch TAP.
 // ---------------------------------------------------------------------
 
+/// A host-routable plaintext endpoint that is not local to the host: a
+/// namespace behind a veth, addressed from a `TestCidrLease` (the
+/// `10.250.0.0/16` fixture pool, disjoint from the production workload
+/// subnet). The host's FIB route type for `address` is `unicast`.
+struct RemoteNonMeshEndpoint {
+    address: Ipv4Addr,
+    namespace: NetNs,
+    host_link: String,
+    _lease: TestCidrLease,
+}
+
+impl RemoteNonMeshEndpoint {
+    fn create() -> Self {
+        let lease = TestCidrLease::acquire("guest-stack-non-mesh-endpoint")
+            .expect("lease a fixture CIDR for the non-mesh endpoint");
+        let namespace = NetNs::create("gti-nonmesh").expect("create non-mesh endpoint netns");
+        let host_link = "gtinm-h".to_owned();
+        let peer_link = "gtinm-p";
+        let _ = Command::new("ip").args(["link", "del", &host_link]).output();
+        run_ip(&["link", "add", &host_link, "type", "veth", "peer", "name", peer_link]);
+        run_ip(&["link", "set", peer_link, "netns", &namespace.name]);
+        let prefix = lease.prefix_len();
+        run_ip(&["addr", "add", &format!("{}/{prefix}", lease.host_gateway()), "dev", &host_link]);
+        run_ip(&["link", "set", &host_link, "up"]);
+        namespace
+            .assign_ip_and_up(peer_link, &format!("{}/{prefix}", lease.workload_addr()))
+            .expect("address the non-mesh endpoint veth");
+        Self { address: lease.workload_addr(), namespace, host_link, _lease: lease }
+    }
+
+    /// Bind a plaintext listener inside the endpoint namespace. A socket
+    /// belongs to the namespace it was created in, so a short-lived thread
+    /// enters it, binds, and hands the listener back.
+    fn bind_listener(&self) -> TcpListener {
+        use std::os::fd::AsRawFd as _;
+        let ns_file = std::fs::File::open(format!("/var/run/netns/{}", self.namespace.name))
+            .expect("open non-mesh endpoint netns");
+        let address = self.address;
+        std::thread::spawn(move || {
+            // SAFETY: setns on this thread's own namespace association with a
+            // valid netns fd; the thread exits right after the bind.
+            let rc = unsafe { libc::setns(ns_file.as_raw_fd(), libc::CLONE_NEWNET) };
+            assert_eq!(rc, 0, "enter non-mesh endpoint netns: {}", std::io::Error::last_os_error());
+            TcpListener::bind((address, 0)).expect("bind non-mesh plaintext endpoint")
+        })
+        .join()
+        .expect("bind thread")
+    }
+}
+
+impl Drop for RemoteNonMeshEndpoint {
+    fn drop(&mut self) {
+        let _ = Command::new("ip").args(["link", "del", &self.host_link]).output();
+    }
+}
+
+fn run_ip(args: &[&str]) {
+    let output = Command::new("ip").args(args).output().expect("spawn ip");
+    assert!(
+        output.status.success(),
+        "ip {args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 /// S-GTI-04 — a destination outside the workload mesh block is classified
 /// NonMesh and reached unchanged over a clear TCP connection.
 ///
@@ -1682,13 +1749,18 @@ async fn the_same_guest_reaches_a_non_mesh_destination_in_the_clear() {
     let (handle, server_tmp) = spawn_mtls_server().await;
     let cfg = config_path(server_tmp.path());
 
-    let host_ip = overdrive_control_plane::iface::resolve_iface_ipv4(DEFAULT_CLIENT_IFACE)
-        .expect("resolve production single-node client interface");
+    // The endpoint must be a destination the host reaches over a unicast
+    // route: the guest-flow owner refuses every destination the host kernel
+    // would deliver locally, including the host's own interface addresses
+    // (ADR-0167). So the plaintext listener lives in its own namespace behind
+    // a veth, on a lease from the test pool disjoint from the workload subnet.
+    let remote = RemoteNonMeshEndpoint::create();
     assert!(
-        !WORKLOAD_SUBNET_BASE.contains(&host_ip),
-        "non-mesh fixture endpoint must be outside {WORKLOAD_SUBNET_BASE}, got {host_ip}"
+        !WORKLOAD_SUBNET_BASE.contains(&remote.address),
+        "non-mesh fixture endpoint must be outside {WORKLOAD_SUBNET_BASE}, got {}",
+        remote.address
     );
-    let listener = TcpListener::bind((host_ip, 0)).expect("bind non-mesh plaintext endpoint");
+    let listener = remote.bind_listener();
     listener.set_nonblocking(true).expect("make non-mesh accept bounded");
     let destination = listener.local_addr().expect("non-mesh endpoint address");
     let endpoint = std::thread::spawn(move || {
