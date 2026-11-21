@@ -4074,6 +4074,9 @@ classifies `Mesh` (an unhealthy backend → `MeshUnreachable`, fail-closed).*
 **Name→frontend mapping (REV-2, VERIFIED)**: `<job>` ← the SVID job segment of
 `Backend.alloc: SpiffeId` (path `spiffe://overdrive.local/job/<WorkloadId>/alloc/<id>`,
 `SpiffeId::for_allocation`); `WorkloadId` IS the deploy `[service].id`.
+*(Identity shape superseded by [ADR-0344](adr-0344-a-workload-svid-names-the-workload-not-the-allocation.md):
+a workload SVID is `spiffe://overdrive.local/workload/<WorkloadId>`, shared by all its
+allocations; see also ADR-0345..0347.)*
 `service_backends` rows are built by `BackendDiscoveryBridge` from
 `actual.actual.running` only, so "∩ running" holds by construction. The
 `name_index` maps `<job>` → the **stable frontend addr `F`** (1a-A) — NOT → the

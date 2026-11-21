@@ -2,7 +2,12 @@
 
 ## Status
 
-Proposed — reconstructed on main 549d78fa6, pending independent review (2026-11-01).
+**Superseded by [ADR-0346](adr-0346-gateway-client-mtls-requires-the-selected-backends-workload-identity.md)
+(2026-11-21).** The exact-allocation pin below is retained as the record of what was
+implemented; the pinned identity is now the selected backend's workload identity
+([ADR-0344](adr-0344-a-workload-svid-names-the-workload-not-the-allocation.md)).
+
+Previously: Proposed — reconstructed on main 549d78fa6, pending independent review (2026-11-01).
 Original decision ratified by the user 2026-09-13; re-pinned to the leg-C path by D3 (user-approved 2026-11-01, see [feature-delta § Reconstruction: user decisions](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-reconstruction-user-decisions-and-proposals)).
 ## Context
 

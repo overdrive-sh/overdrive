@@ -1,6 +1,6 @@
 State 1: <Initial predicate>
 /\ receipt_bugRnatShare_selection_receipt_resv = << >>
-/\ receipt_bugRnatShare_selection_receipt_g = [committed |-> {}, bound |-> << >>, rbBad |-> FALSE, badSel |-> FALSE]
+/\ receipt_bugRnatShare_selection_receipt_g = [committed |-> {}, prog |-> << >>, rbBad |-> FALSE, badSel |-> FALSE]
 /\ receipt_bugRnatShare_selection_receipt_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ receipt_bugRnatShare_selection_receipt_upd = 0
 /\ receipt_bugRnatShare_selection_receipt_ckey = << >>
@@ -8,7 +8,7 @@ State 1: <Initial predicate>
 /\ receipt_bugRnatShare_selection_receipt_receipts = << >>
 /\ receipt_bugRnatShare_selection_receipt_outer = << >>
 /\ receipt_bugRnatShare_selection_receipt_next_bid = 1
-/\ receipt_bugRnatShare_selection_receipt_infl = [on |-> FALSE, key |-> 0, ents |-> << >>, assoc |-> << >>, fresh_addrs |-> {}, prior |-> << >>, identBefore |-> << >>, committed |-> FALSE]
+/\ receipt_bugRnatShare_selection_receipt_infl = [on |-> FALSE, key |-> 0, ents |-> << >>, assoc |-> << >>, wls |-> << >>, fresh_addrs |-> {}, prior |-> << >>, identBefore |-> << >>, committed |-> FALSE]
 /\ receipt_bugRnatShare_selection_receipt_guard = FALSE
 /\ receipt_bugRnatShare_selection_receipt_ident = << >>
 /\ receipt_bugRnatShare_selection_receipt_taken = << >>
@@ -16,9 +16,9 @@ State 1: <Initial predicate>
 /\ receipt_bugRnatShare_selection_receipt_intents = << >>
 /\ receipt_bugRnatShare_selection_receipt_conn = << >>
 
-State 2: <receipt_bugRnatShare_selection_receipt_step line 1918, col 3 to line 1960, col 60 of module receipt_bugRnatShare>
+State 2: <receipt_bugRnatShare_selection_receipt_step line 1820, col 3 to line 1858, col 60 of module receipt_bugRnatShare>
 /\ receipt_bugRnatShare_selection_receipt_resv = <<1>>
-/\ receipt_bugRnatShare_selection_receipt_g = [committed |-> {}, bound |-> <<{1}>>, rbBad |-> FALSE, badSel |-> FALSE]
+/\ receipt_bugRnatShare_selection_receipt_g = [committed |-> {}, prog |-> << >>, rbBad |-> FALSE, badSel |-> FALSE]
 /\ receipt_bugRnatShare_selection_receipt_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ receipt_bugRnatShare_selection_receipt_upd = 1
 /\ receipt_bugRnatShare_selection_receipt_ckey = << >>
@@ -26,7 +26,7 @@ State 2: <receipt_bugRnatShare_selection_receipt_step line 1918, col 3 to line 1
 /\ receipt_bugRnatShare_selection_receipt_receipts = << >>
 /\ receipt_bugRnatShare_selection_receipt_outer = << >>
 /\ receipt_bugRnatShare_selection_receipt_next_bid = 2
-/\ receipt_bugRnatShare_selection_receipt_infl = [on |-> TRUE, key |-> 1, ents |-> <<1>>, assoc |-> <<1>>, fresh_addrs |-> {1}, prior |-> << >>, identBefore |-> << >>, committed |-> FALSE]
+/\ receipt_bugRnatShare_selection_receipt_infl = [on |-> TRUE, key |-> 1, ents |-> <<1>>, assoc |-> <<1>>, wls |-> <<1>>, fresh_addrs |-> {1}, prior |-> << >>, identBefore |-> << >>, committed |-> FALSE]
 /\ receipt_bugRnatShare_selection_receipt_guard = TRUE
 /\ receipt_bugRnatShare_selection_receipt_ident = << >>
 /\ receipt_bugRnatShare_selection_receipt_taken = << >>
@@ -34,9 +34,9 @@ State 2: <receipt_bugRnatShare_selection_receipt_step line 1918, col 3 to line 1
 /\ receipt_bugRnatShare_selection_receipt_intents = << >>
 /\ receipt_bugRnatShare_selection_receipt_conn = << >>
 
-State 3: <receipt_bugRnatShare_selection_receipt_step line 1918, col 3 to line 1960, col 60 of module receipt_bugRnatShare>
+State 3: <receipt_bugRnatShare_selection_receipt_step line 1820, col 3 to line 1858, col 60 of module receipt_bugRnatShare>
 /\ receipt_bugRnatShare_selection_receipt_resv = <<1>>
-/\ receipt_bugRnatShare_selection_receipt_g = [committed |-> {1}, bound |-> <<{1}>>, rbBad |-> FALSE, badSel |-> FALSE]
+/\ receipt_bugRnatShare_selection_receipt_g = [committed |-> {1}, prog |-> <<1>>, rbBad |-> FALSE, badSel |-> FALSE]
 /\ receipt_bugRnatShare_selection_receipt_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ receipt_bugRnatShare_selection_receipt_upd = 1
 /\ receipt_bugRnatShare_selection_receipt_ckey = << >>
@@ -44,7 +44,7 @@ State 3: <receipt_bugRnatShare_selection_receipt_step line 1918, col 3 to line 1
 /\ receipt_bugRnatShare_selection_receipt_receipts = << >>
 /\ receipt_bugRnatShare_selection_receipt_outer = <<<<1>>>>
 /\ receipt_bugRnatShare_selection_receipt_next_bid = 2
-/\ receipt_bugRnatShare_selection_receipt_infl = [on |-> TRUE, key |-> 1, ents |-> <<1>>, assoc |-> <<1>>, fresh_addrs |-> {1}, prior |-> << >>, identBefore |-> << >>, committed |-> TRUE]
+/\ receipt_bugRnatShare_selection_receipt_infl = [on |-> TRUE, key |-> 1, ents |-> <<1>>, assoc |-> <<1>>, wls |-> <<1>>, fresh_addrs |-> {1}, prior |-> << >>, identBefore |-> << >>, committed |-> TRUE]
 /\ receipt_bugRnatShare_selection_receipt_guard = TRUE
 /\ receipt_bugRnatShare_selection_receipt_ident = << >>
 /\ receipt_bugRnatShare_selection_receipt_taken = << >>
@@ -52,9 +52,9 @@ State 3: <receipt_bugRnatShare_selection_receipt_step line 1918, col 3 to line 1
 /\ receipt_bugRnatShare_selection_receipt_intents = << >>
 /\ receipt_bugRnatShare_selection_receipt_conn = << >>
 
-State 4: <receipt_bugRnatShare_selection_receipt_step line 1918, col 3 to line 1960, col 60 of module receipt_bugRnatShare>
+State 4: <receipt_bugRnatShare_selection_receipt_step line 1820, col 3 to line 1858, col 60 of module receipt_bugRnatShare>
 /\ receipt_bugRnatShare_selection_receipt_resv = << >>
-/\ receipt_bugRnatShare_selection_receipt_g = [committed |-> {1}, bound |-> <<{1}>>, rbBad |-> FALSE, badSel |-> FALSE]
+/\ receipt_bugRnatShare_selection_receipt_g = [committed |-> {1}, prog |-> <<1>>, rbBad |-> FALSE, badSel |-> FALSE]
 /\ receipt_bugRnatShare_selection_receipt_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ receipt_bugRnatShare_selection_receipt_upd = 1
 /\ receipt_bugRnatShare_selection_receipt_ckey = << >>
@@ -62,7 +62,7 @@ State 4: <receipt_bugRnatShare_selection_receipt_step line 1918, col 3 to line 1
 /\ receipt_bugRnatShare_selection_receipt_receipts = << >>
 /\ receipt_bugRnatShare_selection_receipt_outer = <<<<1>>>>
 /\ receipt_bugRnatShare_selection_receipt_next_bid = 2
-/\ receipt_bugRnatShare_selection_receipt_infl = [on |-> FALSE, key |-> 0, ents |-> << >>, assoc |-> << >>, fresh_addrs |-> {}, prior |-> << >>, identBefore |-> << >>, committed |-> FALSE]
+/\ receipt_bugRnatShare_selection_receipt_infl = [on |-> FALSE, key |-> 0, ents |-> << >>, assoc |-> << >>, wls |-> << >>, fresh_addrs |-> {}, prior |-> << >>, identBefore |-> << >>, committed |-> FALSE]
 /\ receipt_bugRnatShare_selection_receipt_guard = FALSE
 /\ receipt_bugRnatShare_selection_receipt_ident = <<1>>
 /\ receipt_bugRnatShare_selection_receipt_taken = << >>
@@ -70,9 +70,9 @@ State 4: <receipt_bugRnatShare_selection_receipt_step line 1918, col 3 to line 1
 /\ receipt_bugRnatShare_selection_receipt_intents = << >>
 /\ receipt_bugRnatShare_selection_receipt_conn = << >>
 
-State 5: <receipt_bugRnatShare_selection_receipt_step line 1918, col 3 to line 1960, col 60 of module receipt_bugRnatShare>
+State 5: <receipt_bugRnatShare_selection_receipt_step line 1820, col 3 to line 1858, col 60 of module receipt_bugRnatShare>
 /\ receipt_bugRnatShare_selection_receipt_resv = << >>
-/\ receipt_bugRnatShare_selection_receipt_g = [committed |-> {1}, bound |-> <<{1}>>, rbBad |-> FALSE, badSel |-> FALSE]
+/\ receipt_bugRnatShare_selection_receipt_g = [committed |-> {1}, prog |-> <<1>>, rbBad |-> FALSE, badSel |-> FALSE]
 /\ receipt_bugRnatShare_selection_receipt_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ receipt_bugRnatShare_selection_receipt_upd = 2
 /\ receipt_bugRnatShare_selection_receipt_ckey = << >>
@@ -80,7 +80,7 @@ State 5: <receipt_bugRnatShare_selection_receipt_step line 1918, col 3 to line 1
 /\ receipt_bugRnatShare_selection_receipt_receipts = << >>
 /\ receipt_bugRnatShare_selection_receipt_outer = <<<<1>>>>
 /\ receipt_bugRnatShare_selection_receipt_next_bid = 2
-/\ receipt_bugRnatShare_selection_receipt_infl = [on |-> TRUE, key |-> 2, ents |-> <<1>>, assoc |-> << >>, fresh_addrs |-> {}, prior |-> << >>, identBefore |-> <<1>>, committed |-> FALSE]
+/\ receipt_bugRnatShare_selection_receipt_infl = [on |-> TRUE, key |-> 2, ents |-> <<1>>, assoc |-> << >>, wls |-> <<1>>, fresh_addrs |-> {}, prior |-> << >>, identBefore |-> <<1>>, committed |-> FALSE]
 /\ receipt_bugRnatShare_selection_receipt_guard = TRUE
 /\ receipt_bugRnatShare_selection_receipt_ident = <<1>>
 /\ receipt_bugRnatShare_selection_receipt_taken = << >>
@@ -88,9 +88,9 @@ State 5: <receipt_bugRnatShare_selection_receipt_step line 1918, col 3 to line 1
 /\ receipt_bugRnatShare_selection_receipt_intents = << >>
 /\ receipt_bugRnatShare_selection_receipt_conn = << >>
 
-State 6: <receipt_bugRnatShare_selection_receipt_step line 1918, col 3 to line 1960, col 60 of module receipt_bugRnatShare>
+State 6: <receipt_bugRnatShare_selection_receipt_step line 1820, col 3 to line 1858, col 60 of module receipt_bugRnatShare>
 /\ receipt_bugRnatShare_selection_receipt_resv = << >>
-/\ receipt_bugRnatShare_selection_receipt_g = [committed |-> {1}, bound |-> <<{1}>>, rbBad |-> FALSE, badSel |-> FALSE]
+/\ receipt_bugRnatShare_selection_receipt_g = [committed |-> {1}, prog |-> <<1>>, rbBad |-> FALSE, badSel |-> FALSE]
 /\ receipt_bugRnatShare_selection_receipt_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ receipt_bugRnatShare_selection_receipt_upd = 2
 /\ receipt_bugRnatShare_selection_receipt_ckey = << >>
@@ -98,7 +98,7 @@ State 6: <receipt_bugRnatShare_selection_receipt_step line 1918, col 3 to line 1
 /\ receipt_bugRnatShare_selection_receipt_receipts = << >>
 /\ receipt_bugRnatShare_selection_receipt_outer = <<<<1>>, <<1>>>>
 /\ receipt_bugRnatShare_selection_receipt_next_bid = 2
-/\ receipt_bugRnatShare_selection_receipt_infl = [on |-> TRUE, key |-> 2, ents |-> <<1>>, assoc |-> << >>, fresh_addrs |-> {}, prior |-> << >>, identBefore |-> <<1>>, committed |-> TRUE]
+/\ receipt_bugRnatShare_selection_receipt_infl = [on |-> TRUE, key |-> 2, ents |-> <<1>>, assoc |-> << >>, wls |-> <<1>>, fresh_addrs |-> {}, prior |-> << >>, identBefore |-> <<1>>, committed |-> TRUE]
 /\ receipt_bugRnatShare_selection_receipt_guard = TRUE
 /\ receipt_bugRnatShare_selection_receipt_ident = <<1>>
 /\ receipt_bugRnatShare_selection_receipt_taken = << >>

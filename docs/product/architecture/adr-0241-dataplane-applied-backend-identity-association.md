@@ -2,7 +2,13 @@
 
 ## Status
 
-Proposed — pending independent review (2026-11-02). Ratified by the user
+**Superseded by [ADR-0347](adr-0347-dataplane-backend-identity-association-carries-the-workload-identity.md)
+(2026-11-21).** The per-allocation association and the rejection of a different
+identity at a memoised endpoint below are retained as the record of what was
+implemented; that rejection wedged the hydrator on a same-workload replacement
+([RCA](../../analysis/root-cause-analysis-public-ingress-gateway-502-after-serve-restart.md)).
+
+Previously: Proposed — pending independent review (2026-11-02). Ratified by the user
 2026-09-13; decisions D1–D5 approved 2026-11-01 (see [feature-delta § Reconstruction: user decisions](../../feature/public-ingress-gateway/feature-delta.md#wave-design--ref-reconstruction-user-decisions-and-proposals)).
 User ruling 2026-11-02: P-2 (R-3), the backend-ID allocator is unchanged.
 

@@ -9,6 +9,12 @@ pinning the implementation contract). Mode: propose (recording a
 user-ratified decision). Tags: phase-2, terminology-migration,
 application-arch, wire-contract, workload-identity, single-cut.
 
+**Superseded in part by [ADR-0344](adr-0344-a-workload-svid-names-the-workload-not-the-allocation.md)
+(2026-11-21):** the `/alloc/<alloc>` suffix of the SPIFFE shape this ADR renames
+(`/workload/{workload}/alloc/{alloc}`) is removed; the identity is
+`/workload/{workload}`. The `/v1/workloads*` route rename and the `/job/` →
+`/workload/` segment rename stand.
+
 This ADR records the **last step** of the job→workload terminology
 migration (research:
 `docs/research/refactoring/job-vs-workload-terminology-comprehensive-research.md`,

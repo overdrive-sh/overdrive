@@ -25,7 +25,7 @@ public-ingress-gateway` fails when it no longer matches the specs).
 |---|---|---|---|
 | `gateway_identity.qnt` | ADR-0225 | `HoldImpliesAudit`, `StaleEpochNeverHolds`, `DisabledSlotIsEmpty` | `issue_hold` (happy path), `reissue_near_expiry`, `disable_races_inflight_issue`, `audit_failure_no_hold`, `restart_reissue` |
 | `gateway_application.qnt` (drain, supersession, failed candidate) | ADR-0222; R-65 / Gate G-1 failed-candidate rule | `DrainRetainsUntilLeasesZero`, `SupersededResultNeverRestores`, `FailedCandidateNotRestaged` | `replace_valid` (supersede, drain, retire), `route_withdraw_drain`, `late_probe_after_supersession` (a superseded staged gate result is discarded), `failed_candidate_not_restaged` (a failed Route generation is not re-staged until the Route changes) |
-| `selection_receipt.qnt` | ADR-0232, ADR-0233, ADR-0241 (context ADR-0228, ADR-0242, ADR-0248; see below) | `IdentityReadableOnlyAfterCommit`, `IdentityImmutablePerBackendId`, `ReceiptMatchesIntent`, `NoResidueAfterCleanup`, `RollbackPreservesPriorGeneration`, `EmptyIsNoBackend`, `ReverseNatKeyOneVip` (R-59) | `commit_then_select`, `conflicting_alloc_rejected`, `reverse_nat_conflict_rejected`, `identity_conflict_precedes_reverse_nat`, `restart_destroys_receipts` (conformance-bound, `receipt_conf`); `abandoned_reservation_rolled_back`, `receipt_waits_for_publish_guard` (evaluator-only on `receipt_ok`, not replayed) |
+| `selection_receipt.qnt` | ADR-0232, ADR-0233, ADR-0344, ADR-0346, ADR-0347 (supersede ADR-0234, ADR-0241; context ADR-0228, ADR-0242, ADR-0248; see below) | `IdentityReadableOnlyAfterCommit`, `AssociationFollowsProgrammedWorkload`, `ReceiptMatchesIntent`, `NoResidueAfterCleanup`, `RollbackPreservesPriorGeneration`, `EmptyIsNoBackend`, `ReverseNatKeyOneVip` (R-59) | `commit_then_select`, `replacement_reuses_backend_id`, `serve_restart_replacement` (S-PIG-71), `different_workload_takeover`, `reverse_nat_conflict_rejected`, `restart_destroys_receipts` (conformance-bound, `receipt_conf`); `abandoned_reservation_rolled_back`, `receipt_waits_for_publish_guard` (evaluator-only on `receipt_ok`, not replayed) |
 | `relay_exchange.qnt` (conformance target) | ADR-0239 (context ADR-0245, ADR-0246, ADR-0247, ADR-0253, ADR-0254) | `NoBytePastMessageBoundary` | `exchange_cl_keepalive`, `early_response_closes`, `drain_with_inflight_body`, `half_close_after_request_read`, `upstream_close_mid_body_aborts`, `close_delimited_clean_end`, `public_close_mid_request_aborts` (main `relay_conf`) |
 
 ADR-0228 is a single-owner rule (one dataplane owner), so it has no concurrent protocol and no hazard. ADR-0248 (ledger order) is a
@@ -40,7 +40,7 @@ table is context for the receipt module, not a separate decision with a hazard.
 | ADR-0222 | `retireWhileLeased` -> `app_bugRetireWhileLeased` | `DrainRetainsUntilLeasesZero` |
 | R-65 (G-1) | `restageFailed` -> `app_bugRestageFailed` | `FailedCandidateNotRestaged` |
 | ADR-0233 | `publishEarly` -> `receipt_bugPublishEarly` | `IdentityReadableOnlyAfterCommit` |
-| ADR-0241 | `rebind` -> `receipt_bugRebind` | `IdentityImmutablePerBackendId` |
+| ADR-0347 (R-C, re-association of the live id) | `staleAssoc` -> `receipt_bugStaleAssoc` | `AssociationFollowsProgrammedWorkload` |
 | ADR-0232 | `takeAny` -> `receipt_bugTakeAny` | `ReceiptMatchesIntent` |
 | ADR-0239 | `relayPastBoundary` -> `relay_bugRelayPastBoundary` | `NoBytePastMessageBoundary` |
 
@@ -62,11 +62,14 @@ See the header of `checks.toml` (single home).
   (or `route_withdraw`, which ends the Route) clears it. A result for a candidate whose Route the owner has not yet
   observed superseded may promote it (equivalent to the Route committing just after promotion); once observed, the
   result is discarded.
-- `selection_receipt`: two Service keys, two guest addresses, two allocations, <= 2 gateway sockets, backend sets drawn
-  from a six-entry catalogue. `receipt_ok` (exhaustive) bounds accepted `update_service` calls at 2 (`MAXUPD`), which also hosts the
+- `selection_receipt`: two Service keys, two guest addresses, two WORKLOAD identities (R-A: the dataplane never sees an
+  allocation; a replacement allocation of a workload is a byte-identical `Backend`), <= 2 gateway sockets, backend sets drawn
+  from a six-entry catalogue. The allocator memo is keyed by the endpoint only (R-C): a different workload at a memoised endpoint keeps the BackendId and re-associates it. `OneIdPerEndpoint` is not
+  a separate invariant: it holds by the map type of the memo (one BackendId per endpoint), so it would be vacuous. The ghost `g.prog` records, per BackendId, the workload most recently committed for it. `receipt_ok` (exhaustive) bounds accepted `update_service` calls at 2 (`MAXUPD`), which also hosts the
   two evaluator-only runs (`abandoned_reservation_rolled_back` needs two accepted updates); `receipt_conf` bounds them at
-  3 (`conflicting_alloc_rejected` needs three: the apply, the empty update, the fresh apply); a rejected update changes
-  nothing and is not counted. Post-commit orphan-cleanup debt and its retry are not modelled: no invariant depends on it.- Model-only variables (the driver does not project them): see each file's header (`staged`, `inflight`, `leases`;
+  3 (`serve_restart_replacement` needs three: the apply, then the boot-resync apply and the replacement apply after `restart`); a rejected update changes
+  nothing and is not counted. Post-commit orphan-cleanup debt and its retry are not modelled: no invariant depends on it.
+- Model-only variables (the driver does not project them): see each file's header (`staged`, `inflight`, `leases`;
   identity `now`, ghosts; application `next_gid`, `route_on`, `route_gen`, `failed_rg`; receipt `outer`, `resv`, `infl`, `guard`, `ckey`, `memo`, `next_bid`, `taken`, `g`; `conf_step`).
   The single classification of every variable (projected accessor, port-return check, or model-only, with the value
   mappings) is in feature-delta "Formal protocol model", modules `gateway_application` and `selection_receipt`.
@@ -91,12 +94,17 @@ GA-2 (a lease is released exactly once) is dropped as an obligation: the lease i
 ## Selection receipt conformance (D-PASS7-2)
 
 The conformance owner is the real `EbpfDataplane` on native metal. `receipt_conf` therefore models only what that owner
-can be driven through: the fused `update_apply` (update_begin; commit(true); publish), `update_rejected` (BackendIdentityConflict), `update_rejected_rnat` (R-59 ReverseNatConflict; identity is checked first), `open`,
+can be driven through: the fused `update_apply` (update_begin; commit(true); publish), `update_rejected_rnat` (R-59 ReverseNatConflict; the only rejection: `update_service` never returns an identity error, R-C), `open`,
 `kernel_connect_det` (no `pick`; empty and singleton healthy backend sets only), `take` with r == c, `read_identity`,
 `cleanup`, `restart` (the `idle` stutter is excluded from `receipt_conf`). The results of `take` and `read_identity` are checked from the port returns, not projected;
-the projected state is `identity[id]`, the intent count and the receipts per cookie (`live_receipts()`, R-33). The allocator releases a memo entry at orphan GC after every commit (including an empty-set commit) and never recycles a number; `conflicting_alloc_rejected` pins that a rejected update consumes no id and that the next fresh backend gets the id the counter held (R-36, R-38). The fine-grained phases and rollback live in
+the projected state is `identity[id]`, the intent count and the receipts per cookie (`live_receipts()`, R-33). The allocator releases a memo entry at orphan GC after every commit (including an empty-set commit) and never recycles a number; `replacement_reuses_backend_id` pins the empty-set GC tail (memo released, `ident` history kept, counter not recycled) (R-38); `different_workload_takeover` pins that a different workload at a memoised endpoint re-associates the endpoint's BackendId (memo unchanged, counter not advanced), and that a receipt taken before the takeover and read after it resolves the new workload. The fine-grained phases and rollback live in
 `receipt_ok` (exhaustive safety, and the two evaluator-only runs `abandoned_reservation_rolled_back` and
 `receipt_waits_for_publish_guard`); they need a pause/fault seam the real owner lacks and are not conformance-replayed (R-36, P-32).
+
+The pinned conformance projection (model variable to owner accessor) and the action-to-driving-port table for
+`receipt_conf` live in one place: `docs/feature/workload-spiffe-identity/feature-delta.md` § "Formal protocol model".
+
+Assumption A-WL (R-A): the control plane supplies the workload identity on every `Backend`; two allocations of one workload present equal identities. Discharged by the ADR-0344/0347 identity-derivation tests, not by this model.
 
 ## Relay (`relay_exchange.qnt`, conformance target)
 

@@ -1,0 +1,57 @@
+# receipt-hazard-stale-assoc: counterexample, 7 state(s) (from the TLC trace)
+
+State 1
+  memo = << >>
+  g = [committed |-> {}, prog |-> << >>, rbBad |-> FALSE, badSel |-> FALSE]
+  upd = 0
+  intents = << >>
+  receipts = << >>
+  conn = << >>
+  next_bid = 1
+  resv = << >>
+  conf_step = [init |-> [tag |-> "UNIT"]]
+  next_cookie = 1
+  outer = << >>
+  ckey = << >>
+  guard = FALSE
+  ident = << >>
+  taken = << >>
+  infl = [on |-> FALSE, key |-> 0, ents |-> << >>, assoc |-> << >>, wls |-> << >>, fresh_addrs |-> {}, prior |-> << >>, identBefore |-> << >>, committed |-> FALSE]
+
+State 2 [step]
+  memo = <<1>>
+  upd = 1
+  next_bid = 2
+  resv = <<1>>
+  guard = TRUE
+  infl = [on |-> TRUE, key |-> 1, ents |-> <<1>>, assoc |-> <<1>>, wls |-> <<1>>, fresh_addrs |-> {1}, prior |-> << >>, identBefore |-> << >>, committed |-> FALSE]
+
+State 3 [step]
+  g = [committed |-> {1}, prog |-> <<1>>, rbBad |-> FALSE, badSel |-> FALSE]
+  outer = <<<<1>>>>
+  infl = [on |-> TRUE, key |-> 1, ents |-> <<1>>, assoc |-> <<1>>, wls |-> <<1>>, fresh_addrs |-> {1}, prior |-> << >>, identBefore |-> << >>, committed |-> TRUE]
+
+State 4 [step]
+  resv = << >>
+  guard = FALSE
+  ident = <<1>>
+  infl = [on |-> FALSE, key |-> 0, ents |-> << >>, assoc |-> << >>, wls |-> << >>, fresh_addrs |-> {}, prior |-> << >>, identBefore |-> << >>, committed |-> FALSE]
+
+State 5 [step]
+  memo = <<1, 2>>
+  upd = 2
+  next_bid = 3
+  resv = (2 :> 1)
+  guard = TRUE
+  infl = [on |-> TRUE, key |-> 1, ents |-> <<1, 1>>, assoc |-> (2 :> 1), wls |-> <<2, 1>>, fresh_addrs |-> {2}, prior |-> <<1>>, identBefore |-> <<1>>, committed |-> FALSE]
+
+State 6 [step]
+  g = [committed |-> {1, 2}, prog |-> <<2, 1>>, rbBad |-> FALSE, badSel |-> FALSE]
+  outer = <<<<1, 1>>>>
+  infl = [on |-> TRUE, key |-> 1, ents |-> <<1, 1>>, assoc |-> (2 :> 1), wls |-> <<2, 1>>, fresh_addrs |-> {2}, prior |-> <<1>>, identBefore |-> <<1>>, committed |-> TRUE]
+
+State 7 [step]
+  resv = << >>
+  guard = FALSE
+  ident = <<1, 1>>
+  infl = [on |-> FALSE, key |-> 0, ents |-> << >>, assoc |-> << >>, wls |-> << >>, fresh_addrs |-> {}, prior |-> << >>, identBefore |-> << >>, committed |-> FALSE]

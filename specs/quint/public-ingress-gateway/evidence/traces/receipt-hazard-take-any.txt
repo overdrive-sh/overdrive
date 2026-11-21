@@ -4,12 +4,12 @@ State 1
   resv = << >>
   ckey = << >>
   upd = 0
-  infl = [on |-> FALSE, key |-> 0, ents |-> << >>, assoc |-> << >>, fresh_addrs |-> {}, prior |-> << >>, identBefore |-> << >>, committed |-> FALSE]
+  infl = [on |-> FALSE, key |-> 0, ents |-> << >>, assoc |-> << >>, wls |-> << >>, fresh_addrs |-> {}, prior |-> << >>, identBefore |-> << >>, committed |-> FALSE]
   outer = << >>
   memo = << >>
   guard = FALSE
   ident = << >>
-  g = [committed |-> {}, bound |-> << >>, rbBad |-> FALSE, badSel |-> FALSE]
+  g = [committed |-> {}, prog |-> << >>, rbBad |-> FALSE, badSel |-> FALSE]
   intents = << >>
   taken = << >>
   receipts = << >>

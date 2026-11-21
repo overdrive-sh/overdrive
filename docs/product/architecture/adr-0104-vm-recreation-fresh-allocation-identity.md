@@ -2,6 +2,12 @@
 
 ## Status
 
+**Superseded in part by [ADR-0344](adr-0344-a-workload-svid-names-the-workload-not-the-allocation.md)
+(2026-11-21):** the clause that `SpiffeId::for_allocation(workload_id, alloc_id)`
+carries the fresh ID is replaced — the identity is the workload's and is not fresh
+per recreation; `alloc_id` and `spec.alloc` keep the fresh `AllocationId`. The
+fresh-`AllocationId` decision itself stands.
+
 **Accepted — independent DESIGN review iteration 2 APPROVED; user-authorized**,
 2026-09-12. Approved design commit:
 `a0f9bda8cd4f2377c1a709e77e8c05850e7adaa2`. This ADR is

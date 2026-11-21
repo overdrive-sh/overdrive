@@ -1,0 +1,78 @@
+diff --git a/tests/conformance/src/gateway.rs b/tests/conformance/src/gateway.rs
+index 1c8f216a2..5cde81287 100644
+--- a/tests/conformance/src/gateway.rs
++++ b/tests/conformance/src/gateway.rs
+@@ -1755,6 +1755,14 @@ impl GatewayWorld {
+         response.json().await.expect("gateway status body")
+     }
+ 
++    /// PROBE: raw allocation rows.
++    pub async fn probe_allocs(&self) -> String {
++        match self.api.get(&format!("/v1/allocs?job={SERVICE_ID}")).await {
++            Ok(r) => r.text().await.unwrap_or_default(),
++            Err(e) => format!("err {e:?}"),
++        }
++    }
++
+     /// The api allocation's identifier, once an allocation exists.
+     pub async fn allocation_id(&self) -> Option<String> {
+         let response = self.api.get(&format!("/v1/allocs?job={SERVICE_ID}")).await.ok()?;
+diff --git a/tests/conformance/tests/public_ingress_gateway_end_to_end.rs b/tests/conformance/tests/public_ingress_gateway_end_to_end.rs
+index 348188001..ddd9587ff 100644
+--- a/tests/conformance/tests/public_ingress_gateway_end_to_end.rs
++++ b/tests/conformance/tests/public_ingress_gateway_end_to_end.rs
+@@ -623,6 +623,7 @@ async fn native_metal_kvm_public_ingress_gateway_answers_503_until_the_hydrator_
+     let trace = TraceHistory::install_global();
+     let mut world = GatewayWorld::serving(&trace, 110, GuestKind::Conformance).await;
+ 
++    let probe_mark = trace.mark();
+     world.restart().await;
+     assert_eq!(
+         blocking(live_gateway_counts).await,
+@@ -634,6 +635,7 @@ async fn native_metal_kvm_public_ingress_gateway_answers_503_until_the_hydrator_
+     let mut answers = Vec::<(bool, u16, bool)>::new();
+     let mut served = false;
+     while recovery.elapsed() < Duration::from_secs(60) {
++        eprintln!("PROBE-T {:?} allocs={}", recovery.elapsed(), world.probe_allocs().await);
+         let before = blocking(service_map_entries).await > 0;
+         let client = world.client();
+         let status = blocking(move || {
+@@ -654,6 +656,38 @@ async fn native_metal_kvm_public_ingress_gateway_answers_503_until_the_hydrator_
+         }
+         tokio::time::sleep(Duration::from_millis(500)).await;
+     }
++    {
++        let mut counts = std::collections::BTreeMap::<String, usize>::new();
++        for e in trace.snapshot() {
++            *counts.entry(e.name.clone()).or_default() += 1;
++            if e.name.starts_with("gateway") || e.name.contains("connect") {
++                eprintln!("PROBE-TRACE {} {:?}", e.name, e.fields);
++            }
++        }
++        eprintln!("PROBE-COUNTS {counts:?}");
++        let mut dedup = std::collections::BTreeMap::<String, usize>::new();
++        for (i, e) in trace.snapshot().into_iter().enumerate() {
++            if e.name.contains("h2-0.4") || e.name.contains("hyper-util") || e.name.starts_with("gateway.upstream") || e.name.starts_with("convergence.") { continue; }
++            let phase = if i < probe_mark { "PRE" } else { "POST" };
++            *dedup.entry(format!("{phase} {} {:?}", e.name, e.fields)).or_default() += 1;
++        }
++        for (k, v) in &dedup { eprintln!("PROBE-DEDUP x{v} {k}"); }
++        let mut n = 0;
++        for (i, e) in trace.snapshot().into_iter().enumerate() {
++            if i < probe_mark || e.name.contains("h2-0.4") || e.name.contains("hyper-util") || e.name.starts_with("gateway.upstream") || e.name.starts_with("guest_flow") || e.name.contains("mtls_intercept") || e.name.starts_with("health.mtls") { continue; }
++            n += 1;
++            if n > 160 { break; }
++            eprintln!("PROBE-SEQ {i} {} {:?}", e.name, e.fields);
++        }
++        eprintln!("PROBE-ANSWERS {answers:?}");
++        eprintln!("PROBE-STATUS {}", world.gateway_status().await);
++        eprintln!("PROBE-ALLOC {:?}", world.allocation_id().await);
++        eprintln!("PROBE-LIVE {:?}", blocking(live_gateway_counts).await);
++        let out = std::process::Command::new("bpftool").args(["map","dump","pinned","/sys/fs/bpf/overdrive/SERVICE_MAP"]).output().unwrap();
++        eprintln!("PROBE-SERVICE_MAP {}", String::from_utf8_lossy(&out.stdout));
++        let out = std::process::Command::new("bash").args(["-c","bpftool map show; ss -tanp | head -50; ip -br a; ip route"]).output().unwrap();
++        eprintln!("PROBE-HOST {}", String::from_utf8_lossy(&out.stdout));
++    }
+     for (before, status, after) in &answers {
+         if !before && !after && *status != 0 {
+             assert_eq!(

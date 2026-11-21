@@ -76,6 +76,16 @@ renamed in lockstep under ADR-0075. The D5-intended single-producer
 consolidation (folding that duplicate into `for_allocation`) is the
 optional follow-up. Not superseded — see ADR-0075 *Cross-links → C2*.
 
+**Superseded in part by ADR-0344 (2026-11-21):** the *shape* D5 pins —
+`SpiffeId::for_allocation` emitting `.../alloc/<alloc>` — is replaced by a
+per-workload identity `spiffe://overdrive.local/workload/<w>`
+([ADR-0344](adr-0344-a-workload-svid-names-the-workload-not-the-allocation.md));
+`for_allocation` and the `/alloc/` illustrations in D5, D5b and the rev text are
+historical. The D10 `ever_issued` key (a SPIFFE ID) is replaced by the
+`AllocationId` ([ADR-0345](adr-0345-svid-audit-rows-and-restart-recovery-key-on-the-allocation-not-the-identity.md)).
+Everything else here (holder, reader, dropper, actions, retry View, rotation)
+stays in force.
+
 ## Context
 
 ADR-0063 shipped the `Ca` port and `ca_issuance::issue_and_audit` — the

@@ -1,11 +1,11 @@
 # Checks the `cargo xtask quint` runner executes for specs/quint/public-ingress-gateway/.
 # `expect = "violation"` on a hazard instance means the decision's rule is load-bearing; every other check must hold.
 # Modules: gateway_identity (ADR-0225), gateway_application (ADR-0222), selection_receipt (ADR-0232, -0233,
-# -0241; context -0228, -0242; the connector ledger order is ADR-0248, not modelled) and relay_exchange (ADR-0239; context ADR-0245,
+# -0344, -0346, -0347; supersede -0234, -0241; context -0228, -0242; the connector ledger order is ADR-0248, not modelled) and relay_exchange (ADR-0239; context ADR-0245,
 # -0246, -0247, -0253, -0254). The kTLS rekey exclusion (ADR-0244, -0249, -0250) is not modelled (ruling 19): the gateway
 # never originates a KeyUpdate (ADR-0250), chunk framing is covered by property tests.
-# VALIDATION BUDGET (single home): 35 checks = 4 TLC safety + 8 TLC hazards + 23 named runs. The relay module
-# contributes 9. Only receipt-safety-tlc is slow (about 900 s, non-CI); every other check is under two minutes and
+# VALIDATION BUDGET (single home): 36 checks = 4 TLC safety + 8 TLC hazards + 24 named runs. The relay module
+# contributes 9. Only receipt-safety-tlc is slow (about 225 s, non-CI); every other check is under two minutes and
 # `ci = true`. receipt-safety-tlc is the MANUAL pre-merge gate (not run in CI; run it by hand before merging a
 # change to selection_receipt.qnt). Growth beyond these counts needs user approval.
 
@@ -173,10 +173,28 @@ expect = "holds"
 ci = true
 
 [[check]]
-name = "receipt-run-conflicting-alloc-rejected"
+name = "receipt-run-replacement-reuses-backend-id"
 spec = "selection_receipt.qnt"
 main = "receipt_conf"
-run = "conflicting_alloc_rejected"
+run = "replacement_reuses_backend_id"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "receipt-run-serve-restart-replacement"
+spec = "selection_receipt.qnt"
+main = "receipt_conf"
+run = "serve_restart_replacement"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "receipt-run-different-workload-takeover"
+spec = "selection_receipt.qnt"
+main = "receipt_conf"
+run = "different_workload_takeover"
 backend = "evaluator"
 expect = "holds"
 ci = true
@@ -186,15 +204,6 @@ name = "receipt-run-reverse-nat-conflict-rejected"
 spec = "selection_receipt.qnt"
 main = "receipt_conf"
 run = "reverse_nat_conflict_rejected"
-backend = "evaluator"
-expect = "holds"
-ci = true
-
-[[check]]
-name = "receipt-run-identity-conflict-precedes-reverse-nat"
-spec = "selection_receipt.qnt"
-main = "receipt_conf"
-run = "identity_conflict_precedes_reverse_nat"
 backend = "evaluator"
 expect = "holds"
 ci = true
@@ -227,10 +236,10 @@ expect = "violation"
 ci = true
 
 [[check]]
-name = "receipt-hazard-rebind"
+name = "receipt-hazard-stale-assoc"
 spec = "hazard/selection_receipt_hazards.qnt"
-main = "receipt_bugRebind"
-invariant = "IdentityImmutablePerBackendId"
+main = "receipt_bugStaleAssoc"
+invariant = "AssociationFollowsProgrammedWorkload"
 backend = "tlc"
 expect = "violation"
 ci = true
