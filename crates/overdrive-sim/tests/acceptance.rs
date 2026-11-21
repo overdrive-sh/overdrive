@@ -212,4 +212,9 @@ mod acceptance {
     // node-local-persistent-volume (GH #348): the three seeded volume launch invariants through
     // the DST harness (pending DELIVER: the volume launch path and `SimVolumeBacking`).
     mod volume_launch_invariants;
+
+    // workload-spiffe-identity (ADR-0347, DR-1(b)): replacement and takeover at a memoised
+    // endpoint through `SimDataplane`, and the seeded restart-replacement interleaving through
+    // the real `ServiceMapHydrator`.
+    mod workload_identity_replacement;
 }

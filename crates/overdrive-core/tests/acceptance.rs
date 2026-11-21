@@ -29,6 +29,8 @@ mod acceptance {
     mod enforced_connection_id_completeness;
     mod extended_newtype_completeness;
     mod spiffe_region_validation;
+    // workload-spiffe-identity (ADR-0344) — the workload-grain SPIFFE identity constructor and its one inverse.
+    mod workload_spiffe_identity;
 
     // Phase-1-control-plane-core acceptance scenarios.
     mod aggregate_constructors;
@@ -286,6 +288,8 @@ mod acceptance {
     // emits IssueSvid, stopped-with-held emits DropSvid, View is retry
     // memory only, rotation emit is gated, and lifecycle transitions enqueue
     // SvidLifecycle so the reconciler is reachable.
+    // workload-spiffe-identity (ADR-0345): HELD until DELIVER re-keys `ever_issued` on `AllocationId`.
+    mod svid_lifecycle_allocation_keyed_recovery;
     mod svid_lifecycle_reconcile;
     // built-in-ca-operator-composition Slice ① (folds GH #40) — the
     // near-expiry rotation branch flips from a gated StartWorkflow to an

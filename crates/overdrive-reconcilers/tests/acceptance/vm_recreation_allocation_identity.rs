@@ -19,7 +19,6 @@ use std::collections::BTreeMap;
 use std::num::NonZeroU32;
 use std::time::{Duration, Instant};
 
-use overdrive_core::SpiffeId;
 use overdrive_core::aggregate::{Job, Node, Vm, WorkloadDriver, WorkloadKind};
 use overdrive_core::guest_network::GuestAttachmentOccupancy;
 use overdrive_core::id::{AllocationId, NodeId, Region, WorkloadId};
@@ -257,9 +256,8 @@ fn only_start(actions: &[Action]) -> (&AllocationId, &AllocationSpec) {
     }
 }
 
-fn assert_restart_identity(
+fn assert_restart_allocation(
     driver: ComposedDriver,
-    workload: &str,
     predecessor: &AllocationId,
     successor: &AllocationId,
     actions: &[Action],
@@ -268,7 +266,6 @@ fn assert_restart_identity(
     assert_eq!(action_predecessor, predecessor);
     assert_eq!(&spec.alloc, successor);
     assert_ne!(action_predecessor, &spec.alloc);
-    assert_eq!(spec.identity, SpiffeId::for_allocation(&wid(workload), successor));
     assert!(driver.matches_payload(&spec.driver));
 }
 
@@ -286,7 +283,7 @@ fn replacement_identity_is_driver_neutral_for_vm() {
 
         let (actions, next) = reconcile(&desired, &actual, &WorkloadLifecycleView::default(), 20);
 
-        assert_restart_identity(driver, workload, &predecessor_id, &successor, &actions);
+        assert_restart_allocation(driver, &predecessor_id, &successor, &actions);
         assert_eq!(next.restart_counts.get(&predecessor_id), None);
         assert_eq!(next.restart_counts.get(&successor), Some(&1));
         assert_eq!(next.last_failure_seen_at.get(&successor), Some(&instant(20)));
@@ -312,7 +309,7 @@ fn workload_failure_charges_only_the_fresh_successor_candidate() {
 
         let (actions, next) = reconcile(&desired, &actual, &view, 20);
 
-        assert_restart_identity(driver, workload, &predecessor_id, &successor, &actions);
+        assert_restart_allocation(driver, &predecessor_id, &successor, &actions);
         assert_eq!(next.restart_counts.get(&predecessor_id), Some(&2));
         assert_eq!(next.last_failure_seen_at.get(&predecessor_id), Some(&instant(10)));
         assert_eq!(next.restart_counts.get(&successor), Some(&3));
@@ -338,7 +335,7 @@ fn platform_reclamation_carries_policy_without_failure_charge_for_every_driver()
 
         let (actions, next) = reconcile(&desired, &actual, &view, 80);
 
-        assert_restart_identity(driver, workload, &predecessor_id, &successor, &actions);
+        assert_restart_allocation(driver, &predecessor_id, &successor, &actions);
         assert_eq!(next.restart_counts.get(&predecessor_id), Some(&4));
         assert_eq!(next.last_failure_seen_at.get(&predecessor_id), Some(&instant(41)));
         assert_eq!(next.restart_counts.get(&successor), Some(&4));
@@ -366,7 +363,7 @@ fn desired_generation_replacement_carries_policy_without_failure_charge() {
 
         let (actions, next) = reconcile(&desired, &actual, &view, 20);
 
-        assert_restart_identity(driver, workload, &predecessor_id, &successor, &actions);
+        assert_restart_allocation(driver, &predecessor_id, &successor, &actions);
         assert_eq!(next.issued_generation.get(&successor), Some(&1));
         assert_eq!(next.restart_counts.get(&predecessor_id), Some(&2));
         assert_eq!(next.restart_counts.get(&successor), Some(&2));
@@ -395,7 +392,7 @@ fn only_numeric_current_failed_or_terminated_predecessor_is_eligible() {
         let successor = aid(&format!("alloc-{prefix}-11"));
         let (desired, actual) = states(ComposedDriver::job(prefix), [historical, current]);
         let (actions, _) = reconcile(&desired, &actual, &WorkloadLifecycleView::default(), 20);
-        assert_restart_identity(driver, prefix, &current_id, &successor, &actions);
+        assert_restart_allocation(driver, &current_id, &successor, &actions);
     }
 }
 
@@ -411,7 +408,6 @@ fn initial_placement_reserves_zero_and_system_gc_resubmit_stays_fresh_placement(
     let (initial, spec) = only_start(&actions);
     assert_eq!(initial.as_str(), format!("alloc-{initial_workload}-0"));
     assert_eq!(&spec.alloc, initial);
-    assert_eq!(spec.identity, SpiffeId::for_allocation(&wid(initial_workload), initial));
     assert_eq!(next.restart_counts.get(initial), Some(&0));
     assert!(!next.last_failure_seen_at.contains_key(initial));
 
@@ -453,7 +449,7 @@ fn accepted_failed_successor_is_current_while_view_only_reservation_is_not() {
 
         let (actions, next) = reconcile(&desired, &actual, &view, 20);
 
-        assert_restart_identity(driver, workload, &current_id, &successor, &actions);
+        assert_restart_allocation(driver, &current_id, &successor, &actions);
         assert!(!actual.allocations.contains_key(&reservation));
         assert_eq!(next.restart_counts.get(&historical.alloc_id), Some(&4));
         assert_eq!(next.restart_counts.get(&current_id), Some(&1));
@@ -527,7 +523,7 @@ fn allocator_issues_final_u32_identity_once_then_stops_without_wrap() {
         let final_id = aid(&format!("alloc-{workload}-{}", u32::MAX));
         let (desired, actual) = states(ComposedDriver::job(workload), [predecessor]);
         let (actions, next) = reconcile(&desired, &actual, &WorkloadLifecycleView::default(), 20);
-        assert_restart_identity(driver, workload, &predecessor_id, &final_id, &actions);
+        assert_restart_allocation(driver, &predecessor_id, &final_id, &actions);
         assert!(next.restart_counts.contains_key(&final_id));
 
         let exhausted = failed_row(workload, u32::MAX);
@@ -537,6 +533,56 @@ fn allocator_issues_final_u32_identity_once_then_stops_without_wrap() {
         assert!(allocation_actions(&actions).is_empty(), "exhaustion must emit no allocation");
         assert_eq!(next, view);
     }
+}
+
+/// workload-spiffe-identity D1 (ADR-0344) — the identity a replacement
+/// allocation presents names its WORKLOAD, not the allocation: predecessor and
+/// successor are different allocations of one workload and present the same
+/// identity, `spiffe://overdrive.local/workload/<w>`. Supersedes the per-alloc
+/// identity assertions this file carried (a recreation no longer changes the
+/// identity; only the `AllocationId` is fresh).
+///
+/// RED today: the successor's `AllocationSpec.identity` is the per-allocation
+/// `.../workload/<w>/alloc/<a>`.
+/// CONTRACT_SHAPE: pure-function.
+#[test]
+#[should_panic(expected = "a replacement allocation presents its workload's identity")]
+fn a_replacement_allocation_presents_the_identity_of_its_workload() {
+    for driver in ComposedDriver::ALL {
+        let workload = "vm-replacement";
+        let predecessor = failed_row(workload, 0);
+        let (desired, actual) = states(ComposedDriver::job(workload), [predecessor]);
+
+        let (actions, _) = reconcile(&desired, &actual, &WorkloadLifecycleView::default(), 20);
+
+        let (predecessor_id, spec) = only_restart(&actions);
+        assert_ne!(predecessor_id, &spec.alloc, "the replacement is a fresh allocation");
+        assert!(driver.matches_payload(&spec.driver));
+        assert_eq!(
+            spec.identity.as_str(),
+            format!("spiffe://overdrive.local/workload/{workload}"),
+            "a replacement allocation presents its workload's identity"
+        );
+    }
+}
+
+/// workload-spiffe-identity D1 — the first allocation of a workload also
+/// presents the workload identity (initial placement and replacement agree).
+/// CONTRACT_SHAPE: pure-function.
+#[test]
+#[should_panic(expected = "an initial allocation presents its workload's identity")]
+fn an_initial_allocation_presents_the_identity_of_its_workload() {
+    let workload = "vm-initial";
+    let (desired, actual) = states(ComposedDriver::job(workload), []);
+
+    let (actions, _) = reconcile(&desired, &actual, &WorkloadLifecycleView::default(), 20);
+
+    let (_, spec) = only_start(&actions);
+    assert_eq!(
+        spec.identity.as_str(),
+        format!("spiffe://overdrive.local/workload/{workload}"),
+        "an initial allocation presents its workload's identity"
+    );
 }
 
 proptest! {
@@ -575,10 +621,6 @@ proptest! {
 
             prop_assert_eq!(action_predecessor, &predecessor_id);
             prop_assert_eq!(&spec.alloc, &successor);
-            prop_assert_eq!(
-                spec.identity.clone(),
-                SpiffeId::for_allocation(&wid(workload), &successor),
-            );
             prop_assert!(driver.matches_payload(&spec.driver));
         }
     }

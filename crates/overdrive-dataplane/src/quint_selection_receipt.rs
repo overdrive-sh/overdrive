@@ -1,5 +1,5 @@
 //! Quint conformance driver QC-3 — `selection_receipt` (public-ingress-gateway,
-//! ADR-0232 / ADR-0233 / ADR-0241).
+//! ADR-0232 / ADR-0233 / ADR-0347).
 //!
 //! Replays `specs/quint/public-ingress-gateway/selection_receipt.qnt`,
 //! conformance main `receipt_conf` (the configuration of `selection_receipt`
@@ -15,8 +15,7 @@
 //! |---|---|
 //! | `init` | rebuild the owner on a fresh instance (nothing survives) |
 //! | `update_apply(key, sidx)` | `Dataplane::update_service(frontend(key), backends(sidx))`, which must be accepted |
-//! | `update_rejected(key, sidx)` | `Dataplane::update_service` of a backend set that re-leases a live `BackendId`'s address to another allocation; it must return `DataplaneError::BackendIdentityConflict`; for an input that also violates R-59 the replay asserts this same outcome, and the precedence rests on the `not(conflict)` guard of `update_rejected_rnat` in the model |
-//! | `update_rejected_rnat(key, sidx)` | `Dataplane::update_service` of a backend set naming an endpoint whose reverse-NAT key already maps to another Service's VIP (R-59), with no identity conflict; it must return `DataplaneError::ReverseNatConflict`, and the State comparison that follows verifies nothing moved |
+//! | `update_rejected_rnat(key, sidx)` | `Dataplane::update_service` of a backend set naming an endpoint whose reverse-NAT key already maps to another Service's VIP (R-59); it must return `DataplaneError::ReverseNatConflict`, and the State comparison that follows verifies nothing moved |
 //! | `open(key)` | `GatewayConnectDataplane::open_upstream(ServiceKey)` |
 //! | `kernel_connect_det(c)` | `connect(2)` on the socket from `PreparedUpstream::into_parts` toward the Service frontend, with a bounded wait (the connect result is not asserted: the hook has already written the receipt) |
 //! | `take(c, c)` | `GatewayConnectDataplane::take_receipt(&intent)` |
@@ -25,27 +24,30 @@
 //! | `restart` | drop and re-create the `EbpfDataplane` on the same pin directory (SR-2) |
 //!
 //! Projection (`State::from_driver`), per the pinned table:
-//! `ident[id]` <- `selected_backend_identity(BackendId)` for each `BackendId`
-//! the allocator can have minted (`Ok` -> bound, `BackendIdentityMissing` ->
-//! absent); `intents` <- `live_intent_count()`; `receipts`, per cookie, <-
+//! `ident[id]` <- `selected_backend_identity(BackendId)` for each `BackendId` in
+//! `1..=PROBED_BACKEND_IDS` (the conformance catalogue mints at most
+//! `PROBED_BACKEND_IDS` ids: two backend addresses, `MAXUPD = 3` accepted updates;
+//! `Ok` -> bound, `BackendIdentityMissing` -> absent, any other error fails the
+//! step); `intents` <- `live_intent_count()`; `receipts`, per cookie, <-
 //! `GatewayConnectCleanup::live_receipts()` (R-33): the snapshot's entry for the
 //! `socket_cookie` of the intent the driver holds for model cookie `c` maps to
 //! the spec's `{ key, sel }` (`sel` is the `BackendId` of a `Selected` receipt,
-//! 0 for `NoBackend`). The model variables `outer`, `resv`, `infl`, `guard`,
+//! 0 for `NoBackend`). The driver's `held` map is the only translation between
+//! the spec's model cookies (minted in `open` order) and the owner's
+//! `socket_cookie`s; it records no owner state, so it is not a projection source. The model variables `outer`, `resv`, `infl`, `guard`,
 //! `g`, `ckey`, `upd`, `next_cookie`, `conn`, `memo`, `next_bid`, `taken` and
 //! `conf_step` are model-only and are not projected (R-27, R-33: no owner
 //! accessor is pinned for them).
 //!
-//! The model `BackendId` n is `BackendId::new(n)` and the model allocation `a`
-//! is the `SpiffeId` this driver supplied for it (`alloc_identity`). The
-//! allocator memo and counter are model-only; their observable consequence is
-//! the `ident` map and the `BackendId` each live receipt carries, so an
-//! allocator that recycles an id after a restart or an orphan release shows as
-//! a different `BackendId` for the same backend. The run
-//! `conflicting_alloc_rejected` therefore traces through its tail: after the
-//! rejected update an empty update releases the memo (the owner's orphan
-//! release), `ident` keeps its history, and a fresh backend is bound to the id
-//! the counter held before the rejection (`ident` == `{1 -> 1, 2 -> 2}`).
+//! The model workload `w` is the workload `SpiffeId` this driver supplied for it
+//! (`workload_identity`); a different workload at a memoised endpoint is a
+//! re-association of the endpoint's `BackendId` (ADR-0347), observed as a change
+//! of `ident[id]` on the same id. The driver never computes a `BackendId`: it
+//! keeps no counter or memo, takes each id from a receipt (`take_receipt`,
+//! `live_receipts()`) or observes it on the owner after `update_apply`, and
+//! compares `ident[id]` for exactly those ids (the allocator memo and counter are
+//! model-only; their consequence is `ident` and the `BackendId` each live receipt
+//! carries).
 //!
 //! The spec's `taken` (the receipt a connector consumed) is a function of
 //! projected state and is NOT part of the compared State. It is asserted by the
@@ -54,7 +56,8 @@
 //! (`ReceiptMatchesIntent`), and be bound to the registered `ServiceKey`. The
 //! spec has no `idres` variable: `read_identity` is a step whose handler only
 //! calls `selected_backend_identity` for the cookie's Selected backend and
-//! asserts nothing about the return; what the State comparison checks after the
+//! asserts nothing about the identity it returns (an owner error other than
+//! `BackendIdentityMissing` fails the step); what the State comparison checks after the
 //! step is the projected `ident` and the per-cookie `receipts`.
 //!
 //! Step decoding (D-UP-1): `Config::nondet =
@@ -63,7 +66,10 @@
 //!
 //! Every named run bound to this main is pinned with
 //! `#[quint_test(max_samples = 1)]`; `#[quint_run]` replays randomized traces
-//! (seed printed on failure). The tests are active. The lane runs as root through
+//! from a pinned seed and sample count. Two tests are pending (RED until DELIVER
+//! removes the owner's refusal of a different workload at a memoised endpoint):
+//! the `different_workload_takeover` run and the randomized traces; each is marked
+//! `#[should_panic]` with the refusal it produces today. The lane runs as root through
 //! `cargo xtask metal run --` (bpffs, cgroup v2, a veth pair for the loader's
 //! XDP attach).
 
@@ -240,22 +246,28 @@ fn model_key_of(service_key: &ServiceKey) -> Result<i64> {
         })
 }
 
-/// The model allocation `alloc` (1 or 2) as a real workload identity.
-fn alloc_identity(alloc: i64) -> SpiffeId {
-    SpiffeId::new(&format!("spiffe://overdrive.local/workload/conf/alloc/a{alloc}"))
-        .expect("allocation SpiffeId")
+/// The model workload `workload` (1 or 2) as a real workload identity.
+fn workload_identity(workload: i64) -> SpiffeId {
+    SpiffeId::new(&format!("spiffe://overdrive.local/workload/conf-{workload}"))
+        .expect("workload SpiffeId")
 }
 
-/// The model catalogue of `update_service` backend sets (`CATALOG`): index 0 is
-/// empty; 1 is address 1 / alloc 1; 4 re-leases address 1 to alloc 2; 5 is
-/// address 2 / alloc 2. All are healthy (the arm ignores `healthy`, R-2).
-fn backends(sidx: i64) -> Result<Vec<Backend>> {
-    let backend = |addr: u8, alloc: i64| Backend {
-        alloc: alloc_identity(alloc),
+/// One healthy backend at loopback address `addr` presenting `workload`'s
+/// identity. The single place the `Backend` field holding the identity is named.
+fn backend(addr: u8, workload: i64) -> Backend {
+    Backend {
+        alloc: workload_identity(workload),
         addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, addr)), 9000 + u16::from(addr)),
         weight: 1,
         healthy: true,
-    };
+    }
+}
+
+/// The model catalogue of `update_service` backend sets (`CATALOG`, the indices
+/// the conformance step relation draws): 0 is empty; 1 is address 1 / workload 1;
+/// 4 is address 1 / workload 2 (a different workload at the same endpoint); 5 is
+/// address 2 / workload 2. All are healthy (the arm ignores `healthy`, R-2).
+fn backends(sidx: i64) -> Result<Vec<Backend>> {
     Ok(match sidx {
         0 => Vec::new(),
         1 => vec![backend(1, 1)],
@@ -332,16 +344,6 @@ impl ReceiptConfDriver {
         self.runtime
             .block_on(self.dataplane.update_service(frontend(key), backends(sidx)?))
             .map_err(|error| anyhow!("update_service must be accepted: {error}"))
-    }
-
-    fn update_rejected(&self, key: i64, sidx: i64) -> Result {
-        match self.runtime.block_on(self.dataplane.update_service(frontend(key), backends(sidx)?)) {
-            Ok(()) => bail!("update_service of a re-leased address must be rejected, it succeeded"),
-            Err(DataplaneError::BackendIdentityConflict { .. }) => Ok(()),
-            Err(other) => bail!(
-                "update_service of a re-leased address must fail with BackendIdentityConflict, got {other}"
-            ),
-        }
     }
 
     fn update_rejected_rnat(&self, key: i64, sidx: i64) -> Result {
@@ -430,12 +432,14 @@ impl ReceiptConfDriver {
             .get(&cookie)
             .and_then(|held| held.selected)
             .ok_or_else(|| anyhow!("cookie {cookie} has no Selected receipt to resolve"))?;
-        // R-33: asserts nothing about the return. A Selected id read before the
+        // R-33: asserts nothing about the identity returned; only an owner error
+        // other than `BackendIdentityMissing` fails the step. A Selected id read before the
         // publish guard is released would wait there (Tier 3 covers that window);
         // the compared values are the projected `ident` and `receipts`.
-        let identity = self.dataplane.selected_backend_identity(backend);
-        drop(identity);
-        Ok(())
+        match self.dataplane.selected_backend_identity(backend) {
+            Ok(_) | Err(GatewayConnectDataplaneError::BackendIdentityMissing { .. }) => Ok(()),
+            Err(other) => bail!("selected_backend_identity({backend}) failed: {other}"),
+        }
     }
 
     fn cleanup(&mut self, cookie: i64) -> Result {
@@ -449,13 +453,13 @@ impl ReceiptConfDriver {
         self.recreate_owner();
     }
 
-    /// The model allocation bound to `backend`, `None` when the owner answers
+    /// The model workload bound to `backend`, `None` when the owner answers
     /// `BackendIdentityMissing`.
     fn identity_of(&self, backend: BackendId) -> Result<Option<i64>> {
         match self.dataplane.selected_backend_identity(backend) {
             Ok(spiffe) => [1, 2]
                 .into_iter()
-                .find(|alloc| alloc_identity(*alloc) == spiffe)
+                .find(|workload| workload_identity(*workload) == spiffe)
                 .map(Some)
                 .ok_or_else(|| anyhow!("the owner bound {backend} to an unknown identity")),
             Err(GatewayConnectDataplaneError::BackendIdentityMissing { .. }) => Ok(None),
@@ -475,7 +479,6 @@ impl Driver for ReceiptConfDriver {
         switch!(step {
             init => self.init(),
             update_apply(key: i64, sidx: i64) => self.update_apply(key, sidx)?,
-            update_rejected(key: i64, sidx: i64) => self.update_rejected(key, sidx)?,
             update_rejected_rnat(key: i64, sidx: i64) => self.update_rejected_rnat(key, sidx)?,
             open(key: i64) => self.open(key)?,
             kernel_connect_det(c: i64) => self.kernel_connect_det(c)?,
@@ -510,8 +513,8 @@ impl State<ReceiptConfDriver> for ReceiptState {
         let mut ident = BTreeMap::new();
         for raw in 1..=PROBED_BACKEND_IDS {
             let backend = BackendId::new(raw).map_err(|error| anyhow!("BackendId: {error}"))?;
-            if let Some(alloc) = driver.identity_of(backend)? {
-                ident.insert(i64::from(raw), alloc);
+            if let Some(workload) = driver.identity_of(backend)? {
+                ident.insert(i64::from(raw), workload);
             }
         }
         let intents = driver
@@ -603,7 +606,7 @@ impl ReceiptState {
         };
         let ident = entries(var("ident")?)?
             .into_iter()
-            .map(|(id, alloc)| Ok((id, int(alloc)?)))
+            .map(|(id, workload)| Ok((id, int(workload)?)))
             .collect::<std::result::Result<BTreeMap<_, _>, ItfError>>()?;
         Ok(Self {
             ident,
@@ -639,16 +642,51 @@ fn selection_receipt_commit_then_select() -> impl Driver {
     ReceiptConfDriver::new()
 }
 
-/// An address re-leased to another allocation is rejected before the swap; the
-/// applied generation and its identity are unchanged.
+/// A replacement allocation of the same workload at the same endpoint is a
+/// byte-identical `Backend`: the memo hits, the `BackendId` is reused and the
+/// association is unchanged; an empty update then releases the memo.
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/public-ingress-gateway/selection_receipt.qnt",
     main = "receipt_conf",
-    test = "conflicting_alloc_rejected",
+    test = "replacement_reuses_backend_id",
     max_samples = 1
 )]
-fn selection_receipt_conflicting_alloc_rejected() -> impl Driver {
+fn selection_receipt_replacement_reuses_backend_id() -> impl Driver {
+    ReceiptConfDriver::new()
+}
+
+/// S-PIG-71: a restart empties the memo, then the boot resync apply and the
+/// replacement apply converge without refusal and the gateway reads the
+/// workload identity.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/public-ingress-gateway/selection_receipt.qnt",
+    main = "receipt_conf",
+    test = "serve_restart_replacement",
+    max_samples = 1
+)]
+fn selection_receipt_serve_restart_replacement() -> impl Driver {
+    ReceiptConfDriver::new()
+}
+
+/// A different workload at a memoised endpoint keeps the endpoint's `BackendId`
+/// and re-associates it: a receipt taken before the takeover and read after it
+/// resolves the new workload (ADR-0347, DR-1(b)).
+///
+/// PENDING (RED today): the owner still refuses the takeover with
+/// `BackendIdentityConflict`, so the `update_apply` step fails with the refusal.
+/// DELIVER (ADR-0347) removes the refusal; this attribute is then removed and the
+/// run replays unchanged.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/public-ingress-gateway/selection_receipt.qnt",
+    main = "receipt_conf",
+    test = "different_workload_takeover",
+    max_samples = 1
+)]
+#[should_panic(expected = "update_service must be accepted: backend id")]
+fn selection_receipt_different_workload_takeover() -> impl Driver {
     ReceiptConfDriver::new()
 }
 
@@ -665,21 +703,6 @@ fn selection_receipt_reverse_nat_conflict_rejected() -> impl Driver {
     ReceiptConfDriver::new()
 }
 
-/// An input violating both rules: the replay asserts `update_rejected` is taken and the
-/// owner returns `BackendIdentityConflict`. The precedence over R-59 rests on the
-/// `not(conflict)` guard of `update_rejected_rnat` in the model and on the owner's typed
-/// error check in the replay; the run does not assert that the R-59 rejection is disabled.
-/// CONTRACT_SHAPE: bounded-change.
-#[quint_test(
-    spec = "../../specs/quint/public-ingress-gateway/selection_receipt.qnt",
-    main = "receipt_conf",
-    test = "identity_conflict_precedes_reverse_nat",
-    max_samples = 1
-)]
-fn selection_receipt_identity_conflict_precedes_reverse_nat() -> impl Driver {
-    ReceiptConfDriver::new()
-}
-
 /// A restart destroys intents, receipts, associations and the allocator memo;
 /// the new instance mints identities again from the first id.
 /// CONTRACT_SHAPE: bounded-change.
@@ -693,12 +716,23 @@ fn selection_receipt_restart_destroys_receipts() -> impl Driver {
     ReceiptConfDriver::new()
 }
 
-/// Randomized traces of the conformance main (seed printed on failure).
+/// Randomized traces of the conformance main, from a pinned seed and sample
+/// count so the outcome is the same on every run (the seed is also printed on
+/// failure).
+///
+/// PENDING (RED today): the catalogue draws a different workload at a memoised
+/// endpoint, which the owner still refuses with `BackendIdentityConflict`
+/// ("backend id N is bound to <identity>"); the pinned seed reaches the takeover.
+/// DELIVER (ADR-0347) removes the
+/// refusal; this attribute is then removed and the traces replay unchanged.
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_run(
     spec = "../../specs/quint/public-ingress-gateway/selection_receipt.qnt",
-    main = "receipt_conf"
+    main = "receipt_conf",
+    max_samples = 100,
+    seed = "1"
 )]
+#[should_panic(expected = "is bound to spiffe://overdrive.local/workload/conf-")]
 fn selection_receipt_receipt_conf_randomized_traces() -> impl Driver {
     ReceiptConfDriver::new()
 }

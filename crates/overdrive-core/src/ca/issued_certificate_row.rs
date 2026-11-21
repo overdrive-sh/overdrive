@@ -49,7 +49,7 @@
 use rkyv::util::AlignedVec;
 
 use crate::codec::{EnvelopeError, VersionedEnvelope, decode_envelope_bytes};
-use crate::id::{CertSerial, IssuanceOrdinal, NodeId, SpiffeId};
+use crate::id::{AllocationId, CertSerial, IssuanceOrdinal, NodeId, SpiffeId};
 use crate::traits::observation_store::ObservationStoreError;
 use crate::wall_clock::UnixInstant;
 
@@ -100,6 +100,61 @@ pub struct IssuedCertificateRowV1 {
     /// an `issued_at` tie (the equal-`issued_at` same-tick re-issue a fixed
     /// `SimClock` produces). See feature-delta § D1-AMEND.
     pub issuance_ordinal: IssuanceOrdinal,
+}
+
+/// Who an issued certificate was issued for (ADR-0345, DD-2): an allocation's
+/// SVID, or the public-ingress gateway's own. A sum type, not an optional
+/// `AllocationId`: the gateway SVID shares the `issued_certificates` table and
+/// has no allocation.
+///
+/// SCAFFOLD: true. Shape pinned by the `workload-spiffe-identity` feature
+/// delta; not yet wired into the envelope or the public alias (DELIVER).
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    serde::Serialize,
+    serde::Deserialize,
+    rkyv::Archive,
+    rkyv::Serialize,
+    rkyv::Deserialize,
+)]
+pub enum IssuedFor {
+    /// The SVID of this allocation.
+    Allocation(AllocationId),
+    /// The public-ingress gateway's own SVID (no allocation).
+    Gateway,
+}
+
+/// V2 persisted shape of an `issued_certificates` audit row (ADR-0345): the V1
+/// fields plus `issued_for`.
+///
+/// SCAFFOLD: true. Pinned by the `workload-spiffe-identity` feature delta; the
+/// envelope variant, the public alias re-point and the `issue_and_audit`
+/// parameter are DELIVER's single version-bump commit.
+#[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
+pub struct IssuedCertificateRowV2 {
+    /// Serial number of the issued certificate.
+    pub serial: CertSerial,
+    /// SPIFFE identity the certificate was bound to.
+    pub spiffe_id: SpiffeId,
+    /// Serial number of the issuing CA certificate.
+    pub issuer_serial: CertSerial,
+    /// Start of the certificate validity window.
+    pub not_before: UnixInstant,
+    /// End of the certificate validity window.
+    pub not_after: UnixInstant,
+    /// Node whose CA minted the certificate.
+    pub node_id: NodeId,
+    /// Wall-clock instant the issuance was observed.
+    pub issued_at: UnixInstant,
+    /// The global monotonic issuance-order rank.
+    pub issuance_ordinal: IssuanceOrdinal,
+    /// Who the certificate was issued for.
+    pub issued_for: IssuedFor,
 }
 
 /// Per-type rkyv versioned envelope for [`IssuedCertificateRow`]

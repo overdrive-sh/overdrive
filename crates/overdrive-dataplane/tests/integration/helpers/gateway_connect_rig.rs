@@ -129,10 +129,11 @@ pub fn frontend_target(n: u8) -> SocketAddrV4 {
     SocketAddrV4::new(frontend(n).vip_v4(), FRONTEND_PORT)
 }
 
-/// Model allocation `n` as a workload identity.
+/// Model workload `n` as a workload identity: `spiffe://overdrive.local/workload/gw-<n>`.
+/// Two different `n` are two WORKLOADS (a workload identity is shared by every
+/// allocation of its workload, so one `n` is also every allocation of it).
 pub fn alloc(n: u8) -> SpiffeId {
-    SpiffeId::new(&format!("spiffe://overdrive.local/workload/gw/alloc/a{n}"))
-        .expect("allocation SpiffeId")
+    SpiffeId::new(&format!("spiffe://overdrive.local/workload/gw-{n}")).expect("workload SpiffeId")
 }
 
 /// A model backend: loopback address `127.1.<hi>.<lo>` (so every address is

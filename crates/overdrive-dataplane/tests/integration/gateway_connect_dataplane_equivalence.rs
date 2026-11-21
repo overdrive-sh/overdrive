@@ -4,8 +4,7 @@
 //! `update_service`) and `SimGatewayConnectDataplane` over a shared
 //! `SimDataplane` are driven through the same ports with the same call sequence
 //! and must agree on every observable: the receipt kind, the applied identity of
-//! the selected id, the effect of a rejected conflicting backend set, historical
-//! identities after the Service empties, residue counts, and the instance
+//! the selected id, historical identities after the Service empties, residue counts, and the instance
 //! restart. Only the observable is compared, never the numeric `BackendId`
 //! (the Sim's numbering is its own): selection is observed as the allocation the
 //! selected id denotes, with exactness only for singleton generations and
@@ -214,22 +213,8 @@ fn script(owner: &mut dyn Owner, rt: &tokio::runtime::Runtime) -> Vec<String> {
     note("singleton", format!("{observed:?} counts={:?}", counts(owner)));
     let first_id = first_id.expect("a Selected receipt names an id");
 
-    // 3. A conflicting backend set (the same address re-leased to another
-    //    allocation) is rejected before any mutation: the prior generation and
-    //    its identity are untouched.
-    let rejected = owner.update(frontend(1), vec![backend(1, 2, true)]);
-    assert!(
-        matches!(rejected, Err(DataplaneError::BackendIdentityConflict { .. })),
-        "a re-leased address must be rejected with BackendIdentityConflict: {rejected:?}"
-    );
-    let (observed, id_after) = select_once(rt, owner, 1);
-    assert_eq!(
-        observed,
-        Observed::Selected(alloc(1)),
-        "the prior generation survives the rejection"
-    );
-    assert_eq!(id_after, Some(first_id), "no new id was minted by the rejected update");
-    note("rejected", format!("{observed:?} rejected=true counts={:?}", counts(owner)));
+    // 3. (A different workload at a memoised endpoint re-associates the
+    //    endpoint's id; that sequence is its own test below, ADR-0347.)
 
     // 4. Two backends: membership only (the real Maglev choice is Tier-3 only).
     owner.update(frontend(1), vec![backend(1, 1, true), backend(2, 2, true)]).expect("programmed");
@@ -420,4 +405,141 @@ fn host_and_sim_reject_an_update_whose_reverse_nat_key_belongs_to_another_servic
     let sim_trace = conflict_script(&sim, &rt);
 
     assert_eq!(host_trace, sim_trace, "Host and Sim observe the same trace");
+}
+
+// ---------------------------------------------------------------------------
+// workload-spiffe-identity (ADR-0347, DR-1(b)): replacement, takeover and a
+// duplicate endpoint, host and Sim through the same ports.
+// ---------------------------------------------------------------------------
+
+/// The reverse-NAT key of service one's backend at address 1.
+fn contested_key() -> BackendKey {
+    BackendKey::new(*backend_target(1).ip(), backend_target(1).port(), Proto::Tcp)
+}
+
+/// (a) A replacement allocation of the SAME workload at the endpoint the owner
+/// already programmed presents the same `Backend`: no change at all — the same
+/// `BackendId`, the same association, the same map state — and no
+/// identity-related error from either adapter.
+fn replacement_script<O: Owner + Observe>(owner: &O, rt: &tokio::runtime::Runtime) -> Vec<String> {
+    owner.update(frontend(1), vec![backend(1, 1, true)]).expect("programmed");
+    let (before, id_before) = select_once(rt, owner, 1);
+    assert_eq!(before, Observed::Selected(alloc(1)), "the first allocation is selected");
+    let map_before = owner.map_state(contested_key());
+
+    owner
+        .update(frontend(1), vec![backend(1, 1, true)])
+        .expect("a replacement allocation of the same workload must be accepted");
+
+    let (after, id_after) = select_once(rt, owner, 1);
+    assert_eq!(after, before, "the replacement changes no association");
+    assert_eq!(id_after, id_before, "the endpoint keeps its BackendId");
+    assert_eq!(
+        owner.map_state(contested_key()),
+        map_before,
+        "the replacement changes no map state"
+    );
+    assert_eq!(counts(owner), (0, 0), "no intent and no receipt remain");
+    vec![format!("replacement: {after:?} {map_before:?}")]
+}
+
+/// (a) Host and Sim agree that a replacement allocation of the same workload
+/// changes nothing.
+///
+/// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "mtls-relay")]
+#[test]
+fn host_and_sim_agree_that_a_replacement_allocation_of_the_same_workload_changes_nothing() {
+    let host = Host::new_tagged("h67a");
+    let sim = Sim::new();
+    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("rt");
+
+    assert_eq!(replacement_script(&host, &rt), replacement_script(&sim, &rt));
+}
+
+/// (b) A DIFFERENT workload at the endpoint the owner still memoises keeps the
+/// endpoint's `BackendId`, and the id's association becomes the new workload;
+/// the Service's map state is unchanged (the endpoint and its reverse-NAT key
+/// are the same), only the association moved.
+fn takeover_script<O: Owner + Observe>(owner: &O, rt: &tokio::runtime::Runtime) -> Vec<String> {
+    owner.update(frontend(1), vec![backend(1, 1, true)]).expect("programmed");
+    let (before, id_before) = select_once(rt, owner, 1);
+    assert_eq!(before, Observed::Selected(alloc(1)), "workload one is selected");
+    let id_before = id_before.expect("a Selected receipt names an id");
+    let map_before = owner.map_state(contested_key());
+
+    owner
+        .update(frontend(1), vec![backend(1, 2, true)])
+        .expect("a different workload at a memoised endpoint must be accepted");
+
+    let (after, id_after) = select_once(rt, owner, 1);
+    assert_eq!(after, Observed::Selected(alloc(2)), "the association follows workload two");
+    assert_eq!(id_after, Some(id_before), "the endpoint keeps its BackendId");
+    assert_eq!(
+        owner.gateway().selected_backend_identity(id_before),
+        Ok(alloc(2)),
+        "an id read after the takeover resolves the workload now programmed"
+    );
+    assert_eq!(owner.map_state(contested_key()), map_before, "only the association moved");
+    assert_eq!(counts(owner), (0, 0), "no intent and no receipt remain");
+    vec![format!("takeover: {after:?} {map_before:?}")]
+}
+
+/// (b) Host and Sim agree that a different workload at a memoised endpoint
+/// keeps the id and takes the association.
+///
+/// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "mtls-relay")]
+#[test]
+#[should_panic(expected = "a different workload at a memoised endpoint must be accepted")]
+fn host_and_sim_agree_that_a_different_workload_at_a_memoised_endpoint_keeps_the_id() {
+    let host = Host::new_tagged("h67b");
+    let sim = Sim::new();
+    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("rt");
+
+    assert_eq!(takeover_script(&host, &rt), takeover_script(&sim, &rt));
+}
+
+/// (c) One call that names one endpoint twice is `LoadFailed` whatever the
+/// identities (the same workload twice, or two workloads), and changes nothing.
+fn duplicate_endpoint_script<O: Owner + Observe>(
+    owner: &O,
+    rt: &tokio::runtime::Runtime,
+) -> Vec<String> {
+    owner.update(frontend(1), vec![backend(1, 1, true)]).expect("programmed");
+    let (before, id_before) = select_once(rt, owner, 1);
+    let map_before = owner.map_state(contested_key());
+    let mut trace = Vec::new();
+
+    for (label, backends) in [
+        ("same workload twice", vec![backend(1, 1, true), backend(1, 1, true)]),
+        ("two workloads", vec![backend(1, 1, true), backend(1, 2, true)]),
+    ] {
+        let outcome = owner.update(frontend(1), backends);
+        assert!(
+            matches!(outcome, Err(DataplaneError::LoadFailed(_))),
+            "the {label} at one endpoint must be LoadFailed, got {outcome:?}"
+        );
+        let (after, id_after) = select_once(rt, owner, 1);
+        assert_eq!(after, before, "{label}: a refused call changes no association");
+        assert_eq!(id_after, id_before, "{label}: a refused call mints no id");
+        assert_eq!(owner.map_state(contested_key()), map_before, "{label}: no map state moved");
+        trace.push(format!("{label}: LoadFailed {after:?} {map_before:?}"));
+    }
+    assert_eq!(counts(owner), (0, 0), "no intent and no receipt remain");
+    trace
+}
+
+/// (c) Host and Sim refuse a call naming one endpoint twice with `LoadFailed`.
+///
+/// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "mtls-relay")]
+#[test]
+#[should_panic(expected = "the same workload twice at one endpoint must be LoadFailed")]
+fn host_and_sim_refuse_one_call_that_names_an_endpoint_twice() {
+    let host = Host::new_tagged("h67c");
+    let sim = Sim::new();
+    let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("rt");
+
+    assert_eq!(duplicate_endpoint_script(&host, &rt), duplicate_endpoint_script(&sim, &rt));
 }

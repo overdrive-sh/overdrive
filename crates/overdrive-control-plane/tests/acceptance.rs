@@ -303,6 +303,9 @@ mod acceptance {
     // across a restart (composed shim -> hydrate -> backend row).
     mod service_backend_address_across_restart;
 
+    // workload-spiffe-identity (ADR-0344, V-3): the published backend names its workload.
+    mod service_backend_names_its_workload;
+
     // service-vip-allocator step 02-02 — TOML `[dataplane.vip_allocator]`
     // parser surface. S-VIP-15/16/17/18: section presence + delegation to
     // `VipRange::new` for the three type-level invariants + structured
@@ -445,6 +448,10 @@ mod acceptance {
     // sibling above.
     #[cfg(feature = "integration-tests")]
     mod svid_lifecycle_actual_scoped_to_workload;
+    // workload-spiffe-identity (ADR-0344 / ADR-0345): an allocation's SVID names its workload;
+    // sibling allocations each keep their own SVID under it. Same `run_convergence_tick` gate.
+    #[cfg(feature = "integration-tests")]
+    mod workload_svid_identity_shared_by_allocations;
     // Bugfix regression — a D6 trust-bundle refresh failure inside the `IssueSvid`
     // action-shim executor must be SURFACED via a structured
     // `issue_svid.trust_bundle_refresh_failed` warning (pre-fix the `Err` arm was

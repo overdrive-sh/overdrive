@@ -679,8 +679,8 @@ async fn a_peer_that_never_answers_the_handshake_times_out_before_the_deadline_p
 const GATEWAY_NODE: &str = "gateway-node";
 
 /// The peer a gateway dial selects in the single-leaf trust domains below: a
-/// workload allocation identity.
-const SELECTED_PEER_SPIFFE: &str = "spiffe://overdrive.local/workload/api/alloc/api-0";
+/// workload identity (shared by every allocation of the workload).
+const SELECTED_PEER_SPIFFE: &str = "spiffe://overdrive.local/workload/api";
 
 /// A second, self-contained trust domain whose gateway leaf carries the
 /// dedicated gateway SPIFFE identity (`spiffe://overdrive.local/gateway/<node>`)
@@ -790,6 +790,44 @@ async fn a_peer_certificate_without_a_spiffe_uri_san_is_rejected_by_shape() {
     assert!(!tls_ulp_installed(&observer), "a shape failure arms nothing");
     drop(observer);
     assert_nothing_reached_the_peer(&peer.finish(), "wrong URI-SAN shape");
+}
+
+/// workload-spiffe-identity D3 (ADR-0346) — the check is exact equality with the
+/// selected backend's WORKLOAD identity: a chain-valid peer presenting a
+/// different identity, here the superseded allocation-shaped identity of the
+/// same workload, is a `PeerSpiffeMismatch` and arms nothing (no prefix match).
+///
+/// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default")]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_peer_presenting_another_identity_than_the_selected_workloads_is_rejected_exactly() {
+    let pki = Arc::new(GatewayPki::mint("spiffe://overdrive.local/workload/api/alloc/api-0"));
+    let site = Site::new();
+    let held = Arc::clone(&pki);
+    let (client, _relay) = production_client(
+        &site,
+        source(move || {
+            Ok((
+                svid_from_leaf(&held.gateway, far_future()),
+                TrustBundle::new(CaCertPem::new(held.root_pem.clone()), None),
+            ))
+        }),
+    )
+    .await;
+    let peer = Peer::start(pki.peer_spec());
+    let (connected, observer) = dial(peer.addr);
+    let selected: SpiffeId = SELECTED_PEER_SPIFFE.parse().expect("selected peer SPIFFE ID");
+
+    let result = client.authenticate(connected, selected, deadline_in(HANDSHAKE_BUDGET)).await;
+
+    assert!(
+        matches!(result, Err(GatewayClientMtlsError::PeerSpiffeMismatch { .. })),
+        "only the selected workload's identity authenticates, got {:?}",
+        result.map(|_| "an armed leg")
+    );
+    assert!(!tls_ulp_installed(&observer), "a failed equality arms nothing");
+    drop(observer);
+    assert_nothing_reached_the_peer(&peer.finish(), "another identity of the same workload");
 }
 
 // ---------------------------------------------------------------------------

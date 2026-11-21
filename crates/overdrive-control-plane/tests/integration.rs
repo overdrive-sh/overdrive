@@ -403,6 +403,8 @@ mod integration {
         /// the real `alloc_status` handler; replaces the deleted misplaced
         /// render-layer scaffold.
         mod alloc_status_issued_certificates;
+        /// workload-spiffe-identity (ADR-0345) — HELD until DELIVER lands the V2 row.
+        mod alloc_status_per_allocation_certificates;
         mod rotate_issue_svid_dispatch;
         mod serve_persistent_ca;
     }

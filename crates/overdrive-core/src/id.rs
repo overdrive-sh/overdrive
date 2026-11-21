@@ -343,6 +343,32 @@ impl SpiffeId {
         })
     }
 
+    /// Derive the SVID identity of a workload:
+    /// `spiffe://overdrive.local/workload/<workload>`, shared by every
+    /// allocation of that workload (ADR-0344).
+    ///
+    /// SCAFFOLD: true. The exact signature is pinned by the
+    /// `workload-spiffe-identity` feature delta (Interface contracts); the body
+    /// is delivered by that feature's DELIVER wave. DISTILL's acceptance tests
+    /// pin the behaviour with a matched `#[should_panic]`.
+    #[must_use]
+    #[expect(clippy::todo, reason = "RED scaffold: body delivered by workload-spiffe-identity")]
+    pub fn for_workload(_workload: &WorkloadId) -> Self {
+        todo!("RED scaffold: SpiffeId::for_workload is not delivered yet")
+    }
+
+    /// The workload this identity names: `Some` iff the path is exactly
+    /// `/workload/<label>` with a valid [`WorkloadId`] label; `None` for the
+    /// gateway identity, for any other shape and for a path with extra
+    /// segments (ADR-0344).
+    ///
+    /// SCAFFOLD: true. See [`SpiffeId::for_workload`].
+    #[must_use]
+    #[expect(clippy::todo, reason = "RED scaffold: body delivered by workload-spiffe-identity")]
+    pub fn workload_id(&self) -> Option<WorkloadId> {
+        todo!("RED scaffold: SpiffeId::workload_id is not delivered yet")
+    }
+
     /// Derive the dedicated non-allocation public-ingress gateway identity:
     /// `spiffe://overdrive.local/gateway/<node-id>`.
     ///

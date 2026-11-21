@@ -21,15 +21,15 @@
 //! Default lane — pure in-memory rkyv, no I/O.
 
 use overdrive_core::ca::issued_certificate_row::{
-    IssuedCertificateRowEnvelope, IssuedCertificateRowLatest, IssuedCertificateRowV1,
+    IssuedCertificateRow, IssuedCertificateRowEnvelope, IssuedCertificateRowV1,
 };
 use overdrive_core::codec::VersionedEnvelope;
 use overdrive_core::id::{CertSerial, IssuanceOrdinal, NodeId, SpiffeId};
+use overdrive_core::traits::observation_store::ObservationStoreError;
 use overdrive_core::wall_clock::UnixInstant;
 
 use super::harness::{
-    assert_discriminant_offset_triangulation, assert_envelope_v_roundtrip,
-    assert_unknown_version_probe_surfaces,
+    assert_discriminant_offset_triangulation, assert_unknown_version_probe_surfaces,
 };
 
 /// Independent pin of the V1 discriminant offset for triangulation
@@ -44,7 +44,7 @@ const GOLDEN_DISCRIMINANT_OFFSET_V1: usize = 104;
 /// Canonical V1 payload pinned by `FIXTURE_V1` below. The expected
 /// projection is built from these values verbatim — change any one of them
 /// and the test fails until `FIXTURE_V1` is regenerated.
-fn canonical_v1_payload() -> IssuedCertificateRowLatest {
+fn canonical_v1_payload() -> IssuedCertificateRowV1 {
     IssuedCertificateRowV1 {
         serial: CertSerial::new("0a1b2c3d4e5f").expect("valid cert serial"),
         spiffe_id: SpiffeId::new("spiffe://overdrive.test/node/node-01/workload/dns-resolver")
@@ -69,15 +69,81 @@ fn canonical_v1_payload() -> IssuedCertificateRowLatest {
 /// variants need a `V2` envelope.
 const FIXTURE_V1: &str = "3061316232633364346535667370696666653a2f2f6f76657264726976652e746573742f6e6f64652f6e6f64652d30312f776f726b6c6f61642f646e732d7265736f6c76657266666565646463636262616100000000000000000000000000008c000000a0ffffffba000000a4ffffff170000008c000000d2ffffff0000000000f15365000000000000000000000000804255650000000000000000000000006e6f64652d3031ff05f153650000000000000000000000000700000000000000";
 
-/// `@property` `@S-05` (S-05-06) — golden-bytes roundtrip for the
-/// issued-cert audit row envelope: hex-decode `FIXTURE_V1`,
-/// rkyv-deserialise into `IssuedCertificateRowEnvelope`, `into_latest()`,
-/// assert equality against the canonical `Latest` projection; the archived
-/// layout is byte-stable.
+/// V1 payload archived under the SECOND-variant envelope root: the explicit
+/// `Envelope::V1(frozen V1 payload)` encoding (never through `latest()` or the
+/// alias, which would encode V2). Appending the larger V2 variant grows the
+/// archive root, so the pre-V2 `FIXTURE_V1` literal no longer decodes (ADR-0345,
+/// `development.md` "rkyv schema evolution"); this is that fixture regenerated.
+/// Minted by encoding a two-variant envelope `{ V1(IssuedCertificateRowV1),
+/// V2(IssuedCertificateRowV2) }` with the canonical V1 payload.
+const FIXTURE_V1_UNDER_V2_ROOT: &str = "3061316232633364346535667370696666653a2f2f6f76657264726976652e746573742f6e6f64652f6e6f64652d30312f776f726b6c6f61642f646e732d7265736f6c76657266666565646463636262616100000000000000000000000000008c000000a0ffffffba000000a4ffffff170000008c000000d2ffffff0000000000f15365000000000000000000000000804255650000000000000000000000006e6f64652d3031ff05f15365000000000000000000000000070000000000000000000000000000000000000000000000";
+
+/// The canonical V2 payload pinned by `FIXTURE_V2`: the canonical V1 fields plus
+/// `issued_for = Allocation("alloc-dns-resolver-0")`.
+const FIXTURE_V2: &str = "3061316232633364346535667370696666653a2f2f6f76657264726976652e746573742f6e6f64652f6e6f64652d30312f776f726b6c6f61642f646e732d7265736f6c766572666665656464636362626161616c6c6f632d646e732d7265736f6c7665722d30000001000000000000008c00000090ffffffba00000094ffffff170000008c000000c2ffffff0000000000f15365000000000000000000000000804255650000000000000000000000006e6f64652d3031ff05f15365000000000000000000000000070000000000000000000000940000007effffff00000000";
+
+fn decoded(hex_bytes: &str) -> Result<IssuedCertificateRow, ObservationStoreError> {
+    let bytes = hex::decode(hex_bytes).expect("fixture is valid hex");
+    IssuedCertificateRow::from_store_bytes(&bytes, Some("fixture"))
+}
+
+/// `@error` (ADR-0345, DD-5) — a V1 row is never translated: a row written by a
+/// prior binary carries a per-allocation identity and no `issued_for`, and is
+/// discarded with the data directory. Both the pre-V2 literal and the same V1
+/// payload archived under the V2-sized root are refused with an
+/// `EnvelopeError` (the pre-V2 literal fails to decode as the larger root, the
+/// V2-rooted one is a V1 variant the latest projection refuses; the design pins
+/// no finer variant), never decoded into the latest row. Observation reads log
+/// and skip it (ADR-0048 §3).
+///
+/// `CONTRACT_SHAPE`: bounded-change.
 #[test]
-fn issued_certificate_row_envelope_v1_golden_bytes_roundtrip() {
-    let expected = canonical_v1_payload();
-    assert_envelope_v_roundtrip::<IssuedCertificateRowEnvelope>(FIXTURE_V1, &expected);
+#[should_panic(expected = "a V1 issued-certificate row must be refused")]
+fn issued_certificate_row_v1_rows_are_refused_and_never_translated() {
+    let pre_v2 = decoded(FIXTURE_V1);
+    assert!(pre_v2.is_err(), "a V1 issued-certificate row must be refused, it decoded: {pre_v2:?}");
+    let under_v2_root = decoded(FIXTURE_V1_UNDER_V2_ROOT);
+    assert!(
+        matches!(under_v2_root, Err(ObservationStoreError::Envelope { .. })),
+        "a V1 issued-certificate row must be refused with an envelope error, got: {under_v2_root:?}"
+    );
+}
+
+/// `@property` (ADR-0345) — golden-bytes roundtrip of the V2 row: the pinned
+/// archive decodes through the envelope and re-archives to the same octets, so
+/// the persisted `issued_for` (here `Allocation("alloc-dns-resolver-0")`) is
+/// part of the row and survives the roundtrip.
+///
+/// `CONTRACT_SHAPE`: pure-function.
+#[test]
+#[should_panic(expected = "the V2 issued-certificate row must decode")]
+fn issued_certificate_row_v2_golden_bytes_roundtrip_preserves_issued_for() {
+    let row = decoded(FIXTURE_V2).expect("the V2 issued-certificate row must decode");
+    let again = row.archive_for_store().expect("the decoded row archives");
+    assert_eq!(
+        hex::encode(again.as_ref()),
+        FIXTURE_V2,
+        "the V2 row re-archives to the pinned octets"
+    );
+}
+
+/// `@property` (ADR-0345, ADR-0048) — the envelope declares both versions and
+/// the re-pinned discriminant offset (the larger V2 variant moves the
+/// discriminant from the end of the archive: 104 -> 120, measured on the
+/// two-variant archive of both variants).
+///
+/// `CONTRACT_SHAPE`: pure-function.
+#[test]
+#[should_panic(expected = "the envelope knows V1 and V2 at offset 120")]
+fn issued_certificate_row_envelope_declares_v1_and_v2_with_the_repinned_offset() {
+    assert_eq!(
+        (
+            IssuedCertificateRowEnvelope::known_discriminants(),
+            IssuedCertificateRowEnvelope::discriminant_offset_from_end()
+        ),
+        (&[0u8, 1][..], Some(120)),
+        "the envelope knows V1 and V2 at offset 120"
+    );
 }
 
 /// `@property` `@S-05` (S-05-07) — discriminant-offset triangulation: an

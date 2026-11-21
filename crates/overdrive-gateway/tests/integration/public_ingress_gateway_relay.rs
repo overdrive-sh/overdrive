@@ -218,9 +218,10 @@ struct OriginDataplane {
     state: Mutex<DataplaneState>,
 }
 
-fn backend_identity(backend_id: BackendId) -> SpiffeId {
-    SpiffeId::new(&format!("spiffe://overdrive.local/workload/api/alloc/api-{}", backend_id.get()))
-        .expect("backend SPIFFE ID")
+/// Every backend of the `api` workload presents the workload identity
+/// (workload-spiffe-identity, ADR-0344): allocations are not part of it.
+fn backend_identity(_backend_id: BackendId) -> SpiffeId {
+    SpiffeId::new("spiffe://overdrive.local/workload/api").expect("backend SPIFFE ID")
 }
 
 impl OriginDataplane {
@@ -425,7 +426,7 @@ impl GatewayClientMtls for ArmingMtls {
             drop(connected);
             return Err(GatewayClientMtlsError::PeerSpiffeMismatch {
                 expected: expected_peer,
-                actual: SpiffeId::new("spiffe://overdrive.local/workload/other/alloc/other-1")
+                actual: SpiffeId::new("spiffe://overdrive.local/workload/other")
                     .expect("other SPIFFE ID"),
             });
         }
