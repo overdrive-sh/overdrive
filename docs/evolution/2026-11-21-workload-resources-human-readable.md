@@ -107,7 +107,7 @@ Phase B is not yet run. Expected result: the feature has no `design/architecture
 
 ## Finalization
 
-- **Issues closed:** _to be filled by the orchestrator (verify each with `gh issue view <N> --comments`; #372 expected)_.
+- **Issues closed:** #372, closed 2026-11-21 after checking it with `gh issue view 372 --comments`, with a comment linking this record.
 - **Metal cleanup:** _to be filled by the orchestrator (remote checkout and build output removed after any needed evidence is pulled; record the run id)_.
-- **Website validation and documentation review:** _to be filled by the orchestrator_.
+- **Website validation and documentation review:** `bun run typecheck` and `bun run build` pass. An independent reviewer ran two rounds over `reference/workload-spec.mdx`, `reference/cli.mdx`, `reference/meta.json`, `how-to/deploy-a-workload.mdx` and `concepts/microvms.mdx`; both rounds' findings are fixed (`f1fd3e907`, `c45016871`). No blog post, by the user's decision.
 - **Session files removed:** _to be filled by the orchestrator (`deliver/.develop-progress.json`, after approval)_.
