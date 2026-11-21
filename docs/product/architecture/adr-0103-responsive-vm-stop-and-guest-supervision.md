@@ -14,6 +14,18 @@ original DELIVER step `01-02` crafter resumes. The base decision above remains
 approved. This amendment changes only the private `VmDriver` natural-exit
 ordering described below.
 
+**Amendment 2026-11-21 — beacon stays open after SHUTDOWN: IMPLEMENTED, user-approved
+2026-11-21, commit `6234166e2`.** The 2 s writer deadline bounds only the SHUTDOWN
+write; the host then reads until `EXIT`, stream end or VMM exit within the VMM
+termination grace. Reason: the earlier wording consumed the writer (aborted and
+joined it) at the 2 s bound and closed the socket after the SHUTDOWN write
+(regression from `7105b5807`), so the guest's `EXIT` write failed with a broken
+pipe, init took its fatal path instead of powering off cleanly, and every stop
+waited out the full VMM grace and forced a kill. No exit status was lost: on the
+stop path stop owns the outcome and the watcher's claim returns `None`. The
+overall stop bound is unchanged. See the host decision and the Changed
+Assumptions table below.
+
 Amends only the request/grace ordering and PID 1 duties in ADR-0082 D4/D7,
 plus the private accepted-session natural/post-EXEC exit-watcher ownership and
 driver-artifact cleanup ordering specified below.
@@ -25,13 +37,26 @@ owns the lifecycle-gate matrix, benchmark profiles and evidence obligations.
 
 Reuse the accepted BeaconWriter and `Vmm::terminate` ports. At a successful
 Live → EndingInFlight stop claim, submit SHUTDOWN and begin the VMM termination
-wait together. Retain `VM_SHUTDOWN_REQUEST_DEADLINE = 2 s` solely as the writer
-bound and `VM_STOP_GRACE = 10 s` as the host VMM grace, both measured from this
-stop operation's entry to its request/wait phase. They overlap. Normal VMM exit
-and writer completion proceed immediately; never sleep to the end of either
-successful-path window. On VMM exit, join the writer (abort and join it if still
-pending); on writer timeout abort/join it while continuing the same VMM wait.
+wait together. Retain `VM_SHUTDOWN_REQUEST_DEADLINE = 2 s` solely as the bound
+on the SHUTDOWN **write** and `VM_STOP_GRACE = 10 s` as the host VMM grace, both
+measured from this stop operation's entry to its request/wait phase. They
+overlap. Normal VMM exit and writer completion proceed immediately; never sleep
+to the end of either successful-path window.
+
+The 2 s bound does not end the beacon session. After SHUTDOWN is written, the
+writer keeps the beacon open and keeps reading until the guest's `EXIT` arrives,
+the stream ends, or the VMM exits; only then does it drain what the guest had
+already buffered and close. The wait for `EXIT` is bounded by the VMM
+termination grace, which every stop path already awaits (`VM_STOP_GRACE`, then
+kill and reap), so the overall stop bound is unchanged. A SHUTDOWN write that
+does not complete within 2 s is force-closed while the same VMM wait continues.
 Missing writer skips only request submission, not process completion.
+
+**Contract:** the host must not close its side of the beacon before the guest's
+`EXIT` can land or the VMM has exited. The guest supervisor sends `EXIT` after
+it reaps the workload group (below); a host that closes the socket right after
+writing SHUTDOWN makes that write fail with a broken pipe, and guest init takes
+its fatal path instead of powering off cleanly.
 
 The approved healthy completion criterion is **normal reaper-observed VMM exit
 plus verified required driver-artifact absence**, measured by the native
@@ -46,7 +71,7 @@ VM stop error/cleanup policy:
 | Writer error, disconnected session, missing task or writer timeout | Best-effort request failed/unconfirmed; continue VMM termination. No receipt acknowledgement and no new DriverError variant. |
 | VMM completion | Await existing `Vmm::terminate(&control, VM_STOP_GRACE)`. Its `Killed` includes already gone; only a reaper/process observation establishes normal versus forced termination for measurement. |
 | VMM error / cleanup errors | Preserve current best-effort handling (including currently discarded results); complete the remaining current cleanup calls. They are not newly promoted into success guarantees or a persistent retry plan. |
-| VM `stop` returns `Ok(())` | Active status is relinquished, the writer is consumed and existing termination/cleanup calls have finished. A subsequent `status` returns NotFound. It does not assert normal exit or that every cleanup succeeded. |
+| VM `stop` returns `Ok(())` | Active status is relinquished, the writer task has been joined (it ends on `EXIT`, stream end or VMM exit) and existing termination/cleanup calls have finished. A subsequent `status` returns NotFound. It does not assert normal exit or that every cleanup succeeded. |
 | Healthy-stop verification | Independently require normal VMM exit and absence of VMM process, allocation cgroup scope, run directory/sockets, rootfs clone and clone-index link. Any missing evidence/error/forced exit fails this verdict even after `Ok`. |
 
 Continue cgroup kill/remove, run-directory removal, clone removal then index
@@ -349,7 +374,7 @@ stored lifecycle state changes for measurement:
 | `vm.lifecycle.created` | Vmm::create returned its control; `alloc`, `pid` |
 | `vm.lifecycle.ready` | Successful existing accept_ready arm; `alloc` |
 | `vm.lifecycle.stop_enter` | Stop claimed Live and begins request/VMM wait; `alloc`, `pid` |
-| `vm.lifecycle.writer_finished` | Stop consumed the writer task; `alloc`, `disposition` (`completed`, `aborted`, `absent`) |
+| `vm.lifecycle.writer_finished` | Stop joined the writer task; `alloc`, `disposition` (`completed`, `aborted`, `absent`) |
 | `vmm.process.reaped` | Host reaper collected actual child status, before outcome publication; `pid`, `exit_code`, `signal` |
 | `vm.lifecycle.cleanup_calls_finished` | Current driver cleanup calls returned; `alloc` (does not claim artifact absence) |
 
@@ -377,6 +402,8 @@ stakeholder verdict or reproduce the native integration assertions.
 | ADR-0082 D4 constants: “Bounds **step 1's write**.” and “Bounds **step 2**.” | Preserve values, amend their sequential composition to overlapping deadlines; the native implementation's unconditional completed-write sleep is removed. |
 | ADR-0082 D7: “then reads at most one further `SHUTDOWN` (§ D4).” | PID 1 reads SHUTDOWN during execution, supervises the defined group, and powers off after its completion/report without a post-EXIT read. |
 | This ADR, “the approved defect is waiting and control responsiveness, not a reproduced cleanup/retry failure.” | Qualified native-metal S10a and post-EXEC S10b now reproduce a driver-artifact cleanup gap. The amendment reuses the private current cleanup calls before the natural watcher report; it does not strengthen `Driver::stop Ok`, expose cleanup errors or add retry ownership. |
+| Amendment 2026-11-21 (this ADR, host decision): “On VMM exit, join the writer (abort and join it if still pending); on writer timeout abort/join it while continuing the same VMM wait.” and “Retain `VM_SHUTDOWN_REQUEST_DEADLINE = 2 s` solely as the writer bound” | The 2 s bounds only the SHUTDOWN write. A writer that has written SHUTDOWN is not aborted at 2 s: it keeps reading until `EXIT`, stream end or VMM exit (bounded by the VMM grace), drains and closes. A write that misses 2 s is force-closed while the VMM wait continues. |
+| ADR-0082 § D4 constants (also quoted above): “Bounds **step 1's write**.” | Unchanged in meaning: 2 s bounds the SHUTDOWN write. What this ADR adds is that step 1 does not close the beacon on write completion; the host holds it open until `EXIT`, stream end or VMM exit, inside step 2's grace. |
 
 ADR-0082's historical statement “Running ⟹ READY arrived AND `EXEC` was delivered”
 was already superseded by ADR-0089's deferred EXEC barrier and is not the current

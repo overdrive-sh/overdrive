@@ -1732,6 +1732,8 @@ terms as `VM_BOOT_DEADLINE`:
 | `VM_SHUTDOWN_REQUEST_DEADLINE` | **2 s** | Bounds **step 1's write**. A guest not reading its socket must not block `stop`; expiry falls straight through to step 2. Well above the measured `READY`→`EXIT` round-trip (~0.3 s, both arches, P2) and well below the grace |
 | `VM_STOP_GRACE` | **10 s** | Bounds **step 2**. Covers guest fs sync + `RB_POWER_OFF` → PSCI/ACPI `SYSTEM_OFF` → CH exit. Mirrors `ExecDriver`'s `DEFAULT_STOP_GRACE` role rather than inventing a new policy shape |
 
+> **Amendment 2026-11-21 (ADR-0103, implemented in `6234166e2`).** "Bounds step 1's write" stands: the 2 s bounds only the `SHUTDOWN` write. Step 1 does not close the beacon when the write completes; the host keeps reading until the guest's `EXIT`, stream end or VMM exit, inside step 2's `VM_STOP_GRACE`. Closing right after the write made the guest's `EXIT` write fail with a broken pipe and forced a kill on every stop. See ADR-0103's host decision.
+
 **Without the step-1 deadline this ADR's own claim — *"an unresponsive guest
 still lands `Terminated / Stopped { by: Operator }`"* — has no mechanism**: the
 bundled `shutdown` bounded the whole interaction, and splitting it bounded only

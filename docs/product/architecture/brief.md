@@ -2346,8 +2346,9 @@ authorized architect-to-crafter execution; no independent DESIGN review of
 this amendment has occurred.
 
 [ADR-0103](adr-0103-responsive-vm-stop-and-guest-supervision.md) specifies
-overlapping the existing two-second writer maximum with the ten-second VMM
-grace and a responsive single guest PID 1 supervisor: child-led process group,
+overlapping the existing two-second SHUTDOWN-write bound with the ten-second VMM
+grace (after the write the host keeps the beacon open until the guest's `EXIT`,
+stream end or VMM exit, within that grace; amended 2026-11-21) and a responsive single guest PID 1 supervisor: child-led process group,
 SIGTERM, five-second guest grace, SIGKILL/reap only if needed, then poweroff.
 The generic stop/status postcondition stays limited; the healthy benchmark
 separately verifies normal VMM exit and driver-artifact absence. READY,
