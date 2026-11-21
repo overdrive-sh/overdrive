@@ -7,10 +7,8 @@
 //!
 //! Driving port: `VolumePoolProbe::probe` -> the returned `Arc<dyn VolumeBacking>` ->
 //! `VolumeBacking`. Sad paths are named example tests (Mandate 11). Every test runs in the
-//! volume-pool guest and is pending on its `should_panic` marker until `LvmVolumeBacking`
-//! exists: the probe scaffold still reports no pool, so each test fails at "the guest's pool
-//! is found" (the precondition the scaffold's body denies it). The `lvm` contract test uses no Overdrive code and is a guard
-//! once the pool exists.
+//! volume-pool guest. The `lvm` contract test uses no Overdrive code and guards the tool
+//! behaviour the adapter relies on.
 //!
 //! Evidence tier: Tier 3, real guest kernel and real `lvm`, example-only.
 

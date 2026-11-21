@@ -5,10 +5,9 @@
 //! Driving port: `VolumePoolProbe::probe` on `LvmVolumePoolProbe`. Each guest is fresh, so
 //! a test may damage its own pool. Sad paths are named example tests (Mandate 11).
 //!
-//! Every test runs in the volume-pool guest and is pending on its `should_panic` marker until
-//! the probe exists. The probe is still a scaffold that reports no pool, so each healthy-pool
-//! test fails at "the labelled partition is found" and each broken-pool test at "a broken pool
-//! must fail its probe", the assertion that scenario of ADR-0314 exists to make.
+//! Every test runs in the volume-pool guest. Each healthy-pool test asserts the probe finds the
+//! pool and returns a backing, and each broken-pool test asserts the probe fails with the
+//! scenario of ADR-0314 that breakage exists to make.
 //!
 //! Evidence tier: Tier 3, real guest kernel and real `lvm`, example-only.
 

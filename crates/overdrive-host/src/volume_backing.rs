@@ -9,7 +9,7 @@
 use std::io;
 use std::os::unix::fs::OpenOptionsExt as _;
 use std::path::{Path, PathBuf};
-use std::process::{Output, Stdio};
+use std::process::{ExitStatus, Output, Stdio};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -20,14 +20,15 @@ use overdrive_core::traits::volume_backing::{
     VolumeProbeError, VolumeProbeScenario,
 };
 use overdrive_core::volume::{ByteCount, VolumeOperation, VolumeSize};
-use tokio::process::Command;
+use tokio::process::{Child, Command};
 use tokio::time::Instant;
 
 /// The volume group provisioning creates on the labelled partition.
 const VOLUME_GROUP: &str = "overdrive";
 /// The kernel `PARTNAME` of the pool's partition.
 const PARTITION_LABEL: &str = "overdrive-volumes";
-/// Where the kernel lists block devices; each carries a `uevent` with its `PARTNAME`.
+/// Where the kernel lists block devices; each carries a `uevent`, and a partition's `uevent`
+/// carries its `PARTNAME` (`part_uevent`, `vendors/linux/block/partitions/core.c:253-263 @ v7.0`).
 const SYSFS_BLOCK_DIR: &str = "/sys/class/block";
 /// Where device-mapper creates the nodes of active logical volumes.
 const DEVICE_MAPPER_DIR: &str = "/dev/mapper";
@@ -40,9 +41,14 @@ const SCRATCH_PREFIX: &str = "ovd-probe-";
 const SCRATCH_VOLUME: &str = "ovd-probe-scratch";
 /// One extent: the smallest volume `lvcreate` makes in a group of 4 MiB extents.
 const SCRATCH_BYTES: u64 = 4 * 1024 * 1024;
+/// `lvs` listing the names of the logical volumes in the group.
+const LIST_VOLUMES_ARGV: [&str; 5] = ["lvs", "--noheadings", "-o", "lv_name", VOLUME_GROUP];
+/// `vgs` reporting the group's free space in bytes.
+const FREE_BYTES_ARGV: [&str; 8] =
+    ["vgs", "--noheadings", "--units", "b", "--nosuffix", "-o", "vg_free", VOLUME_GROUP];
 
 /// How `lvm` is spawned: the pinned `--config`, built from the partition node the label found.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct LvmTool {
     config: String,
 }
@@ -65,6 +71,42 @@ impl LvmTool {
         command.args(args).arg("--config").arg(&self.config).env("LVM_SYSTEM_DIR", LVM_SYSTEM_DIR);
         command
     }
+
+    /// Spawns `args` with its output piped, for the caller to wait on.
+    fn spawn(&self, args: &[&str]) -> io::Result<Child> {
+        self.command(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+    }
+}
+
+/// A finished `lvm` command that exited unsuccessfully.
+struct Exited {
+    status: ExitStatus,
+    stderr: String,
+}
+
+/// `output` if the command succeeded, else its exit status and standard error.
+fn into_success(output: Output) -> Result<Output, Exited> {
+    if output.status.success() {
+        return Ok(output);
+    }
+    Err(Exited {
+        status: output.status,
+        stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+    })
+}
+
+/// The byte count in a `vgs ... vg_free` report.
+fn parse_free_bytes(report: &str) -> io::Result<u64> {
+    report.trim().parse().map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("lvm vgs reported free space {:?}, not a byte count", report.trim()),
+        )
+    })
 }
 
 /// The dm name of a logical volume in the `overdrive` group is `<vg>-<lv>` with every `-` inside
@@ -135,14 +177,7 @@ impl LvmVolumeBacking {
         if Instant::now() >= deadline {
             return Err(timed_out(operation));
         }
-        let child = self
-            .tool
-            .command(args)
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|source| pool_command(operation, source))?;
+        let child = self.tool.spawn(args).map_err(|source| pool_command(operation, source))?;
         let mut reaper = tokio::spawn(child.wait_with_output());
         // Dropping a `JoinHandle` detaches its task: on the deadline the reaper keeps waiting.
         let finished = match tokio::time::timeout_at(deadline, &mut reaper).await {
@@ -152,59 +187,25 @@ impl LvmVolumeBacking {
         let output = finished
             .map_err(|joined| pool_command(operation, io::Error::other(joined)))?
             .map_err(|source| pool_command(operation, source))?;
-        if output.status.success() {
-            return Ok(output);
-        }
-        let subcommand = args.first().copied().unwrap_or("lvm");
-        Err(pool_command(
-            operation,
-            io::Error::other(format!(
-                "lvm {subcommand} exited with {}: {}",
-                output.status,
-                String::from_utf8_lossy(&output.stderr).trim()
-            )),
-        ))
+        into_success(output).map_err(|Exited { status, stderr }| {
+            let subcommand = args.first().copied().unwrap_or("lvm");
+            pool_command(
+                operation,
+                io::Error::other(format!("lvm {subcommand} exited with {status}: {stderr}")),
+            )
+        })
     }
 
     async fn volume_names(&self, deadline: Instant) -> Result<Vec<String>, VolumeBackingError> {
-        let output = self
-            .run(
-                VolumeOperation::Report,
-                &["lvs", "--noheadings", "-o", "lv_name", VOLUME_GROUP],
-                deadline,
-            )
-            .await?;
+        let output = self.run(VolumeOperation::Report, &LIST_VOLUMES_ARGV, deadline).await?;
         let report = String::from_utf8_lossy(&output.stdout);
         Ok(logical_volume_names(&report).map(str::to_owned).collect())
     }
 
     async fn free_bytes(&self, deadline: Instant) -> Result<u64, VolumeBackingError> {
-        let output = self
-            .run(
-                VolumeOperation::Report,
-                &[
-                    "vgs",
-                    "--noheadings",
-                    "--units",
-                    "b",
-                    "--nosuffix",
-                    "-o",
-                    "vg_free",
-                    VOLUME_GROUP,
-                ],
-                deadline,
-            )
-            .await?;
-        let report = String::from_utf8_lossy(&output.stdout);
-        report.trim().parse().map_err(|_| {
-            pool_command(
-                VolumeOperation::Report,
-                io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("lvm vgs reported free space {:?}, not a byte count", report.trim()),
-                ),
-            )
-        })
+        let output = self.run(VolumeOperation::Report, &FREE_BYTES_ARGV, deadline).await?;
+        parse_free_bytes(&String::from_utf8_lossy(&output.stdout))
+            .map_err(|source| pool_command(VolumeOperation::Report, source))
     }
 
     /// Creates `name` with exactly `size` reserved, written nowhere. A failing `lvcreate` after
@@ -258,31 +259,19 @@ impl LvmVolumeBacking {
         Err(failure)
     }
 
-    async fn activate(
-        &self,
-        name: &str,
-        node: &Path,
-        deadline: Instant,
-    ) -> Result<(), VolumeBackingError> {
+    async fn activate(&self, name: &str, deadline: Instant) -> Result<(), VolumeBackingError> {
         self.run(
             VolumeOperation::Activate,
             &["lvchange", "-ay", &format!("{VOLUME_GROUP}/{name}")],
             deadline,
         )
-        .await?;
-        if node_exists(node).await? {
-            return Ok(());
-        }
-        Err(pool_command(
-            VolumeOperation::Activate,
-            io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("lvm activated the volume but {} did not appear", node.display()),
-            ),
-        ))
+        .await
+        .map(drop)
     }
 }
 
+/// Whether the device-mapper node exists. The presence check is part of the activate step, so a
+/// stat error is reported under [`VolumeOperation::Activate`].
 async fn node_exists(node: &Path) -> Result<bool, VolumeBackingError> {
     tokio::fs::try_exists(node)
         .await
@@ -299,20 +288,23 @@ impl VolumeBacking for LvmVolumeBacking {
         let deadline = Instant::now() + ENSURE_DEADLINE;
         let name = volume_name(workload);
         let node = device_node(&name);
+        if node_exists(&node).await? {
+            return Ok(node);
+        }
         if !self.volume_names(deadline).await?.contains(&name) {
             self.create(workload, &name, size, deadline).await?;
         }
-        if !node_exists(&node).await? {
-            self.activate(&name, &node, deadline).await?;
-        }
+        self.activate(&name, deadline).await?;
         Ok(node)
     }
 
     /// One `O_EXCL` open of the device-mapper node, released at once. On a block device `O_EXCL`
     /// makes the opening file the holder (`blkdev_open`, `vendors/linux/block/fops.c:674-687 @
     /// v7.0`), and a device another holder has claimed fails the open `-EBUSY`
-    /// (`bd_prepare_to_claim`, `vendors/linux/block/bdev.c:596-610 @ v7.0`). An inactive volume
-    /// has no node, so the open fails `ENOENT`.
+    /// (`bd_prepare_to_claim`, `vendors/linux/block/bdev.c:596-610 @ v7.0`). The open may sleep
+    /// briefly while another claim is in progress (`bd_prepare_to_claim` waits for it,
+    /// `vendors/linux/block/bdev.c:613-622 @ v7.0`), which is why it runs in `spawn_blocking`. An
+    /// inactive volume has no node, so the open fails `ENOENT`.
     async fn claim_state(&self, workload: &WorkloadId) -> Result<ClaimState, VolumeBackingError> {
         let node = device_node(&volume_name(workload));
         let attempt = tokio::task::spawn_blocking(move || {
@@ -362,12 +354,7 @@ async fn labelled_partitions() -> io::Result<Vec<PathBuf>> {
     let mut entries = tokio::fs::read_dir(SYSFS_BLOCK_DIR).await?;
     let mut nodes = Vec::new();
     while let Some(entry) = entries.next_entry().await? {
-        let uevent = match tokio::fs::read_to_string(entry.path().join("uevent")).await {
-            Ok(uevent) => uevent,
-            // A device removed between the listing and the read is not a candidate.
-            Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
-            Err(error) => return Err(error),
-        };
+        let uevent = tokio::fs::read_to_string(entry.path().join("uevent")).await?;
         if uevent.lines().any(|line| line == wanted) {
             nodes.push(Path::new("/dev").join(entry.file_name()));
         }
@@ -383,31 +370,22 @@ async fn probe_command(
     scenario: VolumeProbeScenario,
     args: &[&str],
 ) -> Result<String, VolumeProbeError> {
-    let output = tool
-        .command(args)
-        .output()
+    let child =
+        tool.spawn(args).map_err(|source| failure(scenario, VolumeProbeDetail::Io(source)))?;
+    let output = child
+        .wait_with_output()
         .await
         .map_err(|source| failure(scenario, VolumeProbeDetail::Io(source)))?;
-    if !output.status.success() {
-        return Err(failure(
-            scenario,
-            VolumeProbeDetail::CommandFailed {
-                exit_status: output.status.code(),
-                stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-            },
-        ));
-    }
+    let output = into_success(output).map_err(|Exited { status, stderr }| {
+        failure(scenario, VolumeProbeDetail::CommandFailed { exit_status: status.code(), stderr })
+    })?;
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
 /// Removes every scratch volume a crashed probe left (`lvremove -f` removes it active or not).
 async fn remove_leftover_scratch(tool: &LvmTool) -> Result<(), VolumeProbeError> {
-    let report = probe_command(
-        tool,
-        VolumeProbeScenario::VolumeGroupMissing,
-        &["lvs", "--noheadings", "-o", "lv_name", VOLUME_GROUP],
-    )
-    .await?;
+    let report =
+        probe_command(tool, VolumeProbeScenario::VolumeGroupMissing, &LIST_VOLUMES_ARGV).await?;
     for leftover in logical_volume_names(&report).filter(|name| name.starts_with(SCRATCH_PREFIX)) {
         tracing::warn!(name: "volume_backing.probe.leftover_scratch_removed", volume = leftover);
         probe_command(
@@ -424,6 +402,7 @@ async fn remove_leftover_scratch(tool: &LvmTool) -> Result<(), VolumeProbeError>
 /// is removed before the failure is returned.
 async fn probe_scratch(tool: &LvmTool) -> Result<(), VolumeProbeError> {
     let scratch = format!("{VOLUME_GROUP}/{SCRATCH_VOLUME}");
+    let scratch_bytes = format!("{SCRATCH_BYTES}b");
     let created = probe_command(
         tool,
         VolumeProbeScenario::ScratchCreateOrNodeFailed,
@@ -434,7 +413,7 @@ async fn probe_scratch(tool: &LvmTool) -> Result<(), VolumeProbeError> {
             "--wipesignatures",
             "n",
             "-L",
-            "4m",
+            &scratch_bytes,
             "-n",
             SCRATCH_VOLUME,
             VOLUME_GROUP,
@@ -456,21 +435,20 @@ async fn probe_scratch(tool: &LvmTool) -> Result<(), VolumeProbeError> {
             )),
         },
     };
-    if let Err(error) = outcome {
-        if let Err(cleanup) = probe_command(
-            tool,
-            VolumeProbeScenario::ScratchRemoveFailed,
-            &["lvremove", "-f", &scratch],
-        )
-        .await
-        {
+    let removed = probe_command(
+        tool,
+        VolumeProbeScenario::ScratchRemoveFailed,
+        &["lvremove", "-f", &scratch],
+    )
+    .await;
+    match (outcome, removed) {
+        (Err(error), Err(cleanup)) => {
             tracing::warn!(name: "volume_backing.probe.scratch_cleanup_failed", error = %cleanup);
+            Err(error)
         }
-        return Err(error);
+        (Err(error), Ok(_)) => Err(error),
+        (Ok(()), removed) => removed.map(drop),
     }
-    probe_command(tool, VolumeProbeScenario::ScratchRemoveFailed, &["lvremove", "-f", &scratch])
-        .await
-        .map(drop)
 }
 
 #[async_trait]
@@ -503,20 +481,10 @@ impl VolumePoolProbe for LvmVolumePoolProbe {
         )
         .await?;
         remove_leftover_scratch(&tool).await?;
-        let free = probe_command(
-            &tool,
-            VolumeProbeScenario::VolumeGroupMissing,
-            &["vgs", "--noheadings", "--units", "b", "--nosuffix", "-o", "vg_free", VOLUME_GROUP],
-        )
-        .await?;
-        let free: u64 = free.trim().parse().map_err(|_| {
-            failure(
-                VolumeProbeScenario::VolumeGroupMissing,
-                VolumeProbeDetail::Io(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    format!("lvm vgs reported free space {:?}, not a byte count", free.trim()),
-                )),
-            )
+        let report =
+            probe_command(&tool, VolumeProbeScenario::VolumeGroupMissing, &FREE_BYTES_ARGV).await?;
+        let free = parse_free_bytes(&report).map_err(|source| {
+            failure(VolumeProbeScenario::VolumeGroupMissing, VolumeProbeDetail::Io(source))
         })?;
         if free < SCRATCH_BYTES {
             tracing::warn!(name: "volume_backing.probe.scratch_skipped", free_bytes = free);
