@@ -59,6 +59,7 @@ libc.workspace           = true
 rand.workspace           = true
 # `SimVolumeBacking` derives the volume's device name from the workload id (ADR-0312).
 sha2.workspace           = true
+hex.workspace            = true
 thiserror.workspace      = true
 tempfile.workspace       = true
 overdrive-store-local    = { path = "../overdrive-store-local" }

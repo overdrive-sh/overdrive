@@ -83,27 +83,12 @@ pub trait VolumeBacking: Send + Sync {
     /// the volume an earlier attempt created and never creates a second one;
     /// a volume is created at most once per workload.
     ///
-    /// Bound: `ensure` returns, `Ok` or `Err`, within 30 s of the call, whatever
-    /// the pool does. The 30 s is one deadline for the whole call, covering
-    /// every command it spawns, and is a private policy value of the adapter,
-    /// not a parameter of the port. The adapter owns it: it starts the deadline
-    /// when `ensure` is entered, on its own timer. The caller passes no deadline,
-    /// holds no timer on `ensure`, and awaits it to its return; it never drops
-    /// the call mid-effect.
-    ///
-    /// At the deadline: `ensure` returns at that instant
-    /// `Err(PoolCommand { operation, source })`, `operation` the command in
-    /// flight (or, between two commands, the next one it would have run) and
-    /// `source.kind() == io::ErrorKind::TimedOut`. It spawns no further command
-    /// after the deadline. A command in flight is not killed or aborted; it runs
-    /// to its own end and its result is discarded. A deadline return is neither
-    /// `NotFound` nor `InsufficientSpace`: the caller learns nothing about
+    /// Bound: `ensure` returns, `Ok` or `Err`, within 30 s of the call. The
+    /// deadline is a private policy of the adapter, not a parameter of the
+    /// port; the caller awaits `ensure` to its end and never drops it. A
+    /// deadline return is `Err(PoolCommand { operation, source })` with
+    /// `source.kind() == io::ErrorKind::TimedOut`; it says nothing about
     /// whether the volume was created or activated.
-    ///
-    /// After the deadline: the abandoned command may still create or activate
-    /// the volume, and nothing the call returned depends on it. The next
-    /// `ensure` observes the volume afresh and may spend its own deadline
-    /// waiting for a lock the abandoned command still holds.
     async fn ensure(
         &self,
         workload: &WorkloadId,
@@ -127,9 +112,7 @@ pub trait VolumeBacking: Send + Sync {
     /// `Claim` names the `open(2)` of the device node, not an `lvm` command (no
     /// `lvm` is spawned by `claim_state`).
     ///
-    /// Preconditions: none; the volume need not exist. `claim_state` has no
-    /// persistent effect and never blocks, so repeated calls observe the claim
-    /// without releasing it.
+    /// Preconditions: none; the volume need not exist.
     ///
     /// The launch path treats any `Err` as the end of the launch; only
     /// `Ok(Held)` is polled again.

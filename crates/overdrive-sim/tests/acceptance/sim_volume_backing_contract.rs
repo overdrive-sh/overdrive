@@ -250,7 +250,7 @@ proptest! {
     /// claimable volume.
     /// CONTRACT_SHAPE: bounded-change.
     #[test]
-        fn model_volumes_are_created_once_and_claims_follow_activity(ops in prop::collection::vec(op_strategy(), 0..24)) {
+    fn model_volumes_are_created_once_and_claims_follow_activity(ops in prop::collection::vec(op_strategy(), 0..24)) {
         let sim = pool(1024);
         let ids = [workload("alpha"), workload("beta"), workload("gamma")];
         // The model: a volume is `ensured` once created, `active` while it has a device node (every
@@ -266,7 +266,7 @@ proptest! {
                     ensured[i] = true;
                     active[i] = true;
                 }
-                Op::Hold(i) if active[i] => {
+                Op::Hold(i) if active[i] && !held[i] => {
                     sim.hold_claim(&ids[i]);
                     held[i] = true;
                 }
@@ -331,17 +331,17 @@ fn an_ensure_that_failed_after_the_create_is_reused_by_the_retry() {
     let sim = pool(1024);
     let w = workload("dev-box");
     sim.pause_ensure_after_create(&w);
-    let parked = run(async {
+    let (stopped, parked_after_create) = run(async {
         let mut ensure = Box::pin(sim.ensure(&w, gib(40)));
-        tokio::select! {
+        let stopped = tokio::select! {
             result = &mut ensure => Some(result),
             () = tokio::time::sleep(std::time::Duration::from_millis(20)) => None,
-        }
+        };
+        // Observed while the ensure future is still alive, before it is dropped as a crash would.
+        (stopped.is_none(), sim.ensure_parked(&w))
     });
-    assert!(
-        parked.is_none() && sim.ensure_parked(&w),
-        "the first ensure is parked after its create"
-    );
+    assert!(stopped && parked_after_create, "the first ensure is parked after its create");
+    assert!(!sim.ensure_parked(&w), "dropping the parked ensure clears its parked state");
     sim.resume_ensure(&w);
     run(sim.ensure(&w, gib(40))).expect("the retry finds the volume and activates it");
     assert_eq!(sim.volumes_created(), 1, "never a second volume");

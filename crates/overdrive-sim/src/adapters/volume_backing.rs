@@ -1,15 +1,18 @@
 //! `SimVolumeBacking` — the simulation twin of the volume pool port.
 //!
-//! GH #348. It models the observable behaviour of `LvmVolumeBacking` exactly: an idempotent
-//! `ensure` that creates then activates, a `claim_state` that reports `NotFound` for an absent or
-//! inactive volume, and the same device-node name. It holds no timer and models no `ensure`
-//! deadline: the adapter owns that bound, and the sim returns by itself. The inspection and
+//! GH #348. It models the observable behaviour of `LvmVolumeBacking`: an idempotent `ensure` that
+//! runs report, create and activate (a scripted fault fails whichever of the three it reaches
+//! first), a `claim_state` that reports `NotFound` for an absent or inactive volume, and the same
+//! device-node name. A created volume starts inactive until its `ensure` activates it (a
+//! documented conservative refinement, feature-delta). A parked `ensure` is the sim's in-flight
+//! state. It holds no timer and does not model the `ensure` deadline (B-1): the adapter owns that
+//! bound, and the sim returns by itself. The inspection and
 //! fault-injection methods are test-support surface (`.claude/rules/design.md` scope note). A
 //! backing has no "pool absent" route: it exists only after a probe found a pool; a node without
 //! one composes `SimVolumePoolProbe::absent()` and the driver holds no backing.
 
 use std::collections::BTreeMap;
-use std::fmt::{self, Write as _};
+use std::fmt;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -24,17 +27,12 @@ use overdrive_core::volume::{ByteCount, VolumeOperation, VolumeSize};
 use parking_lot::Mutex;
 use sha2::{Digest, Sha256};
 
-/// Hex characters of the workload id's SHA-256 that name its volume (ADR-0312).
-const NAME_HEX_CHARS: usize = 32;
-
 /// Who holds a volume's exclusive claim.
 #[derive(Clone, Default)]
 enum Holder {
     /// Nobody has the device open.
     #[default]
     None,
-    /// A holder whose claim outlives it until a `drain`.
-    Held,
     /// A holder whose claim lasts while `live()` is true.
     WhileLive(Arc<dyn Fn() -> bool + Send + Sync>),
 }
@@ -43,7 +41,6 @@ impl fmt::Debug for Holder {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::None => f.write_str("None"),
-            Self::Held => f.write_str("Held"),
             Self::WhileLive(_) => f.write_str("WhileLive"),
         }
     }
@@ -56,16 +53,23 @@ struct Volume {
     holder: Holder,
 }
 
+/// Where a workload's scripted `ensure` pause stands.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PauseState {
+    /// The next `ensure` parks after its create.
+    Armed,
+    /// An `ensure` is parked after its create.
+    Parked,
+}
+
 /// The modelled pool.
 #[derive(Debug)]
 struct Pool {
     free: u64,
     volumes: BTreeMap<WorkloadId, Volume>,
     volumes_created: usize,
-    /// Workloads whose next `ensure` parks before activation.
-    pause_armed: Vec<WorkloadId>,
-    /// Workloads with an `ensure` parked before activation.
-    parked: Vec<WorkloadId>,
+    /// Per-workload pause: armed for the next `ensure`, or parked before activation.
+    pauses: BTreeMap<WorkloadId, PauseState>,
     fail_next_command: bool,
     fail_next_claim_state: bool,
 }
@@ -75,6 +79,7 @@ struct Pool {
 pub struct SimVolumeBacking {
     pool: Arc<Mutex<Pool>>,
     support: Arc<CallSupport>,
+    ensure_resume: Arc<tokio::sync::Notify>,
 }
 
 /// Test support (launch supersession acceptance tests): counts the port calls the driver makes,
@@ -87,19 +92,13 @@ struct CallSupport {
     claim_state_parked: AtomicBool,
     claim_state_release: tokio::sync::Notify,
     claim_state_released: AtomicBool,
-    ensure_resume: tokio::sync::Notify,
 }
 
 /// The device-mapper node of the workload's volume: `/dev/mapper/overdrive-ovd--<hex>`, the dm
 /// name `<vg>-<lv>` with the `-` of the `ovd-` prefix doubled (the hex has none).
 fn device_node(workload: &WorkloadId) -> PathBuf {
     let digest = Sha256::digest(workload.as_str().as_bytes());
-    let mut hex = String::with_capacity(digest.len() * 2);
-    for byte in digest {
-        // Writing into a `String` cannot fail.
-        let _ = write!(hex, "{byte:02x}");
-    }
-    PathBuf::from(format!("/dev/mapper/overdrive-ovd--{}", &hex[..NAME_HEX_CHARS]))
+    PathBuf::from(format!("/dev/mapper/overdrive-ovd--{}", hex::encode(&digest[..16])))
 }
 
 fn command_failure(operation: VolumeOperation) -> VolumeBackingError {
@@ -117,12 +116,15 @@ impl SimVolumeBacking {
             free: capacity.bytes(),
             volumes: BTreeMap::new(),
             volumes_created: 0,
-            pause_armed: Vec::new(),
-            parked: Vec::new(),
+            pauses: BTreeMap::new(),
             fail_next_command: false,
             fail_next_claim_state: false,
         };
-        Self { pool: Arc::new(Mutex::new(pool)), support: Arc::new(CallSupport::default()) }
+        Self {
+            pool: Arc::new(Mutex::new(pool)),
+            support: Arc::new(CallSupport::default()),
+            ensure_resume: Arc::new(tokio::sync::Notify::new()),
+        }
     }
 
     /// Test support: how many times the driver called `ensure` (every call counts, whatever its
@@ -166,8 +168,11 @@ impl SimVolumeBacking {
 
     /// A VMM opens the workload's device exclusively (the claim becomes `Held`). A volume with no
     /// device node (absent or inactive) cannot be opened: the call changes nothing.
+    ///
+    /// # Panics
+    /// If the claim is already held: a real second `O_EXCL` open fails `EBUSY`.
     pub fn hold_claim(&self, workload: &WorkloadId) {
-        self.set_holder(workload, Holder::Held);
+        self.set_holder(workload, Holder::WhileLive(Arc::new(|| true)));
     }
 
     /// A VMM process opens the workload's device and holds its claim for as long as that process
@@ -176,6 +181,9 @@ impl SimVolumeBacking {
     /// to a `SimVmm` process with `move || vmm.is_live(pid)`. Models a VMM whose lifetime owns the
     /// claim, such as the orphan a crashed control plane leaves behind; `hold_claim` plus `drain`
     /// models a claim that outlives its holder. Test support: no port method carries it.
+    ///
+    /// # Panics
+    /// If the claim is already held: a real second `O_EXCL` open fails `EBUSY`.
     pub fn hold_claim_while_live(
         &self,
         workload: &WorkloadId,
@@ -194,18 +202,14 @@ impl SimVolumeBacking {
     /// The next `ensure` for the workload completes only its create effect and parks before
     /// activation (the conformance driver steps `LaunchEnsureCreate` / `LaunchEnsureActivate`).
     pub fn pause_ensure_after_create(&self, workload: &WorkloadId) {
-        self.pool.lock().pause_armed.push(workload.clone());
+        self.pool.lock().pauses.insert(workload.clone(), PauseState::Armed);
     }
 
     /// Release a parked `ensure` so it activates the volume. A pause armed but not yet reached is
     /// disarmed.
     pub fn resume_ensure(&self, workload: &WorkloadId) {
-        {
-            let mut pool = self.pool.lock();
-            pool.pause_armed.retain(|armed| armed != workload);
-            pool.parked.retain(|parked| parked != workload);
-        }
-        self.support.ensure_resume.notify_waiters();
+        self.pool.lock().pauses.remove(workload);
+        self.ensure_resume.notify_waiters();
     }
 
     /// The pool has no free extent (the model's `PoolFull`).
@@ -237,11 +241,19 @@ impl SimVolumeBacking {
     /// conformance driver waits on it to step `LaunchEnsureCreate`.
     #[must_use]
     pub fn ensure_parked(&self, workload: &WorkloadId) -> bool {
-        self.pool.lock().parked.contains(workload)
+        self.pool.lock().pauses.get(workload) == Some(&PauseState::Parked)
     }
 
     fn set_holder(&self, workload: &WorkloadId, holder: Holder) {
         if let Some(volume) = self.pool.lock().volumes.get_mut(workload).filter(|v| v.active) {
+            let held = match &volume.holder {
+                Holder::None => false,
+                Holder::WhileLive(live) => live(),
+            };
+            assert!(
+                !held,
+                "the claim on {workload} is already held: a second O_EXCL open is EBUSY"
+            );
             volume.holder = holder;
         }
     }
@@ -253,7 +265,9 @@ impl SimVolumeBacking {
         size: VolumeSize,
     ) -> Result<(), VolumeBackingError> {
         let mut pool = self.pool.lock();
-        if std::mem::take(&mut pool.fail_next_command) {
+        // An armed fault lands on the next command the ensure reaches. A scripted pause means the
+        // test places the fault inside the parked window, so it lands on the activate.
+        if !pool.pauses.contains_key(workload) && std::mem::take(&mut pool.fail_next_command) {
             return Err(command_failure(VolumeOperation::Report));
         }
         if pool.volumes.contains_key(workload) {
@@ -276,20 +290,54 @@ impl SimVolumeBacking {
     async fn park_if_armed(&self, workload: &WorkloadId) {
         {
             let mut pool = self.pool.lock();
-            let Some(position) = pool.pause_armed.iter().position(|armed| armed == workload) else {
-                return;
-            };
-            pool.pause_armed.remove(position);
-            pool.parked.push(workload.clone());
+            match pool.pauses.get_mut(workload) {
+                Some(state @ PauseState::Armed) => *state = PauseState::Parked,
+                _ => return,
+            }
         }
+        let _unpark = UnparkOnDrop { pool: &self.pool, workload };
         loop {
-            let resumed = self.support.ensure_resume.notified();
+            let resumed = self.ensure_resume.notified();
             tokio::pin!(resumed);
             resumed.as_mut().enable();
             if !self.ensure_parked(workload) {
                 return;
             }
             resumed.await;
+        }
+    }
+
+    /// The activate step of `ensure`: an armed fault fails it, else the volume becomes active.
+    fn activate(&self, workload: &WorkloadId) -> Result<(), VolumeBackingError> {
+        let mut pool = self.pool.lock();
+        if std::mem::take(&mut pool.fail_next_command) {
+            return Err(command_failure(VolumeOperation::Activate));
+        }
+        if let Some(volume) = pool.volumes.get_mut(workload) {
+            volume.active = true;
+        }
+        drop(pool);
+        Ok(())
+    }
+
+    /// A failed `ensure` leaves no pause armed for the workload.
+    fn disarm(&self, workload: &WorkloadId) {
+        self.pool.lock().pauses.remove(workload);
+    }
+}
+
+/// Clears a parked entry when the parked `ensure` future is dropped, so a dropped `ensure` reads
+/// as not parked.
+struct UnparkOnDrop<'a> {
+    pool: &'a Mutex<Pool>,
+    workload: &'a WorkloadId,
+}
+
+impl Drop for UnparkOnDrop<'_> {
+    fn drop(&mut self) {
+        let mut pool = self.pool.lock();
+        if pool.pauses.get(self.workload) == Some(&PauseState::Parked) {
+            pool.pauses.remove(self.workload);
         }
     }
 }
@@ -302,11 +350,12 @@ impl VolumeBacking for SimVolumeBacking {
         size: VolumeSize,
     ) -> Result<PathBuf, VolumeBackingError> {
         self.support.ensure_calls.fetch_add(1, Ordering::SeqCst);
-        self.report_and_create(workload, size)?;
-        self.park_if_armed(workload).await;
-        if let Some(volume) = self.pool.lock().volumes.get_mut(workload) {
-            volume.active = true;
+        if let Err(error) = self.report_and_create(workload, size) {
+            self.disarm(workload);
+            return Err(error);
         }
+        self.park_if_armed(workload).await;
+        self.activate(workload)?;
         Ok(device_node(workload))
     }
 
@@ -337,7 +386,6 @@ impl VolumeBacking for SimVolumeBacking {
         };
         let held = match holder {
             Holder::None => false,
-            Holder::Held => true,
             Holder::WhileLive(live) => live(),
         };
         Ok(if held { ClaimState::Held } else { ClaimState::Free })

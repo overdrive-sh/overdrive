@@ -2681,6 +2681,7 @@ dependencies = [
  "color-eyre",
  "eyre",
  "futures",
+ "hex",
  "libc",
  "overdrive-control-plane",
  "overdrive-core",
