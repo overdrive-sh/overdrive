@@ -86,7 +86,7 @@ consecutive unchanged steps, cap 4096, a clear panic at the cap); it uses no fix
 **Boot gate** (`crates/overdrive-cli/tests/integration/volume_boot_probe.rs`, Tier 3 placement, a real in-process `serve` with the probe port replaced):
 S-VOL-BOOT-1..4 are one table-driven test, `sad_a_broken_volume_pool_refuses_startup`: each ADR-0314 scenario refuses startup naming the probe
 (`health.startup.refused`, reason `volume_backing.probe`), independent of VM capability (injected `VolumeProbeDetail`: `CommandFailed` exit 4, 5 and none,
-`NodeMissing`); S-VOL-BOOT-5 no labelled partition boots and logs `volume_backing.not_composed` (boundary 6); S-VOL-BOOT-6 a healthy pool boots clean (GUARD);
+`NodeMissing`, and `Io` for the `sysfs_unreadable` row, P-5: a sysfs read failure refuses startup); S-VOL-BOOT-5 no labelled partition boots and logs `volume_backing.not_composed` (boundary 6); S-VOL-BOOT-6 a healthy pool boots clean (GUARD);
 S-VOL-BOOT-7 (H2, `a_deployed_volume_workload_launches_through_the_composed_volume_pool`, `nested-launch` profile, `kvm-tests`): `serve` over a composed
 `SimVolumePoolProbe` deploys a `[vm.volume]` workload and the recording `Vmm` receives the volume attachment through `run_server` -> `compose_volume_backing` -> `VmDriver::new(volumes)`.
 All PENDING except BOOT-6.

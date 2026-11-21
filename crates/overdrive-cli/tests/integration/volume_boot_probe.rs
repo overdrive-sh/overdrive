@@ -144,7 +144,7 @@ async fn assert_refused(row: &str, scenario: VolumeProbeScenario, typed_detail: 
 /// ADR-0314 scenarios 1 to 4, one table, each row one real in-process serve run in turn: the
 /// `lvm` tools or device-mapper are unusable (exit 4); the volume group is missing (exit 5); the
 /// scratch volume could not be created or its node never appeared; the scratch volume could not
-/// be removed (no exit status). Every row's failure message names the row.
+/// be removed (no exit status); reading the block-device listing in sysfs failed (an `Io` detail). Every row's failure message names the row.
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "current_thread")]
@@ -180,6 +180,14 @@ async fn sad_a_broken_volume_pool_refuses_startup() {
                 exit_status: None,
                 stderr: "lvremove killed by a signal".to_owned(),
             },
+        ),
+        (
+            "sysfs_unreadable",
+            VolumeProbeScenario::SysfsUnreadable,
+            VolumeProbeDetail::Io(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "/sys/class/block unreadable",
+            )),
         ),
     ];
     for (row, scenario, detail) in rows {
