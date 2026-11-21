@@ -46,7 +46,6 @@ proptest! {
     /// `for_workload(w).workload_id() == Some(w)` for every valid workload, and
     /// the identity is exactly `spiffe://overdrive.local/workload/<w>`.
     #[test]
-    #[should_panic(expected = "SpiffeId::for_workload is not delivered yet")]
     fn a_workload_identity_round_trips_to_its_workload(workload in workload_labels()) {
         let identity = SpiffeId::for_workload(&workload);
         prop_assert_eq!(
@@ -60,7 +59,6 @@ proptest! {
     /// workload identity: `workload_id()` is `None`, there is no parser of the
     /// old shape (DD-5: greenfield single cut).
     #[test]
-    #[should_panic(expected = "SpiffeId::workload_id is not delivered yet")]
     fn the_superseded_allocation_shaped_identity_names_no_workload(
         workload in workload_labels(),
         alloc in allocation_labels(),
@@ -77,7 +75,6 @@ proptest! {
 /// The concrete wire shape: workload `payments` is
 /// `spiffe://overdrive.local/workload/payments`, and the identity names it back.
 #[test]
-#[should_panic(expected = "SpiffeId::for_workload is not delivered yet")]
 fn the_payments_workload_has_the_documented_identity() {
     let workload = WorkloadId::new("payments").expect("valid workload");
     let identity = SpiffeId::for_workload(&workload);
@@ -89,7 +86,6 @@ fn the_payments_workload_has_the_documented_identity() {
 /// the gateway identity, an empty or invalid label, extra segments, other path
 /// families.
 #[test]
-#[should_panic(expected = "SpiffeId::workload_id is not delivered yet")]
 fn identities_that_are_not_exactly_a_workload_path_name_no_workload() {
     // Build every identity first: a rejection by `SpiffeId::new` fails here, on
     // the input, never masked by the pending `workload_id` scaffold.

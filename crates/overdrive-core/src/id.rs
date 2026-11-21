@@ -347,14 +347,19 @@ impl SpiffeId {
     /// `spiffe://overdrive.local/workload/<workload>`, shared by every
     /// allocation of that workload (ADR-0344).
     ///
-    /// SCAFFOLD: true. The exact signature is pinned by the
-    /// `workload-spiffe-identity` feature delta (Interface contracts); the body
-    /// is delivered by that feature's DELIVER wave. DISTILL's acceptance tests
-    /// pin the behaviour with a matched `#[should_panic]`.
+    /// Infallible by construction: [`WorkloadId`] is an already-validated label
+    /// newtype, so the fixed `spiffe://overdrive.local/workload/...` shape always
+    /// has a valid scheme, trust domain and non-empty path.
     #[must_use]
-    #[expect(clippy::todo, reason = "RED scaffold: body delivered by workload-spiffe-identity")]
-    pub fn for_workload(_workload: &WorkloadId) -> Self {
-        todo!("RED scaffold: SpiffeId::for_workload is not delivered yet")
+    pub fn for_workload(workload: &WorkloadId) -> Self {
+        let raw = format!("spiffe://overdrive.local/workload/{}", workload.as_str());
+        Self::new(&raw).unwrap_or_else(|_| {
+            unreachable!(
+                "for_workload interpolates an already-validated WorkloadId into the fixed \
+                 spiffe://overdrive.local/workload/... shape; SpiffeId::new cannot \
+                 reject a valid scheme + non-empty trust domain + non-empty path"
+            )
+        })
     }
 
     /// The workload this identity names: `Some` iff the path is exactly
@@ -362,11 +367,12 @@ impl SpiffeId {
     /// gateway identity, for any other shape and for a path with extra
     /// segments (ADR-0344).
     ///
-    /// SCAFFOLD: true. See [`SpiffeId::for_workload`].
+    /// The label is validated by [`WorkloadId`]'s own grammar, which forbids
+    /// `/`, so an extra segment (such as the superseded `/alloc/<a>` shape)
+    /// fails the parse and no separate separator logic is needed.
     #[must_use]
-    #[expect(clippy::todo, reason = "RED scaffold: body delivered by workload-spiffe-identity")]
     pub fn workload_id(&self) -> Option<WorkloadId> {
-        todo!("RED scaffold: SpiffeId::workload_id is not delivered yet")
+        self.path().strip_prefix("/workload/")?.parse().ok()
     }
 
     /// Derive the dedicated non-allocation public-ingress gateway identity:
