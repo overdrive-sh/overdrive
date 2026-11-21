@@ -55,9 +55,6 @@ fn open_exclusive(device: &Path) -> std::fs::File {
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[test]
-#[should_panic(
-    expected = "the guest's pool is found (ensure_creates_the_declared_size_activated_under_the_hashed_name)"
-)]
 fn ensure_creates_the_declared_size_activated_under_the_hashed_name() {
     runtime().block_on(async {
         let backing =
@@ -94,9 +91,6 @@ fn ensure_creates_the_declared_size_activated_under_the_hashed_name() {
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[test]
-#[should_panic(
-    expected = "the guest's pool is found (ensure_is_idempotent_and_does_not_compare_the_existing_size)"
-)]
 fn ensure_is_idempotent_and_does_not_compare_the_existing_size() {
     runtime().block_on(async {
         let backing =
@@ -117,9 +111,6 @@ fn ensure_is_idempotent_and_does_not_compare_the_existing_size() {
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[test]
-#[should_panic(
-    expected = "the guest's pool is found (an_inactive_volume_is_activated_by_ensure_and_reads_not_found_until_then)"
-)]
 fn an_inactive_volume_is_activated_by_ensure_and_reads_not_found_until_then() {
     runtime().block_on(async {
         let backing = probed_backing(
@@ -144,9 +135,6 @@ fn an_inactive_volume_is_activated_by_ensure_and_reads_not_found_until_then() {
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[test]
-#[should_panic(
-    expected = "the guest's pool is found (claim_state_reports_held_free_and_not_found_as_the_kernel_does)"
-)]
 fn claim_state_reports_held_free_and_not_found_as_the_kernel_does() {
     runtime().block_on(async {
         let backing =
@@ -174,9 +162,6 @@ fn claim_state_reports_held_free_and_not_found_as_the_kernel_does() {
 /// CONTRACT_SHAPE: pure-function.
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[test]
-#[should_panic(
-    expected = "the guest's pool is found (sad_claim_state_of_an_absent_volume_is_not_found)"
-)]
 fn sad_claim_state_of_an_absent_volume_is_not_found() {
     runtime().block_on(async {
         let backing = probed_backing("sad_claim_state_of_an_absent_volume_is_not_found").await;
@@ -192,9 +177,6 @@ fn sad_claim_state_of_an_absent_volume_is_not_found() {
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[test]
-#[should_panic(
-    expected = "the guest's pool is found (sad_insufficient_space_names_both_figures_and_creates_nothing)"
-)]
 fn sad_insufficient_space_names_both_figures_and_creates_nothing() {
     runtime().block_on(async {
         let backing =
@@ -219,9 +201,6 @@ fn sad_insufficient_space_names_both_figures_and_creates_nothing() {
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[test]
-#[should_panic(
-    expected = "the guest's pool is found (sad_a_failing_lvm_command_is_a_pool_command_error)"
-)]
 fn sad_a_failing_lvm_command_is_a_pool_command_error() {
     runtime().block_on(async {
         let backing = probed_backing("sad_a_failing_lvm_command_is_a_pool_command_error").await;
@@ -263,15 +242,14 @@ fn sad_a_failing_lvm_command_is_a_pool_command_error() {
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[test]
-#[should_panic(
-    expected = "the guest's pool is found (sad_an_ensure_blocked_on_the_group_lock_times_out_as_a_command_failure)"
-)]
 fn sad_an_ensure_blocked_on_the_group_lock_times_out_as_a_command_failure() {
     runtime().block_on(async {
         let backing = probed_backing("sad_an_ensure_blocked_on_the_group_lock_times_out_as_a_command_failure").await;
         std::fs::create_dir_all("/run/lock/lvm").expect("lock dir");
         let mut holder = std::process::Command::new("flock")
-            .args(["/run/lock/lvm/V_overdrive", "sleep", "90"])
+            // `--no-fork`: flock execs `sleep` in place, so the process the test kills is the one
+            // holding the lock. Without it `sleep` is a child that outlives the kill and keeps it.
+            .args(["--no-fork", "/run/lock/lvm/V_overdrive", "sleep", "90"])
             .spawn()
             .expect("hold the group lock (needs flock in the guest)");
         tokio::time::sleep(Duration::from_millis(200)).await;
@@ -312,9 +290,6 @@ fn sad_an_ensure_blocked_on_the_group_lock_times_out_as_a_command_failure() {
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[test]
-#[should_panic(
-    expected = "the guest's pool is found (two_workloads_ensured_at_once_each_get_their_own_volume)"
-)]
 fn two_workloads_ensured_at_once_each_get_their_own_volume() {
     runtime().block_on(async {
         let backing =

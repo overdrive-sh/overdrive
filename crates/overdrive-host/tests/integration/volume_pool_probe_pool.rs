@@ -60,9 +60,6 @@ fn lvm_binary() -> String {
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[test]
-#[should_panic(
-    expected = "the labelled partition is found (a_healthy_pool_probes_clean_and_leaves_nothing_behind)"
-)]
 fn a_healthy_pool_probes_clean_and_leaves_nothing_behind() {
     let free_before = free_bytes();
     let probed =
@@ -80,9 +77,6 @@ fn a_healthy_pool_probes_clean_and_leaves_nothing_behind() {
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[test]
-#[should_panic(
-    expected = "the labelled partition is found (a_scratch_volume_left_by_a_crashed_probe_is_removed_first)"
-)]
 fn a_scratch_volume_left_by_a_crashed_probe_is_removed_first() {
     lvm_ok(&["lvcreate", "-L", "4m", "-n", "ovd-probe-leftover", "overdrive"]);
     lvm_ok(&["lvchange", "-an", "overdrive/ovd-probe-leftover"]);
@@ -101,7 +95,6 @@ fn a_scratch_volume_left_by_a_crashed_probe_is_removed_first() {
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[test]
-#[should_panic(expected = "the labelled partition is found (the_probe_touches_no_workload_volume)")]
 fn the_probe_touches_no_workload_volume() {
     lvm_ok(&["lvcreate", "-L", "4m", "-n", "ovd-0123456789abcdef0123456789abcdef", "overdrive"]);
     lvm_ok(&["lvchange", "-an", "overdrive/ovd-0123456789abcdef0123456789abcdef"]);
@@ -119,9 +112,6 @@ fn the_probe_touches_no_workload_volume() {
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[test]
-#[should_panic(
-    expected = "the labelled partition is found (a_pool_with_no_free_extent_still_probes_clean)"
-)]
 fn a_pool_with_no_free_extent_still_probes_clean() {
     let free = free_bytes();
     lvm_ok(&[
@@ -145,9 +135,6 @@ fn a_pool_with_no_free_extent_still_probes_clean() {
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[test]
-#[should_panic(
-    expected = "a broken pool must fail its probe (sad_an_unusable_lvm_tool_fails_the_probe_tools_or_device_mapper_unusable)"
-)]
 fn sad_an_unusable_lvm_tool_fails_the_probe_tools_or_device_mapper_unusable() {
     let _unusable = BindOver::new("/dev/null", &lvm_binary());
     let error =
@@ -164,9 +151,6 @@ fn sad_an_unusable_lvm_tool_fails_the_probe_tools_or_device_mapper_unusable() {
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[test]
-#[should_panic(
-    expected = "a broken pool must fail its probe (sad_a_missing_volume_group_fails_the_probe_volume_group_missing)"
-)]
 fn sad_a_missing_volume_group_fails_the_probe_volume_group_missing() {
     lvm_ok(&["vgrename", "overdrive", "overdrive-renamed"]);
     let error = probe_error("sad_a_missing_volume_group_fails_the_probe_volume_group_missing");
@@ -183,9 +167,6 @@ fn sad_a_missing_volume_group_fails_the_probe_volume_group_missing() {
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[test]
-#[should_panic(
-    expected = "a broken pool must fail its probe (sad_an_ambiguous_label_fails_the_probe_volume_group_missing_naming_the_ambiguity)"
-)]
 fn sad_an_ambiguous_label_fails_the_probe_volume_group_missing_naming_the_ambiguity() {
     let part = super::volume_pool_support::labelled_partition();
     let disk = part
@@ -214,9 +195,6 @@ fn sad_an_ambiguous_label_fails_the_probe_volume_group_missing_naming_the_ambigu
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[test]
-#[should_panic(
-    expected = "a broken pool must fail its probe (sad_a_scratch_node_that_cannot_appear_fails_the_probe_scratch_create_or_node_failed)"
-)]
 fn sad_a_scratch_node_that_cannot_appear_fails_the_probe_scratch_create_or_node_failed() {
     let _read_only = {
         let bind = BindOver::new("/dev/mapper", "/dev/mapper");
@@ -246,9 +224,6 @@ fn sad_a_scratch_node_that_cannot_appear_fails_the_probe_scratch_create_or_node_
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[test]
-#[should_panic(
-    expected = "a broken pool must fail its probe (sad_a_scratch_volume_held_open_fails_the_probe_scratch_remove_failed)"
-)]
 fn sad_a_scratch_volume_held_open_fails_the_probe_scratch_remove_failed() {
     let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
     let watcher = {
