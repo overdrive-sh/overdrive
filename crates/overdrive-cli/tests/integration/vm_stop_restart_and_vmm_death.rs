@@ -849,6 +849,36 @@ fn rootfs_fingerprint(path: &Path) -> (u64, u64) {
     (len, hasher.finish())
 }
 
+/// SHA-256 of `bytes`, through the same `sha256sum` the fixture inventory uses
+/// for files.
+fn sha256sum_bytes(bytes: &[u8]) -> String {
+    use std::io::Write as _;
+    use std::process::Stdio;
+    let mut child = Command::new("sha256sum")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn sha256sum for native fixture inventory");
+    child
+        .stdin
+        .take()
+        .expect("sha256sum stdin is piped")
+        .write_all(bytes)
+        .expect("feed sha256sum the embedded source");
+    let output = child.wait_with_output().expect("wait for sha256sum");
+    assert!(
+        output.status.success(),
+        "sha256sum failed for embedded source: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout)
+        .split_whitespace()
+        .next()
+        .expect("sha256sum emits a digest")
+        .to_owned()
+}
+
 fn sha256sum_file(path: &Path) -> String {
     let output = Command::new("sha256sum")
         .arg(path)
@@ -5203,9 +5233,12 @@ async fn native_lifecycle_profiles_meet_stage_targets_without_dropping_trials() 
         .find(|line| line.starts_with("MemTotal:"))
         .unwrap_or("MemTotal: unavailable")
         .to_owned();
+    // The body runs inside a disposable guest that stages only the guest kit's
+    // declared trees, so the checkout's source path does not exist there. The
+    // recorded source identity is the source this binary was compiled from.
     let source_file = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests/integration/vm_stop_restart_and_vmm_death.rs");
-    let source_sha256 = sha256sum_file(&source_file);
+    let source_sha256 = sha256sum_bytes(include_bytes!("vm_stop_restart_and_vmm_death.rs"));
     let in_process_binary_sha256 = sha256sum_file(&current_test_binary);
     let kernel_sha256 = sha256sum_file(&fixture.kernel_path);
     let rootfs_sha256 = sha256sum_file(&profile_rootfs);
