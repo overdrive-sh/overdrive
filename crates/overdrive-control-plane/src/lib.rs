@@ -3579,8 +3579,7 @@ const OVERDRIVE_VMM_RLIMIT_NOFILE: u64 = 256;
 
 /// Boot step: probe the node's volume pool (GH #348, ADR-0314). `None` logs
 /// `volume_backing.not_composed`; a present but broken pool refuses startup with
-/// `health.startup.refused`, reason `volume_backing.probe`. The decision does not
-/// depend on the node's VM capability.
+/// `health.startup.refused`, reason `volume_backing.probe`.
 async fn compose_volume_backing(
     probe: &dyn overdrive_core::traits::volume_backing::VolumePoolProbe,
 ) -> std::result::Result<
@@ -3597,8 +3596,8 @@ async fn compose_volume_backing(
             Ok(None)
         }
         Err(source) => {
-            // Recorded as a string value (not `%source`) so the event carries the
-            // probe error's words verbatim, including a quoted device path.
+            // Recorded as a str so the test visitor's quote-trimming cannot alter
+            // a detail that ends in a quoted path.
             let cause = source.to_string();
             tracing::error!(
                 name: "health.startup.refused",
