@@ -4057,7 +4057,7 @@ components:
       additionalProperties: false
     VolumeBody:
       type: object
-      description: The declared volume of a workload, as the operator wrote it.
+      description: The declared volume of a workload, with its size in the canonical form.
       required:
       - size
       properties:

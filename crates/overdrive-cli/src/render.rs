@@ -33,6 +33,8 @@ pub mod schedule;
 // `#[cfg(test)] mod tests`, so production code AND its tests were
 // deleted together in the same commit.
 
+use overdrive_core::vm::config::VOLUME_DISK_SERIAL;
+
 use crate::commands::cluster::ClusterStatusOutput;
 use crate::commands::deploy::{DeployOutput, RouteDeployOutput, StopOutput};
 use crate::commands::node::NodeListOutput;
@@ -641,7 +643,8 @@ fn render_volume_section(
     let Some(volume) = volume else {
         return;
     };
-    let _ = writeln!(out, "Volume:        {} (guest disk: virtio serial ovd-volume)", volume.size);
+    let _ =
+        writeln!(out, "Volume  {} (guest disk: virtio serial {VOLUME_DISK_SERIAL})", volume.size);
 }
 
 /// Append the operator-facing `Listeners:` section to `out` IFF the

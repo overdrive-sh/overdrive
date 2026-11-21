@@ -1516,6 +1516,7 @@ async fn genuine_pre_change_contract(
             probes: Vec::new(),
             probe_results: Vec::new(),
             capacity_wait: None,
+            volume: None,
         },
     }
 }

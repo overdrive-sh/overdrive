@@ -1289,7 +1289,7 @@ pub async fn alloc_status(
 }
 
 /// Project the workload's declared `[vm.volume]` from its persisted intent
-/// onto the wire, in the `Display` spelling the operator wrote.
+/// onto the wire, in the canonical `Display` form.
 fn declared_volume(intent: &WorkloadIntent) -> Option<api::VolumeBody> {
     let driver = match intent {
         WorkloadIntent::Job(job) => &job.driver,

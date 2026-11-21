@@ -376,7 +376,7 @@ pub struct AllocStatusResponse {
     pub volume: Option<VolumeBody>,
 }
 
-/// The declared volume of a workload, as the operator wrote it.
+/// The declared volume of a workload, with its size in the canonical form.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub struct VolumeBody {
     /// The declared size in its canonical `Display` spelling (for example
