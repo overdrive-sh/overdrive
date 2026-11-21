@@ -2228,3 +2228,123 @@ async fn writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed
     // completion only; neither a forced SimVmm ending nor an unobservable
     // cleanup result is promoted to a healthy native measurement here.
 }
+
+// ---------------------------------------------------------------------
+// ADR-0103 — the guest's EXIT after SHUTDOWN is received, not refused.
+// ---------------------------------------------------------------------
+
+/// A stop in flight whose VMM termination is held open, with the guest
+/// connected and `SHUTDOWN` already delivered to it. The guest side is the
+/// real beacon wire: `GuestSession::write` refuses (panics) when the host has
+/// closed the connection, exactly as the kernel fails a write to a closed peer.
+struct StopAwaitingGuestExit {
+    driver: VmDriver,
+    sim: SimVmm,
+    vmm: RecordsTermination,
+    beacon: BeaconHarness,
+    guest: GuestSession,
+    handle: AllocationHandle,
+    key: overdrive_core::vm::beacon::BeaconConnKey,
+    exit_rx: tokio::sync::mpsc::Receiver<ExitEvent>,
+    stop: tokio::task::JoinHandle<Result<(), DriverError>>,
+    _tmp: TempDir,
+}
+
+async fn stop_with_shutdown_delivered(name: &str) -> StopAwaitingGuestExit {
+    let tmp = TempDir::new().expect("tempdir");
+    let layout = build_layout(&tmp);
+    let sim = SimVmm::new();
+    let vmm = RecordsTermination::new(sim.clone(), true);
+    let (driver, _clock, beacon) =
+        build_driver(&sim, std::sync::Arc::new(vmm.clone()), layout).await;
+    let alloc = AllocationId::new(name).expect("valid alloc id");
+    let spec = build_spec(&alloc, &tmp);
+    let key = beacon_key(&spec);
+    let mut exit_rx = driver.take_exit_receiver().expect("exit receiver available exactly once");
+    let (handle, mut guest) = start_with_beacon_accepted(&driver, &spec, &beacon).await;
+
+    let stop_driver = driver.clone();
+    let stop_handle = handle.clone();
+    let stop = tokio::spawn(async move { stop_driver.stop(&stop_handle).await });
+    vmm.wait_until_entered().await;
+
+    let shutdown = tokio::time::timeout(Duration::from_secs(1), guest.next_line())
+        .await
+        .expect("the host delivers SHUTDOWN")
+        .expect("SHUTDOWN is the first host line");
+    assert_eq!(shutdown, "SHUTDOWN");
+    // Nothing but the stop has run: no exit has been reported yet.
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), exit_rx.recv()).await.is_err(),
+        "no ExitEvent before the guest reports"
+    );
+    StopAwaitingGuestExit { driver, sim, vmm, beacon, guest, handle, key, exit_rx, stop, _tmp: tmp }
+}
+
+impl StopAwaitingGuestExit {
+    fn host_closed_socket(&self) -> bool {
+        self.beacon.io.beacon_socket_observation().closed_by_driver.contains(&self.key)
+    }
+
+    /// The stop path owns the ending (`EndingInFlight`), so it emits no
+    /// `ExitEvent` of its own: the exit stream closes empty.
+    async fn finish_without_exit_event(mut self) {
+        self.driver.release_supervision(&self.handle.alloc);
+        drop(self.driver);
+        require_closed_exit_stream(&mut self.exit_rx).await;
+    }
+
+    /// The guest's lines the host had not read when it closed the socket.
+    fn unread_guest_lines(&self) -> Option<usize> {
+        self.beacon.io.guest_lines_unread_at_close(self.key)
+    }
+}
+
+/// The host keeps the beacon socket open after `SHUTDOWN`, so the guest's
+/// `EXIT` write succeeds and is consumed exactly once; the VMM leaves through
+/// the guest's own poweroff while its termination request is still pending, so
+/// `stop` never escalates to a forced kill.
+///
+/// Observable universe: the host-to-guest lines, whether the host closed the
+/// beacon socket, `SimVmm` liveness (ended by the guest's poweroff, not by
+/// `terminate`), the single `Vmm::terminate` request, the guest lines unread at
+/// close, and the exit-event stream. The permitted delta is: socket open until
+/// the guest's `EXIT`, then closed with nothing unread; VMM live -> dead by
+/// poweroff; no `ExitEvent` (the stop owns the ending).
+///
+/// CONTRACT_SHAPE: bounded-change.
+/// Outcome anchor: DISCUSS Elevator Pitch
+#[allow(
+    clippy::doc_markdown,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+)]
+#[tokio::test]
+async fn stop_keeps_the_beacon_open_so_the_guests_exit_after_shutdown_is_consumed() {
+    let mut s = stop_with_shutdown_delivered("alloc-stop-exit-after-shutdown").await;
+    let pid = s.handle.pid.expect("VmDriver populates pid");
+
+    assert!(
+        !s.host_closed_socket(),
+        "the host must not close the beacon socket before the guest's EXIT write"
+    );
+    // Fails (the connection is gone) if the host has already closed it.
+    s.guest.write("EXIT 0");
+    let session = tokio::time::timeout(Duration::from_secs(1), s.guest.session_to_end())
+        .await
+        .expect("the host closes only after consuming the guest's EXIT");
+    assert_eq!(session, vec!["SHUTDOWN".to_owned()], "SHUTDOWN is the only host line");
+    assert!(s.host_closed_socket(), "the host closes once EXIT was consumed");
+
+    // The guest powers off by itself; the pending termination request is
+    // never what ended the VMM.
+    assert!(!s.stop.is_finished(), "the held termination still owns stop completion");
+    assert!(s.sim.exit_process(pid, Some(0), None), "the guest powers the VMM off");
+    assert!(!s.sim.is_live(pid));
+    s.vmm.release();
+    let result = (&mut s.stop).await.expect("stop task joins");
+    assert!(result.is_ok(), "stop returns Ok without escalation: {result:?}");
+    s.vmm.assert_single_ten_second_grace();
+
+    assert_eq!(s.unread_guest_lines(), Some(0), "the guest's one EXIT line was consumed");
+    s.finish_without_exit_event().await;
+}
