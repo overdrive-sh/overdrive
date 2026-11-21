@@ -643,6 +643,14 @@ components:
             Per the Q1.A resolution 2026-05-15: per-listener lines do
             NOT carry a per-listener VIP — listeners are `(port, protocol)`
             only; the Service-level VIP lives at this top-level field.
+        volume:
+          oneOf:
+          - type: 'null'
+          - $ref: '#/components/schemas/VolumeBody'
+            description: |-
+              The node-local persistent volume the workload declares (GH #348,
+              ADR-0310), projected at read time from the workload intent; never
+              persisted. Additive: absent when the workload declares no volume.
         workload_id:
           type:
           - string
@@ -3878,6 +3886,7 @@ components:
         | `VmConfinementUnavailable { control, detail }` | cause | `VmDriver` — `VmmError::ConfinementUnavailable` join | NO — Slice 03 |
         | `VmGuestExitUnreported { vmm_exit_code, vmm_signal }` | cause | `VmDriver` — boot-race VMM-exit arm | yes |
         | `VmGuestCommandDispatchFailed { detail }` | cause | `VmDriver` — post-READY `EXEC` write failure | yes |
+        | `VmVolumeUnavailable { cause }` | cause | `TransitionReason::from(&DriverStartFailure)` maps a `VmStartFailure::VolumeUnavailable` start failure | NO — no driver constructs that failure yet |
 
         **Phase 2 emit-deferred variants**: `NoCapacity` is deferred until
         capacity accounting exists, and until 2026-08-11
@@ -4046,6 +4055,17 @@ components:
           type: string
           description: The declared size, `<uint>GiB` or `<uint>TiB`.
       additionalProperties: false
+    VolumeBody:
+      type: object
+      description: The declared volume of a workload, as the operator wrote it.
+      required:
+      - size
+      properties:
+        size:
+          type: string
+          description: |-
+            The declared size in its canonical `Display` spelling (for example
+            `40GiB`).
     VolumeOperation:
       type: string
       description: |-

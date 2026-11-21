@@ -113,7 +113,6 @@ async fn install_volume_service(state: &AppState) {
 /// in the `Display` form the operator wrote.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[should_panic(expected = "the response must carry the declared volume size")]
 async fn alloc_status_reports_the_declared_volume_size() {
     let tmp = TempDir::new().expect("tmpdir");
     let state = build_app_state(&tmp);

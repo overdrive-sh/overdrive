@@ -66,7 +66,7 @@ cargo xtask metal run -- examples/node-local-volume/run-example.sh run oversized
 
 ```bash
 overdrive deploy --detach examples/node-local-volume/volume-service.toml
-overdrive workload describe volume-notes     # Volume  1GiB (guest disk: virtio serial ovd-volume)
+overdrive workload describe volume-notes     # Volume:        1GiB (guest disk: virtio serial ovd-volume)
 overdrive workload restart volume-notes      # a replacement attaches the same volume
 overdrive job stop volume-notes              # the volume stays
 overdrive workload restart volume-notes      # resume: the same volume is attached again

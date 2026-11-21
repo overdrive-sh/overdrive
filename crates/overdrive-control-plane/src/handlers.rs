@@ -1284,7 +1284,20 @@ pub async fn alloc_status(
         probes,
         probe_results,
         capacity_wait: None,
+        volume: declared_volume(&intent),
     }))
+}
+
+/// Project the workload's declared `[vm.volume]` from its persisted intent
+/// onto the wire, in the `Display` spelling the operator wrote.
+fn declared_volume(intent: &WorkloadIntent) -> Option<api::VolumeBody> {
+    let driver = match intent {
+        WorkloadIntent::Job(job) => &job.driver,
+        WorkloadIntent::Service(svc) => &svc.driver,
+        WorkloadIntent::Schedule(sched) => &sched.job.driver,
+    };
+    let overdrive_core::aggregate::WorkloadDriver::Vm(vm) = driver;
+    vm.volume.as_ref().map(|volume| api::VolumeBody { size: volume.size.to_string() })
 }
 
 /// Flatten a Service aggregate's three per-role probe arrays into one

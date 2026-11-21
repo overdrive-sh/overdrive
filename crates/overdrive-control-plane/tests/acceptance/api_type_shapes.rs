@@ -284,6 +284,7 @@ fn alloc_status_response_round_trips_with_empty_and_populated_rows() {
         probes: vec![],
         probe_results: vec![],
         capacity_wait: None,
+        volume: None,
     };
     let wire = serde_json::to_string(&populated).expect("serialise populated AllocStatusResponse");
     let round_tripped: AllocStatusResponse =

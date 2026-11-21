@@ -154,6 +154,7 @@ fn status_fixture(kind: WorkloadKind, spec_digest: &str) -> WorkloadDescribeOutp
         probes: vec![],
         probe_results: vec![],
         capacity_wait: None,
+        volume: None,
     };
     WorkloadDescribeOutput {
         workload_id: "test-wl".to_string(),

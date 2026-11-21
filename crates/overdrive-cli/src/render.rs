@@ -267,6 +267,7 @@ pub fn workload_describe(out: &WorkloadDescribeOutput) -> String {
     // Service, `None` for Job/Schedule per ADR-0049 / #183); the line is
     // omitted entirely when absent.
     render_vip_section(&mut s, out.snapshot.vip.as_deref());
+    render_volume_section(&mut s, out.snapshot.volume.as_ref());
     // Listeners are an INTENT property carried on the snapshot envelope,
     // independent of allocations/convergence — render them at ANY
     // allocation count (including 0) so a pre-convergence UDP Service
@@ -627,6 +628,20 @@ fn render_vip_section(out: &mut String, vip: Option<&str>) {
         return;
     };
     let _ = writeln!(out, "VIP:           {vip}");
+}
+
+/// Append the operator-facing `Volume` line IFF the workload declares a
+/// node-local persistent volume. The guest disk serial is static text: the
+/// guest finds its volume by that fixed virtio serial.
+fn render_volume_section(
+    out: &mut String,
+    volume: Option<&overdrive_control_plane::api::VolumeBody>,
+) {
+    use std::fmt::Write as _;
+    let Some(volume) = volume else {
+        return;
+    };
+    let _ = writeln!(out, "Volume:        {} (guest disk: virtio serial ovd-volume)", volume.size);
 }
 
 /// Append the operator-facing `Listeners:` section to `out` IFF the

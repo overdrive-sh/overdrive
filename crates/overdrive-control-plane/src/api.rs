@@ -369,6 +369,19 @@ pub struct AllocStatusResponse {
     /// the workload is not waiting.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub capacity_wait: Option<CapacityWait>,
+    /// The node-local persistent volume the workload declares (GH #348,
+    /// ADR-0310), projected at read time from the workload intent; never
+    /// persisted. Additive: absent when the workload declares no volume.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub volume: Option<VolumeBody>,
+}
+
+/// The declared volume of a workload, as the operator wrote it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct VolumeBody {
+    /// The declared size in its canonical `Display` spelling (for example
+    /// `40GiB`).
+    pub size: String,
 }
 
 /// The capacity limit a workload's start is waiting on (ADR-0336).

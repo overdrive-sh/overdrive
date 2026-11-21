@@ -37,7 +37,6 @@ fn describe(volume: Option<Value>) -> String {
 /// A workload with a volume shows its size and the static guest-disk serial.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "the describe output must show the declared volume")]
 fn describe_shows_the_volume_size_and_guest_serial() {
     let text = describe(Some(json!({"size": "40GiB"})));
     assert!(
@@ -49,7 +48,6 @@ fn describe_shows_the_volume_size_and_guest_serial() {
 /// A larger size is shown in its canonical spelling, as the server sent it.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "the describe output must show the declared volume")]
 fn describe_shows_a_terabyte_volume_verbatim() {
     let text = describe(Some(json!({"size": "2TiB"})));
     assert!(

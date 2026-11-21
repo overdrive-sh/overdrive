@@ -101,6 +101,7 @@ fn fixture_response(
         probes: vec![],
         probe_results: vec![],
         capacity_wait: None,
+        volume: None,
     }
 }
 
