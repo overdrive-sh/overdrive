@@ -50,20 +50,124 @@ fn held_maps_to_the_typed_volume_reason() {
     );
 }
 
-/// The operator reads the volume, the cause and the remedy.
+/// Operator wording for one cause, as the operator reads it on the allocation's `Failed` row.
+fn wording(cause: VolumeUnavailableCause) -> String {
+    TransitionReason::VmVolumeUnavailable { cause }.human_readable()
+}
+
+/// Phrases that send the operator to a node-local command. The appliance has no SSH and no
+/// operator shell (CLAUDE.md), so none of these remedies can be performed.
+const NODE_LOCAL_REMEDIES: [&str; 7] = [
+    "lvm",
+    "lvextend",
+    "vgextend",
+    "on the node",
+    "check the pool",
+    "create the volume pool",
+    "free pool space",
+];
+
+/// The operator reads the volume, the cause and a remedy performable on the appliance: with no
+/// pool the node is re-provisioned with one (VD-4, ADR-0313).
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-fn the_operator_wording_names_the_volume_the_cause_and_the_remedy() {
-    let held = TransitionReason::VmVolumeUnavailable { cause: VolumeUnavailableCause::Held };
-    let absent =
-        TransitionReason::VmVolumeUnavailable { cause: VolumeUnavailableCause::PoolAbsent };
-    let (held_text, absent_text) = (held.human_readable(), absent.human_readable());
-    assert!(held_text.contains("volume"), "the volume wording must name the cause: {held_text}");
+fn the_pool_absent_wording_names_the_volume_the_cause_and_the_remedy() {
+    let text = wording(VolumeUnavailableCause::PoolAbsent);
+    let lower = text.to_lowercase();
     assert!(
-        absent_text.contains("volume") && absent_text.to_lowercase().contains("pool"),
-        "the volume wording must name the cause: {absent_text}"
+        lower.contains("volume") && lower.contains("no volume pool"),
+        "the pool-absent wording must name the volume and its cause: {text}"
     );
-    assert_ne!(held_text, absent_text, "each cause reads differently");
+    assert!(
+        lower.contains("re-provision"),
+        "the pool-absent wording must carry an appliance remedy (re-provision the node with a volume pool): {text}"
+    );
+}
+
+/// Both figures in their canonical forms, and a remedy performable on the appliance: declare a
+/// size no larger than the free space, or re-provision with a larger pool (L4: the pool only
+/// shrinks, nothing is ever deleted).
+/// CONTRACT_SHAPE: pure-function.
+#[test]
+fn the_insufficient_space_wording_names_both_figures_and_the_remedy() {
+    let text = wording(VolumeUnavailableCause::InsufficientSpace {
+        needed: volume_size_gib(40),
+        free: ByteCount::new(4_194_304),
+    });
+    let lower = text.to_lowercase();
+    assert!(
+        text.contains("40GiB") && text.contains("4194304B"),
+        "the insufficient-space wording must carry the declared size and the free bytes: {text}"
+    );
+    assert!(
+        lower.contains("smaller") && lower.contains("re-provision"),
+        "the insufficient-space wording must carry an appliance remedy (declare a smaller size, or re-provision with a larger pool): {text}"
+    );
+}
+
+/// The failed operation is named, and the remedy is re-provisioning if it persists (the launch
+/// is retried under the restart budget).
+/// CONTRACT_SHAPE: pure-function.
+#[test]
+fn the_command_failure_wording_names_the_operation_and_the_remedy() {
+    for operation in [
+        VolumeOperation::Report,
+        VolumeOperation::Create,
+        VolumeOperation::Activate,
+        VolumeOperation::Claim,
+    ] {
+        let text = wording(VolumeUnavailableCause::PoolCommandFailed { operation });
+        let lower = text.to_lowercase();
+        assert!(
+            lower.contains("volume") && lower.contains(operation.as_str()),
+            "the command-failure wording must name the volume and the operation: {text}"
+        );
+        assert!(
+            lower.contains("retried") && lower.contains("re-provision"),
+            "the command-failure wording must carry an appliance remedy (retried under the restart budget; re-provision if it persists): {text}"
+        );
+    }
+}
+
+/// A claim held past the wait bound names the holder remedy with the verb the CLI has.
+/// CONTRACT_SHAPE: pure-function.
+#[test]
+fn the_held_wording_names_the_volume_the_cause_and_the_remedy() {
+    let text = wording(VolumeUnavailableCause::Held);
+    let lower = text.to_lowercase();
+    assert!(
+        lower.contains("volume") && lower.contains("held"),
+        "the held wording must name the volume and its cause: {text}"
+    );
+    assert!(
+        lower.contains("overdrive job stop"),
+        "the held wording must carry an appliance remedy (stop the workload holding the volume with `overdrive job stop`): {text}"
+    );
+}
+
+/// No cause tells the operator to run a node-local command: there is no operator shell.
+/// CONTRACT_SHAPE: pure-function.
+#[test]
+fn no_volume_wording_sends_the_operator_to_a_node_local_command() {
+    let causes = [
+        VolumeUnavailableCause::PoolAbsent,
+        VolumeUnavailableCause::InsufficientSpace {
+            needed: volume_size_gib(40),
+            free: ByteCount::new(4_194_304),
+        },
+        VolumeUnavailableCause::PoolCommandFailed { operation: VolumeOperation::Create },
+        VolumeUnavailableCause::Held,
+    ];
+    for cause in causes {
+        let text = wording(cause);
+        let lower = text.to_lowercase();
+        for phrase in NODE_LOCAL_REMEDIES {
+            assert!(
+                !lower.contains(phrase),
+                "the volume wording must not tell the operator to run a node-local command (`{phrase}`): {text}"
+            );
+        }
+    }
 }
 
 /// A volume failure is a failure, never a progress marker.

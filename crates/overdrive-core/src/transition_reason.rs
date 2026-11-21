@@ -69,6 +69,7 @@ use crate::volume::VolumeUnavailableCause;
 /// | `VmConfinementUnavailable { control, detail }` | cause | `VmDriver` — `VmmError::ConfinementUnavailable` join | NO — Slice 03 |
 /// | `VmGuestExitUnreported { vmm_exit_code, vmm_signal }` | cause | `VmDriver` — boot-race VMM-exit arm | yes |
 /// | `VmGuestCommandDispatchFailed { detail }` | cause | `VmDriver` — post-READY `EXEC` write failure | yes |
+/// | `VmVolumeUnavailable { cause }` | cause | `TransitionReason::from(&DriverStartFailure)` maps a `VmStartFailure::VolumeUnavailable` start failure | NO — no driver constructs that failure yet |
 ///
 /// **Phase 2 emit-deferred variants**: `NoCapacity` is deferred until
 /// capacity accounting exists, and until 2026-08-11
@@ -337,27 +338,27 @@ impl From<&DriverStartFailure> for TransitionReason {
 }
 
 /// Operator wording for a volume-unavailable cause: the volume, the cause and the remedy.
+///
+/// The appliance has no SSH and no operator shell, so every remedy is an action the operator can
+/// take from outside the node: re-provision it, change the declared size, or stop a workload.
 fn volume_unavailable_wording(cause: &VolumeUnavailableCause) -> String {
     match cause {
-        VolumeUnavailableCause::PoolAbsent => {
-            "VM volume unavailable: no volume pool is composed on this node; \
-             create the volume pool on the node, then redeploy"
-                .to_owned()
-        }
+        VolumeUnavailableCause::PoolAbsent => "VM volume unavailable: this node has no volume pool; \
+             re-provision this node with a volume pool, or deploy to a node that has one"
+            .to_owned(),
         VolumeUnavailableCause::InsufficientSpace { needed, free } => format!(
             "VM volume unavailable: the volume needs {needed} but the pool has only {free} free; \
-             free pool space or declare a smaller volume size, then redeploy",
+             declare a smaller size, no larger than the free space, or re-provision this node with a larger pool",
         ),
         VolumeUnavailableCause::PoolCommandFailed { operation } => format!(
-            "VM volume unavailable: the volume pool {} operation failed; \
-             check the pool's health on the node, then redeploy",
+            "VM volume unavailable: the {} operation on the volume failed; \
+             the start is retried under the restart budget, and if it keeps failing \
+             re-provision this node",
             operation.as_str(),
         ),
-        VolumeUnavailableCause::Held => {
-            "VM volume unavailable: the volume is still held by another launch past the wait bound; \
-             stop the workload holding the volume, then redeploy"
-                .to_owned()
-        }
+        VolumeUnavailableCause::Held => "VM volume unavailable: the volume is still held by another launch past the wait bound; \
+             stop the workload holding the volume with `overdrive job stop`, then redeploy"
+            .to_owned(),
     }
 }
 
