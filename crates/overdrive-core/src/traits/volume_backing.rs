@@ -151,6 +151,8 @@ pub trait VolumePoolProbe: Send + Sync {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum VolumeProbeScenario {
+    /// Reading `/sys/class/block` to discover the labelled partition failed.
+    SysfsUnreadable,
     /// The `lvm` tools or device-mapper are unusable (also: a labelled partition
     /// matched by more than one device is `VolumeGroupMissing`, not this).
     ToolsOrDeviceMapperUnusable,

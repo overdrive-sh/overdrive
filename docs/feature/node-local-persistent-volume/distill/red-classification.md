@@ -93,6 +93,10 @@ stop earlier and the marker text they stop on; "Moves" names the activation row.
 ### `overdrive-host/tests/integration/volume_pool_backing.rs` and `volume_pool_probe_pool.rs` (`volume-pool`)
 - Fails today: ignored until the pool exists (row 1). Once run, the probe scaffold reports no pool: the backing tests and the four healthy probe tests stop at a precondition ("the guest's pool is found (<test>)", "the labelled partition is found (<test>)"); the five sad probe tests stop at the headline ("a broken pool must fail its probe (<test>)").
 - Moves: row 1 removes the `#[ignore]`; row 6 (GREEN).
+- Added 2026-11-21 (P-4, P-5), both running pending tests in the `cgroup-default` guest (they need no pool, so no `#[ignore]`), each proven RED on its marker:
+  - `sad_a_probe_blocked_on_the_group_lock_times_out_as_an_io_failure` stops at the headline, "the probe must return within its 30 s deadline, the adapter's own": today the probe waits on the held lock and returns only when the 45 s hold ends. The later assertions (`TimedOut`, the in-flight command's scenario, the stalled `lvm` neither killed nor lost, the next probe clean) are first exercised when the deadline lands.
+  - `sad_an_unreadable_sysfs_block_directory_fails_the_probe_sysfs_unreadable` stops at the headline, "a failed sysfs read must be reported as SysfsUnreadable": today the failed read reports `ToolsOrDeviceMapperUnusable`. The scenario is compared by its `Debug` name because `VolumeProbeScenario::SysfsUnreadable` does not exist yet.
+  - Moves: both go GREEN when the probe deadline (P-4) and the `SysfsUnreadable` scenario (P-5) land with the probe; the crafter removes the two markers.
 
 ### `overdrive-sim/tests/acceptance/sim_volume_backing_contract.rs`
 - Fails today: `SimVolumeBacking` holds no state (`ensure` fails `PoolCommand`, `claim_state` reports `NotFound`, hooks ignored).

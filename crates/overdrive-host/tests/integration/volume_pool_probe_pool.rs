@@ -19,7 +19,11 @@ use overdrive_core::traits::volume_backing::{
 use overdrive_host::LvmVolumePoolProbe;
 use overdrive_testing::overdrive_test;
 
-use super::volume_pool_support::{free_bytes, logical_volumes, lvm, lvm_ok, runtime};
+use std::time::Duration;
+
+use super::volume_pool_support::{
+    free_bytes, logical_volumes, lvm, lvm_ok, lvm_processes, runtime,
+};
 
 /// `test` names the calling test in the failure message.
 fn probe_error(test: &str) -> VolumeProbeError {
@@ -250,6 +254,108 @@ fn sad_a_scratch_volume_held_open_fails_the_probe_scratch_remove_failed() {
     assert!(
         matches!(error.detail, VolumeProbeDetail::CommandFailed { exit_status: Some(_), .. }),
         "the failed lvremove exited non-zero (CommandFailed), got {:?}",
+        error.detail
+    );
+}
+
+/// Sad (P-4, ADR-0314 Bound): an `lvm` command that stalls on the volume group's lock. The probe
+/// enforces its own 30 s deadline over the whole call, on the adapter's own timer: it returns a
+/// `VolumeProbeError` whose detail is `Io` of kind `TimedOut` and whose scenario is that of the
+/// command in flight, never a hang. The stalled command is not killed at the deadline: it is still
+/// running when `probe` returns and ends on its own once the lock is released. A probe after that
+/// passes and leaves no scratch volume.
+/// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
+#[test]
+fn sad_a_probe_blocked_on_the_group_lock_times_out_as_an_io_failure() {
+    runtime().block_on(async {
+        std::fs::create_dir_all("/run/lock/lvm").expect("lock dir");
+        let mut holder = std::process::Command::new("flock")
+            // `--no-fork`: flock execs `sleep` in place, so the process the test kills is the one
+            // holding the lock. The hold outlasts the 30 s deadline by a margin, and ends by
+            // itself at 45 s so a probe with no deadline of its own is seen to return late.
+            .args(["--no-fork", "/run/lock/lvm/V_overdrive", "sleep", "45"])
+            .spawn()
+            .expect("hold the group lock (needs flock in the guest)");
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        let started = std::time::Instant::now();
+        let result = LvmVolumePoolProbe::new().probe().await;
+        let waited = started.elapsed();
+        let still_running = lvm_processes();
+        let _ = holder.kill();
+        let _ = holder.wait();
+        assert!(
+            waited >= Duration::from_secs(29) && waited < Duration::from_secs(33),
+            "the probe must return within its 30 s deadline, the adapter's own: {waited:?}"
+        );
+        let error = result.err().expect("a probe blocked past its deadline fails");
+        assert!(
+            matches!(&error.detail, VolumeProbeDetail::Io(source) if source.kind() == std::io::ErrorKind::TimedOut),
+            "the deadline return is an Io failure of kind TimedOut, got {:?}",
+            error.detail
+        );
+        // The in-flight command is the first to need the held group lock: `pvs` (reports as
+        // `ToolsOrDeviceMapperUnusable`) or, if `pvs` takes no group lock, `vgs` (`VolumeGroupMissing`).
+        assert!(
+            matches!(
+                error.scenario,
+                VolumeProbeScenario::ToolsOrDeviceMapperUnusable
+                    | VolumeProbeScenario::VolumeGroupMissing
+            ),
+            "the deadline return names the scenario of the command in flight, got {error}"
+        );
+        assert!(
+            !still_running.is_empty(),
+            "the stalled lvm command is not killed at the deadline: it is still running after probe returned"
+        );
+        let released = std::time::Instant::now();
+        while !lvm_processes().is_empty() {
+            assert!(
+                released.elapsed() < Duration::from_secs(30),
+                "the stalled lvm command ends on its own once the lock is released, still running: {:?}",
+                lvm_processes()
+            );
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+        let probed = LvmVolumePoolProbe::new().probe().await.expect("a probe after the release passes");
+        assert!(probed.is_some(), "the labelled partition is found again");
+        assert!(logical_volumes().is_empty(), "no scratch volume is left behind");
+    });
+}
+
+/// Sad (P-5, ADR-0314 scenario `SysfsUnreadable`): reading `/sys/class/block` to discover the
+/// labelled partition fails. The read fails for real: the process has no file descriptor left, so
+/// the kernel refuses to open the directory (`EMFILE`). The failure is reported as
+/// `SysfsUnreadable` with an `Io` detail, not as an `lvm` or device-mapper failure. The scenario is
+/// compared by its `Debug` name because the variant does not exist yet.
+/// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
+#[test]
+fn sad_an_unreadable_sysfs_block_directory_fails_the_probe_sysfs_unreadable() {
+    // The runtime (its poller and wakers hold descriptors) is built before the descriptors run out.
+    let runtime = runtime();
+    let mut held = Vec::new();
+    let exhausted = loop {
+        match std::fs::File::open("/dev/null") {
+            Ok(file) => held.push(file),
+            Err(error) => break error,
+        }
+    };
+    let result = runtime.block_on(LvmVolumePoolProbe::new().probe());
+    drop(held);
+    assert!(
+        matches!(exhausted.raw_os_error(), Some(23 | 24)),
+        "the descriptors ran out (ENFILE or EMFILE), got {exhausted:?}"
+    );
+    let error = result.err().expect("a probe that cannot read the block devices fails");
+    assert_eq!(
+        format!("{:?}", error.scenario),
+        "SysfsUnreadable",
+        "a failed sysfs read must be reported as SysfsUnreadable, not as a tool failure: {error}"
+    );
+    assert!(
+        matches!(error.detail, VolumeProbeDetail::Io(_)),
+        "a failed directory read is an Io failure, got {:?}",
         error.detail
     );
 }

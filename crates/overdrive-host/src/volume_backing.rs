@@ -36,6 +36,9 @@ const DEVICE_MAPPER_DIR: &str = "/dev/mapper";
 const LVM_SYSTEM_DIR: &str = "/run/lvm";
 /// The one deadline of an `ensure` call, covering every `lvm` spawn it makes (ADR-0317).
 const ENSURE_DEADLINE: Duration = Duration::from_secs(30);
+/// The one deadline of a `probe` call, covering every `lvm` spawn it makes (ADR-0314); the same
+/// value as [`ENSURE_DEADLINE`].
+const PROBE_DEADLINE: Duration = ENSURE_DEADLINE;
 /// The scratch volume the boot probe creates and removes; any `ovd-probe-` volume is a leftover.
 const SCRATCH_PREFIX: &str = "ovd-probe-";
 const SCRATCH_VOLUME: &str = "ovd-probe-scratch";
@@ -97,6 +100,34 @@ fn into_success(output: Output) -> Result<Output, Exited> {
         status: output.status,
         stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
     })
+}
+
+/// How an `lvm` command run against a deadline ended without succeeding.
+enum Ran {
+    /// The deadline passed before the command was spawned or while it ran.
+    TimedOut,
+    /// The spawn, the wait or the reaper task failed.
+    Io(io::Error),
+    /// The command exited unsuccessfully.
+    Exited(Exited),
+}
+
+/// Runs one `lvm` command inside `deadline`. A command still running at the deadline is not
+/// killed or aborted: the task that owns the child outlives this call, reaps it when it ends on
+/// its own, and discards its output (ADR-0317). Nothing is spawned once the deadline has passed.
+async fn run_until(tool: &LvmTool, args: &[&str], deadline: Instant) -> Result<Output, Ran> {
+    if Instant::now() >= deadline {
+        return Err(Ran::TimedOut);
+    }
+    let child = tool.spawn(args).map_err(Ran::Io)?;
+    let mut reaper = tokio::spawn(child.wait_with_output());
+    // Dropping a `JoinHandle` detaches its task: on the deadline the reaper keeps waiting.
+    let finished = match tokio::time::timeout_at(deadline, &mut reaper).await {
+        Ok(finished) => finished,
+        Err(_elapsed) => return Err(Ran::TimedOut),
+    };
+    let output = finished.map_err(|joined| Ran::Io(io::Error::other(joined)))?.map_err(Ran::Io)?;
+    into_success(output).map_err(Ran::Exited)
 }
 
 /// The byte count in a `vgs ... vg_free` report.
@@ -165,34 +196,23 @@ impl LvmVolumeBacking {
         Self { tool: LvmTool::over(partition) }
     }
 
-    /// Runs one `lvm` command inside the `ensure` deadline. A command still running at the
-    /// deadline is not killed or aborted: the task that owns the child outlives this call, reaps
-    /// it when it ends on its own, and discards its output (ADR-0317).
+    /// Runs one `lvm` command inside the `ensure` deadline (see [`run_until`]).
     async fn run(
         &self,
         operation: VolumeOperation,
         args: &[&str],
         deadline: Instant,
     ) -> Result<Output, VolumeBackingError> {
-        if Instant::now() >= deadline {
-            return Err(timed_out(operation));
-        }
-        let child = self.tool.spawn(args).map_err(|source| pool_command(operation, source))?;
-        let mut reaper = tokio::spawn(child.wait_with_output());
-        // Dropping a `JoinHandle` detaches its task: on the deadline the reaper keeps waiting.
-        let finished = match tokio::time::timeout_at(deadline, &mut reaper).await {
-            Ok(finished) => finished,
-            Err(_elapsed) => return Err(timed_out(operation)),
-        };
-        let output = finished
-            .map_err(|joined| pool_command(operation, io::Error::other(joined)))?
-            .map_err(|source| pool_command(operation, source))?;
-        into_success(output).map_err(|Exited { status, stderr }| {
-            let subcommand = args.first().copied().unwrap_or("lvm");
-            pool_command(
-                operation,
-                io::Error::other(format!("lvm {subcommand} exited with {status}: {stderr}")),
-            )
+        run_until(&self.tool, args, deadline).await.map_err(|ran| match ran {
+            Ran::TimedOut => timed_out(operation),
+            Ran::Io(source) => pool_command(operation, source),
+            Ran::Exited(Exited { status, stderr }) => {
+                let subcommand = args.first().copied().unwrap_or("lvm");
+                pool_command(
+                    operation,
+                    io::Error::other(format!("lvm {subcommand} exited with {status}: {stderr}")),
+                )
+            }
         })
     }
 
@@ -363,35 +383,47 @@ async fn labelled_partitions() -> io::Result<Vec<PathBuf>> {
     Ok(nodes)
 }
 
-/// Runs one probe `lvm` command to its end; a spawn failure is `Io`, a non-zero exit
-/// `CommandFailed`, both under `scenario`. Returns its standard output.
+/// Runs one probe `lvm` command inside the probe's deadline; a spawn failure is `Io`, the
+/// deadline `Io` of kind `TimedOut`, a non-zero exit `CommandFailed`, all under `scenario`.
+/// Returns its standard output.
 async fn probe_command(
     tool: &LvmTool,
     scenario: VolumeProbeScenario,
     args: &[&str],
+    deadline: Instant,
 ) -> Result<String, VolumeProbeError> {
-    let child =
-        tool.spawn(args).map_err(|source| failure(scenario, VolumeProbeDetail::Io(source)))?;
-    let output = child
-        .wait_with_output()
-        .await
-        .map_err(|source| failure(scenario, VolumeProbeDetail::Io(source)))?;
-    let output = into_success(output).map_err(|Exited { status, stderr }| {
-        failure(scenario, VolumeProbeDetail::CommandFailed { exit_status: status.code(), stderr })
+    let output = run_until(tool, args, deadline).await.map_err(|ran| match ran {
+        Ran::TimedOut => failure(
+            scenario,
+            VolumeProbeDetail::Io(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "the volume pool probe deadline passed",
+            )),
+        ),
+        Ran::Io(source) => failure(scenario, VolumeProbeDetail::Io(source)),
+        Ran::Exited(Exited { status, stderr }) => failure(
+            scenario,
+            VolumeProbeDetail::CommandFailed { exit_status: status.code(), stderr },
+        ),
     })?;
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }
 
 /// Removes every scratch volume a crashed probe left (`lvremove -f` removes it active or not).
-async fn remove_leftover_scratch(tool: &LvmTool) -> Result<(), VolumeProbeError> {
+async fn remove_leftover_scratch(
+    tool: &LvmTool,
+    deadline: Instant,
+) -> Result<(), VolumeProbeError> {
     let report =
-        probe_command(tool, VolumeProbeScenario::VolumeGroupMissing, &LIST_VOLUMES_ARGV).await?;
+        probe_command(tool, VolumeProbeScenario::VolumeGroupMissing, &LIST_VOLUMES_ARGV, deadline)
+            .await?;
     for leftover in logical_volume_names(&report).filter(|name| name.starts_with(SCRATCH_PREFIX)) {
         tracing::warn!(name: "volume_backing.probe.leftover_scratch_removed", volume = leftover);
         probe_command(
             tool,
             VolumeProbeScenario::ScratchRemoveFailed,
             &["lvremove", "-f", &format!("{VOLUME_GROUP}/{leftover}")],
+            deadline,
         )
         .await?;
     }
@@ -400,7 +432,7 @@ async fn remove_leftover_scratch(tool: &LvmTool) -> Result<(), VolumeProbeError>
 
 /// Creates the scratch volume, checks its node, and removes it. A volume the create left behind
 /// is removed before the failure is returned.
-async fn probe_scratch(tool: &LvmTool) -> Result<(), VolumeProbeError> {
+async fn probe_scratch(tool: &LvmTool, deadline: Instant) -> Result<(), VolumeProbeError> {
     let scratch = format!("{VOLUME_GROUP}/{SCRATCH_VOLUME}");
     let scratch_bytes = format!("{SCRATCH_BYTES}b");
     let created = probe_command(
@@ -418,6 +450,7 @@ async fn probe_scratch(tool: &LvmTool) -> Result<(), VolumeProbeError> {
             SCRATCH_VOLUME,
             VOLUME_GROUP,
         ],
+        deadline,
     )
     .await;
     let node = device_node(SCRATCH_VOLUME);
@@ -439,6 +472,7 @@ async fn probe_scratch(tool: &LvmTool) -> Result<(), VolumeProbeError> {
         tool,
         VolumeProbeScenario::ScratchRemoveFailed,
         &["lvremove", "-f", &scratch],
+        deadline,
     )
     .await;
     match (outcome, removed) {
@@ -454,8 +488,9 @@ async fn probe_scratch(tool: &LvmTool) -> Result<(), VolumeProbeError> {
 #[async_trait]
 impl VolumePoolProbe for LvmVolumePoolProbe {
     async fn probe(&self) -> Result<Option<Arc<dyn VolumeBacking>>, VolumeProbeError> {
+        let deadline = Instant::now() + PROBE_DEADLINE;
         let mut partitions = labelled_partitions().await.map_err(|source| {
-            failure(VolumeProbeScenario::ToolsOrDeviceMapperUnusable, VolumeProbeDetail::Io(source))
+            failure(VolumeProbeScenario::SysfsUnreadable, VolumeProbeDetail::Io(source))
         })?;
         let partition = match partitions.len() {
             0 => return Ok(None),
@@ -472,24 +507,31 @@ impl VolumePoolProbe for LvmVolumePoolProbe {
             &tool,
             VolumeProbeScenario::ToolsOrDeviceMapperUnusable,
             &["pvs", "--noheadings", "-o", "pv_name"],
+            deadline,
         )
         .await?;
         probe_command(
             &tool,
             VolumeProbeScenario::VolumeGroupMissing,
             &["vgs", "--noheadings", "-o", "vg_name", VOLUME_GROUP],
+            deadline,
         )
         .await?;
-        remove_leftover_scratch(&tool).await?;
-        let report =
-            probe_command(&tool, VolumeProbeScenario::VolumeGroupMissing, &FREE_BYTES_ARGV).await?;
+        remove_leftover_scratch(&tool, deadline).await?;
+        let report = probe_command(
+            &tool,
+            VolumeProbeScenario::VolumeGroupMissing,
+            &FREE_BYTES_ARGV,
+            deadline,
+        )
+        .await?;
         let free = parse_free_bytes(&report).map_err(|source| {
             failure(VolumeProbeScenario::VolumeGroupMissing, VolumeProbeDetail::Io(source))
         })?;
         if free < SCRATCH_BYTES {
             tracing::warn!(name: "volume_backing.probe.scratch_skipped", free_bytes = free);
         } else {
-            probe_scratch(&tool).await?;
+            probe_scratch(&tool, deadline).await?;
         }
         Ok(Some(Arc::new(LvmVolumeBacking::new(&partition))))
     }
