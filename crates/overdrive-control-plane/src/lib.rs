@@ -3579,18 +3579,38 @@ const OVERDRIVE_VMM_RLIMIT_NOFILE: u64 = 256;
 
 /// Boot step: probe the node's volume pool (GH #348, ADR-0314). `None` logs
 /// `volume_backing.not_composed`; a present but broken pool refuses startup with
-/// `health.startup.refused`, reason `volume_backing.probe`.
-///
-/// RED scaffold (DISTILL): passes the probed backing through and treats every other
-/// outcome as "no pool", so existing boots are unchanged until DELIVER lands the
-/// event and the refusal.
+/// `health.startup.refused`, reason `volume_backing.probe`. The decision does not
+/// depend on the node's VM capability.
 async fn compose_volume_backing(
     probe: &dyn overdrive_core::traits::volume_backing::VolumePoolProbe,
 ) -> std::result::Result<
     Option<Arc<dyn overdrive_core::traits::volume_backing::VolumeBacking>>,
     error::ControlPlaneError,
 > {
-    Ok(probe.probe().await.ok().flatten())
+    match probe.probe().await {
+        Ok(Some(backing)) => Ok(Some(backing)),
+        Ok(None) => {
+            tracing::info!(
+                name: "volume_backing.not_composed",
+                "no labelled volume partition; volumes are refused at launch"
+            );
+            Ok(None)
+        }
+        Err(source) => {
+            // Recorded as a string value (not `%source`) so the event carries the
+            // probe error's words verbatim, including a quoted device path.
+            let cause = source.to_string();
+            tracing::error!(
+                name: "health.startup.refused",
+                target: "overdrive::health",
+                reason = "volume_backing.probe",
+                scenario = source.scenario.as_str(),
+                cause = cause.as_str(),
+                "volume pool startup refused; composition root will not start"
+            );
+            Err(error::ControlPlaneError::VolumeBackingBoot(source))
+        }
+    }
 }
 
 #[allow(

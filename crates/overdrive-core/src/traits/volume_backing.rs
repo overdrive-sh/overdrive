@@ -164,9 +164,23 @@ pub enum VolumeProbeScenario {
     ScratchRemoveFailed,
 }
 
+impl VolumeProbeScenario {
+    /// The snake_case label naming this stage in the startup-refusal event and error.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::SysfsUnreadable => "sysfs_unreadable",
+            Self::ToolsOrDeviceMapperUnusable => "tools_or_device_mapper_unusable",
+            Self::VolumeGroupMissing => "volume_group_missing",
+            Self::ScratchCreateOrNodeFailed => "scratch_create_or_node_failed",
+            Self::ScratchRemoveFailed => "scratch_remove_failed",
+        }
+    }
+}
+
 /// A present-but-broken volume pool: refuses startup (`volume_backing.probe`).
 #[derive(Debug, thiserror::Error)]
-#[error("volume pool probe failed ({scenario:?}): {detail}")]
+#[error("volume pool probe failed ({}): {detail}", scenario.as_str())]
 pub struct VolumeProbeError {
     /// The failing stage.
     pub scenario: VolumeProbeScenario,

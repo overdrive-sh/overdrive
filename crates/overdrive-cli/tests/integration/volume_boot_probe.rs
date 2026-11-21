@@ -148,9 +148,6 @@ async fn assert_refused(row: &str, scenario: VolumeProbeScenario, typed_detail: 
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "current_thread")]
-#[should_panic(
-    expected = "a present but broken volume pool must refuse startup (tools_or_device_mapper_unusable)"
-)]
 async fn sad_a_broken_volume_pool_refuses_startup() {
     let rows = [
         (
@@ -195,7 +192,6 @@ async fn sad_a_broken_volume_pool_refuses_startup() {
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "current_thread")]
-#[should_panic(expected = "the boot must log volume_backing.not_composed")]
 async fn a_node_with_no_labelled_partition_boots_and_logs_not_composed() {
     let (result, events, _tmp) = boot(Arc::new(SimVolumePoolProbe::absent())).await;
     let handle = result.expect("an absent pool is the soft case, not a refusal");
