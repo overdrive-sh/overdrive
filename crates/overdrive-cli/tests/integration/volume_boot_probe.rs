@@ -121,6 +121,7 @@ fn broken(scenario: VolumeProbeScenario, detail: VolumeProbeDetail) -> Arc<dyn V
 async fn assert_refused(row: &str, scenario: VolumeProbeScenario, typed_detail: VolumeProbeDetail) {
     let detail = typed_detail.to_string();
     let detail = detail.as_str();
+    let scenario_label = scenario.as_str();
     let (result, events, _tmp) = boot(broken(scenario, typed_detail)).await;
     let Err(err) = result else {
         panic!("a present but broken volume pool must refuse startup ({row})")
@@ -134,10 +135,11 @@ async fn assert_refused(row: &str, scenario: VolumeProbeScenario, typed_detail: 
     assert!(
         refused.iter().any(|event| {
             event.fields.get("reason").is_some_and(|reason| reason == "volume_backing.probe")
+                && event.fields.get("scenario").map(String::as_str) == Some(scenario_label)
                 && event.fields.get("cause").is_some_and(|cause| cause.contains(detail))
         }),
-        "row {row}: a health.startup.refused event with reason volume_backing.probe and the cause \
-         is required; events: {refused:?}"
+        "row {row}: a health.startup.refused event with reason volume_backing.probe, scenario \
+         {scenario_label} and the cause is required; events: {refused:?}"
     );
 }
 
