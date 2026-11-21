@@ -1416,7 +1416,7 @@ impl VmDriver {
             cmdline,
             memory,
             // vCPUs are DERIVED per-allocation from this allocation's own
-            // `[resources] cpu` — `max(1, round_up(cpu/1000))`,
+            // `[resources] cpu` — `max(1, round_up(millicores/1000))`,
             // floor 1 (US-VM-5, ADR-0082 §D2). `[resources]` is the single
             // source of truth for VM size — there is no per-node vCPU
             // template (step 06-01).

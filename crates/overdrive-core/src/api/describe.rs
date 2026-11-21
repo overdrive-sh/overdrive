@@ -120,6 +120,8 @@ pub struct ScheduleSpecOutput {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::byte_size::ByteSize;
+    use crate::cpu_quantity::CpuQuantity;
     use proptest::prelude::*;
 
     /// Strategy producing an arbitrary valid `ServiceVip` (IPv4 dotted-
@@ -135,8 +137,8 @@ mod tests {
     /// Strategy producing an arbitrary `ResourcesInput`.
     fn resources_strategy() -> impl Strategy<Value = ResourcesInput> {
         (any::<u32>(), 1..=u64::from(u32::MAX)).prop_map(|(cpu, mib)| ResourcesInput {
-            cpu: crate::cpu_quantity::CpuQuantity::from_millis(cpu),
-            memory: crate::byte_size::ByteSize::new(mib * 1024 * 1024),
+            cpu: CpuQuantity::from_millis(cpu),
+            memory: ByteSize::new(mib * 1024 * 1024),
         })
     }
 
@@ -281,8 +283,8 @@ mod tests {
             id: "describe-job".to_owned(),
             replicas: 2,
             resources: ResourcesInput {
-                cpu: crate::cpu_quantity::CpuQuantity::from_millis(500),
-                memory: crate::byte_size::ByteSize::new(64 * 1024 * 1024),
+                cpu: CpuQuantity::from_millis(500),
+                memory: ByteSize::new(64 * 1024 * 1024),
             },
             driver: DriverInput::Vm(crate::aggregate::VmInput {
                 volume: None,
@@ -328,8 +330,8 @@ mod tests {
             id: "describe-svc".to_owned(),
             replicas: 3,
             resources: ResourcesInput {
-                cpu: crate::cpu_quantity::CpuQuantity::from_millis(250),
-                memory: crate::byte_size::ByteSize::new(32 * 1024 * 1024),
+                cpu: CpuQuantity::from_millis(250),
+                memory: ByteSize::new(32 * 1024 * 1024),
             },
             driver: DriverInput::Vm(crate::aggregate::VmInput {
                 volume: None,

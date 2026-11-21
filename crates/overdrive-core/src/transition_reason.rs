@@ -882,7 +882,6 @@ pub enum CancelledBy {
     Copy,
     PartialEq,
     Eq,
-    Hash,
     Serialize,
     Deserialize,
     ToSchema,

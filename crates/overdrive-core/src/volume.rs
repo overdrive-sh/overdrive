@@ -10,7 +10,7 @@ use std::str::FromStr;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use utoipa::ToSchema;
 
-use crate::byte_size::ByteSize;
+use crate::byte_size::{BYTES_PER_GIB, ByteSize};
 
 /// A validated volume size in bytes: the `ByteSize` grammar refined to a
 /// non-zero whole number of GiB. `Display` is the `ByteSize` canonical form,
@@ -36,8 +36,6 @@ impl VolumeSize {
     }
 }
 
-const BYTES_PER_GIB: u64 = 1 << 30;
-
 /// Splits `<uint><unit>` into its ASCII-digit count and the remaining unit text.
 fn split_count_and_unit(s: &str) -> Option<(u64, &str)> {
     let digits_end = s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len());
@@ -50,7 +48,7 @@ impl FromStr for VolumeSize {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let reject = |reason: String| VolumeSizeParseError { input: s.to_owned(), reason };
-        let size = s.parse::<ByteSize>().map_err(|e| reject(e.to_string()))?;
+        let size = s.parse::<ByteSize>().map_err(|e| reject(e.cause().to_owned()))?;
         if size.bytes() == 0 {
             return Err(reject("the size must be at least 1GiB".to_owned()));
         }

@@ -22,7 +22,6 @@ const MAX_FRACTIONAL_DIGITS: usize = 3;
     Eq,
     PartialOrd,
     Ord,
-    Hash,
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
@@ -79,8 +78,9 @@ fn core_form_millis(whole: &str, fraction: u64) -> Option<u32> {
 
 /// The fractional digits right-padded to three places, as millicores.
 fn fraction_millis(fraction_digits: &str) -> Option<u64> {
-    let padded = format!("{fraction_digits:0<MAX_FRACTIONAL_DIGITS$}");
-    padded.parse().ok()
+    let places = u32::try_from(MAX_FRACTIONAL_DIGITS.checked_sub(fraction_digits.len())?).ok()?;
+    let value = fraction_digits.parse::<u64>().ok()?;
+    value.checked_mul(10u64.checked_pow(places)?)
 }
 
 impl FromStr for CpuQuantity {

@@ -44,7 +44,6 @@
 #![cfg(all(feature = "integration-tests", feature = "kvm-tests"))]
 #![allow(clippy::missing_panics_doc, clippy::unwrap_used, clippy::expect_used)]
 
-use overdrive_core::byte_size::ByteSize;
 use std::net::SocketAddr;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};

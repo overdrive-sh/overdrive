@@ -255,7 +255,7 @@ pub fn workload_describe(out: &WorkloadDescribeOutput) -> String {
     // to a process allocation — one render surface, never a VM-only fork.
     // Presence-guarded + additive, the same discipline as the sections
     // below.
-    render_memory_section(&mut s, &out.snapshot.rows);
+    render_resources_section(&mut s, &out.snapshot.rows);
     // Canonical workload endpoints are row facts. For VM allocations this is
     // the guest NIC address, not the transit-veth forwarding hop. Keep the
     // section presence-guarded so pre-existing host-networked output remains
@@ -552,7 +552,7 @@ fn render_svid_issue_failure_detail(
     );
 }
 
-/// Append the operator-facing `Memory:` and `CPU:` lines to `out` IFF the workload's
+/// Append the operator-facing resources section (the `Memory:` and `CPU:` lines) to `out` IFF the workload's
 /// first allocation row carries a non-zero declared `memory` — the
 /// `[resources] memory` single source of truth.
 ///
@@ -571,7 +571,7 @@ fn render_svid_issue_failure_detail(
 /// existed — the same discipline as `render_vip_section` /
 /// `render_listeners_section`. The label aligns to the offset-15 value
 /// column the other key-value lines use.
-fn render_memory_section(
+fn render_resources_section(
     out: &mut String,
     rows: &[overdrive_control_plane::api::AllocStatusRowBody],
 ) {

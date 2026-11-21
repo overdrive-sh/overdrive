@@ -1035,10 +1035,14 @@ impl SimNode {
 
     /// Store effects of `handlers::submit_workload` for a fresh Job intent.
     ///
-    /// Demand is 0 mCPU and 256 KiB so the existing CPU/memory check (R9,
-    /// unchanged; GH #261) can never bind before the attachment cap. The
-    /// baseline node has 4,000 mCPU and 8 GiB, and (CAP + 2) × 256 KiB <
-    /// 8 GiB, so only the attachment cap decides admission here.
+    /// Demand is 0 mCPU and 1 MiB. The existing CPU/memory check (R9,
+    /// unchanged; GH #261) sums the demand over the placed workload's own
+    /// Running allocations only (`WorkloadLifecycle` hydrates `actual`
+    /// filtered to its `workload_id`, and `scheduler::free_capacity` counts
+    /// just those), never across workloads. Each workload here has at most one
+    /// Running allocation, so the check compares 1 MiB against the baseline
+    /// node's 8 GiB and cannot bind; only the attachment cap decides
+    /// admission, however many workloads the fill deploys.
     async fn operator_deploys(&self, workload: &str) {
         let job = Job::from_submit(JobSpecInput {
             id: workload.to_owned(),

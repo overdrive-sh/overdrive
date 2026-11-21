@@ -9,8 +9,8 @@ use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 const BYTES_PER_KIB: u64 = 1 << 10;
-const BYTES_PER_MIB: u64 = 1 << 20;
-const BYTES_PER_GIB: u64 = 1 << 30;
+pub(crate) const BYTES_PER_MIB: u64 = 1 << 20;
+pub(crate) const BYTES_PER_GIB: u64 = 1 << 30;
 const BYTES_PER_TIB: u64 = 1 << 40;
 
 /// Canonical units, largest first: `Display` picks the first that divides exactly.
@@ -33,7 +33,6 @@ const CANONICAL_UNITS: [(&str, u64); 5] = [
     Eq,
     PartialOrd,
     Ord,
-    Hash,
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
@@ -56,38 +55,62 @@ impl ByteSize {
 
 /// A byte size that failed the grammar, one variant per distinct operator
 /// remedy.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ByteSizeParseError {
     /// Not `<digits><unit>` at all.
-    #[error(
-        "invalid byte size {input:?}: expected a count and a unit, written like 128MiB \
-         (units: B, KiB, MiB, GiB, TiB)"
-    )]
     Malformed { input: String },
     /// Digits with no unit.
-    #[error(
-        "invalid byte size {input:?}: the count has no unit; write the unit after the count, \
-         like 128MiB"
-    )]
     MissingUnit { input: String },
     /// A decimal unit (`KB`, `MB`, `GB`, `TB`).
-    #[error(
-        "invalid byte size {input:?}: decimal units are not accepted; use the binary units \
-         KiB, MiB, GiB or TiB"
-    )]
     DecimalUnit { input: String },
     /// A fractional count.
-    #[error(
-        "invalid byte size {input:?}: the count must be a whole number; write it in the \
-         smaller unit instead, like 1536MiB for 1.5GiB"
-    )]
     Fractional { input: String },
     /// A valid input whose value exceeds `u64::MAX` bytes.
-    #[error(
-        "invalid byte size {input:?}: the value is too large; the limit is 18446744073709551615 bytes"
-    )]
     Overflow { input: String },
 }
+
+impl ByteSizeParseError {
+    /// The rejected input text.
+    fn input(&self) -> &str {
+        match self {
+            Self::Malformed { input }
+            | Self::MissingUnit { input }
+            | Self::DecimalUnit { input }
+            | Self::Fractional { input }
+            | Self::Overflow { input } => input,
+        }
+    }
+
+    /// The cause clause alone, without the input it was raised for.
+    pub(crate) const fn cause(&self) -> &'static str {
+        match self {
+            Self::Malformed { .. } => {
+                "expected a count and a unit, written like 128MiB (units: B, KiB, MiB, GiB, TiB)"
+            }
+            Self::MissingUnit { .. } => {
+                "the count has no unit; write the unit after the count, like 128MiB"
+            }
+            Self::DecimalUnit { .. } => {
+                "decimal units are not accepted; use the binary units KiB, MiB, GiB or TiB"
+            }
+            Self::Fractional { .. } => {
+                "the count must be a whole number; write it in the smaller unit instead, like \
+                 1536MiB for 1.5GiB"
+            }
+            Self::Overflow { .. } => {
+                "the value is too large; the limit is 18446744073709551615 bytes"
+            }
+        }
+    }
+}
+
+impl fmt::Display for ByteSizeParseError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "invalid byte size {:?}: {}", self.input(), self.cause())
+    }
+}
+
+impl std::error::Error for ByteSizeParseError {}
 
 /// The byte multiple of a binary unit spelling, case-insensitive.
 fn binary_unit_multiple(unit: &str) -> Option<u64> {
@@ -105,30 +128,30 @@ impl FromStr for ByteSize {
     type Err = ByteSizeParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let err = |build: fn(String) -> ByteSizeParseError| build(s.to_owned());
+        let input = || s.to_owned();
         let digits_end = s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len());
         let (digits, unit) = s.split_at(digits_end);
         if digits.is_empty() {
-            return Err(err(|input| ByteSizeParseError::Malformed { input }));
+            return Err(ByteSizeParseError::Malformed { input: input() });
         }
         if unit.is_empty() {
-            return Err(err(|input| ByteSizeParseError::MissingUnit { input }));
+            return Err(ByteSizeParseError::MissingUnit { input: input() });
         }
         if unit.starts_with('.') {
-            return Err(err(|input| ByteSizeParseError::Fractional { input }));
+            return Err(ByteSizeParseError::Fractional { input: input() });
         }
         if is_decimal_unit(unit) {
-            return Err(err(|input| ByteSizeParseError::DecimalUnit { input }));
+            return Err(ByteSizeParseError::DecimalUnit { input: input() });
         }
         let Some(multiple) = binary_unit_multiple(unit) else {
-            return Err(err(|input| ByteSizeParseError::Malformed { input }));
+            return Err(ByteSizeParseError::Malformed { input: input() });
         };
         digits
             .parse::<u64>()
             .ok()
             .and_then(|count| count.checked_mul(multiple))
             .map(Self)
-            .ok_or_else(|| err(|input| ByteSizeParseError::Overflow { input }))
+            .ok_or_else(|| ByteSizeParseError::Overflow { input: input() })
     }
 }
 
@@ -142,7 +165,7 @@ impl fmt::Display for ByteSize {
             .iter()
             .copied()
             .find(|&(_, multiple)| self.0.is_multiple_of(multiple))
-            .unwrap_or(("B", 1));
+            .unwrap_or_else(|| unreachable!("1 divides every u64"));
         write!(f, "{}{name}", self.0 / multiple)
     }
 }

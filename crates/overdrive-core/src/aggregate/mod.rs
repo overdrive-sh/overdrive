@@ -21,7 +21,7 @@ use rkyv::util::AlignedVec;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::byte_size::ByteSize;
+use crate::byte_size::{BYTES_PER_MIB, ByteSize};
 use crate::codec::{EnvelopeError, VersionedEnvelope, decode_envelope_bytes};
 use crate::cpu_quantity::CpuQuantity;
 use crate::id::{
@@ -370,10 +370,7 @@ impl From<JobV1> for JobV2 {
     }
 }
 
-/// Bytes in one MiB: the granularity workload memory is admitted at (DD-8).
-const BYTES_PER_MIB: u64 = 1024 * 1024;
-
-/// Admit a workload `memory`: a non-zero whole number of MiB. Node capacity
+/// Admit a workload `memory`: a non-zero whole number of MiB (DD-8). Node capacity
 /// is not guest RAM and keeps only the non-zero check in [`Node::new`].
 fn validate_workload_memory(memory: ByteSize) -> Result<(), AggregateError> {
     if memory.bytes() == 0 {
