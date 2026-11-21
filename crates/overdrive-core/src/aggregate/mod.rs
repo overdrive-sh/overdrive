@@ -41,9 +41,7 @@ use crate::volume::VolumeSize;
 pub use self::probe_descriptor::{
     JOB_PROBES_GUIDANCE, ProbeDescriptor, ProbeMechanic, SCHEDULE_PROBES_GUIDANCE,
 };
-pub use self::service_spec::{
-    ServiceSpec, ServiceSpecEnvelope, ServiceSpecLatest, ServiceSpecV1, ServiceSpecV2,
-};
+pub use self::service_spec::ServiceSpec;
 
 // Re-export the parser-side `ResourcesInput` and VM input under
 // disambiguating aliases. The parser-side variants are what
@@ -53,9 +51,8 @@ pub use self::workload_spec::{
     WorkloadSpecInput,
 };
 pub use self::workload_spec::{
-    DriverInput as ParserDriverInput, DriverInputV1 as ParserDriverInputV1,
-    ResourcesInput as ParserResourcesInput, VmInput as ParserVmInput, VmInputV1 as ParserVmInputV1,
-    VmVolumeInput,
+    DriverInput as ParserDriverInput, ResourcesInput as ParserResourcesInput,
+    VmInput as ParserVmInput, VmVolumeInput,
 };
 
 mod workload_spec;
@@ -65,9 +62,8 @@ mod workload_spec;
 // HTTP are the supported mechanics.
 pub mod probe_descriptor;
 
-// `ServiceSpec` parser-side aggregate + per-type rkyv envelope per
-// ADR-0048 + ADR-0057. The current VM-only V1 carries the three
-// `Vec<ProbeDescriptor>` fields.
+// `ServiceSpec` parser-side aggregate. Carries the three
+// `Vec<ProbeDescriptor>` fields (ADR-0057).
 mod service_spec;
 
 // ---------------------------------------------------------------------------
@@ -874,7 +870,7 @@ impl From<&VmVolume> for VmVolumeInput {
 /// Re-assign every descriptor's `idx` from its 0-based position in
 /// its own role vector, per ADR-0080 § D1.
 ///
-/// The TOML parser assigns `idx` at `ServiceSpecV1` construction and
+/// The TOML parser assigns `idx` at `ServiceSpec` construction and
 /// the projection carries it verbatim, so for the CLI path this is an
 /// identity transform. For the API/wire path it is the enforcement
 /// point: `ProbeDescriptor.idx` is parser-assigned by contract, and a

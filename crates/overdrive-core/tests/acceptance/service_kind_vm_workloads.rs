@@ -6,12 +6,10 @@
 )]
 
 use overdrive_core::aggregate::{
-    DriverInput, ParserDriverInput, Service, ServiceSpecEnvelope, VmInput, WorkloadDriver,
-    WorkloadSpecInput,
+    DriverInput, ParserDriverInput, Service, VmInput, WorkloadDriver, WorkloadSpecInput,
 };
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
 use overdrive_core::byte_size::ByteSize;
-use overdrive_core::codec::VersionedEnvelope;
 use overdrive_core::cpu_quantity::CpuQuantity;
 
 const VM_SERVICE: &str = r#"
@@ -74,13 +72,6 @@ fn service_vm_http_tcp_spec_parses_to_vm_driver_without_rewriting_probe_intent()
         spec.readiness_probes.as_slice(),
         [probe] if matches!(probe.mechanic, overdrive_core::aggregate::ProbeMechanic::Tcp { port: 8081, .. })
     ));
-}
-
-/// CONTRACT_SHAPE: pure-function.
-/// CONTRACT_SHAPE: pure-function.
-#[test]
-fn service_spec_envelope_knows_versions_one_and_two() {
-    assert_eq!(ServiceSpecEnvelope::known_discriminants(), &[0, 1]);
 }
 
 /// CONTRACT_SHAPE: pure-function.

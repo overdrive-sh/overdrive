@@ -34,7 +34,6 @@ mod schema_evolution {
     mod public_certified_key_status_row;
     mod public_route_set;
     mod service_backend_row;
-    mod service_spec;
     mod workload_intent;
     // workload-resources-human-readable (GH #372, DD-5): the existing fixtures decode unchanged
     // through the new `ByteSize` / `CpuQuantity` types.

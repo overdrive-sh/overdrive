@@ -473,42 +473,6 @@ pub struct VmInput {
     pub volume: Option<VmVolumeInput>,
 }
 
-/// **FROZEN.** The V1 `[vm]` block, before `[vm.volume]` existed. Carried only
-/// so `ServiceSpecV1` keeps its archived layout (ADR-0048).
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub struct VmInputV1 {
-    /// Command run INSIDE the guest.
-    pub command: String,
-    /// Argv passed verbatim to the in-guest command.
-    pub args: Vec<String>,
-    /// Operator-supplied kernel artifact path (BYO).
-    pub kernel: String,
-    /// Operator-supplied rootfs artifact path (BYO).
-    pub rootfs: String,
-}
-
-impl From<VmInputV1> for VmInput {
-    fn from(v1: VmInputV1) -> Self {
-        Self {
-            command: v1.command,
-            args: v1.args,
-            kernel: v1.kernel,
-            rootfs: v1.rootfs,
-            volume: None,
-        }
-    }
-}
-
 /// The `[vm.volume]` table (GH #348, ADR-0310): one field, `size`, validated
 /// as a [`crate::volume::VolumeSize`] at admission. `deny_unknown_fields`
 /// refuses every other key.
@@ -552,30 +516,6 @@ pub struct VmVolumeInput {
 #[serde(rename_all = "snake_case")]
 pub enum DriverInput {
     Vm(VmInput),
-}
-
-/// **FROZEN.** The V1 driver-table dispatch carried by `ServiceSpecV1`.
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Serialize,
-    Deserialize,
-    rkyv::Archive,
-    rkyv::Serialize,
-    rkyv::Deserialize,
-)]
-pub enum DriverInputV1 {
-    Vm(VmInputV1),
-}
-
-impl From<DriverInputV1> for DriverInput {
-    fn from(v1: DriverInputV1) -> Self {
-        match v1 {
-            DriverInputV1::Vm(vm) => Self::Vm(vm.into()),
-        }
-    }
 }
 
 impl DriverInput {
@@ -675,12 +615,10 @@ pub struct Listener {
 // Per-kind specs
 // ---------------------------------------------------------------------------
 
-// `ServiceSpec` (= the current VM-only V1 payload) lives in
-// `crate::aggregate::service_spec`. It carries the existing driver union
-// and three `Vec<ProbeDescriptor>` fields (startup / readiness / liveness),
-// and is wrapped by `ServiceSpecEnvelope`. We re-import here
-// so the parser-side enum types (`WorkloadSpec`, `WorkloadSpecInput`)
-// continue to use the bare `ServiceSpec` name unchanged.
+// `ServiceSpec` lives in `crate::aggregate::service_spec`. It carries the
+// driver union and three `Vec<ProbeDescriptor>` fields (startup / readiness /
+// liveness). We re-import here so the parser-side enum types
+// (`WorkloadSpec`, `WorkloadSpecInput`) use the bare `ServiceSpec` name.
 pub use crate::aggregate::service_spec::ServiceSpec;
 
 /// Validated `[job]` body. `replicas` is intentionally absent — Job is

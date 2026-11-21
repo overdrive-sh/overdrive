@@ -143,7 +143,7 @@ impl ProbeMechanic {
 )]
 pub struct ProbeDescriptor {
     /// 0-indexed position within THIS descriptor's role array
-    /// (`[[health_check.<role>]]`). Parser-assigned at `ServiceSpecV1`
+    /// (`[[health_check.<role>]]`). Parser-assigned at `ServiceSpec`
     /// construction and carried verbatim into `Service`; never
     /// re-derived downstream.
     ///
