@@ -4,6 +4,11 @@
 
 **Accepted** (decision VD-7c, GH #348). Approved by the user on 2026-11-17.
 
+**Amended 2026-11-20:** the fix (F3, an explicit `image_type` skips sniffing) is now upstream Cloud
+Hypervisor's own behaviour (upstream commit `f2cedec65`), carried by the fork's move to upstream `main`
+(ADR-0161 § Amendment). It is no longer a fork patch; the decision still holds. Where the text below says
+the fork carries a patch, read it as upstream's behaviour at the pinned revision.
+
 ## Context
 
 A volume is raw, and the guest owns its contents. A guest that writes a qcow2, VHDX or fixed-VHD marker

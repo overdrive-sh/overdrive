@@ -1065,11 +1065,12 @@ VM with `--vsock cid=N,backend=vhost-kernel` and opens `/dev/vhost-vsock`
 itself; the VMM is the only holder of that descriptor. When the VMM exits,
 the device's last close runs the kernel's orphan sweep, which resets every
 host vsock connection to that guest (`drivers/vhost/vsock.c:753-768 @ v7.0`,
-reset at `:746-750`). With the fork change of ADR-0182 the VMM ends when the
+reset at `:746-750`). Because the launcher passes upstream's
+`--guest-reset-action exit-vmm` on every launch (ADR-0182; the fork keeps
+upstream's default and carries no reset change), the VMM ends when the
 guest resets instead of rebooting it in place, so a guest PID-1 crash ends the
 VM, resets its host flows and reaches the driver as a VMM exit with no guest
-exit report, which the driver classifies as a crash (the pinned fork build
-`41a619d19` still reboots in place until the change lands). A VM's CID is
+exit report, which the driver classifies as a crash. A VM's CID is
 `GUEST_CID_BASE + lease_offset`, derived from its admission lease and never
 persisted (ADR-0156); the lease is released only after the VMM has exited.
 
@@ -1077,7 +1078,7 @@ persisted (ADR-0156); the lease is released only after the VMM has exited.
 guest-flow owner's listeners accept guest-opened vsock connections and
 attribute each by its peer CID and the per-launch token the guest received on
 its kernel command line (ADR-0157, ADR-0177). The token is sound only with
-the fork change of ADR-0182, under which a guest reset ends the VMM. Each VM holds one control session to the owner
+the launcher flag of ADR-0182, under which a guest reset ends the VMM. Each VM holds one control session to the owner
 (ADR-0166); losing it aborts every flow of that session. The three
 node-global listener ports (beacon, flow stream, control; defaults 1234,
 1240, 1243) are node configuration, fixed or kernel-assigned, and each
@@ -3980,7 +3981,7 @@ Rules to enforce:
 | 0108 | **Durable reservation consumes successor identity** — the View fsync consumes the fresh ID even if dispatch never reaches a successor effect; later successors use a higher ID. Exact View contract lives in the feature delta. GH #284 | User-ratified as P-105-5A; iteration-2 technical check passed; complete DESIGN final verdict `CHANGES_REQUESTED` |
 | 0109 | **Replacement requires terminal predecessor handoff** — only accepted numeric-current `Failed` or `Terminated` is eligible; `Draining` is insufficient. Exact predicate lives in the feature delta. GH #284 | User-ratified as P-105-4A; focused ADR added after final review F-05; no third review under user cap |
 | 0110 | **Live workload execution is microVM-only while driver routing remains extensible** — delete every live Exec driver route and concrete adapter; retain VM-only tagged unions, `DriverRegistry`, `AllocDriverIndex`, and per-composed-driver exit observers; preserve ordinary empty-registry boot on VMM absence. GH #293 | User-approved 2026-09-14; corrected DESIGN independently `APPROVED` after overall review iteration 4 |
-| 0111 | **Exec-affected specification and intent envelopes reset forward-only to V1** — only `ServiceSpecEnvelope` and `WorkloadIntentEnvelope`; no legacy version, reader, conversion, fixture, error branch, or migration. GH #293 | User-approved 2026-09-14; corrected DESIGN independently `APPROVED` after overall review iteration 4 |
+| 0111 | **Exec-affected specification and intent envelopes reset forward-only to V1** — now only `WorkloadIntentEnvelope`; no legacy version, reader, conversion, fixture, error branch, or migration. `ServiceSpecEnvelope` was removed 2026-11-21 (commit `11e6ac03b`): nothing persisted, read, hashed or sent it. GH #293 | User-approved 2026-09-14; corrected DESIGN independently `APPROVED` after overall review iteration 4; amended 2026-11-21 by user ruling |
 | 0112 | **Exec-affected lifecycle evidence resets forward-only to V1** — delete Exec-only `DriverType`/`TransitionReason` vocabulary and reset only `AllocStatusRowEnvelope` plus `AllocLifecycleOccurrenceRowEnvelope`; unrelated envelopes remain unchanged. GH #293 | User-approved 2026-09-14; corrected DESIGN independently `APPROVED` after overall review iteration 4 |
 | 0113 | **Remove the host Exec health-probe surface** — delete `ProbeMechanic::Exec`, `ExecProber`, host/sim adapters, runner/parser/error arms and VM rejection shim; HTTP/TCP remain; future in-guest command probing stays GH #280. Supersedes only ADR-0054's Exec-specific clauses and ADR-0059's host Exec-probe decision; ADR-0054's HTTP/TCP task/row/supervision contract remains. | User-approved 2026-09-14; corrected DESIGN independently `APPROVED` after overall review iteration 4 |
 
@@ -6319,9 +6320,10 @@ structurally — Job/Schedule cannot represent probes.
 
 `ServiceSpec` (per ADR-0050) gains three Vec fields:
 `startup_probes`, `readiness_probes`, `liveness_probes`. The
-rkyv envelope bumps `ServiceSpecEnvelope::V1 → V2` per ADR-0048
-"Version-bump procedure" — single commit, fixture file added,
-existing `FIXTURE_V1` untouched.
+rkyv envelope bump `ServiceSpecEnvelope::V1 → V2` this section first
+specified no longer exists: `ServiceSpecEnvelope` was removed 2026-11-21 (user
+ruling, commit `11e6ac03b`) because nothing persisted, read, hashed or sent
+it. Probes persist through `WorkloadIntentEnvelope` (ADR-0111).
 
 ### 82. Default-probe inference — "honest by default"
 
@@ -6425,8 +6427,8 @@ To DEVOPS (platform-architect, parallel with DISTILL):
 - New schema-evolution fixture file:
   `crates/overdrive-core/tests/schema_evolution/probe_result_row.rs`
   pinning `ProbeResultRowEnvelope::V1` archived bytes
-- `ServiceSpecEnvelope::V2` fixture: `FIXTURE_V1` untouched;
-  new `FIXTURE_V2_FORWARD_ROUNDTRIP` test
+- (Removed 2026-11-21: the `ServiceSpecEnvelope::V2` fixture went with the
+  envelope, commit `11e6ac03b`.)
 - New OpenAPI schemas: `ProbeResultRowJson`,
   `ProbeWitnessWire`, `ServiceFailureReasonWire`,
   `ServiceSubmitEvent::Stable`, `ServiceSubmitEvent::Failed` —

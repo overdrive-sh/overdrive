@@ -174,8 +174,9 @@ The parts that could be decided differently are separate ADRs:
 
 **Negative:**
 
-- The production VMM is the vendored Cloud Hypervisor fork, which must end the
-  VMM on a guest reset (ADR-0146, ADR-0161, ADR-0182).
+- The production VMM is the vendored Cloud Hypervisor fork; the launcher
+  passes upstream's `--guest-reset-action exit-vmm` so the VMM ends on a
+  guest reset (ADR-0146, ADR-0161, ADR-0182).
 - A Linux guest runs Aya capture programs (ADR-0150) and the forwarder
   module (ADR-0197) of its guest kit (ADR-0206). The host side is
   guest-neutral (ADR-0207); a guest that runs no Linux kernel is

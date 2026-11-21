@@ -9,10 +9,13 @@ Attachment Replacement DESIGN*.
 
 The VMM path inside this decision is ruling **D13 = (a), approved by user
 2026-10-05**: the vendored Cloud Hypervisor fork
-(`overdrive-sh/cloud-hypervisor`, branch `overdrive/vhost-kernel-vsock`,
-commits `9b68dbb57` and `41a619d19` on v53.0) is the production VMM path. How
-that fork is built, pinned and provisioned is ADR-0161; the fork change that
-ends the VMM on a guest reset is ADR-0182.
+(`overdrive-sh/cloud-hypervisor`, branch `main`: upstream `main` plus our
+commits; first accepted as branch `overdrive/vhost-kernel-vsock`, commits
+`9b68dbb57` and `41a619d19` on v53.0, see ADR-0161 § Amendment) is the
+production VMM path. How that fork is built, pinned and provisioned is
+ADR-0161; the guarantee that a guest reset ends the VMM is ADR-0182, enforced
+by the launcher passing upstream's `--guest-reset-action exit-vmm`, not by a
+fork change.
 
 This ADR **supersedes ADR-0128** (the VMM adapter owns the TAP queue fd). CID
 derivation is ADR-0156; the beacon listener is ADR-0157.
@@ -119,7 +122,8 @@ the feature delta (§ *VMM backend contract*, § *Core vocabulary*).
   lease is assigned (ADR-0156). A copy of the descriptor kept by `serve` past
   VMM exit keeps the dead guest's host flows ESTABLISHED (V-30 Q2c), and a
   once-only handoff guard ends the VMM on a guest reset only as a failed
-  reboot. Rejected (CID-NOCLAIM).
+  reboot (the guarantee is now the launcher's `--guest-reset-action exit-vmm`,
+  ADR-0182). Rejected (CID-NOCLAIM).
 - **A startup probe that opens `/dev/vhost-vsock` and sets a CID.** It checks
   a property of the pinned kernel and image that no Overdrive node lacks; a
   launch that cannot open the device already fails pre-READY through a typed

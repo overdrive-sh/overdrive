@@ -129,8 +129,9 @@ session*, § *Beacon intake*).
   gives a guest application nothing it could not already do from that VM.
 - **The token is sound only with RESET-EXIT.** It reaches the guest on the
   kernel command line, which does not change when a guest reboots inside the
-  same VMM; the fork reboots a reset guest in place unless it carries the
-  change of ADR-0182 (V-30: same VMM pid, CID and token, new `boot_id`).
+  same VMM; Cloud Hypervisor reboots a reset guest in place by default unless
+  the launcher passes `--guest-reset-action exit-vmm`, which it does on every
+  launch (ADR-0182; V-30: same VMM pid, CID and token, new `boot_id`).
   ADR-0182 makes every guest reset end the VMM, so one token names one guest
   boot and the next launch draws a new one.
 - The session and flow admission rules are covered by the feature delta's

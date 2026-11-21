@@ -14,6 +14,17 @@ does not support, decode, migrate, or re-archive V1/V2 bytes. It changes no
 operator, parser, wire request, intent, allocation, describe, probe, or
 lifecycle behavior.
 
+**Amended 2026-11-21 (user ruling, commit `11e6ac03b`): `ServiceSpecEnvelope`
+is removed.** The § "Greenfield ServiceSpec persistence contract" below no
+longer describes live code. `ServiceSpecEnvelope`, `ServiceSpecV1`,
+`ServiceSpecLatest` and the frozen `VmInputV1` / `DriverInputV1` were deleted,
+because nothing ever persisted, read, hashed or sent the envelope: Services
+persist through `WorkloadIntentEnvelope` (ADR-0111), and `spec_digest` hashes
+that. The parser-side `ServiceSpec` (formerly `ServiceSpecV3`) is a plain struct
+with the field set below; it keeps its rkyv derives because `WorkloadSpec`
+embeds it. The widened `driver: DriverInput` payload and the VM Exec probe
+exclusion are unchanged.
+
 Partially supersedes ADR-0083 D4's blanket `[service] + [vm]` rejection. It
 retains ADR-0083's existing `DriverInput::{Exec, Vm}` and
 `WorkloadDriverV2::{Exec, Vm}` unions.

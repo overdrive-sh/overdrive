@@ -1849,7 +1849,7 @@ C4Container
   Container(resolve, "Mesh resolution", "Rust, ServiceBackendsResolve", "Classifies TCP destinations by frontend, VIP and backend")
   Container(dns, "DnsResponder", "Rust", "Node DNS, wildcard bind on port 53")
   Container(nft, "Host firewall", "nftables, constant rules", "Diverts to leg-C; refuses other guest-prefix traffic; rejects marked owner sockets to host-internal destinations")
-  Container(vmm, "Cloud Hypervisor fork", "VMM, backend=vhost-kernel", "Opens its own vhost-vsock device; exits on guest reset with the fork change of ADR-0182")
+  Container(vmm, "Cloud Hypervisor fork", "VMM, backend=vhost-kernel", "Opens its own vhost-vsock device; exits on guest reset because the launcher passes --guest-reset-action exit-vmm (ADR-0182)")
   Container(init, "overdrive-init", "Rust, guest PID 1", "Guest network configuration, guest flow owner, control session, beacon")
   Container(gfwd, "Guest capture and forwarder", "Aya eBPF capture + C module ovd_fwd in the guest kernel", "Captures ordinary sockets; forwards each pair; classifies vsock ends")
   System_Ext(peer, "Remote mesh peer")
@@ -2034,9 +2034,9 @@ sequenceDiagram
     Note over Pool: the lease is released only after the VMM has exited
 ```
 
-The VMM step "exits instead of rebooting in place" is the fork change of
-ADR-0182; the pinned fork build `41a619d19` still answers a reset with
-`vm_reboot`. The driver classifies the exit as a crash because the guest sent
+The VMM step "exits instead of rebooting in place" is upstream's
+`--guest-reset-action exit-vmm`, which the launcher passes on every launch
+(ADR-0182, amended 2026-11-20); the fork carries no reset change. The driver classifies the exit as a crash because the guest sent
 no exit report.
 
 On a `serve` restart, boot reclamation ends every VM the new process does not

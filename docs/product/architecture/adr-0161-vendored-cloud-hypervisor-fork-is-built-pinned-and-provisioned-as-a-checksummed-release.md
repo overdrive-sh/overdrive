@@ -2,14 +2,31 @@
 
 ## Status
 
-**Accepted — decision D21 approved by user 2026-10-05; RESET-EXIT (the pinned
-fork build carries the change that ends the VMM on a guest reset, ADR-0182)
-approved by user 2026-10-11.** GH #295. Recorded in the #295 feature delta,
+**Accepted — decision D21 approved by user 2026-10-05; RESET-EXIT (a guest
+reset ends the VMM, ADR-0182) approved by user 2026-10-11, its mechanism
+amended 2026-11-20 to the launcher flag, see § Amendment.** GH #295. Recorded in the #295 feature delta,
 § *[REF] vsock Attachment Replacement DESIGN*.
 
 It implements the provisioning half of ruling **D13 = (a), APPROVED
 2026-10-05**: the vendored fork is the only VMM Overdrive runs with, and this
 ADR fixes how it is built, pinned and provisioned.
+
+## Amendment — 2026-11-20: the fork is upstream `main` plus our commits
+
+User ruling: the less our fork differs from upstream the better. The fork
+branch is now `main` (upstream Cloud Hypervisor `main`, v56, plus our commits
+on top), no longer `overdrive/vhost-kernel-vsock` (v53.0 plus two commits).
+The fork no longer carries a guest-reset change. It keeps upstream's
+`--guest-reset-action` default and the launcher passes `exit-vmm` on every
+launch (ADR-0182). The fork now differs from upstream only by the vhost-kernel
+vsock device (ADR-0146), its backend flag, and the O_EXCL block-device open
+(F2, ADR-0310 family). F1 (fsync propagation) and F3 (explicit `image_type`)
+of the volume work are upstream's own now (commits `91e4be988`, `8e9c08689`,
+`1f468d822`, `f2cedec65`). Where the Context and Decision below say the pinned
+fork commit carries the reset-exit change, or name the old branch and commit
+list, they describe the first-accepted pin: the one-pinned-SHA, release-artifact
+and checksum decisions stand, and the SHA, tag and checksums pinned in
+`versions.env` are those of the build from the new branch.
 
 ## Context
 
@@ -26,10 +43,10 @@ project's GitHub releases:
 - `infra/metal/native-preflight.sh` only checks that `cloud-hypervisor` is on
   `PATH`.
 
-Nothing verifies the binary's content, and Overdrive requires two fork
-properties: the `backend=vhost-kernel` vsock device (ADR-0146) and the end of
-the VMM on a guest reset (ADR-0182). The binary must be the pinned fork build,
-byte for byte.
+Nothing verifies the binary's content, and Overdrive requires the fork's
+`backend=vhost-kernel` vsock device (ADR-0146); the end of the VMM on a guest
+reset is the launcher's flag on upstream's option (ADR-0182), not a fork
+property. The binary must be the pinned fork build, byte for byte.
 
 The fork is the submodule `vendors/cloud-hypervisor` (URL
 `https://github.com/overdrive-sh/cloud-hypervisor.git`), branch
@@ -37,14 +54,15 @@ The fork is the submodule `vendors/cloud-hypervisor` (URL
 `41a619d19`. Those commits' gates passed: x86_64 clippy `-D warnings`
 (default and `--no-default-features --features kvm`), the vsock and config
 unit tests, and `fmt --check`; aarch64 compiled and passed clippy in Lima.
-Runtime evidence exists for x86_64 only. The reset-exit change of ADR-0182 is
-not yet a commit on the branch.
+Runtime evidence exists for x86_64 only. (As first accepted; the branch is now
+`main`, see § Amendment. The reset-exit change of ADR-0182 was never a commit
+on the old branch and is now the launcher's flag.)
 
 ## Decision
 
 1. **One source pin.** The production VMM is built from one full commit SHA of
-   the fork, and that commit carries both the `backend=vhost-kernel` vsock
-   device and the reset-exit change (ADR-0182). The submodule pointer is that
+   the fork, and that commit carries the `backend=vhost-kernel` vsock device
+   (guest reset needs no fork commit, ADR-0182). The submodule pointer is that
    SHA, and `versions.env` names it (`CLOUD_HYPERVISOR_FORK_REV`). The
    submodule is the build input; nothing builds from a moving branch.
 2. **One release artifact per architecture.** A fork CI workflow builds
@@ -95,8 +113,9 @@ Upstreaming the change to Cloud Hypervisor is outside this decision.
   parameter is replaced the same way. The exact keys are pinned in the feature
   delta (§ *VMM fork provisioning contract*).
 - Rebasing the fork onto a new Cloud Hypervisor version is a deliberate change: new
-  SHA, new tag, new checksums, the reset-exit change carried forward, and the
-  V-1 evidence and the ADR-0182 validation item re-run on qualified metal.
+  SHA, new tag, new checksums, our remaining fork commits carried forward
+  (nothing for guest reset), and the V-1 evidence and a real-VM guest-reset
+  check (ADR-0182) re-run on qualified metal.
 - The fork's aarch64 binary has compile and lint evidence only.
 - Any host image that ships Cloud Hypervisor consumes the same pinned
   artifact and checksum; nothing in this ADR depends on how such an image is

@@ -182,8 +182,7 @@ S-VOL-21 (the V2 fixtures) is not authored: the V2 bytes exist only in DELIVER's
 The claim and the kernel citations are in the feature delta § Test infrastructure decisions (P-3, P-3a).
 
 - **Relabel (P-3a, user ruling 2026-11-19, option A).** In the production write-back attachment a guest `fsync` is an explicit flush, and stock Cloud Hypervisor already propagates a failed explicit flush
-  (spike run-022 and run-030, `a3_fault_wb_explicit_flush_*`). S-VOL-T3-11 therefore tests that behaviour; it does not test fork fix F1 (ADR-0316). F1's regression test lands in the fork
-  (`overdrive-sh/cloud-hypervisor`) with the F1 patch, as DELIVER's fork-side work, not in this repository (feature delta V-3).
+  (spike run-022 and run-030, `a3_fault_wb_explicit_flush_*`). S-VOL-T3-11 therefore tests that behaviour; it does not test F1 (ADR-0316). F1 is upstream Cloud Hypervisor's own behaviour since 2026-11-20 (ADR-0316 amended), so no fork-side F1 regression test exists (feature delta V-3).
 - **Placement:** `guest = "cgroup-default", profile = "volume-pool"`, through `serve` + `deploy` like S-VOL-T3-07.
 - **Scenario:** a VM workload with `[vm.volume]` is Running and the guest has written to its volume block device with `O_DIRECT`, so nothing is
   dirty in the guest page cache. A control `fsync` on that block device returns success. While the VMM runs, the test replaces the volume's

@@ -12,7 +12,8 @@ volume and the `overdrive` volume group on it, plus the `lvm` tools and device-m
 The pool is not one of Overdrive's internal stores (intent store, observation store).
 
 Evidence: `spike/findings.md` (including § "V-1. LVM on a minimal node without udev"), `spike/wave-decisions.md` (native metal host, Linux
-7.0.0-38, Cloud Hypervisor fork `f252bb20b` plus spike patches F1 to F3). Research:
+7.0.0-38, Cloud Hypervisor fork `f252bb20b` plus spike patches F1 to F3; since 2026-11-20 the fork is upstream `main` plus our commits, and F1 and F3 are
+upstream's own behaviour, so only F2 remains a fork change, ADR-0161 § Amendment). Research:
 `docs/research/platform/vm-persistent-volume-block-path-and-backing-research.md`, `vm-volume-copy-on-write-clone-prior-art-research.md`,
 `docs/research/orchestration/stop-during-start-comprehensive-research.md`.
 
@@ -235,15 +236,34 @@ PoolAbsent }`: `VmDriver` holds `volumes: None`, because the probe returned `Non
   that partition's volume group `overdrive`.
 - **`Err(VolumeProbeError)`** iff a labelled partition is present (or the label is ambiguous) and a scenario failed. No backing is returned.
 - **Effects:** it may create and remove one scratch volume named with the prefix `ovd-probe-`, and removes a leftover one first; it touches no
-  other volume. On any exit, including `Err`, it leaves no scratch volume it created, except `ScratchRemoveFailed`.
+  other volume. On any exit, including `Err`, it leaves no scratch volume it created, except `ScratchRemoveFailed` and a deadline return (below),
+  where an abandoned command may still create the scratch volume or fail to remove it.
 - **Repeatable:** safe to call again after a crash or an `Err`; a second call after an `Ok` is a fresh probe with the same result on an unchanged
-  node.
+  node. A scratch volume left by an abandoned command is removed first by the next probe.
+- **Bound (P-4, 2026-11-21).** `probe` returns, `Ok` or `Err`, within 30 s of the call, whatever `lvm` does; the same 30 s as the `ensure`
+  deadline (B-1), and likewise a private policy value of the adapter, not a parameter of the port.
+  - *One deadline for the whole call,* not per command: it starts when `probe` is entered, on the adapter's own timer (`LvmVolumePoolProbe` is
+    `adapter-host`), and covers every `lvm` spawn the probe makes (`pvs`, `vgs`, `lvs`, the scratch `lvcreate` and `lvremove`), mirroring
+    `ensure`. The sysfs partition discovery is a local read that does not wait on `lvm` and is not itself bounded.
+  - *At the deadline* `probe` returns at that instant `Err(VolumeProbeError { scenario, detail: Io(source) })`, `source.kind() ==
+    io::ErrorKind::TimedOut` (no new `VolumeProbeDetail` variant; this mirrors `PoolCommand { TimedOut }`), and `scenario` is the scenario the
+    command in flight reports on any failure (when the deadline passes between two commands, the scenario of the next command it would have run).
+    It spawns no further command after the deadline. A command in flight is not killed, aborted or awaited: its child runs to its own end, reaped
+    by a task the adapter owns, and its status and output are discarded (`rust.md`).
+  - *Operator-visible:* a deadline return refuses startup exactly as any probe `Err` does (VD-5): `health.startup.refused`, reason
+    `volume_backing.probe`, `ControlPlaneError::VolumeBackingBoot`, the error naming the scenario and a `TimedOut` source. No fallback runs:
+    `overdrive serve` never waits on a hung `lvm`, and the node boots again on the appliance's next start.
+  - *The sim.* `SimVolumePoolProbe::failing(VolumeProbeError)` already returns any scripted error, including a `TimedOut` one; no timer in the sim.
 
 `VolumeProbeError { scenario: VolumeProbeScenario, detail: VolumeProbeDetail }` (`thiserror`; `detail` is the error's `source`, never a flattened
 `String`). `VolumeProbeDetail` is `#[non_exhaustive]`: `Io(io::Error)`, `CommandFailed { exit_status: Option<i32>, stderr: String }` (diagnostic
-text only, never parsed), `AmbiguousLabel { nodes: Vec<PathBuf> }`, `NodeMissing { path: PathBuf }`. `VolumeProbeScenario` (`as_str`):
-`ToolsOrDeviceMapperUnusable`, `VolumeGroupMissing` (including a group not on the labelled partition, and a label matched by more than one
-partition, detail `AmbiguousLabel`), `ScratchCreateOrNodeFailed`, `ScratchRemoveFailed`. The probe removes a scratch volume left by a crashed
+text only, never parsed), `AmbiguousLabel { nodes: Vec<PathBuf> }`, `NodeMissing { path: PathBuf }`. `VolumeProbeScenario` (`as_str`, in this
+order; neither probe enum is serialised, archived or in the OpenAPI schema, so adding a variant has no persisted or wire effect):
+`SysfsUnreadable` (P-5, 2026-11-21: reading `/sys/class/block` to discover the partition labelled by `PARTNAME` failed, detail `Io`; it is the
+first stage of the probe and is not an `lvm` or device-mapper failure), `ToolsOrDeviceMapperUnusable` (the `lvm` tools or device-mapper),
+`VolumeGroupMissing` (including a group not on the labelled partition, and a label matched by more than one partition, detail `AmbiguousLabel`;
+it also reports a failing `lvs` in the leftover-scratch sweep and an unparseable `vg_free`, which arise only when the volume group itself is
+broken), `ScratchCreateOrNodeFailed`, `ScratchRemoveFailed`. The probe removes a scratch volume left by a crashed
 probe first (`lvremove -f` removes it in either state, V-1) and skips the scratch step with an event when the pool has no free extent. It touches
 no volume that is not a scratch volume; a workload volume left inactive by a reboot is the launch path's `ensure` to activate. "Probed before
 use" rests on two facts, not on a witness type: `compose_volume_backing` is the only caller of `VolumePoolProbe::probe`, and `run_server` is the
@@ -266,8 +286,8 @@ which owns its command builder. `VmConfig` gains `volume: Option<VolumeAttachmen
 `--disk` (so it is `/dev/vdb`). `prepare_confined_paths` also chowns the symlink-resolved device node to `root:<VMM gid>` mode `0660` (a block
 device node is refused to the dropped uid otherwise, spike C3); a failure is the existing `ConfinementUnavailable { control: UidDrop }`. The owner
 and mode are not restored at teardown; no other VMM can open another workload's node because each VMM's Landlock allow-list is derived from its
-own launch arguments (ADR-0315). `rlimit_fsize` is unchanged. Fork: F1 to F3 (ADR-0316, ADR-0319, ADR-0320) and the pinned revision and
-checksums bump.
+own launch arguments (ADR-0315). `rlimit_fsize` is unchanged. Fork: only F2 (ADR-0319, the `O_EXCL` open) is a fork change; F1 (ADR-0316) and F3 (ADR-0320) are upstream Cloud Hypervisor's own behaviour
+since the fork moved to upstream `main` (2026-11-20, ADR-0161 § Amendment); the pinned revision and checksums follow that move.
 
 ### Launch path and driver failures (VD-8, VD-9)
 
@@ -769,7 +789,7 @@ guest as an `fsync` error through the real VMM. This is the durability guarantee
 every engine (spike `run-022` and `run-030`: `a3_fault_wb_explicit_flush_*`, `errs_after_injection=20`), so the test does not guard F1. F1
 (ADR-0316) changes only the write-through path, a failed post-write fsync, which a guest reaches by switching its virtio-blk cache mode; the
 spike reached it only with host page caching on, because with direct I/O to the device no stock dm target produces a write that succeeds
-followed by a flush that fails. F1's regression test lives in the fork and is a DELIVER obligation (§ Validation, V-2). Faults enter only at
+followed by a flush that fails. F1 is upstream's own behaviour (ADR-0316 amended 2026-11-20), so no fork-side regression test exists for it (§ Validation, V-3). Faults enter only at
 the kernel device. The fixture mechanics (placement, the `dm-flakey` table rewrite, the write-cache precondition, the guest-image addition,
 cost): `distill/upstream-issues.md` § "P-3 fixture".
 
@@ -1104,13 +1124,13 @@ Neither driver reads a `Sim*` adapter in `from_driver`; the volume driver keeps 
 |---|---|---|---|
 | V-1 | LVM tools work on a minimal image-equivalent node, and the labelled partition is found without udev | contract-shaping; **PASSED** (2026-11-17): `spike/findings.md` § "V-1", `spike/evidence/v1-001` to `v1-011` | none: VD-3, VD-4, VD-5 stand; the contract absorbs `LVM_SYSTEM_DIR=/run/lvm` and the kernel features provisioning supplies |
 | V-2 | A failed volume device is reported to the guest as an I/O error through the real VMM, in the production write-back attachment (the default mode's durability guarantee) | a Tier-3 test obligation, not a spike (P-3): S-VOL-T3-11 | a failure would be a defect in the VMM or the attachment, found by DELIVER, not a contract change |
-| V-3 | F1 (ADR-0316): a write-through request whose post-write fsync fails completes with `VIRTIO_BLK_S_IOERR` on every engine (io_uring, AIO, sync) | a fork-side test obligation, discharged by DELIVER (P-3a): see below | a failure would be a defect in the F1 patch, found by DELIVER, not a contract change |
+| V-3 | F1 (ADR-0316): a write-through request whose post-write fsync fails completes with `VIRTIO_BLK_S_IOERR` on every engine (io_uring, AIO, sync) | upstream behaviour since 2026-11-20 (see below); originally a fork-side test obligation (P-3a) | a failure would be a defect in upstream's fsync propagation, found by DELIVER, not a contract change |
 
-**V-3 discharge (P-3a, 2026-11-19).** F1 is fork code, so its regression test lands in `overdrive-sh/cloud-hypervisor` (the vendored
-`vendors/cloud-hypervisor`) together with the F1 patch. The test mirrors spike `run-030`'s cells: for each engine, a write-through request whose
-post-write fsync fails completes with `VIRTIO_BLK_S_IOERR`, with no acknowledgement and no wedge on the sync engine. The DELIVER step that
-lands the fork patches and the pin and checksum bump (ADR-0316, ADR-0319, ADR-0320, ADR-0161) carries this test as an obligation. It is the
-discharging item for F1; S-VOL-T3-11 is not.
+**V-3 (P-3a, 2026-11-19; amended 2026-11-20).** F1 was first planned as fork code with its regression test in `overdrive-sh/cloud-hypervisor`.
+The fork has since moved to upstream `main` and F1 is upstream's own behaviour (upstream commits `91e4be988`, `8e9c08689`, `1f468d822`), so
+this repository carries no F1 patch and no F1 regression test; the DELIVER step lands the fork pin and checksum bump (ADR-0161 § Amendment) and
+F2 (ADR-0319). The property to hold is unchanged: for each engine, a write-through request whose post-write fsync fails completes with
+`VIRTIO_BLK_S_IOERR`, with no acknowledgement and no wedge on the sync engine. S-VOL-T3-11 is not its discharging item.
 
 **V-1 result** (nested guest on the metal host, kernel 7.0.0-38, read-only root with a tmpfs on `/run` only, no udev, no LVM daemon, distro
 `lvm2 2.03.31` plus its `ldd` closure; deciding run `v1-008`): all five steps pass on the pinned `--config`, with one addition,
@@ -1167,8 +1187,8 @@ Exposures with a stated bound:
 
 Contract tests recommended for the `lvm` command-line tools: the JSON report format and exit-status behaviour Overdrive parses are pinned by
 golden outputs captured from the node's LVM2 version and re-captured on every LVM2 bump (consumer-driven contract against a subprocess). The
-Cloud Hypervisor fork's disk argument surface (`serial`, `direct`, `image_type`, `O_EXCL` on block devices) is pinned by the F1 to F3 patch tests
-(in the fork; F1's is V-3) and the argv golden test. Enforcement tooling: the existing dst-lint and `conformance-lint` families and whatever ADR-0082 D5 enforces for probe
+Cloud Hypervisor fork's disk argument surface (`serial`, `direct`, `image_type`, `O_EXCL` on block devices) is pinned by the fork's F2 test, upstream's own
+tests for F1 and F3, and the argv golden test. Enforcement tooling: the existing dst-lint and `conformance-lint` families and whatever ADR-0082 D5 enforces for probe
 adapters.
 
 ## Handoff

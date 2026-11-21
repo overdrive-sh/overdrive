@@ -8,6 +8,17 @@ authoritative as part of the complete #293 DESIGN bundle. The user explicitly
 directed a greenfield, forward-only reset because there are no production
 users.
 
+**Amended 2026-11-21 (user ruling, commit `11e6ac03b`): `ServiceSpecEnvelope`
+no longer exists.** Nothing ever persisted, read, hashed or sent it. Services
+persist through `WorkloadIntentEnvelope` (`archive_for_store` in the control
+plane's `handlers.rs`), and `spec_digest` hashes that. The envelope existed
+only by the convention that every archived type gets one. It was deleted with
+`ServiceSpecV1`, `ServiceSpecLatest` and the frozen `VmInputV1` /
+`DriverInputV1`. The parser-side `ServiceSpec` is a plain struct that keeps its
+rkyv derives because `WorkloadSpec` embeds it. This ADR's decision therefore
+resets one envelope owner, `WorkloadIntentEnvelope`; every statement below
+about `ServiceSpecEnvelope` or its V1 describes the first-accepted decision.
+
 ## Context
 
 Two current envelope owners directly embed the workload-driver union:

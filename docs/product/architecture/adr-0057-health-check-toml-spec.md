@@ -191,6 +191,14 @@ pub enum ProbeMechanic {
 }
 ```
 
+> **Amended 2026-11-21 (user ruling, commit `11e6ac03b`):** `ServiceSpecEnvelope`
+> was removed. Nothing persisted, read, hashed or sent it; Services persist
+> through `WorkloadIntentEnvelope` (ADR-0111). The `ServiceSpecEnvelope::V2`
+> bump and its `FIXTURE_V1` described here and under Consequences were
+> superseded by that removal; `ProbeDescriptor` persists only through
+> `WorkloadIntentEnvelope`, and `ServiceSpec` is a plain struct that keeps its
+> rkyv derives because `WorkloadSpec` embeds it.
+
 `ProbeDescriptor` is rkyv-archived as part of `ServiceSpec`. Per
 ADR-0048 / ADR-0050 the `ServiceSpec` already lives inside a
 versioned envelope; adding the three Vec fields is an additive

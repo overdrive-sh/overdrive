@@ -1,11 +1,28 @@
-# ADR-0182 — A guest reset ends the VMM, enforced by a change in the vendored Cloud Hypervisor fork
+# ADR-0182 — A guest reset ends the VMM, enforced by the launcher passing upstream's `--guest-reset-action exit-vmm`
 
 ## Status
 
-**Accepted — decision RESET-EXIT approved by user 2026-10-11.** GH #295.
+**Accepted — decision RESET-EXIT approved by user 2026-10-11. Mechanism
+amended by user ruling 2026-11-20** (see § Amendment). GH #295.
 Recorded in the #295 feature delta, § *[REF] vsock Attachment Replacement
 DESIGN* (§ *VMM fork provisioning contract*). Depends on ADR-0146 (the VMM
 opens its own vhost-vsock device) and ADR-0161 (the pinned fork build).
+
+## Amendment — 2026-11-20: the launcher passes upstream's flag; the fork carries no reset change
+
+The guarantee below is unchanged: a guest reset ends the VMM. Only the
+mechanism changed. As first accepted, the fork carried a patch routing
+`EpollDispatch::Reset` to the VMM exit path. The fork has since moved to
+upstream `main` (Cloud Hypervisor v56), which has its own
+`--guest-reset-action` option. The fork keeps upstream's default (`reset-vm`)
+and carries no change for guest reset. Overdrive's launcher
+(`build_confined_command`, `crates/overdrive-host/src/vmm.rs`) passes
+`--guest-reset-action exit-vmm` on every launch, which routes the guest-reset
+dispatch to the VMM exit path rather than `vm_reboot`. User ruling: the less
+our fork differs from upstream the better. Where the Context, Decision and
+Consequences below say the fork ends the VMM or carries the change, read it
+as this launcher flag on upstream's option. The first-accepted text is kept
+because the V-30 reasoning and the rejected alternatives still apply.
 
 ## Context
 
@@ -45,10 +62,12 @@ opening the new one, so host flows into the old incarnation are reset
 
 ## Decision
 
-- **The fork ends the VMM on a guest reset.** The fork routes
+- **The VMM ends on a guest reset, because the launcher passes
+  `--guest-reset-action exit-vmm`.** Upstream's option routes
   `EpollDispatch::Reset` to the VMM exit path instead of to `vm_reboot`.
   Every reset source therefore ends the VMM process; no guest runs a second
-  incarnation inside one VMM.
+  incarnation inside one VMM. (First accepted as a fork patch; see
+  § Amendment.)
 - **A reset is classified as a crash by the driver's existing exit
   classification; no new exit status is introduced.** That a reset is a
   crash is the purpose of this decision (CLAUDE.md: a crash loop must charge
@@ -63,10 +82,11 @@ opening the new one, so host flows into the old incarnation are reset
   (`cloud-hypervisor/src/main.rs:960-968` in the fork), the reset therefore
   lands as the existing unreported-guest-exit start failure before READY and
   as an ordinary crash after READY.
-- **The change lives in the fork.** It is a fork property carried by the
-  pinned fork build (ADR-0161), not a driver-side behaviour. The driver gains
-  no reset supervision; it sees the VMM's exit through its existing VMM-exit
-  handling, before or after READY.
+- **The launcher enforces it, not the fork and not driver supervision.** The
+  flag is part of the launch command line, so it holds for every VM the
+  launcher starts. The driver gains no reset supervision; it sees the VMM's
+  exit through its existing VMM-exit handling, before or after READY. The
+  driver must not rely on supervising `vm/rebooting`.
 - **One incarnation per VMM process.** A VMM process runs exactly one guest
   boot. A guest that needs to start again is started by its lifecycle owner
   as a new launch.
@@ -101,14 +121,13 @@ opening the new one, so host flows into the old incarnation are reset
   them on the host (ADR-0180).
 - The launch token stays one-per-VMM-process, which ADR-0177's attribution
   requires.
-- The fork diverges from upstream Cloud Hypervisor in its reset handling; a
-  rebase of the fork carries the change (ADR-0161).
+- The fork does not diverge from upstream Cloud Hypervisor in its reset
+  handling; it keeps upstream's `--guest-reset-action` default and the
+  launcher overrides it per launch (ADR-0161). A rebase of the fork carries
+  nothing for guest reset.
 - The rule is covered by the feature delta's § *Formal protocol model*.
-- The change is untested: V-30's reading of it is a reading, not a result.
-  Its validation (V-30-FORK in the feature delta's validation plan) is not
-  contract-shaping and blocks DELIVER of the fork step only: the driver's
-  classification depends on the absence of a guest report, not on any
-  property of the patch, so a falsification changes the fork patch, not a
-  contract DISTILL pins. The pinned fork build `41a619d19` still answers a
-  reset with `vm_reboot` (`vmm/src/lib.rs:2088-2094`); the change is this
-  ADR's, not yet the fork's.
+- The pre-amendment fork patch and its V-30-FORK validation are superseded:
+  the pinned fork build `41a619d19` that still answered a reset with
+  `vm_reboot` (`vmm/src/lib.rs:2088-2094`) predates the move to upstream
+  `main`. The guarantee is now proven by a real-VM reset ending the VMM when
+  launched through `build_confined_command`.

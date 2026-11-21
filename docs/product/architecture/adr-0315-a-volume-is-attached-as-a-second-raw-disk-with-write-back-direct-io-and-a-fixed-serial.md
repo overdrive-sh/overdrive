@@ -30,7 +30,7 @@ no VMM can open another workload's node.**
 ## Alternatives considered
 
 - **Write-through.** Rejected: slower, and not needed for durability; the guest can still
-  request it, which the fork changes keep honest (ADR-0316).
+  request it, which upstream's fsync-error propagation keeps honest (ADR-0316).
 - **Leave the node's owner and mode alone and run the VMM with wider privilege.** Rejected: the
   confined uid drop is the platform's isolation boundary and is not weakened for one disk.
 - **Buffered host I/O (`direct=off`).** Rejected: page cache charged to `memory.max`; the OOM

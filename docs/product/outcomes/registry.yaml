@@ -713,10 +713,10 @@ outcomes:
   superseded_by: null
 - id: OUT-EXEC-REMOVAL-FORWARD-SCHEMA
   kind: invariant
-  summary: Exactly four Exec-coupled envelope owners use new incompatible forward-only V1 schemas; no prior payload is read or migrated and every unrelated envelope remains unchanged
+  summary: Exactly three Exec-coupled envelope owners use new incompatible forward-only V1 schemas; no prior payload is read or migrated and every unrelated envelope remains unchanged (ServiceSpecEnvelope was a fourth until removed 2026-11-21, commit 11e6ac03b, because nothing persisted it)
   feature: remove-legacy-exec-workload-driver
   inputs:
-  - shape: ServiceSpecEnvelope, WorkloadIntentEnvelope, AllocStatusRowEnvelope, and AllocLifecycleOccurrenceRowEnvelope current payloads
+  - shape: WorkloadIntentEnvelope, AllocStatusRowEnvelope, and AllocLifecycleOccurrenceRowEnvelope current payloads
   output:
     shape: one post-cut V1 arm per named envelope, no legacy variants/readers/conversions/fixtures, and no reset outside the named set
   keywords:

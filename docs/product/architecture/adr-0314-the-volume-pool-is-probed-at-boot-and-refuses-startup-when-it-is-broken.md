@@ -23,7 +23,15 @@ declares a volume then fails its start with a typed cause). A node that has the 
 and fails the probe refuses to start with the structured event `health.startup.refused`,
 reason `volume_backing.probe`.**
 
-The probe fails on: device-mapper or the LVM tools unusable; the volume group `overdrive`
+The probe runs under one deadline owned by the adapter, the same 30 s as the `ensure` deadline (ADR-0318):
+one bound over the whole probe, not per command. A probe that outlives it returns a typed probe error
+(the failing stage's scenario, source kind `TimedOut`) and startup is refused as for a broken pool; a
+stalled `lvm` is never killed. Without the bound, a hung `lvm` at boot (for example on a lock left by a
+crash) would hang `overdrive serve` forever on an appliance with no operator shell (decision P-4,
+approved by the user on 2026-11-21).
+
+The probe fails on: the partition discovery read of `/sys/class/block` failing (scenario
+`SysfsUnreadable`, decision P-5, approved 2026-11-21); device-mapper or the LVM tools unusable; the volume group `overdrive`
 missing from the labelled partition (or the label matched by more than one partition); a scratch logical volume that cannot be created, whose
 device node does not appear, or that cannot be removed. It removes a scratch volume left by a crashed earlier probe first, and
 skips the scratch step (with an event) when the pool has no free extent, so a full pool does

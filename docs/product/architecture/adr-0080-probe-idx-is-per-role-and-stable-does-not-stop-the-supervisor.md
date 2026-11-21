@@ -430,9 +430,13 @@ commit, per `feedback_behavior_change_must_mark_stale_adjacent_docs`. The
 docstring at `probe_result_row.rs:159` becomes true without edit.
 
 **rkyv handling — follow the in-tree precedent, do NOT bump an envelope.**
-`ProbeDescriptor` is reachable from two persisted archives: `WorkloadIntentV1`
+`ProbeDescriptor` was reachable from two persisted archives: `WorkloadIntentV1`
 (via `ServiceV1`) and `ServiceSpecV2` (via `ServiceSpecEnvelope::V2`). Adding a
-field shifts positional offsets in both. The governing local precedent is
+field shifts positional offsets in both. *(Amended 2026-11-21, user ruling,
+commit `11e6ac03b`: `ServiceSpecEnvelope` was removed because nothing persisted,
+read, hashed or sent it, so only the `WorkloadIntentV1` archive remains; the
+parser-side `ServiceSpec` is a plain struct that keeps its rkyv derives because
+`WorkloadSpec` embeds it.)* The governing local precedent is
 `crates/overdrive-core/src/aggregate/mod.rs:413-427`, recorded for **this exact
 change shape** (adding probe vecs to `ServiceV1`):
 

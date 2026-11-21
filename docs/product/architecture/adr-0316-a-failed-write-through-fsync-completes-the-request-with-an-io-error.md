@@ -4,6 +4,13 @@
 
 **Accepted** (decision VD-7a, GH #348). Approved by the user on 2026-11-17.
 
+**Amended 2026-11-20:** the fix (F1) is now upstream Cloud Hypervisor's own behaviour (upstream commits
+`91e4be988`, `8e9c08689`, `1f468d822`), carried by the fork's move to upstream `main` (ADR-0161
+§ Amendment). It is no longer a fork patch. The decision below, that a failed write-through fsync
+completes the request with an I/O error on every engine, still holds and is the contract Overdrive
+relies on. Where the text below says the fork carries a patch, a pin change, or a fork regression test,
+read it as upstream's behaviour at the pinned revision.
+
 ## Context
 
 Overdrive runs only its own Cloud Hypervisor fork (ADR-0161) and changes it when the platform needs
