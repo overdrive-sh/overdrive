@@ -232,7 +232,7 @@ impl Rig {
 /// so the body stops at `declare`; the assertions after it are the contract the launch path must
 /// meet once the parser and the lane table land.
 #[test]
-#[should_panic(expected = "the volume exists before the claim is held")]
+#[should_panic(expected = "a stop recorded during a launch's claim wait must end the launch at once with StartSuperseded")]
 fn a_stop_interrupts_the_start_and_its_result_is_never_used() {
     let mut rig = Rig::new();
     rig.declare();
@@ -288,7 +288,7 @@ fn a_stop_interrupts_the_start_and_its_result_is_never_used() {
 /// charged to the restart budget: the restart authority's view carries the charge once the
 /// next evaluation issues the replacement.
 #[test]
-#[should_panic(expected = "the volume exists before the claim is held")]
+#[should_panic(expected = "the held claim must fail the launch typed")]
 fn a_launch_held_past_its_bound_writes_the_typed_failed_row_and_charges_the_restart_budget() {
     let mut rig = Rig::new();
     rig.declare();

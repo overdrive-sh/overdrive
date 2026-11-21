@@ -49,7 +49,6 @@ fn run<F: std::future::Future>(f: F) -> F::Output {
 /// Gate available (boundary 1): a new volume is created, activated, returned, and unclaimed.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[should_panic(expected = "ensure on a pool with space must create the volume")]
 fn ensure_creates_the_volume_and_leaves_the_claim_free() {
     let sim = pool(1024);
     let w = workload("dev-box");
@@ -68,7 +67,6 @@ fn ensure_creates_the_volume_and_leaves_the_claim_free() {
 /// returns the same device and creates nothing new; the existing size is not compared.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[should_panic(expected = "the first ensure must create the volume")]
 fn ensure_is_idempotent_and_does_not_compare_the_existing_size() {
     let sim = pool(1024);
     let w = workload("dev-box");
@@ -83,7 +81,6 @@ fn ensure_is_idempotent_and_does_not_compare_the_existing_size() {
 /// Two workloads get two distinct volumes.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[should_panic(expected = "each workload's ensure must create its own volume")]
 fn each_workload_gets_its_own_volume() {
     let sim = pool(1024);
     let a = run(sim.ensure(&workload("alpha"), gib(10)))
@@ -98,9 +95,6 @@ fn each_workload_gets_its_own_volume() {
 /// size, and creates nothing.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[should_panic(
-    expected = "an ensure that does not fit must fail InsufficientSpace naming both figures"
-)]
 fn sad_insufficient_space_fails_typed_and_creates_nothing() {
     let sim = pool(10);
     let err = run(sim.ensure(&workload("dev-box"), gib(40))).expect_err("40GiB does not fit 10GiB");
@@ -117,7 +111,6 @@ fn sad_insufficient_space_fails_typed_and_creates_nothing() {
 /// the volume's claim reads `Free` on the very next call.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[should_panic(expected = "ensure must create the volume whose claim_state fault is armed")]
 fn sad_a_claim_state_open_failure_is_a_claim_pool_command_error_and_the_next_call_recovers() {
     let sim = pool(1024);
     let w = workload("dev-box");
@@ -140,9 +133,6 @@ fn sad_a_claim_state_open_failure_is_a_claim_pool_command_error_and_the_next_cal
 /// Sad: asking for the claim of a volume nobody created is `NotFound`.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(
-    expected = "a created volume's claim must be Free while an uncreated one's is NotFound"
-)]
 fn sad_claim_state_of_an_absent_volume_is_not_found() {
     let sim = pool(1024);
     // The control: a sim that reports NotFound for everything also reports it for the ghost.
@@ -161,7 +151,6 @@ fn sad_claim_state_of_an_absent_volume_is_not_found() {
 /// in-flight I/O drained (spike B2b: the claim outlives the process).
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[should_panic(expected = "ensure must create the volume whose claim is read")]
 fn the_claim_is_held_until_the_old_writer_drains() {
     let sim = pool(1024);
     let w = workload("dev-box");
@@ -189,7 +178,6 @@ fn the_claim_is_held_until_the_old_writer_drains() {
 /// `Held` while the process is live and `Free` once it is gone, with no `drain` step.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[should_panic(expected = "ensure must create the volume whose claim is linked to a VMM")]
 fn a_claim_linked_to_a_vmm_is_released_when_the_vmm_dies() {
     let sim = pool(1024);
     let w = workload("dev-box");
@@ -216,7 +204,6 @@ fn a_claim_linked_to_a_vmm_is_released_when_the_vmm_dies() {
 /// volume without creating another.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[should_panic(expected = "ensure must create the volume the reboot deactivates")]
 fn after_a_node_reboot_the_volume_is_inactive_until_ensure_reactivates_it() {
     let sim = pool(1024);
     let w = workload("dev-box");
@@ -263,8 +250,7 @@ proptest! {
     /// claimable volume.
     /// CONTRACT_SHAPE: bounded-change.
     #[test]
-    #[should_panic(expected = "1TiB holds three 10GiB volumes")]
-    fn model_volumes_are_created_once_and_claims_follow_activity(ops in prop::collection::vec(op_strategy(), 0..24)) {
+        fn model_volumes_are_created_once_and_claims_follow_activity(ops in prop::collection::vec(op_strategy(), 0..24)) {
         let sim = pool(1024);
         let ids = [workload("alpha"), workload("beta"), workload("gamma")];
         // The model: a volume is `ensured` once created, `active` while it has a device node (every
@@ -322,7 +308,6 @@ proptest! {
 /// nothing, and leaves the claim state untouched; the very next `ensure` (no fault armed) succeeds.
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[should_panic(expected = "the fault was one-shot")]
 fn sad_a_failing_command_is_a_pool_command_error_and_the_next_ensure_recovers() {
     let sim = pool(1024);
     let w = workload("dev-box");
@@ -342,7 +327,6 @@ fn sad_a_failing_command_is_a_pool_command_error_and_the_next_ensure_recovers() 
 /// rather than creating a second one (`I_ENSURE_IDEMPOTENT_UNDER_CRASH`).
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[should_panic(expected = "the first ensure is parked after its create")]
 fn an_ensure_that_failed_after_the_create_is_reused_by_the_retry() {
     let sim = pool(1024);
     let w = workload("dev-box");
@@ -373,7 +357,6 @@ fn an_ensure_that_failed_after_the_create_is_reused_by_the_retry() {
 /// `/dev/mapper/overdrive-ovd--<hex>` (dm name `<vg>-<lv>` with every `-` doubled; the hex has none).
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "ensure must return the volume's device")]
 fn the_volume_name_is_ovd_and_the_sha256_prefix_of_the_workload_id() {
     let sim = pool(1024);
     for (id, hex) in [

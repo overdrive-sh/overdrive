@@ -621,7 +621,7 @@ async fn sad_a_claim_state_error_ends_the_launch_at_once_as_a_claim_command_fail
 /// it carries no wait duration), attaches nothing, and the volume keeps its holder.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[should_panic(expected = "the volume whose claim is held must exist")]
+#[should_panic(expected = "a declared volume whose claim stays held must fail VolumeUnavailable")]
 async fn sad_a_claim_held_past_the_bound_fails_held_and_attaches_nothing() {
     let sim = pool(1024);
     sim.ensure(&workload(), gib(40)).await.expect("the volume whose claim is held must exist");

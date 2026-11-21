@@ -1,9 +1,9 @@
 //! `VolumeBacking` — the node-local volume pool port (GH #348, ADR-0312,
 //! ADR-0317, ADR-0318).
 //!
-//! RED scaffold (DISTILL): the trait and its errors are the shapes the feature
-//! delta § Port pins. The behavioural contract is the feature delta § Port;
-//! DELIVER writes it into these docstrings.
+//! The trait and its errors are the shapes the feature delta § Port pins; the
+//! method docstrings below are the behavioural contract every adapter
+//! (`LvmVolumeBacking`, `SimVolumeBacking`) implements.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -51,11 +51,59 @@ pub enum VolumeBackingError {
     },
 }
 
-/// The volume pool port. See the feature delta § Port for the behavioural
-/// contract (idempotent `ensure`, `claim_state` projection rule).
+/// The volume pool port: one volume per workload, named `ovd-<hash>` where
+/// `<hash>` is the first 32 lowercase hexadecimal characters of the SHA-256 of
+/// the workload id (ADR-0312). The device path every method uses is the
+/// device-mapper node `/dev/mapper/overdrive-ovd--<hash>`.
 #[async_trait]
 pub trait VolumeBacking: Send + Sync {
     /// Create-if-absent and activate the workload's volume; return its device path.
+    ///
+    /// Preconditions: none beyond a backing that exists (a node with no pool has
+    /// no backing, so "no pool" is never an `ensure` outcome).
+    ///
+    /// Postconditions on `Ok(path)`: the volume exists and is active, `path` is
+    /// its device node, and `claim_state` no longer reports `NotFound` for it.
+    /// A missing volume is created with exactly `size` reserved and is never
+    /// formatted; a volume that exists but is inactive (the state after every
+    /// node reboot) is activated. Creation and activation are separate effects,
+    /// never assumed from each other.
+    ///
+    /// Edge cases:
+    /// - An existing volume is returned as it is: its size is never compared or
+    ///   changed, so `ensure` with another `size` returns the same path.
+    /// - Not enough free extents is `Err(InsufficientSpace { needed, free })`,
+    ///   `needed` the declared `size` and `free` the free space observed before
+    ///   the create; nothing is created.
+    /// - A failing `lvm` command is `Err(PoolCommand { operation, source })`,
+    ///   `operation` the command that failed; nothing it did not complete is
+    ///   left behind, and a volume it did create stays.
+    ///
+    /// Invariants: idempotent and safe to repeat after a crash, so a retry finds
+    /// the volume an earlier attempt created and never creates a second one;
+    /// a volume is created at most once per workload.
+    ///
+    /// Bound: `ensure` returns, `Ok` or `Err`, within 30 s of the call, whatever
+    /// the pool does. The 30 s is one deadline for the whole call, covering
+    /// every command it spawns, and is a private policy value of the adapter,
+    /// not a parameter of the port. The adapter owns it: it starts the deadline
+    /// when `ensure` is entered, on its own timer. The caller passes no deadline,
+    /// holds no timer on `ensure`, and awaits it to its return; it never drops
+    /// the call mid-effect.
+    ///
+    /// At the deadline: `ensure` returns at that instant
+    /// `Err(PoolCommand { operation, source })`, `operation` the command in
+    /// flight (or, between two commands, the next one it would have run) and
+    /// `source.kind() == io::ErrorKind::TimedOut`. It spawns no further command
+    /// after the deadline. A command in flight is not killed or aborted; it runs
+    /// to its own end and its result is discarded. A deadline return is neither
+    /// `NotFound` nor `InsufficientSpace`: the caller learns nothing about
+    /// whether the volume was created or activated.
+    ///
+    /// After the deadline: the abandoned command may still create or activate
+    /// the volume, and nothing the call returned depends on it. The next
+    /// `ensure` observes the volume afresh and may spend its own deadline
+    /// waiting for a lock the abandoned command still holds.
     async fn ensure(
         &self,
         workload: &WorkloadId,
@@ -78,6 +126,10 @@ pub trait VolumeBacking: Send + Sync {
     /// `Err(PoolCommand { operation: VolumeOperation::Claim, source })`, where
     /// `Claim` names the `open(2)` of the device node, not an `lvm` command (no
     /// `lvm` is spawned by `claim_state`).
+    ///
+    /// Preconditions: none; the volume need not exist. `claim_state` has no
+    /// persistent effect and never blocks, so repeated calls observe the claim
+    /// without releasing it.
     ///
     /// The launch path treats any `Err` as the end of the launch; only
     /// `Ok(Held)` is polled again.
