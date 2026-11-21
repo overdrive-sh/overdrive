@@ -60,6 +60,43 @@ fn config_path(tmp: &Path) -> std::path::PathBuf {
     tmp.join("conf").join(".overdrive").join("config")
 }
 
+/// Bound on how long a freshly booted server may take to drain its boot
+/// resync pass.
+const BOOT_SETTLE_BOUND: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Read `cluster status` once the boot resync pass has settled.
+///
+/// The convergence loop runs the resync pass on its first iteration, after
+/// `serve` has already returned (ADR-0084): it submits one `Immediate`
+/// evaluation per managed target and the loop admits each, counting it as
+/// `dispatched`. A status read straight after boot therefore races that
+/// admission and can see `dispatched=0`. The only observable of the pass
+/// through the CLI is the broker counters, so poll until the pass is visible
+/// (`dispatched >= 1`) and drained (`queued == 0`), and panic naming the last
+/// snapshot if that does not happen within [`BOOT_SETTLE_BOUND`].
+async fn settled_cluster_status(config_path: &Path) -> ClusterStatusOutput {
+    let started = std::time::Instant::now();
+    loop {
+        let output = overdrive_cli::commands::cluster::status(StatusArgs {
+            config_path: config_path.to_path_buf(),
+        })
+        .await
+        .expect("cluster::status");
+        if output.broker.dispatched >= 1 && output.broker.queued == 0 {
+            return output;
+        }
+        assert!(
+            started.elapsed() < BOOT_SETTLE_BOUND,
+            "boot resync pass did not settle within {BOOT_SETTLE_BOUND:?}; last broker \
+             counters: queued={} cancelled={} dispatched={}",
+            output.broker.queued,
+            output.broker.cancelled,
+            output.broker.dispatched,
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+}
+
 // -------------------------------------------------------------------
 // (a) cluster::status returns typed output with reconciler registry
 // -------------------------------------------------------------------
@@ -70,9 +107,7 @@ async fn cluster_status_against_in_process_server_returns_typed_output_with_reco
     let (handle, tmp) = spawn_server().await;
     let cfg = config_path(tmp.path());
 
-    let args = StatusArgs { config_path: cfg };
-    let output: ClusterStatusOutput =
-        overdrive_cli::commands::cluster::status(args).await.expect("cluster::status");
+    let output = settled_cluster_status(&cfg).await;
 
     assert_eq!(output.mode, "single", "Phase 1 control plane mode must be `single`");
     assert_eq!(output.region, "local", "Phase 1 region must be `local`");
@@ -82,12 +117,18 @@ async fn cluster_status_against_in_process_server_returns_typed_output_with_reco
         output.reconcilers,
     );
 
-    // broker counters are typed u64 fields — on a fresh server they
-    // are all zero, but the structural assertion (values are u64 and
-    // start at zero) is the important part.
-    assert_eq!(output.broker.queued, 0_u64, "fresh broker must report queued=0");
-    assert_eq!(output.broker.cancelled, 0_u64, "fresh broker must report cancelled=0");
-    assert_eq!(output.broker.dispatched, 0_u64, "fresh broker must report dispatched=0");
+    // Broker counters are typed u64 fields. `settled_cluster_status` returned
+    // only once the boot resync pass had drained, so the snapshot is the
+    // post-boot invariant: nothing queued, nothing cancelled, and the boot
+    // pass's evaluation(s) counted as dispatched (never zero: `vm-reclamation`
+    // always manages `node/<local-node-id>`).
+    assert_eq!(output.broker.queued, 0_u64, "settled broker must report queued=0");
+    assert_eq!(output.broker.cancelled, 0_u64, "settled broker must report cancelled=0");
+    assert!(
+        output.broker.dispatched >= 1,
+        "the boot resync pass dispatches at least one evaluation; got dispatched={}",
+        output.broker.dispatched,
+    );
 
     handle.shutdown().await.expect("clean shutdown");
 }
