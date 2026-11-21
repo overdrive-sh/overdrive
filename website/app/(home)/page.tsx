@@ -173,8 +173,8 @@ kernel = "/srv/vm/kernel"
 rootfs = "/srv/vm/payments.ext4"
 
 [resources]
-cpu_milli = 500
-memory_bytes = 134217728
+cpu = "500m"
+memory = "128MiB"
 
 [[listener]]
 port = 8080

@@ -1246,7 +1246,7 @@ print_reports() {
   REPORT_EMITTED=1
   aggregate_ledger
   echo "E09 v2 metadata: one control-plane process, pid=${SERVE_PID:-stopped}, start_ticks=${SERVE_START_TICKS:-unknown}"
-  echo "E09 v2 capacity: cpus=$HOST_CPUS memory_bytes=$HOST_MEM_BYTES configured_concurrency=$CONCURRENCY"
+  echo "E09 v2 capacity: cpus=$HOST_CPUS memory=$HOST_MEM_BYTES configured_concurrency=$CONCURRENCY"
   echo '--- E09 v2 input manifest begin ---'
   cat "$INPUT_MANIFEST"
   echo '--- E09 v2 input manifest end ---'

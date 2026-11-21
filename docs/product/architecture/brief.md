@@ -147,7 +147,7 @@ acquires an unmeasured load-bearing claim.
 | # | Unmeasured premise | Sensitivity if wrong |
 |---|---|---|
 | **A-1** | **Cloud Hypervisor's failure-to-*exit* latency.** The spike recorded CH's exit *status* on every failure path and never its exit *latency* | SD-3's VMM-exit arm is expected to resolve a bad kernel / unloadable rootfs / Landlock denial far below the boot deadline. If CH's failure-exit approaches the deadline *D*, that arm's advantage collapses and SD-3's rejected asynchronous-readiness seam must be re-opened |
-| **A-2** | **`reserve(memory_bytes)`'s value on the boot path.** Two floors are known (~5.4 MiB steady-state, ~11.9 MiB pre-residency), both from the restore path, and neither includes host page tables — RSS structurally cannot see them | SD-4's *decision* (`memory.max = memory_bytes + reserve`) is unaffected; the *constant* is not shippable until measured via `memory.current` / `memory.stat`. Guessing between the floors is intake precedent warning #7's "magic version floor" |
+| **A-2** | **`reserve(memory)`'s value on the boot path.** Two floors are known (~5.4 MiB steady-state, ~11.9 MiB pre-residency), both from the restore path, and neither includes host page tables — RSS structurally cannot see them | SD-4's *decision* (`memory.max = memory + reserve`) is unaffected; the *constant* is not shippable until measured via `memory.current` / `memory.stat`. Guessing between the floors is intake precedent warning #7's "magic version floor" |
 | **A-3** | **`--memory shared=on` on aarch64.** P6 measured the `shared=on` volume path on **x86_64 only**; `findings.md`'s verdict table says *"aarch64 still unmeasured"* and `wave-decisions.md` carries it under Still-open | Slice 04 designs the volume path (`shared=on` derivation, `rlimit_fsize = max(rootfs, guest RAM)`, the volume payload) for **both** shipping arches on a single-arch measurement. **If `shared=on` misbehaves on Arm metal, Slice 04 is x86_64-only until measured** — the volume capability, not the whole driver, is what gates. **— SUPERSEDED 2026-08-18 (volumes cut, ADR-0083 Amendment 2026-08-18): the `--memory shared=on` / volume path is deferred → #97 (managed block-volume) / #43 (virtiofsd lifecycle), so no `shared=on` ships in this feature and A-3 no longer gates it. Retained as history.** |
 
 A-1 and A-2 were labelled in the first draft of this entry; **A-3 was labelled
@@ -592,16 +592,16 @@ VM density grows.
 #### SD-4 — `memory.max` **cannot** equal the guest's RAM
 
 **Decision.** The allocation's cgroup limit is
-`resources.memory_bytes + reserve(resources.memory_bytes)`, where `reserve` is
+`resources.memory + reserve(resources.memory)`, where `reserve` is
 a **policy function evaluated at start time**, not a persisted field. The
-guest's RAM is `resources.memory_bytes` — the operator's declared figure is the
+guest's RAM is `resources.memory` — the operator's declared figure is the
 quantity the workload observes, and the platform accounts for its own overhead.
 
 **Why, and it is arithmetic rather than a judgement.** The cgroup charges the
 `cloud-hypervisor` process's **entire** RSS: guest RAM **plus** vCPU thread
 stacks, virtio device rings, the HTTP API server, the binary's text, and the
 host page tables backing the guest mapping. `CgroupManager::write_resource_limits`
-writes `memory.max = resources.memory_bytes` verbatim
+writes `memory.max = resources.memory` verbatim
 (`crates/overdrive-worker/src/cgroup_manager.rs:346-360`), and feature-delta
 `[D1]` derives guest memory from the same figure. Set both from one number and
 the scope is over its limit by construction: the VMM's own footprint and the
@@ -645,7 +645,7 @@ RSS**, and the number goes into the policy function with its measurement cited.
 > → #97 (managed block-volume) / #43 (virtiofsd lifecycle)** — no `shared=on` and no
 > storage daemon ship in this feature. The **KEPT** point survives the cut: the
 > **hypervisor's own** memory reserve (SD-4) is a Slice-01 concern that bites from
-> whichever slice first derives guest RAM from `memory_bytes`, and is unaffected by
+> whichever slice first derives guest RAM from `memory`, and is unaffected by
 > the volume deferral. The forward-property prose below is retained as history.
 
 **Forward property, and it rests on assumption A-3.** Under `--memory shared=on`
@@ -657,7 +657,7 @@ misbehaves on Arm metal, Slice 04 is x86_64-only until it is measured.**
 same scope (`[D8e]`), so the reserve function must take the daemon into
 account. Slice 05 already flags the daemon allowance; it does **not** flag the
 hypervisor's own — and that half bites from **whichever slice first derives
-guest RAM from `memory_bytes`**. Slice 01 already writes resource limits (its
+guest RAM from `memory`**. Slice 01 already writes resource limits (its
 own `[D7]` item-5 four-step shape) and must give the guest *some* memory size,
 so either it applies `[D1]`'s derivation — and the collision is present at
 Slice 01 — or it hardcodes a default and ships a VM that ignores `[resources]`.
@@ -1908,7 +1908,7 @@ and **not** an aggregate-boundary change. Checked against Vernon's four rules:
 1. **True invariants inside the boundary.** A VM adds no invariant `Job` does not
    already protect. The candidate — *"the VM's guest RAM and the allocation's
    cgroup limit are consistent"* (SD-4) — is a **derivation at start time from
-   `resources.memory_bytes`**, not a stored pair, so there is no two-field
+   `resources.memory`**, not a stored pair, so there is no two-field
    invariant to protect. Per § *"Persist inputs, not derived state"* the reserve is
    a policy function, never a field; making it a field would manufacture the very
    invariant that would then justify an aggregate.
@@ -2185,7 +2185,7 @@ query exists, so Event Sourcing and CQRS add nothing.
 ### Workload resources in human-readable units (feature `workload-resources-human-readable`, GH #372, 2026-11-20) — ACCEPTED
 
 **ACCEPTED — approved by the user, 2026-11-20** (`.claude/rules/design.md` § "Surface material design decisions"). `[resources]` takes
-`cpu = "500m"` and `memory = "128MiB"` (strings) in place of `cpu_milli` and `memory_bytes`. Two `overdrive-core` value types own the grammars
+`cpu = "500m"` and `memory = "128MiB"` (strings) in place of the earlier integer fields. Two `overdrive-core` value types own the grammars
 and canonical spellings: `ByteSize` (shared with the volume size, which refines it to whole GiB) and `CpuQuantity`. `Resources`, node capacity
 and the API carry them as `cpu` and `memory`; the API carries the canonical string; the archived byte layout is unchanged, so no envelope
 version is added (spike V-1 held). A workload `memory` is a whole number of MiB. No new container or component. Decisions:
@@ -3246,7 +3246,7 @@ hostname-derived by default, with optional `[node].id` config
 override. `Region("local")` is the default, overridable via
 `[node].region`. Capacity defaults to a deliberately-conservative
 `Resources` sentinel (1000 cores / 1 TiB), overridable via
-`[node].cpu_milli` + `[node].memory_bytes`.
+the node capacity configuration.
 
 Per ADR-0029, the `node_health` row writer is a **worker-subsystem
 responsibility**, not a control-plane bootstrap responsibility. The
@@ -3419,8 +3419,8 @@ kernel = "/srv/vm/kernel"
 rootfs = "/srv/vm/report.ext4"
 
 [resources]
-cpu_milli = 500
-memory_bytes = 134217728
+cpu = "500m"
+memory = "128MiB"
 ```
 
 The command is inside the guest. Kernel and rootfs paths are operator-supplied

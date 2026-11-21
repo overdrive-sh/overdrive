@@ -73,8 +73,8 @@ kernel  = "/srv/vm/kernel"       # operator-supplied supported guest-kit kernel
 rootfs  = "/srv/vm/payments.ext4" # operator-supplied guest root filesystem
 
 [resources]
-cpu_milli    = 500         # sizes the guest vCPUs
-memory_bytes = 134217728   # guest RAM in bytes (128 MiB)
+cpu    = "500m"    # sizes the guest vCPUs
+memory = "128MiB"  # guest RAM
 
 [[listener]]
 port     = 8080   # a port the service holds open
@@ -153,15 +153,15 @@ kernel   = "/srv/vm/kernel"      # host path to a bootable kernel image
 rootfs   = "/srv/vm/report.ext4" # host path to an ext4 root filesystem
 
 [resources]
-cpu_milli    = 500         # sizes the guest's vCPUs
-memory_bytes = 134217728   # sizes the guest's memory (128 MiB)
+cpu    = "500m"    # sizes the guest's vCPUs
+memory = "128MiB"  # sizes the guest's memory
 ```
 
 All four `[vm]` fields are required. `command` and `args` name the program to run
 inside the guest; `kernel` and `rootfs` are host paths to a bootable kernel and an
 ext4 root filesystem from a matching guest kit. The rootfs must contain the
 kit's `overdrive-init` and `ovd_fwd` module; an arbitrary kernel is unsupported.
-`cpu_milli` derives the guest vCPU count, and `memory_bytes` sets guest memory.
+`cpu` derives the guest vCPU count, and `memory` sets guest memory.
 
 Deploy, inspect, and stop a microVM job with the same verbs as any other workload
 — the steps below are identical. The allocation reaches `Running` once the guest

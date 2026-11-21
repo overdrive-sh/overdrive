@@ -358,8 +358,8 @@ kernel = "\$KERNEL"
 rootfs = "\$WORK/rootfs.ext4"
 
 [resources]
-cpu_milli = 500
-memory_bytes = 134217728
+cpu = "500m"
+memory = "128MiB"
 SPEC_EOF
 cp "\$SPEC" "\$EVID/spec_render.toml"
 
