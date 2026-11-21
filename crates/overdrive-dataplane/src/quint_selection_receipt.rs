@@ -106,6 +106,7 @@ use tokio::net::TcpStream;
 use tokio::runtime::Runtime;
 
 use crate::EbpfDataplane;
+use overdrive_testing::overdrive_test;
 
 /// The conformance main this driver replays.
 const MAIN: &str = "receipt_conf";
@@ -123,10 +124,6 @@ const FRONTEND_PORT: u16 = 8080;
 /// The test-owned veth fixture. A `#[cfg(test)]` module: the fixture builds
 /// kernel state for a Tier-3 test over netlink (`overdrive-netlink`, no
 /// subprocess) and ships in no binary.
-use overdrive_testing::placement;
-
-placement!(host_pure);
-
 #[cfg(test)]
 mod veth_fixture {
     use std::future::Future;
@@ -638,6 +635,7 @@ impl<'de> Deserialize<'de> for ReceiptState {
     test = "commit_then_select",
     max_samples = 1
 )]
+#[overdrive_test(guest = "cgroup-default", profile = "quint")]
 fn selection_receipt_commit_then_select() -> impl Driver {
     ReceiptConfDriver::new()
 }
@@ -652,6 +650,7 @@ fn selection_receipt_commit_then_select() -> impl Driver {
     test = "replacement_reuses_backend_id",
     max_samples = 1
 )]
+#[overdrive_test(guest = "cgroup-default", profile = "quint")]
 fn selection_receipt_replacement_reuses_backend_id() -> impl Driver {
     ReceiptConfDriver::new()
 }
@@ -666,6 +665,7 @@ fn selection_receipt_replacement_reuses_backend_id() -> impl Driver {
     test = "serve_restart_replacement",
     max_samples = 1
 )]
+#[overdrive_test(guest = "cgroup-default", profile = "quint")]
 fn selection_receipt_serve_restart_replacement() -> impl Driver {
     ReceiptConfDriver::new()
 }
@@ -685,6 +685,7 @@ fn selection_receipt_serve_restart_replacement() -> impl Driver {
     test = "different_workload_takeover",
     max_samples = 1
 )]
+#[overdrive_test(guest = "cgroup-default", profile = "quint")]
 #[should_panic(expected = "update_service must be accepted: backend id")]
 fn selection_receipt_different_workload_takeover() -> impl Driver {
     ReceiptConfDriver::new()
@@ -699,6 +700,7 @@ fn selection_receipt_different_workload_takeover() -> impl Driver {
     test = "reverse_nat_conflict_rejected",
     max_samples = 1
 )]
+#[overdrive_test(guest = "cgroup-default", profile = "quint")]
 fn selection_receipt_reverse_nat_conflict_rejected() -> impl Driver {
     ReceiptConfDriver::new()
 }
@@ -712,6 +714,7 @@ fn selection_receipt_reverse_nat_conflict_rejected() -> impl Driver {
     test = "restart_destroys_receipts",
     max_samples = 1
 )]
+#[overdrive_test(guest = "cgroup-default", profile = "quint")]
 fn selection_receipt_restart_destroys_receipts() -> impl Driver {
     ReceiptConfDriver::new()
 }
@@ -732,6 +735,7 @@ fn selection_receipt_restart_destroys_receipts() -> impl Driver {
     max_samples = 100,
     seed = "1"
 )]
+#[overdrive_test(guest = "cgroup-default", profile = "quint")]
 #[should_panic(expected = "is bound to spiffe://overdrive.local/workload/conf-")]
 fn selection_receipt_receipt_conf_randomized_traces() -> impl Driver {
     ReceiptConfDriver::new()
