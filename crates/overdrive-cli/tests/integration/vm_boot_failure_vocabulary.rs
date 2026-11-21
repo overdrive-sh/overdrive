@@ -172,24 +172,39 @@ fn copy_kernel_for_this_test(tmp: &Path, fixture: &VmFixture, name: &str) -> Pat
     dest
 }
 
-/// Builds an EMPTY, validly-formatted 64 MiB ext4 image with NO staged
-/// content at all — no `/sbin/init`, nothing. The kernel's no-`init=`
-/// fallback search (`/sbin/init`, `/etc/init`, `/bin/init`, `/bin/sh`)
-/// exhausts every candidate, so the guest boots the kernel and then
-/// never beacons: S-VM-36's "guest that never signals READY" fixture.
-fn build_empty_rootfs(tmp: &Path, name: &str) -> PathBuf {
+/// Builds a 64 MiB ext4 image whose `/sbin/init` is `init_binary` and nothing
+/// else: a guest that boots the kernel, runs that init, and so never beacons
+/// as long as the init does not. The image is populated at format time
+/// (`mkfs.ext4 -d`), so no loop mount is needed.
+///
+/// An image with NO init is not a "never beacons" guest: the kernel panics
+/// ("No working init found"), `panic=1` resets the guest, and the launcher's
+/// `--guest-reset-action exit-vmm` ends the VMM, so the driver reports
+/// `VmGuestExitUnreported` — the designed outcome for a guest that dies, not
+/// a boot-deadline breach.
+fn build_rootfs_with_init(tmp: &Path, name: &str, init_binary: &Path) -> PathBuf {
+    let tree = tmp.join(format!("{name}-tree"));
+    std::fs::create_dir_all(tree.join("sbin")).expect("create the rootfs tree");
+    let init = tree.join("sbin").join("init");
+    std::fs::copy(init_binary, &init).expect("copy the init binary into the rootfs tree");
+    let mut perms = std::fs::metadata(&init).expect("stat the staged init").permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&init, perms).expect("chmod the staged init executable");
+
     let path = tmp.join(name);
     {
-        let file = std::fs::File::create(&path).expect("create empty rootfs image");
-        file.set_len(64 * 1024 * 1024).expect("size empty rootfs image");
+        let file = std::fs::File::create(&path).expect("create rootfs image");
+        file.set_len(64 * 1024 * 1024).expect("size rootfs image");
     }
     let status = Command::new("mkfs.ext4")
         .arg("-F")
-        .args(["-L", "overdrive-vm-noinit"])
+        .args(["-L", "overdrive-vm-hung-init"])
+        .arg("-d")
+        .arg(&tree)
         .arg(&path)
         .status()
-        .expect("spawn mkfs.ext4 for the empty rootfs image");
-    assert!(status.success(), "mkfs.ext4 must format the empty rootfs image");
+        .expect("spawn mkfs.ext4 for the hung-init rootfs image");
+    assert!(status.success(), "mkfs.ext4 must format the hung-init rootfs image");
     path
 }
 
@@ -203,7 +218,7 @@ fn build_empty_rootfs(tmp: &Path, name: &str) -> PathBuf {
 /// the same name rather than a cross-module reference: sibling test modules
 /// cannot see each other's private items, and this file is already
 /// self-contained by convention (`shared_staging_root`, `spawn_vm_server`,
-/// `config_path`, `write_toml` and `build_empty_rootfs` are all file-local
+/// `config_path`, `write_toml` and `build_rootfs_with_init` are all file-local
 /// copies of the same shapes). Widening the walking skeleton's surface to
 /// share ~50 lines of `losetup` plumbing would couple two Tier-3 files that
 /// are deliberately independent.
@@ -916,9 +931,13 @@ async fn guest_that_never_beacons_reports_the_boot_deadline_and_console_tail() {
         .prefix("vm-never-beacons-")
         .tempdir_in(shared_staging_root())
         .expect("tempdir on the shared reflink-capable staging root (never tmpfs -- cloud-hypervisor disk I/O needs O_DIRECT, which tmpfs cannot support)");
-    // A real guest that really boots and really never beacons: the
-    // kernel's no-`init=` fallback search finds no init at all.
-    let silent_rootfs = build_empty_rootfs(artifact_tmp.path(), "never-beacons-rootfs.ext4");
+    // A real guest that really boots and really never beacons: its init
+    // runs and hangs forever without dialling the beacon vsock. (An image
+    // with no init panics the guest, which ends the VMM and is reported as
+    // an unreported guest exit instead.)
+    let spin = build_spin_binary(artifact_tmp.path());
+    let silent_rootfs =
+        build_rootfs_with_init(artifact_tmp.path(), "never-beacons-rootfs.ext4", &spin);
 
     let (handle, server_tmp) = spawn_vm_server().await;
     let cfg = config_path(server_tmp.path());
@@ -1541,7 +1560,7 @@ async fn unmapped_start_failure_reads_as_unclassified_and_preserves_its_verbatim
 ///
 /// **Reuse as-is**: `shared_staging_root`, `VmFixture::provision` (the shared
 /// kernel/rootfs pair that actually boots — do NOT reach for
-/// `build_empty_rootfs`, whose whole purpose is a guest that never beacons),
+/// `build_rootfs_with_init`, whose guest never beacons),
 /// `spawn_vm_server`, `config_path`, `write_toml`, `deploy`, and `vm_job_toml`
 /// unchanged: it already emits `[job]` + `[vm]`, so this scenario's spec needs
 /// no new builder at all.
@@ -1924,7 +1943,7 @@ fn scheduled_vm_workload_reaches_running_when_its_first_firing_becomes_due() {
 /// **Still to build**: a file-local copy of `path_without_cloud_hypervisor()`.
 /// The walking skeleton's is private to that module and sibling test modules
 /// cannot see each other's private items — the same reason
-/// [`build_spin_binary`], [`build_empty_rootfs`] and [`spawn_vm_server`] are
+/// [`build_spin_binary`], [`build_rootfs_with_init`] and [`spawn_vm_server`] are
 /// already file-local copies here.
 ///
 /// **Assertions**, all on the operator-visible rendering:
@@ -1979,7 +1998,7 @@ fn scheduled_vm_workload_reaches_running_when_its_first_firing_becomes_due() {
 /// — a file-local copy of `vm_walking_skeleton.rs`'s helper of the same
 /// name (sibling test modules cannot see each other's private items, the
 /// same reason [`spawn_vm_server`], [`build_spin_binary`] and
-/// [`build_empty_rootfs`] are already file-local copies). Hiding the
+/// [`build_rootfs_with_init`] are already file-local copies). Hiding the
 /// binary is a REAL `exec`-resolution fact — `cloud-hypervisor` genuinely
 /// cannot be run by this process for the duration — so discovery finds no
 /// hypervisor, `compose_vm_driver` takes the `VmComposeError::NotAvailable`
