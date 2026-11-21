@@ -1,0 +1,6 @@
+0 allocations for workload dev-box — the spec is committed, but no allocation has converged to a Running instance yet. If it stays at 0, check that a node is eligible to place it and the control plane's convergence loop is running.
+Job 'dev-box' (kind: Job)
+Spec digest: b4ce56d3f259d2ed400e716bde64087448deda416a0e910ff359d4eb9bb19af3
+Verdict: In progress (no terminal yet)
+
+Attempt  State        Exit   Started              Duration  

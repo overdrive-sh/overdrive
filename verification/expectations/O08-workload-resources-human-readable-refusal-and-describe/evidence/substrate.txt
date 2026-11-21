@@ -1,0 +1,8 @@
+arch:      x86_64
+kernel:    Linux 7.0.0-38-generic
+virt:      none
+kvm:       /dev/kvm present
+cloud-hypervisor: /usr/local/bin/cloud-hypervisor
+staged kernel: present
+staged rootfs: present
+head sha:  c450168716b01ab34d7c93fce56ba95c9aadca70 (source dirty=true)

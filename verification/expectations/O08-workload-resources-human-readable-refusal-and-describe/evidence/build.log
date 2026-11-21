@@ -1,0 +1,4 @@
+   Compiling overdrive-control-plane v0.0.0 (/home/ubuntu/overdrive-worktrees/c7ac5ae9927d350481eba482a80fd193c091c7352f44b6bba334bd608080246f/crates/overdrive-control-plane)
+   Compiling reqwest v0.12.28
+   Compiling overdrive-cli v0.0.0 (/home/ubuntu/overdrive-worktrees/c7ac5ae9927d350481eba482a80fd193c091c7352f44b6bba334bd608080246f/crates/overdrive-cli)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 16.40s

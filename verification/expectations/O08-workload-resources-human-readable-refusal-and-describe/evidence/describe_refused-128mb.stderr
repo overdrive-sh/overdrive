@@ -1,0 +1,9 @@
+control plane returned HTTP 404: not_found (workloads/refused-128mb)
+Error: 
+   0: [91mworkload describe failed[0m
+
+Location:
+   [35mcrates/overdrive-cli/src/main.rs[0m:[35m162[0m
+
+Backtrace omitted. Run with RUST_BACKTRACE=1 environment variable to display it.
+Run with RUST_BACKTRACE=full to include source snippets.

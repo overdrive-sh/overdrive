@@ -1,0 +1,19 @@
+2026-11-21T04:56:44Z substrate recorded
+2026-11-21T04:56:44Z building overdrive (default features)
+2026-11-21T04:57:01Z starting serve bind=127.0.0.1:7648
+2026-11-21T04:57:02Z serve ready pid=2744164
+2026-11-21T04:57:02Z case deploy_dev-box exit=0
+2026-11-21T04:57:02Z case deploy_dev-box-gib exit=0
+2026-11-21T04:57:02Z case deploy_refused-bare-number exit=2
+2026-11-21T04:57:02Z case deploy_refused-128mb exit=2
+2026-11-21T04:57:02Z case deploy_refused-cpu-capital-m exit=2
+2026-11-21T04:57:02Z case deploy_refused-1000b exit=2
+2026-11-21T04:57:02Z case deploy_refused-memory-bytes exit=2
+2026-11-21T04:57:04Z describe dev-box polls=2
+2026-11-21T04:57:04Z case describe_dev-box_final exit=0
+2026-11-21T04:57:04Z describe dev-box-gib polls=1
+2026-11-21T04:57:04Z case describe_dev-box-gib_final exit=0
+2026-11-21T04:57:04Z case describe_refused-128mb exit=1
+2026-11-21T04:57:04Z case stop_dev-box exit=0
+2026-11-21T04:57:04Z case stop_dev-box-gib exit=0
+2026-11-21T04:57:09Z done

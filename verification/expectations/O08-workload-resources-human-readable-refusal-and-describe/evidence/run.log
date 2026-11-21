@@ -1,0 +1,19 @@
+  substrate recorded
+  building overdrive (default features)
+  starting serve bind=127.0.0.1:7648
+  serve ready pid=2744164
+  case deploy_dev-box exit=0
+  case deploy_dev-box-gib exit=0
+  case deploy_refused-bare-number exit=2
+  case deploy_refused-128mb exit=2
+  case deploy_refused-cpu-capital-m exit=2
+  case deploy_refused-1000b exit=2
+  case deploy_refused-memory-bytes exit=2
+  describe dev-box polls=2
+  case describe_dev-box_final exit=0
+  describe dev-box-gib polls=1
+  case describe_dev-box-gib_final exit=0
+  case describe_refused-128mb exit=1
+  case stop_dev-box exit=0
+  case stop_dev-box-gib exit=0
+  done

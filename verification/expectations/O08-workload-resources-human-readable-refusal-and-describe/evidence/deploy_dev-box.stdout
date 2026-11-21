@@ -1,0 +1,7 @@
+Accepted.
+Workload ID:   dev-box
+Intent key:    workloads/dev-box
+Spec digest:   b4ce56d3f259d2ed400e716bde64087448deda416a0e910ff359d4eb9bb19af3
+Outcome:       created
+Endpoint:      https://127.0.0.1:7648/
+Next: overdrive workload describe dev-box

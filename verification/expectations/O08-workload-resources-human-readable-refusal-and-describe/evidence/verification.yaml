@@ -1,0 +1,16 @@
+expectation_id: "O08"
+date_utc: "2026-11-21T04:56:41Z"
+overdrive_sha: "c450168716b01ab34d7c93fce56ba95c9aadca70"
+working_tree_dirty: true
+dst_seed: 1
+harness_sha: "034a30a2ce4c89ac18f9aa65a294167430a260f8"
+harness_invocation: "verification/harness/run-expectation.sh O08"
+runner_invoked: true
+execution_status: "succeeded"
+execution_substrate: "native-metal"
+executed_in_lima: false
+runner_exit_code: "0"
+anchors: ["docs/feature/workload-resources-human-readable/feature-delta.md AC-1.3, AC-1.5, AC-2.3, AC-2.8 (DISCUSS stories US-1, US-2)","docs/feature/workload-resources-human-readable/feature-delta.md D-3, D-4, DD-7","docs/product/architecture/adr-0339-memory-and-volume-sizes-share-one-binary-byte-size-grammar.md","docs/product/architecture/adr-0343-a-workload-memory-is-a-whole-number-of-mib.md"]
+anchor_status: "present"
+# NOTE: 'satisfied' is a HUMAN/auditor verdict written into README.md after
+# adversarial review of the captured evidence below — never auto-stamped here.

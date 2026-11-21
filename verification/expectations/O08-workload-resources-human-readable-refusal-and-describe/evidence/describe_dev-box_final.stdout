@@ -1,0 +1,16 @@
+Job 'dev-box' (kind: Job)
+Spec digest: b4ce56d3f259d2ed400e716bde64087448deda416a0e910ff359d4eb9bb19af3
+Verdict: Failed (backoff exhausted)
+
+Attempt  State        Exit   Started              Duration  
+1        Failed       0      (c=6,w=local)        —         
+
+    reason: VM hypervisor exited before the guest reported ready (exit Some(0), signal None)
+    error:
+      [    0.785641] Run /sbin/init as init process
+      [    0.793640] NET: Registered PF_VSOCK protocol family
+      overdrive-init: guest transport setup failed: creating the transport dummy device failed: Not supported (os error 95)
+      [    0.804042] ACPI: PM: Preparing to enter system sleep state S5
+      [    0.804998] reboot: Power down
+Memory:        128MiB
+CPU:           500m

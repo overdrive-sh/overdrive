@@ -1,0 +1,6 @@
+invalid job spec: field `toml`: failed to parse TOML: TOML parse error at line 12, column 10
+   |
+12 | memory = "128MB"
+   |          ^^^^^^^
+invalid byte size "128MB": decimal units are not accepted; use the binary units KiB, MiB, GiB or TiB
+

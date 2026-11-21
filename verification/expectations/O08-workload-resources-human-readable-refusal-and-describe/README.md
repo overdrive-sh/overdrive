@@ -1,11 +1,8 @@
 # O08 — a mistyped workload size is refused in words, and `describe` reads the declared size back in the operator's own units
 
-**Surface:** O (operator CLI) · **KPI:** Declared size readable in `describe` / Silent mis-size on mistyped value · **Status:** `pending`
+**Surface:** O (operator CLI) · **KPI:** Declared size readable in `describe` / Silent mis-size on mistyped value · **Status:** `satisfied`
 
-<!-- Status rationale: authored at DISTILL, before any implementation evidence
-exists (`.claude/rules/verification.md` § "DISTILL — author expectations").
-Nothing has been captured. The status stays `pending` until a different agent
-reviews evidence captured against the built `overdrive` binary. -->
+<!-- Status rationale: set to `satisfied` on 2026-11-21 by an independent reviewer agent (not the implementation or capture author) after judging the verbatim captured evidence; see "Review" below. Satisfied for SHA c450168716b01ab34d7c93fce56ba95c9aadca70 and the recorded native-metal substrate only. -->
 
 ## Expectation
 
@@ -51,4 +48,28 @@ sets the status.
 
 ## Evidence
 
-None captured. Not yet run.
+Captured 2026-11-21T04:56:41Z on native-metal (x86_64, Linux 7.0.0-38-generic, `systemd-detect-virt` = none, /dev/kvm present), SHA `c450168716b01ab34d7c93fce56ba95c9aadca70`, `working_tree_dirty: true` (untracked files only, see Review), harness invocation `verification/harness/run-expectation.sh O08`, runner exit 0.
+
+All under `evidence/`: `verification.yaml`, `substrate.txt`, `binary_under_test.txt`, `build.log`, `dirty-status.txt`, `dirty-diff.patch` (empty), `run.log`, `trace.log`, `serve.log`, `spec_*.toml` (7 specs), `deploy_<case>.{stdout,stderr,meta}` (7 cases), `describe_dev-box_poll01/02`, `describe_dev-box-gib_poll01`, `describe_{dev-box,dev-box-gib}_final.*`, `describe_refused-128mb.*`, `stop_*.*`, `leak_verdict.*.txt`, `teardown_sweep.*.txt`, `rootfs_staging.log`.
+
+## Review
+
+Reviewed 2026-11-21 by an independent reviewer agent (different fox; did not write the implementation or capture the evidence). Verdict: **satisfied**.
+
+Refusals (all `overdrive deploy`, exit 2, empty stdout, verbatim stderr):
+
+| Case | Message (key lines) | Names key/form/remedy |
+|---|---|---|
+| `memory = 134217728` | `invalid type: integer `134217728`, expected a byte size string such as 128MiB (units: B, KiB, MiB, GiB, TiB)` | yes: a string with an example |
+| `memory = "128MB"` | `invalid byte size "128MB": decimal units are not accepted; use the binary units KiB, MiB, GiB or TiB` | yes |
+| `cpu = "500M"` | `invalid cpu quantity "500M": unknown suffix "M"; the only suffix is the lowercase milli suffix m, as in 500m` | yes |
+| `memory = "1000B"` | `invalid job spec: field `memory`: memory must be a whole number of MiB; got 1000B` | yes: names the key and the form (whole MiB); does not give a corrected value, but the form is stated |
+| `memory_bytes` | `unknown field `memory_bytes`, expected `cpu` or `memory`` | yes: lists the valid keys |
+
+Before any allocation exists: `describe_refused-128mb` returns `control plane returned HTTP 404: not_found (workloads/refused-128mb)` (exit 1) after the refused deploy. Evidenced for one refused case only; the other four fail on the same spec-parse path before intent is written, but were not each described. Accepted as sufficient for a point-in-time capture.
+
+Describe read-back: `dev-box` (`cpu = "500m"`, `memory = "128MiB"`) prints `Memory:        128MiB` and `CPU:           500m`; `dev-box-gib` (`cpu = "0.5"`, `memory = "1024MiB"`) prints `Memory:        1GiB` and `CPU:           500m`. No raw byte count or bare milli number appears.
+
+Provenance: dirty state is limited to untracked paths (`dirty-status.txt` lists only `.develop-progress.json`, the O08 evidence dir, `execution-substrate`, `runner.sh`); `dirty-diff.patch` is empty, so no tracked source differed from the SHA and the binary (built with default features from the synced tree, `build.log` shows a clean compile) is the SHA's code. None of the untracked files is compiled into the binary. Binary identity is the path and `--version` only; no hash was recorded.
+
+Caveats, none touching the claim: both accepted workloads ended `Failed (backoff exhausted)` because the guest's transport setup failed (`creating the transport dummy device failed: Not supported`), an environment matter unrelated to resources; the `Memory:`/`CPU:` lines print after the attempts table; a reader of the evidence for later source states must re-capture (satisfied for this SHA only). Candidate to stabilize into a test per `.claude/rules/verification.md` § Stabilize.

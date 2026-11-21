@@ -1,0 +1,3 @@
+path: /home/ubuntu/overdrive-worktrees/c7ac5ae9927d350481eba482a80fd193c091c7352f44b6bba334bd608080246f/target/debug/overdrive
+-rwxr-x--- 2 root root 181895760 Nov 21 04:57 /home/ubuntu/overdrive-worktrees/c7ac5ae9927d350481eba482a80fd193c091c7352f44b6bba334bd608080246f/target/debug/overdrive
+overdrive-cli 0.0.0

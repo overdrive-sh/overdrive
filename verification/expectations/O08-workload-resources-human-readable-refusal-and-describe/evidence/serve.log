@@ -1,0 +1,62 @@
+[2m2026-11-21T04:57:01.665353Z[0m [33m WARN[0m The map SERVICE_MAP is of type BPF_MAP_TYPE_HASH_OF_MAPS which is currently unsupported in Aya, use `allow_unsupported_maps()` to load it anyways
+[2m2026-11-21T04:57:01.688577Z[0m [32m INFO[0m [3mnode_id[0m[2m=[0mlocal [3mphase[0m[2m=[0m"vm_reclamation" [3mtransition[0m[2m=[0m"started"
+[2m2026-11-21T04:57:01.688972Z[0m [32m INFO[0m [3mnode_id[0m[2m=[0mlocal [3mphase[0m[2m=[0m"vm_reclamation" [3mtransition[0m[2m=[0m"completed"
+[2m2026-11-21T04:57:01.688980Z[0m [32m INFO[0m [3mnode_id[0m[2m=[0mlocal [3mphase[0m[2m=[0m"stale_sweep" [3mtransition[0m[2m=[0m"started"
+[2m2026-11-21T04:57:01.688992Z[0m [32m INFO[0m [3mnode_id[0m[2m=[0mlocal [3mphase[0m[2m=[0m"stale_sweep" [3mtransition[0m[2m=[0m"completed"
+[2m2026-11-21T04:57:01.977914Z[0m [32m INFO[0m control plane listening [3mendpoint[0m[2m=[0mhttps://127.0.0.1:7648/
+[2m2026-11-21T04:57:01.978172Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mvm-reclamation [3mtarget[0m[2m=[0mnode/local [3mtick[0m[2m=[0m0 [3mqueue_ms[0m[2m=[0m0 [3mactive[0m[2m=[0m1 [3mcapacity[0m[2m=[0m8
+[2m2026-11-21T04:57:01.978945Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mvm-reclamation [3mtarget[0m[2m=[0mnode/local [3mtick[0m[2m=[0m0 [3melapsed_ms[0m[2m=[0m0 [3moutcome[0m[2m=[0m"ok" [3merror[0m[2m=[0mNone
+[2m2026-11-21T04:57:02.327704Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mworkload-lifecycle [3mtarget[0m[2m=[0mworkload/dev-box [3mtick[0m[2m=[0m1 [3mqueue_ms[0m[2m=[0m0 [3mactive[0m[2m=[0m1 [3mcapacity[0m[2m=[0m8
+[2m2026-11-21T04:57:02.330617Z[0m [32m INFO[0m creating VMM [3malloc[0m[2m=[0malloc-dev-box-0
+[2m2026-11-21T04:57:02.345655Z[0m [32m INFO[0m VMM created [3malloc[0m[2m=[0malloc-dev-box-0 [3mpid[0m[2m=[0m2744243
+[2m2026-11-21T04:57:02.353591Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mworkload-lifecycle [3mtarget[0m[2m=[0mworkload/dev-box-gib [3mtick[0m[2m=[0m2 [3mqueue_ms[0m[2m=[0m7 [3mactive[0m[2m=[0m2 [3mcapacity[0m[2m=[0m8
+[2m2026-11-21T04:57:02.356068Z[0m [32m INFO[0m creating VMM [3malloc[0m[2m=[0malloc-dev-box-gib-0
+[2m2026-11-21T04:57:02.368676Z[0m [32m INFO[0m VMM created [3malloc[0m[2m=[0malloc-dev-box-gib-0 [3mpid[0m[2m=[0m2744253
+[2m2026-11-21T04:57:03.539583Z[0m [32m INFO[0m VMM process reaped [3mpid[0m[2m=[0m2744243 [3mexit_code[0m[2m=[0mSome(0) [3msignal[0m[2m=[0mNone
+[2m2026-11-21T04:57:03.540091Z[0m [33m WARN[0m guest powered off before READY; preserving its console diagnostic [3mguest_console[0m[2m=[0m[    0.785641] Run /sbin/init as init process
+[    0.793640] NET: Registered PF_VSOCK protocol family
+overdrive-init: guest transport setup failed: creating the transport dummy device failed: Not supported (os error 95)
+[    0.804042] ACPI: PM: Preparing to enter system sleep state S5
+[    0.804998] reboot: Power down
+[2m2026-11-21T04:57:03.540760Z[0m [32m INFO[0m guest network lease retired [3malloc[0m[2m=[0malloc-dev-box-0
+[2m2026-11-21T04:57:03.540904Z[0m [32m INFO[0m guest network lease released [3malloc[0m[2m=[0malloc-dev-box-0
+[2m2026-11-21T04:57:03.541647Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mworkload-lifecycle [3mtarget[0m[2m=[0mworkload/dev-box [3mtick[0m[2m=[0m1 [3melapsed_ms[0m[2m=[0m1213 [3moutcome[0m[2m=[0m"ok" [3merror[0m[2m=[0mNone
+[2m2026-11-21T04:57:03.541689Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0msvid-lifecycle [3mtarget[0m[2m=[0mworkload/dev-box [3mtick[0m[2m=[0m3 [3mqueue_ms[0m[2m=[0m0 [3mactive[0m[2m=[0m2 [3mcapacity[0m[2m=[0m8
+[2m2026-11-21T04:57:03.542143Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0msvid-lifecycle [3mtarget[0m[2m=[0mworkload/dev-box [3mtick[0m[2m=[0m3 [3melapsed_ms[0m[2m=[0m0 [3moutcome[0m[2m=[0m"ok" [3merror[0m[2m=[0mNone
+[2m2026-11-21T04:57:03.542172Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mservice-lifecycle [3mtarget[0m[2m=[0mworkload/dev-box [3mtick[0m[2m=[0m4 [3mqueue_ms[0m[2m=[0m0 [3mactive[0m[2m=[0m2 [3mcapacity[0m[2m=[0m8
+[2m2026-11-21T04:57:03.542381Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mservice-lifecycle [3mtarget[0m[2m=[0mworkload/dev-box [3mtick[0m[2m=[0m4 [3melapsed_ms[0m[2m=[0m0 [3moutcome[0m[2m=[0m"ok" [3merror[0m[2m=[0mNone
+[2m2026-11-21T04:57:03.542424Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mworkload-lifecycle [3mtarget[0m[2m=[0mworkload/dev-box [3mtick[0m[2m=[0m5 [3mqueue_ms[0m[2m=[0m0 [3mactive[0m[2m=[0m2 [3mcapacity[0m[2m=[0m8
+[2m2026-11-21T04:57:03.543619Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mworkload-lifecycle [3mtarget[0m[2m=[0mworkload/dev-box [3mtick[0m[2m=[0m5 [3melapsed_ms[0m[2m=[0m1 [3moutcome[0m[2m=[0m"ok" [3merror[0m[2m=[0mNone
+[2m2026-11-21T04:57:03.543661Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0msvid-lifecycle [3mtarget[0m[2m=[0mworkload/dev-box [3mtick[0m[2m=[0m6 [3mqueue_ms[0m[2m=[0m1 [3mactive[0m[2m=[0m2 [3mcapacity[0m[2m=[0m8
+[2m2026-11-21T04:57:03.544003Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0msvid-lifecycle [3mtarget[0m[2m=[0mworkload/dev-box [3mtick[0m[2m=[0m6 [3melapsed_ms[0m[2m=[0m0 [3moutcome[0m[2m=[0m"ok" [3merror[0m[2m=[0mNone
+[2m2026-11-21T04:57:03.544052Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mservice-lifecycle [3mtarget[0m[2m=[0mworkload/dev-box [3mtick[0m[2m=[0m7 [3mqueue_ms[0m[2m=[0m0 [3mactive[0m[2m=[0m2 [3mcapacity[0m[2m=[0m8
+[2m2026-11-21T04:57:03.544204Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mservice-lifecycle [3mtarget[0m[2m=[0mworkload/dev-box [3mtick[0m[2m=[0m7 [3melapsed_ms[0m[2m=[0m0 [3moutcome[0m[2m=[0m"ok" [3merror[0m[2m=[0mNone
+[2m2026-11-21T04:57:03.544234Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mworkload-lifecycle [3mtarget[0m[2m=[0mworkload/dev-box [3mtick[0m[2m=[0m8 [3mqueue_ms[0m[2m=[0m0 [3mactive[0m[2m=[0m2 [3mcapacity[0m[2m=[0m8
+[2m2026-11-21T04:57:03.544730Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mworkload-lifecycle [3mtarget[0m[2m=[0mworkload/dev-box [3mtick[0m[2m=[0m8 [3melapsed_ms[0m[2m=[0m0 [3moutcome[0m[2m=[0m"ok" [3merror[0m[2m=[0mNone
+[2m2026-11-21T04:57:03.561857Z[0m [32m INFO[0m VMM process reaped [3mpid[0m[2m=[0m2744253 [3mexit_code[0m[2m=[0mSome(0) [3msignal[0m[2m=[0mNone
+[2m2026-11-21T04:57:03.562279Z[0m [33m WARN[0m guest powered off before READY; preserving its console diagnostic [3mguest_console[0m[2m=[0m[    0.790675] Run /sbin/init as init process
+[    0.798662] NET: Registered PF_VSOCK protocol family
+overdrive-init: guest transport setup failed: creating the transport dummy device failed: Not supported (os error 95)
+[    0.809022] ACPI: PM: Preparing to enter system sleep state S5
+[    0.809975] reboot: Power down
+[2m2026-11-21T04:57:03.562935Z[0m [32m INFO[0m guest network lease retired [3malloc[0m[2m=[0malloc-dev-box-gib-0
+[2m2026-11-21T04:57:03.563039Z[0m [32m INFO[0m guest network lease released [3malloc[0m[2m=[0malloc-dev-box-gib-0
+[2m2026-11-21T04:57:03.563779Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mworkload-lifecycle [3mtarget[0m[2m=[0mworkload/dev-box-gib [3mtick[0m[2m=[0m2 [3melapsed_ms[0m[2m=[0m1210 [3moutcome[0m[2m=[0m"ok" [3merror[0m[2m=[0mNone
+[2m2026-11-21T04:57:03.563814Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0msvid-lifecycle [3mtarget[0m[2m=[0mworkload/dev-box-gib [3mtick[0m[2m=[0m9 [3mqueue_ms[0m[2m=[0m0 [3mactive[0m[2m=[0m1 [3mcapacity[0m[2m=[0m8
+[2m2026-11-21T04:57:03.564147Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0msvid-lifecycle [3mtarget[0m[2m=[0mworkload/dev-box-gib [3mtick[0m[2m=[0m9 [3melapsed_ms[0m[2m=[0m0 [3moutcome[0m[2m=[0m"ok" [3merror[0m[2m=[0mNone
+[2m2026-11-21T04:57:03.564172Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mservice-lifecycle [3mtarget[0m[2m=[0mworkload/dev-box-gib [3mtick[0m[2m=[0m10 [3mqueue_ms[0m[2m=[0m0 [3mactive[0m[2m=[0m1 [3mcapacity[0m[2m=[0m8
+[2m2026-11-21T04:57:03.564352Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mservice-lifecycle [3mtarget[0m[2m=[0mworkload/dev-box-gib [3mtick[0m[2m=[0m10 [3melapsed_ms[0m[2m=[0m0 [3moutcome[0m[2m=[0m"ok" [3merror[0m[2m=[0mNone
+[2m2026-11-21T04:57:03.564423Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mworkload-lifecycle [3mtarget[0m[2m=[0mworkload/dev-box-gib [3mtick[0m[2m=[0m11 [3mqueue_ms[0m[2m=[0m0 [3mactive[0m[2m=[0m1 [3mcapacity[0m[2m=[0m8
+[2m2026-11-21T04:57:03.565322Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mworkload-lifecycle [3mtarget[0m[2m=[0mworkload/dev-box-gib [3mtick[0m[2m=[0m11 [3melapsed_ms[0m[2m=[0m0 [3moutcome[0m[2m=[0m"ok" [3merror[0m[2m=[0mNone
+[2m2026-11-21T04:57:03.565376Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0msvid-lifecycle [3mtarget[0m[2m=[0mworkload/dev-box-gib [3mtick[0m[2m=[0m12 [3mqueue_ms[0m[2m=[0m1 [3mactive[0m[2m=[0m1 [3mcapacity[0m[2m=[0m8
+[2m2026-11-21T04:57:03.565615Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0msvid-lifecycle [3mtarget[0m[2m=[0mworkload/dev-box-gib [3mtick[0m[2m=[0m12 [3melapsed_ms[0m[2m=[0m0 [3moutcome[0m[2m=[0m"ok" [3merror[0m[2m=[0mNone
+[2m2026-11-21T04:57:03.565644Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mservice-lifecycle [3mtarget[0m[2m=[0mworkload/dev-box-gib [3mtick[0m[2m=[0m13 [3mqueue_ms[0m[2m=[0m0 [3mactive[0m[2m=[0m1 [3mcapacity[0m[2m=[0m8
+[2m2026-11-21T04:57:03.565782Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mservice-lifecycle [3mtarget[0m[2m=[0mworkload/dev-box-gib [3mtick[0m[2m=[0m13 [3melapsed_ms[0m[2m=[0m0 [3moutcome[0m[2m=[0m"ok" [3merror[0m[2m=[0mNone
+[2m2026-11-21T04:57:03.565817Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mworkload-lifecycle [3mtarget[0m[2m=[0mworkload/dev-box-gib [3mtick[0m[2m=[0m14 [3mqueue_ms[0m[2m=[0m0 [3mactive[0m[2m=[0m1 [3mcapacity[0m[2m=[0m8
+[2m2026-11-21T04:57:03.566278Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mworkload-lifecycle [3mtarget[0m[2m=[0mworkload/dev-box-gib [3mtick[0m[2m=[0m14 [3melapsed_ms[0m[2m=[0m0 [3moutcome[0m[2m=[0m"ok" [3merror[0m[2m=[0mNone
+[2m2026-11-21T04:57:04.856303Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mworkload-lifecycle [3mtarget[0m[2m=[0mworkload/dev-box [3mtick[0m[2m=[0m15 [3mqueue_ms[0m[2m=[0m0 [3mactive[0m[2m=[0m1 [3mcapacity[0m[2m=[0m8
+[2m2026-11-21T04:57:04.857059Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mworkload-lifecycle [3mtarget[0m[2m=[0mworkload/dev-box [3mtick[0m[2m=[0m15 [3melapsed_ms[0m[2m=[0m0 [3moutcome[0m[2m=[0m"ok" [3merror[0m[2m=[0mNone
+[2m2026-11-21T04:57:04.918888Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mworkload-lifecycle [3mtarget[0m[2m=[0mworkload/dev-box-gib [3mtick[0m[2m=[0m16 [3mqueue_ms[0m[2m=[0m0 [3mactive[0m[2m=[0m1 [3mcapacity[0m[2m=[0m8
+[2m2026-11-21T04:57:04.919632Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mworkload-lifecycle [3mtarget[0m[2m=[0mworkload/dev-box-gib [3mtick[0m[2m=[0m16 [3melapsed_ms[0m[2m=[0m0 [3moutcome[0m[2m=[0m"ok" [3merror[0m[2m=[0mNone
+[2m2026-11-21T04:57:09.984987Z[0m [32m INFO[0m SIGTERM received; shutting down [3msignal[0m[2m=[0m"SIGTERM"
+[2m2026-11-21T04:57:09.985088Z[0m [32m INFO[0m [3melapsed_ms[0m[2m=[0m0 [3madmitted_at_close[0m[2m=[0m0 [3mcompleted_during_drain[0m[2m=[0m0 [3mpending_at_exit[0m[2m=[0m0

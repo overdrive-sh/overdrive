@@ -1,0 +1,4 @@
+?? docs/feature/workload-resources-human-readable/deliver/.develop-progress.json
+?? verification/expectations/O08-workload-resources-human-readable-refusal-and-describe/evidence/
+?? verification/expectations/O08-workload-resources-human-readable-refusal-and-describe/execution-substrate
+?? verification/expectations/O08-workload-resources-human-readable-refusal-and-describe/runner.sh

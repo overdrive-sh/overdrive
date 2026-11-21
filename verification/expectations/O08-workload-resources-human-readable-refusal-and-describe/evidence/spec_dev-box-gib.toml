@@ -1,0 +1,12 @@
+[job]
+id = "dev-box-gib"
+
+[vm]
+command = "/sbin/busybox"
+args = ["sleep", "3600"]
+kernel = "/srv/vm/overdrive-testing/kernel"
+rootfs = "/srv/vm/overdrive-testing/o08-rB6uKt/rootfs.ext4"
+
+[resources]
+cpu = "0.5"
+memory = "1024MiB"

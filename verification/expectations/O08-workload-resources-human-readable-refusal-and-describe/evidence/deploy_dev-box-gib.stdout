@@ -1,0 +1,7 @@
+Accepted.
+Workload ID:   dev-box-gib
+Intent key:    workloads/dev-box-gib
+Spec digest:   8e99468bbc803e39598dfb3660afe4c7f0ef1377019c9cee073142f587dabee1
+Outcome:       created
+Endpoint:      https://127.0.0.1:7648/
+Next: overdrive workload describe dev-box-gib
