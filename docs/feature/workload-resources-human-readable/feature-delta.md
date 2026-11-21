@@ -108,7 +108,7 @@ Decision enabled: Ana picks a core fraction without unit arithmetic and knows at
 - AC-2.4: A `cpu` string parses to the millicores the operator meant (`"500m"` and `"0.5"` are 500, `"2"` is 2000), pinned by the CPU grammar tests. `vcpus_for` itself is unchanged and stays covered by the existing `vm_resources_derivation` tests.
 - AC-2.5: `parse(display(v)) == v` for every accepted value (proptest); equal quantities spelled differently produce the same spec digest.
 - AC-2.6: Fixtures (AC-1.6), openapi regeneration (AC-1.7) and the examples/docs sweep (AC-1.8) hold for the `cpu` field.
-- AC-2.7: After this feature no `cpu_milli` or `memory_bytes` identifier remains in the operator-facing spec, the wire types, `api/openapi.yaml` or the grep-gate surfaces (`cpu_milli|memory_bytes` across `crates/`, `tests/`, `examples/`, `verification/**/runner.sh`, `benchmarks/catalogue.md`, `website/`, `api/`), except the `memory_bytes` metric label in `crates/overdrive-bench-families/src/families/mtls_path.rs`.
+- AC-2.7: After this feature no `cpu_milli` or `memory_bytes` identifier remains in the operator-facing spec, the wire types, `api/openapi.yaml` or the grep-gate surfaces (`cpu_milli|memory_bytes` across `crates/`, `tests/`, `examples/`, `verification/**/runner.sh`, `benchmarks/catalogue.md`, `website/`, `api/`), except the `memory_bytes` metric label in `crates/overdrive-bench-families/src/families/mtls_path.rs` and `benchmarks/catalogue.md` (a measurement name), the O08 README, and the pre-authored acceptance tests that use the removed keys as refusal inputs (`crates/overdrive-core/tests/acceptance/workload_resources_spec.rs`, `crates/overdrive-core/tests/schema_evolution/workload_resources_fixtures.rs`, `crates/overdrive-cli/tests/acceptance/deploy_workload_resources.rs`, `crates/overdrive-control-plane/tests/acceptance/workload_resources_wire.rs`).
 - AC-2.8: `overdrive workload describe` prints a `CPU:` line with the canonical quantity for every workload kind, under the same presence guard as `Memory:`; zero CPU renders as its canonical zero form `0`.
 
 ### Node capacity (R-2)
@@ -146,7 +146,7 @@ Brownfield. Walking skeleton: not needed. `overdrive deploy` -> parse -> intent 
 
 | KPI | Target | Measured by |
 |---|---|---|
-| Specs and docs using unit-in-name fields | 0 occurrences of `cpu_milli`/`memory_bytes` on the grep-gate surfaces (`crates/`, `tests/`, `examples/`, `verification/**/runner.sh`, `benchmarks/catalogue.md`, `website/`, `api/`), except the `memory_bytes` metric label in `crates/overdrive-bench-families/src/families/mtls_path.rs` | grep gate at DELIVER and in review |
+| Specs and docs using unit-in-name fields | 0 occurrences of `cpu_milli`/`memory_bytes` on the grep-gate surfaces (`crates/`, `tests/`, `examples/`, `verification/**/runner.sh`, `benchmarks/catalogue.md`, `website/`, `api/`), except the `memory_bytes` metric label in `crates/overdrive-bench-families/src/families/mtls_path.rs` and `benchmarks/catalogue.md` (a measurement name), the O08 README, and the pre-authored acceptance tests that use the removed keys as refusal inputs (`crates/overdrive-core/tests/acceptance/workload_resources_spec.rs`, `crates/overdrive-core/tests/schema_evolution/workload_resources_fixtures.rs`, `crates/overdrive-cli/tests/acceptance/deploy_workload_resources.rs`, `crates/overdrive-control-plane/tests/acceptance/workload_resources_wire.rs`) | grep gate at DELIVER and in review |
 | Declared size readable in `describe` | 100% of rendered memory values are canonical strings, 0 raw byte counts | live-path render tests |
 | Grammar soundness | round trip holds for all accepted inputs; every rejection class in AC-1.3/AC-2.3 has a test | proptest + acceptance tests; mutation kill rate >= 80% on both parsers |
 | Silent mis-size on mistyped value | 0 inputs of the rejected classes admitted | acceptance tests |
@@ -242,7 +242,7 @@ to record. Rejected: `bytesize`, `byte-unit`, `k8s-openapi`, `kube_quantity` (us
 Architecture enforcement: the existing `dst-lint` scan keeps both parsers free of clock, entropy and network (both are `core`-class pure code);
 the 80% mutation gate covers both parsers. The KPI grep gate is `cpu_milli|memory_bytes` over `crates/`, `tests/`, `examples/`,
 `website/content/docs`, `website/app/(home)/page.tsx`, `api/openapi.yaml`, `benchmarks/catalogue.md` and `verification/expectations/`
-(excluding every `evidence/` directory). It expects zero matches except the `memory_bytes` metric label in `mtls_path.rs`. Retained results under
+(excluding every `evidence/` directory). It expects zero matches except the `memory_bytes` metric label in `mtls_path.rs` and `benchmarks/catalogue.md` (a measurement name), the O08 README, and the pre-authored acceptance tests that use the removed keys as refusal inputs (`workload_resources_spec.rs`, `workload_resources_fixtures.rs`, `deploy_workload_resources.rs`, `workload_resources_wire.rs`). Retained results under
 `benchmarks/results/` and `docs/evolution/` are historical record and outside the gate. No new tool.
 
 ## Wave: DESIGN / [REF] Delivery cut
@@ -421,9 +421,14 @@ pub struct NodeSpecInput { pub id: String, pub region: String, pub cpu: CpuQuant
 pub struct ResourceEnvelope { pub cpu: CpuQuantity, pub memory: ByteSize }      // derives unchanged; ToSchema value_type = String per field
 
 // overdrive-control-plane/src/api.rs
+#[serde(deny_unknown_fields)]
 pub struct ResourcesBody { pub cpu: CpuQuantity, pub memory: ByteSize }         // Serialize, Deserialize, ToSchema value_type = String
 impl From<&Resources> for ResourcesBody;                                         // unchanged
 ```
+
+`ResourcesBody` carries `#[serde(deny_unknown_fields)]` so a mixed `{"cpu":…,"memory_bytes":…}` body is refused (pinned by `workload_resources_wire::sad_the_resources_block_refuses_the_removed_keys`); its OpenAPI schema therefore has `additionalProperties: false`, and a client decoding `ResourcesBody` refuses a field it does not know.
+
+`ByteSize`, `CpuQuantity` and `ResourceEnvelope` derive no `Hash` (no consumer).
 
 Functions: `vcpus_for(cpu: CpuQuantity) -> NonZeroU8` (rule unchanged: `max(1, ceil(millis / 1000))`, saturating at `u8::MAX`);
 `cpu_weight_for(cpu: CpuQuantity) -> u32` (`clamp(millis / 10, 1, 10000)`, ADR-0026 D9, unchanged). `MemoryPlan::derive(declared: u64)` and
@@ -681,3 +686,54 @@ AC-1.10 (node capacity carries `CpuQuantity` and `ByteSize`) has no new test. Th
 | O08 | Applied: narrowed to the refusal-text and describe read-back claims |
 | Docs | Applied: `red-classification.md` keeps the table and the notes only; the scenario table above is trimmed |
 | DISCUSS delta (AC-1.10, AC-2.8, AC-2.4 narrowed) | Applied: AC trace above; `describe_prints_a_zero_cpu_as_the_canonical_zero` covers AC-2.8; the vCPU test is removed per the narrowed AC-2.4 |
+
+## Wave: DELIVER / [REF] Implementation summary
+
+`[resources]` takes `cpu` and `memory` as strings end to end. `ByteSize` and `CpuQuantity` are hand-built grammars in `overdrive-core`; `VolumeSize` is `ByteSize` refined to whole GiB. The typed fields run from the TOML spec through the intent aggregate, the wire bodies (`ResourcesBody`, `ResourceEnvelope`), node capacity (`NodeSpecInput`), `schedule` and the `NoCapacity` prose, to `vcpus_for`, `cpu_weight_for` and `MemoryPlan::derive` at the driver. `Job::from_submit` and the service constructor refuse a non-whole-MiB or zero memory; `describe` prints the canonical `CPU:` and `Memory:` forms. The old keys `cpu_milli` and `memory_bytes` are refused by `deny_unknown_fields` with no alias. Existing golden fixtures decode unchanged and `api/openapi.yaml` is regenerated. Delivered in three steps (grammars, field rename, sweep) plus a review-fix commit.
+
+## Wave: DELIVER / [REF] Files modified
+
+About 300 files, mostly mechanical renames.
+
+- **Production:** `overdrive-core` (`byte_size.rs`, `cpu_quantity.rs`, `VolumeSize`, `Resources`, `ResourcesInput`, `NodeSpecInput`, `ResourceEnvelope`, `vcpus_for`, `cpu_weight_for`, admission), `overdrive-control-plane` (`ResourcesBody`, node-volume and quint raw literals, `describe`), `overdrive-worker` and `overdrive-reconcilers` (typed field consumers), `overdrive-cli` (renderer), `overdrive-bench-families` (`vm_lifecycle.rs` spec TOML), `api/openapi.yaml`.
+- **Tests:** the 55 pre-authored acceptance tests activated; renamed fields and corrected goldens in existing acceptance, integration, conformance and sim-fixture tests; four sub-MiB sim fixtures raised to at least 1 MiB.
+- **Examples and scripts:** every `examples/**` spec and runner script, `verification/**/runner.sh`, `benchmarks/catalogue.md`.
+- **Docs:** website how-to and reference pages, `docs/product/architecture/brief.md` example, this feature's artifacts.
+
+## Wave: DELIVER / [REF] Scenarios green
+
+All 55 DISTILL pending tests are activated and pass: 28 in step 01-01 and 27 in step 01-02.
+
+## Wave: DELIVER / [REF] Definition of Done check
+
+| # | Item | Result |
+|---|---|---|
+| 1 | Both AC sets green through the production composition | Pass |
+| 2 | Old keys refused; no alias path in source | Pass |
+| 3 | Existing golden fixtures decode unchanged | Pass |
+| 4 | `api/openapi.yaml` regenerated; check passes | Pass |
+| 5 | Examples and website docs updated; grep gate clean | Examples and gate pass; the website docs page is in finalize |
+| 6 | One renderer prints the canonical forms; tests on the live path | Pass |
+| O08 | EDD expectation capture | In finalize |
+
+## Wave: DELIVER / [REF] Quality gates
+
+| Commit | Content | Gate |
+|---|---|---|
+| `caed426be` | 01-01: grammars, `VolumeSize` refines `ByteSize` | Mutation 29/29 |
+| `182273b25` | 01-02: typed cpu and memory from spec to driver | Mutation: core 13/13, worker 5/5, cli 4/4, reconcilers 7/7; control-plane had one diff-scoped mutant, unviable, so no signal |
+| `034a30a2c` | 01-03: examples, scripts, docs | Grep gate |
+| `54223f20f` | Review fixes | Value-type mutation 30/32 = 93.8%; the two survivors replace `ByteSizeParseError::input()` and no test asserts the input text |
+| `10627a0bb` | DES execution log | DES integrity verification passed |
+
+**Adversarial review:** CHANGES_REQUESTED, 0 blockers. F1: the density-test comment is corrected after tracing that the memory check counts only the placed workload's own allocations. F2: `Hash` removed. F5: volume error text.
+
+**Subtractive review:** S1, S3, S4, S5, S7, S9, S12 applied; S2 declined.
+
+**Full workspace suite on metal:** 5162/5164 passed. The two failures are unrelated to this feature:
+- `cluster_status_against_in_process_server…` is flaky under load and passes alone.
+- `public_ingress_gateway_answers_503_until_the_hydrator_reprograms_after_a_serve_restart` fails on main before this feature (it stays 502 after a serve restart).
+
+## Wave: DELIVER / [REF] Pre-requisites
+
+DISTILL tests and the DESIGN component decomposition.
