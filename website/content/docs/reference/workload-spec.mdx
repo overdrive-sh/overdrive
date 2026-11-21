@@ -1,9 +1,9 @@
 ---
 title: Workload spec resources
-description: How a workload spec writes CPU and memory, the canonical form each one displays in, and the values the control plane refuses.
+description: How a workload spec writes CPU and memory, the canonical form each one displays in, and the values `overdrive deploy` refuses.
 ---
 
-A workload spec sizes its guest with a `[resources]` table. `cpu` and `memory` are both quoted strings. TOML reads an unquoted `cpu = 2` or `memory = 134217728` as an integer, and the control plane refuses it. Write `cpu = "2"`.
+A workload spec sizes its guest with a `[resources]` table. `cpu` and `memory` are both quoted strings. TOML reads an unquoted `cpu = 2` or `memory = 134217728` as an integer, and `overdrive deploy` refuses it. Write `cpu = "2"`.
 
 ```toml
 [resources]
@@ -17,7 +17,7 @@ An unknown key in `[resources]` is refused, and the error names it.
 
 `memory` is a whole number followed by a binary unit, with no space: `<number><unit>`. The units are `B`, `KiB`, `MiB`, `GiB`, and `TiB`, and they are case-insensitive. Display uses the largest unit that divides the value exactly, so `1024MiB` displays as `1GiB`.
 
-A workload's memory must also be a non-zero whole number of MiB, because guest RAM is page-aligned.
+A workload's memory must also be a non-zero whole number of MiB. The memory is the guest's RAM, and Cloud Hypervisor refuses a guest RAM size that is not a multiple of the host page size. A whole number of MiB is a multiple of every host page size.
 
 | Written | Result |
 |---|---|
