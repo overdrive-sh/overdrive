@@ -107,7 +107,9 @@ A `[vm]` workload boots, runs, and reports honestly through `overdrive serve` an
   it ends. A persistent or host-shared volume is unbuilt.
 - **No snapshots or persistence.** The driver boots a VM and tears it down.
   Snapshot, restore, and persistent stateful microVMs are outside this scope.
-- **Fixed size.** `[resources]` sizes the guest's vCPUs and memory at boot.
+- **Fixed size.** `[resources]` sizes the guest's vCPUs and memory at boot,
+  written as `cpu = "500m"` and `memory = "128MiB"`. See the
+  [workload spec reference](/docs/reference/workload-spec).
   Resizing a running VM is rejected — CPU and memory hotplug are not wired.
 - **Shared node networking.** Guest capture and vsock transport connect Linux
   guests to DNS, remote TCP/UDP, and the host mesh mTLS path. Guest-to-Service-VIP

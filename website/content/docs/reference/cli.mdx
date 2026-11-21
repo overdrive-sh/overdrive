@@ -177,7 +177,9 @@ from the same spec.
 `describe` returns the canonical `spec_digest` the control plane holds for the
 workload and the number of live allocations for it. This is the command to
 confirm that a deploy took effect: match the returned digest against the spec you
-deployed, and check the allocation count.
+deployed, and check the allocation count. When the workload has an allocation row with a resolved size, it also prints the declared `Memory:` and `CPU:` in
+their [canonical form](/docs/reference/workload-spec#where-the-canonical-form-appears),
+for example `1GiB` and `500m`.
 
 For each running allocation that has been issued an identity, the `describe`
 output also lists its current certificate — serial, SPIFFE identity, issuer

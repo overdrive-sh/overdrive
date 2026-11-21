@@ -1,0 +1,66 @@
+---
+title: Workload spec resources
+description: How a workload spec writes CPU and memory, the canonical form each one displays in, and the values the control plane refuses.
+---
+
+A workload spec sizes its guest with a `[resources]` table. `cpu` and `memory` are both quoted strings. TOML reads an unquoted `cpu = 2` or `memory = 134217728` as an integer, and the control plane refuses it. Write `cpu = "2"`.
+
+```toml
+[resources]
+cpu    = "500m"
+memory = "128MiB"
+```
+
+An unknown key in `[resources]` is refused, and the error names it.
+
+## Memory
+
+`memory` is a whole number followed by a binary unit, with no space: `<number><unit>`. The units are `B`, `KiB`, `MiB`, `GiB`, and `TiB`, and they are case-insensitive. Display uses the largest unit that divides the value exactly, so `1024MiB` displays as `1GiB`.
+
+A workload's memory must also be a non-zero whole number of MiB, because guest RAM is page-aligned.
+
+| Written | Result |
+|---|---|
+| `"128MiB"` | Accepted, displays as `128MiB` |
+| `"1024MiB"` | Accepted, displays as `1GiB` |
+| `"2gib"` | Accepted, displays as `2GiB` |
+| `"1536MiB"` | Accepted, displays as `1536MiB` |
+| `"128MB"`, `"2GB"` | Refused. Decimal units are not accepted, use `MiB` or `GiB` |
+| `"1.5GiB"` | Refused. The count must be a whole number, write `1536MiB` |
+| `"134217728"` | Refused. The count has no unit |
+| `134217728` (unquoted) | Refused. TOML reads it as an integer, not a string |
+| `"-128MiB"`, `"128 MiB"` | Refused. Not `<number><unit>` |
+| `"0MiB"` | Refused. Memory must be non-zero |
+| `"1000KiB"` | Refused. Memory must be a whole number of MiB |
+| `"1024KiB"` | Accepted, displays as `1MiB` |
+
+## CPU
+
+`cpu` follows the Kubernetes quantity style. Write millicores as `<n>m`, or cores as a decimal with at most three fractional digits. Display is the whole number of cores when the value is an exact multiple of 1000 millicores, and `<n>m` otherwise. Zero is accepted. The `m` suffix is lowercase only and case-sensitive, unlike memory units.
+
+The guest boots with the CPU value rounded up to whole vCPUs, at least 1 and at most 255. `"1500m"` boots 2 vCPUs and `"0"` boots 1.
+
+| Written | Result |
+|---|---|
+| `"500m"` | Accepted, displays as `500m` |
+| `"0.5"` | Accepted, displays as `500m` |
+| `"2"` | Accepted, displays as `2` |
+| `2` (unquoted) | Refused. TOML reads it as an integer, write `"2"` |
+| `"1500m"` | Accepted, displays as `1500m` |
+| `"1.5"` | Accepted, displays as `1500m` |
+| `"500M"` | Refused. The only suffix is lowercase `m` |
+| `"0.0005"` | Refused. At most three decimal places are allowed |
+| `"half"` | Refused. Not millicores or cores |
+
+The largest value is 4294967295 millicores.
+
+## Where the canonical form appears
+
+`overdrive workload describe` prints the declared size in canonical form when the workload has an allocation with a resolved size. For a workload with no allocation, or whose first allocation row carries a zero memory size, it prints neither line.
+
+```text
+Memory:        1GiB
+CPU:           500m
+```
+
+The control plane API returns the same canonical strings in its `resources` fields.

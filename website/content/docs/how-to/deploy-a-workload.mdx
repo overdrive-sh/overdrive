@@ -161,7 +161,9 @@ All four `[vm]` fields are required. `command` and `args` name the program to ru
 inside the guest; `kernel` and `rootfs` are host paths to a bootable kernel and an
 ext4 root filesystem from a matching guest kit. The rootfs must contain the
 kit's `overdrive-init` and `ovd_fwd` module; an arbitrary kernel is unsupported.
-`cpu` derives the guest vCPU count, and `memory` sets guest memory.
+`cpu` derives the guest vCPU count, and `memory` sets guest memory. The
+[workload spec reference](/docs/reference/workload-spec) lists the accepted forms
+and the values the control plane refuses.
 
 Deploy, inspect, and stop a microVM job with the same verbs as any other workload
 — the steps below are identical. The allocation reaches `Running` once the guest
