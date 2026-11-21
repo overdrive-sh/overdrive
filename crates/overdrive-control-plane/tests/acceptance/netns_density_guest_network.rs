@@ -16,6 +16,8 @@
 
 #![allow(clippy::doc_markdown)]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use overdrive_core::guest_transport::GuestFlowPorts;
 use std::collections::BTreeSet;
 use std::net::{Ipv4Addr, SocketAddrV4};
@@ -871,7 +873,10 @@ fn spec(name: &str) -> AllocationSpec {
             kernel: PathBuf::from("/conformance/kernel"),
             rootfs: PathBuf::from("/conformance/rootfs.ext4"),
         }),
-        resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
+        resources: Resources {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(64 * 1024 * 1024),
+        },
         probe_descriptors: Vec::new(),
         transport: None,
         declared_listeners: SERVICE_PORTS

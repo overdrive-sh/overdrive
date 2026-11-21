@@ -24,6 +24,8 @@
 #![cfg(feature = "integration-tests")]
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::collections::BTreeSet;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -251,7 +253,10 @@ async fn build_harness(tmp: &TempDir, workload_id: &str, driver_type: DriverType
     let job = Job::from_submit(JobSpecInput {
         id: workload_id.to_string(),
         replicas: 1,
-        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(256 * 1024 * 1024),
+        },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/bin/sleep".to_string(),
@@ -448,8 +453,8 @@ async fn release_supervision_fires_on_no_prior_row_arm() {
             },
         ),
         resources: overdrive_core::traits::driver::Resources {
-            cpu_milli: 100,
-            memory_bytes: 32 * 1024 * 1024,
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(32 * 1024 * 1024),
         },
         probe_descriptors: Vec::new(),
         transport: None,

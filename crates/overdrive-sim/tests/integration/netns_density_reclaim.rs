@@ -74,6 +74,8 @@
     reason = "seeded acceptance harness: every verdict prints its seed; fixture preconditions fail loudly"
 )]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use overdrive_core::guest_transport::GuestFlowPorts;
 use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
@@ -584,7 +586,10 @@ impl Fixture {
         let service = Service::from_submit(ServiceSpecInput {
             id: workload.to_owned(),
             replicas: 1,
-            resources: ResourcesInput { cpu_milli: 0, memory_bytes: 256 * 1024 },
+            resources: ResourcesInput {
+                cpu: CpuQuantity::from_millis(0),
+                memory: ByteSize::new(1024 * 1024),
+            },
             driver: DriverInput::Vm(VmInput {
                 volume: None,
                 command: "/bin/sleep".to_owned(),
@@ -1011,7 +1016,10 @@ fn filler_action(tag: &str, index: usize) -> Action {
                 kernel: PathBuf::from("/nd295/kernel"),
                 rootfs: PathBuf::from("/nd295/rootfs.ext4"),
             }),
-            resources: Resources { cpu_milli: 0, memory_bytes: 256 * 1024 },
+            resources: Resources {
+                cpu: CpuQuantity::from_millis(0),
+                memory: ByteSize::new(1024 * 1024),
+            },
             probe_descriptors: Vec::new(),
             transport: None,
         },

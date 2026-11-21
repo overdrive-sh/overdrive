@@ -12,6 +12,8 @@
 //!
 //! Tier 1 (seeded `overdrive-sim` composition). Contract shape: bounded-change.
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
@@ -109,7 +111,10 @@ async fn drive(seed: u64) {
     let svc = Service::from_submit(ServiceSpecInput {
         id: "addr-restart".to_owned(),
         replicas: 1,
-        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(64 * 1024 * 1024),
+        },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/bin/sleep".to_owned(),

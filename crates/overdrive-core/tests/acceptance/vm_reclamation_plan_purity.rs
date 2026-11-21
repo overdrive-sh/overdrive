@@ -35,6 +35,8 @@
 #![allow(clippy::missing_panics_doc)]
 #![allow(clippy::expect_used)]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::collections::{BTreeMap, BTreeSet};
 use std::num::NonZeroU32;
 use std::path::PathBuf;
@@ -405,7 +407,10 @@ fn vm_job(workload_id: &WorkloadId) -> Job {
     Job {
         id: workload_id.clone(),
         replicas: NonZeroU32::new(1).unwrap_or_else(|| unreachable!("1 is non-zero")),
-        resources: Resources { cpu_milli: 500, memory_bytes: 512 * 1024 * 1024 },
+        resources: Resources {
+            cpu: CpuQuantity::from_millis(500),
+            memory: ByteSize::new(512 * 1024 * 1024),
+        },
         driver: WorkloadDriver::Vm(Vm {
             volume: None,
             command: "/sbin/init".to_string(),
@@ -420,7 +425,10 @@ fn one_node_map(node_id: &NodeId) -> BTreeMap<NodeId, Node> {
     let n = Node {
         id: node_id.clone(),
         region: Region::new("local").unwrap_or_else(|_| unreachable!("'local' is a valid Region")),
-        capacity: Resources { cpu_milli: 4_000, memory_bytes: 8 * 1024 * 1024 * 1024 },
+        capacity: Resources {
+            cpu: CpuQuantity::from_millis(4_000),
+            memory: ByteSize::new(8 * 1024 * 1024 * 1024),
+        },
     };
     let mut m = BTreeMap::new();
     m.insert(n.id.clone(), n);

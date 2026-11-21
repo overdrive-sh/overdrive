@@ -13,6 +13,8 @@
 //! Step 03-01 lands the `submit_workload` body; the other four remain RED
 //! scaffolds owned by subsequent deliver steps.
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::collections::BTreeMap;
 
 use axum::Json;
@@ -165,7 +167,10 @@ impl From<overdrive_core::traits::observation_store::AllocStatusRow> for api::Al
             // Phase 1 — the row schema does not carry the requested
             // envelope. The handler that knows the JobSpec overrides
             // this field; the bare conversion uses zeroes.
-            resources: api::ResourcesBody { cpu_milli: 0, memory_bytes: 0 },
+            resources: api::ResourcesBody {
+                cpu: CpuQuantity::from_millis(0),
+                memory: ByteSize::new(0),
+            },
             // Mechanical projection of the durable canonical endpoint. The
             // VM C3 seam writes the guest address here; the transit hop is
             // deliberately never persisted as `workload_addr` for VM kind.
@@ -1112,10 +1117,7 @@ pub async fn alloc_status(
     // VIP from the typed `WorkloadIntent`.
     let (resources_body, replicas_desired, response_vip, listeners, probes) = match &intent {
         WorkloadIntent::Job(job) => (
-            api::ResourcesBody {
-                cpu_milli: job.resources.cpu_milli,
-                memory_bytes: job.resources.memory_bytes,
-            },
+            api::ResourcesBody { cpu: job.resources.cpu, memory: job.resources.memory },
             job.replicas.get(),
             None,
             // Job carries no listeners — the operator-facing surface
@@ -1140,10 +1142,7 @@ pub async fn alloc_status(
             let vip = guard.get(&digest_bytes);
             drop(guard);
             (
-                api::ResourcesBody {
-                    cpu_milli: svc.resources.cpu_milli,
-                    memory_bytes: svc.resources.memory_bytes,
-                },
+                api::ResourcesBody { cpu: svc.resources.cpu, memory: svc.resources.memory },
                 svc.replicas.get(),
                 vip.map(|v| v.get().to_string()),
                 // Project the persisted Service intent's listeners
@@ -1165,10 +1164,7 @@ pub async fn alloc_status(
             )
         }
         WorkloadIntent::Schedule(sched) => (
-            api::ResourcesBody {
-                cpu_milli: sched.job.resources.cpu_milli,
-                memory_bytes: sched.job.resources.memory_bytes,
-            },
+            api::ResourcesBody { cpu: sched.job.resources.cpu, memory: sched.job.resources.memory },
             sched.job.replicas.get(),
             None,
             Vec::new(),

@@ -336,8 +336,8 @@ fn config_path(config_dir: &Path) -> PathBuf {
 fn vm_job_toml(id: &str, command: &str, kernel: &Path, rootfs: &Path) -> String {
     format!(
         "[job]\nid = \"{id}\"\n\n[vm]\ncommand = \"{command}\"\nargs = []\n\
-         kernel = \"{}\"\nrootfs = \"{}\"\n\n[resources]\ncpu_milli = 500\n\
-         memory_bytes = 134217728\n",
+         kernel = \"{}\"\nrootfs = \"{}\"\n\n[resources]\ncpu = '500m'\n\
+         memory = '128MiB'\n",
         kernel.display(),
         rootfs.display(),
     )

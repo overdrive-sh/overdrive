@@ -166,7 +166,7 @@ fn stage_rootfs(tmp: &Path, fixture: &VmFixture) -> PathBuf {
 /// guest scripts open it (a background `nc` loop on `LISTENER_PORT`) so the startup gate over the declared listener passes.
 fn service_toml(id: &str, command: &str, kernel: &Path, rootfs: &Path) -> String {
     format!(
-        "[service]\nid = \"{id}\"\nreplicas = 1\n\n[[listener]]\nport = {LISTENER_PORT}\nprotocol = \"tcp\"\n\n[vm]\ncommand = \"{command}\"\nargs = []\nkernel = \"{}\"\nrootfs = \"{}\"\n\n[vm.volume]\nsize = \"1GiB\"\n\n[resources]\ncpu_milli = 500\nmemory_bytes = 134217728\n",
+        "[service]\nid = \"{id}\"\nreplicas = 1\n\n[[listener]]\nport = {LISTENER_PORT}\nprotocol = \"tcp\"\n\n[vm]\ncommand = \"{command}\"\nargs = []\nkernel = \"{}\"\nrootfs = \"{}\"\n\n[vm.volume]\nsize = \"1GiB\"\n\n[resources]\ncpu = '500m'\nmemory = '128MiB'\n",
         kernel.display(),
         rootfs.display(),
     )

@@ -27,7 +27,7 @@ use overdrive_core::codec::VersionedEnvelope;
 use serde_json::{Value, json};
 
 const JOB_BASE: &str = "[job]\nid = \"dev-box\"\n\n[vm]\ncommand = \"/sbin/init\"\nargs = []\nkernel = \"/k\"\nrootfs = \"/r\"\n";
-const RESOURCES: &str = "\n[resources]\ncpu_milli = 500\nmemory_bytes = 134217728\n";
+const RESOURCES: &str = "\n[resources]\ncpu = '500m'\nmemory = '128MiB'\n";
 
 fn job_toml(volume: &str) -> String {
     format!("{JOB_BASE}{volume}{RESOURCES}")
@@ -39,7 +39,7 @@ fn wire_job(replicas: u32, volume: &Value) -> Value {
         vm["volume"] = volume.clone();
     }
     json!({"id": "dev-box", "replicas": replicas,
-           "resources": {"cpu_milli": 500, "memory_bytes": 134_217_728u64}, "vm": vm})
+           "resources": {"cpu": "500m", "memory": "128MiB"}, "vm": vm})
 }
 
 fn admit_job(replicas: u32, volume: &Value) -> Result<Job, AggregateError> {

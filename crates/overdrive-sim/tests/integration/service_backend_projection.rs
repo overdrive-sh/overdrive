@@ -46,6 +46,8 @@ use overdrive_control_plane::{
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
 use overdrive_core::aggregate::{DriverInput, IntentKey, ResourcesInput, Service, WorkloadIntent};
 use overdrive_core::api::{ListenerInput, ServiceSpecInput};
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use overdrive_core::dataplane::backend_key::Proto;
 use overdrive_core::id::{AllocationId, MeshServiceName, NodeId, ServiceId, ServiceVip};
 use overdrive_core::observation::{ProbeIdx, ProbeRole};
@@ -164,7 +166,10 @@ fn input(listeners: &[(u16, &str)], replicas: u32) -> ServiceSpecInput {
     ServiceSpecInput {
         id: WORKLOAD.into(),
         replicas,
-        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(64 * 1024 * 1024),
+        },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/bin/sleep".into(),

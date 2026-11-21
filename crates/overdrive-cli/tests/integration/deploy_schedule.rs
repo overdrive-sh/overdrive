@@ -67,8 +67,8 @@ kernel = "/kernel"
 rootfs = "/rootfs"
 
 [resources]
-cpu_milli = 100
-memory_bytes = 67108864
+cpu = '100m'
+memory = '64MiB'
 
 [schedule]
 cron = "0 2 * * *"
@@ -210,8 +210,8 @@ kernel = "/kernel"
 rootfs = "/rootfs"
 
 [resources]
-cpu_milli = 100
-memory_bytes = 67108864
+cpu = '100m'
+memory = '64MiB'
 
 [schedule]
 cron = "0 2 * * *"

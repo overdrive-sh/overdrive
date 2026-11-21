@@ -144,6 +144,8 @@
     reason = "test support and conformance drivers: fixture preconditions are asserted with expect, and handler signatures follow the action map"
 )]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::Ipv4Addr;
 use std::path::Path as FsPath;
@@ -1023,7 +1025,10 @@ impl CidLeaseDriver {
                 spec: SubmitSpecInput::Service(ServiceSpecInput {
                     id: workload(a),
                     replicas: 1,
-                    resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+                    resources: ResourcesInput {
+                        cpu: CpuQuantity::from_millis(100),
+                        memory: ByteSize::new(128 * 1024 * 1024),
+                    },
                     driver: DriverInput::Vm(VmInput {
                         volume: None,
                         command: "/sbin/init".to_owned(),

@@ -43,6 +43,8 @@
 use std::collections::BTreeMap;
 
 use crate::aggregate::Node;
+use crate::byte_size::ByteSize;
+use crate::cpu_quantity::CpuQuantity;
 use crate::guest_network::GuestAttachmentOccupancy;
 use crate::id::NodeId;
 use crate::traits::driver::Resources;
@@ -101,7 +103,7 @@ pub fn schedule(
     // zero — every iterated node either replaces the running max or
     // keeps it, so the eventual value is the per-component pointwise
     // maximum across nodes after subtraction.
-    let mut max_free = Resources { cpu_milli: 0, memory_bytes: 0 };
+    let mut max_free = Resources { cpu: CpuQuantity::from_millis(0), memory: ByteSize::new(0) };
 
     // First-fit: walk in BTreeMap order. The first node whose free
     // capacity covers the `needed` requested envelope wins when the
@@ -123,12 +125,8 @@ pub fn schedule(
         // less actionable than the per-node max but better matches
         // the operator's "where would I add capacity?" intuition for
         // Phase 1.
-        if free.cpu_milli > max_free.cpu_milli {
-            max_free.cpu_milli = free.cpu_milli;
-        }
-        if free.memory_bytes > max_free.memory_bytes {
-            max_free.memory_bytes = free.memory_bytes;
-        }
+        max_free.cpu = max_free.cpu.max(free.cpu);
+        max_free.memory = max_free.memory.max(free.memory);
     }
 
     Err(PlacementError::NoCapacity { needed: *needed, max_free })
@@ -165,24 +163,25 @@ pub fn free_capacity(
     // capacity. `saturating_mul` keeps the helper total: an overflow
     // in the multiply (impossible at Phase 1 sizes but cheap insurance)
     // would clamp to MAX, leaving free at 0 after subtraction.
-    let total_cpu_reserved = u64::from(per_alloc.cpu_milli).saturating_mul(running_on_node);
-    let total_mem_reserved = per_alloc.memory_bytes.saturating_mul(running_on_node);
+    let total_cpu_reserved = u64::from(per_alloc.cpu.millis()).saturating_mul(running_on_node);
+    let total_mem_reserved = per_alloc.memory.bytes().saturating_mul(running_on_node);
 
     // CPU subtraction is widened to u64 to keep the multiply room above,
     // then narrowed to u32. `saturating_sub` cannot exceed
-    // `node.capacity.cpu_milli` (a u32) so the narrow is total — but we
+    // `node.capacity.cpu.millis()` (a u32) so the narrow is total — but we
     // express it via `u32::try_from(...).unwrap_or(u32::MAX)` to avoid
     // a `cast_possible_truncation` lint.
-    let cpu_after = u64::from(node.capacity.cpu_milli).saturating_sub(total_cpu_reserved);
+    let cpu_after = u64::from(node.capacity.cpu.millis()).saturating_sub(total_cpu_reserved);
     Resources {
-        cpu_milli: u32::try_from(cpu_after).unwrap_or(u32::MAX),
-        memory_bytes: node.capacity.memory_bytes.saturating_sub(total_mem_reserved),
+        cpu: CpuQuantity::from_millis(u32::try_from(cpu_after).unwrap_or(u32::MAX)),
+        memory: ByteSize::new(node.capacity.memory.bytes().saturating_sub(total_mem_reserved)),
     }
 }
 
 /// Does `available` cover `needed` on every component?
 const fn covers(available: &Resources, needed: &Resources) -> bool {
-    available.cpu_milli >= needed.cpu_milli && available.memory_bytes >= needed.memory_bytes
+    available.cpu.millis() >= needed.cpu.millis()
+        && available.memory.bytes() >= needed.memory.bytes()
 }
 
 /// Placement-failure envelope.

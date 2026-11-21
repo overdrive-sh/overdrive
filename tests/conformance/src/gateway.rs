@@ -1698,7 +1698,7 @@ impl GatewayWorld {
                 "kind": "service",
                 "id": SERVICE_ID,
                 "replicas": 1,
-                "resources": { "cpu_milli": 500, "memory_bytes": 134_217_728_u64 },
+                "resources": { "cpu": "500m", "memory": "128MiB" },
                 "vm": {
                     "command": command,
                     "args": [],

@@ -73,6 +73,8 @@
     reason = "a conformance driver asserts its own preconditions; handler signatures follow the action map"
 )]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::io;
@@ -407,7 +409,10 @@ fn spec_of(alloc: &AllocationId) -> AllocationSpec {
             kernel: PathBuf::from("/kernel"),
             rootfs: PathBuf::from("/rootfs"),
         }),
-        resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
+        resources: Resources {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(64 * 1024 * 1024),
+        },
         probe_descriptors: vec![
             tcp_descriptor(ProbeRole::Startup, 0),
             tcp_descriptor(ProbeRole::Readiness, 0),

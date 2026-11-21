@@ -486,8 +486,8 @@ pub(super) fn vm_job_toml(
     let args_toml = args.iter().map(|a| format!("\"{a}\"")).collect::<Vec<_>>().join(", ");
     format!(
         "[job]\nid = \"{id}\"\n\n[vm]\ncommand = \"{command}\"\nargs = [{args_toml}]\n\
-         kernel = \"{}\"\nrootfs = \"{}\"\n\n[resources]\ncpu_milli = 500\n\
-         memory_bytes = 134217728\n",
+         kernel = \"{}\"\nrootfs = \"{}\"\n\n[resources]\ncpu = '500m'\n\
+         memory = '128MiB'\n",
         kernel.display(),
         rootfs.display(),
     )
@@ -2104,7 +2104,7 @@ fn build_memory_hog_binary(tmp: &Path) -> PathBuf {
 /// Forces a REAL, genuine kernel cgroup-OOM (per this step's "Ground the
 /// premise" obligation — the diagnosis must observe a REAL kernel
 /// `memory.events` increment, never a synthesized classification). The
-/// deploy declares `memory_bytes` at the SAME 128 MiB every other
+/// deploy declares `memory` at the SAME 128 MiB every other
 /// scenario in this file uses (empirically the smallest point this
 /// kernel/rootfs/CH combination is proven to boot at — a first cut of
 /// this test at 64 MiB never reached Running within 60s on the real
@@ -2161,8 +2161,8 @@ async fn vm_that_exceeds_declared_memory_is_diagnosed_as_oom_not_bare_signal_9()
         "vm-oom.toml",
         &format!(
             "[job]\nid = \"vm-oom\"\n\n[vm]\ncommand = \"/sbin/memhog\"\nargs = []\n\
-             kernel = \"{}\"\nrootfs = \"{}\"\n\n[resources]\ncpu_milli = 500\n\
-             memory_bytes = {DECLARED_MEMORY_BYTES}\n",
+             kernel = \"{}\"\nrootfs = \"{}\"\n\n[resources]\ncpu = '500m'\n\
+             memory = \"{DECLARED_MEMORY_BYTES}B\"\n",
             fixture.kernel_path.display(),
             rootfs.display(),
         ),

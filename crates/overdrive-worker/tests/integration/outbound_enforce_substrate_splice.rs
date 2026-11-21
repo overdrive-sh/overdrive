@@ -28,6 +28,8 @@
     reason = "Tier-3 outbound-substrate test body; the bidirectional-splice narrative in the module docstring is prose; skip messages + strace diagnostics go to stderr; failures must panic with informative messages; the libc FFI casts are width conversions on compile-time constants (ETH_P_ALL.to_be() as i32 mirrors traffic.rs); leg F/B are the ADR-0069 contract vocabulary; the single composed Tier-3 scenario drives the round-trip under one strace attach; the SocketAddr wildcard arm is the V6 case a v4-only fixture cannot hit; the per-byte \\xNN python-literal fold reads clearer than a write! accumulator in a test fixture; const-fn-ability on test constructors is not load-bearing"
 )]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read as _, Write as _};
 use std::net::{Ipv4Addr, SocketAddrV4, TcpListener};
@@ -389,7 +391,10 @@ fn build_client_spec(pki: &TestPki, _host_veth: Option<String>) -> AllocationSpe
                 rootfs: "/nonexistent/rootfs".into(),
             },
         ),
-        resources: Resources { cpu_milli: 50, memory_bytes: 32 * 1024 * 1024 },
+        resources: Resources {
+            cpu: CpuQuantity::from_millis(50),
+            memory: ByteSize::new(32 * 1024 * 1024),
+        },
         probe_descriptors: Vec::new(),
         transport: None,
     }

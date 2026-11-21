@@ -26,6 +26,8 @@
 
 #![allow(clippy::large_futures)]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -157,7 +159,10 @@ async fn build_harness(tmp: &TempDir) -> Harness {
     let job = Job::from_submit(JobSpecInput {
         id: "exitobs".to_string(),
         replicas: 1,
-        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(256 * 1024 * 1024),
+        },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/bin/sleep".to_string(),
@@ -718,7 +723,10 @@ async fn exit_observer_writes_failed_and_does_not_name_consumers_on_observed_exi
     let job = Job::from_submit(JobSpecInput {
         id: "exitobs".to_string(),
         replicas: 1,
-        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(256 * 1024 * 1024),
+        },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/bin/sleep".to_string(),

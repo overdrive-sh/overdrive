@@ -76,6 +76,8 @@
     clippy::unused_async
 )]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use overdrive_core::observation::{ProbeRunSeq, SameStatusRuns};
 use std::str::FromStr;
 use std::sync::Arc;
@@ -176,7 +178,10 @@ fn exec_job(id: &str) -> Job {
     Job::from_submit(JobSpecInput {
         id: id.to_owned(),
         replicas: 1,
-        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(128 * 1024 * 1024),
+        },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/bin/serve".to_owned(),
@@ -192,7 +197,10 @@ fn service_with_startup_probe(id: &str) -> Service {
     Service::from_submit(ServiceSpecInput {
         id: id.to_owned(),
         replicas: 1,
-        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(128 * 1024 * 1024),
+        },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/bin/serve".to_owned(),

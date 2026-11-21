@@ -47,8 +47,8 @@ use tracing_subscriber::Layer;
 use tracing_subscriber::layer::SubscriberExt;
 
 const LISTEN_PORT: u16 = 18081;
-const VM_MEMORY_BYTES: u64 = 134_217_728;
-const VM_CPU_MILLI: u32 = 500;
+const VM_MEMORY: &str = "128MiB";
+const VM_CPU: &str = "500m";
 const STABLE_BOUND: Duration = Duration::from_secs(90);
 const CLEANUP_BOUND: Duration = Duration::from_secs(40);
 const POLL: Duration = Duration::from_millis(20);
@@ -501,7 +501,7 @@ fn replicate(
     trace: &Arc<Trace>,
 ) -> Result<Replicated, ReplicateFailure> {
     rep.note("cache_state", shape.cache_state());
-    rep.note("vm_resources", &format!("cpu_milli={VM_CPU_MILLI} memory_bytes={VM_MEMORY_BYTES}"));
+    rep.note("vm_resources", &format!("cpu={VM_CPU} memory={VM_MEMORY}"));
     rep.note("concurrency", &shape.concurrency.to_string());
     let version =
         rep.exec(&fixture.kit.cloud_hypervisor_bin.display().to_string(), &["--version"])?;
@@ -696,7 +696,7 @@ fn service_toml(id: &str, kernel: &Path, rootfs: &Path, command: &str) -> String
     format!(
         "[service]\nid = \"{id}\"\nreplicas = 1\n\n[[listener]]\nport = {LISTEN_PORT}\nprotocol = \"tcp\"\n\n\
          [vm]\ncommand = \"{GUEST_PEER_GUEST_PATH}\"\nargs = [\"{command}\", \"{LISTEN_PORT}\", \"bench\"]\n\
-         kernel = \"{}\"\nrootfs = \"{}\"\n\n[resources]\ncpu_milli = {VM_CPU_MILLI}\nmemory_bytes = {VM_MEMORY_BYTES}\n\n\
+         kernel = \"{}\"\nrootfs = \"{}\"\n\n[resources]\ncpu = \"{VM_CPU}\"\nmemory = \"{VM_MEMORY}\"\n\n\
          [[health_check.startup]]\ntype = \"tcp\"\nhost = \"0.0.0.0\"\nport = {LISTEN_PORT}\n\
          interval_seconds = 1\ntimeout_seconds = 1\nmax_attempts = 30\n",
         kernel.display(),

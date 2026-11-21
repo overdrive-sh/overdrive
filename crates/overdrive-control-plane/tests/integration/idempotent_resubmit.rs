@@ -33,6 +33,8 @@
 //! handshake, real reqwest. Gated by the `integration-tests` feature at
 //! the `tests/integration.rs` entrypoint.
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::net::SocketAddr;
 use std::time::Duration;
 
@@ -137,7 +139,10 @@ fn payments_spec() -> JobSpecInput {
     JobSpecInput {
         id: "payments".to_owned(),
         replicas: 3,
-        resources: ResourcesInput { cpu_milli: 500, memory_bytes: 536_870_912 }, // 512 MiB
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(500),
+            memory: ByteSize::new(536_870_912),
+        }, // 512 MiB
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/bin/true".to_string(),
@@ -154,7 +159,10 @@ fn payments_spec_alt_replicas() -> JobSpecInput {
     JobSpecInput {
         id: "payments".to_owned(),
         replicas: 7,
-        resources: ResourcesInput { cpu_milli: 500, memory_bytes: 536_870_912 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(500),
+            memory: ByteSize::new(536_870_912),
+        },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/bin/true".to_string(),

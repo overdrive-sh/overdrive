@@ -63,8 +63,8 @@ kernel = "/kernel"
 rootfs = "/rootfs"
 
 [resources]
-cpu_milli = 100
-memory_bytes = 134217728
+cpu = '100m'
+memory = '128MiB'
 
 [[health_check.startup]]
 type = "http"
@@ -146,7 +146,7 @@ proptest! {
         let toml = format!(
             "[job]\nid = \"j\"\n\n\
              [vm]\ncommand = \"/usr/bin/server\"\nargs = []\n\n\
-             [resources]\ncpu_milli = 100\nmemory_bytes = 134217728\n\n\
+             [resources]\ncpu = '100m'\nmemory = '128MiB'\n\n\
              {health_check}"
         );
         match parse_err(&toml) {
@@ -176,7 +176,7 @@ proptest! {
             "[job]\nid = \"j\"\n\n\
              [schedule]\ncron = \"* * * * *\"\n\n\
              [vm]\ncommand = \"/usr/bin/server\"\nargs = []\n\n\
-             [resources]\ncpu_milli = 100\nmemory_bytes = 134217728\n\n\
+             [resources]\ncpu = '100m'\nmemory = '128MiB'\n\n\
              {health_check}"
         );
         match parse_err(&toml) {
@@ -401,8 +401,8 @@ kernel = "/kernel"
 rootfs = "/rootfs"
 
 [resources]
-cpu_milli = 100
-memory_bytes = 134217728
+cpu = '100m'
+memory = '128MiB'
 "#;
 
 fn parse_err(toml: &str) -> ParseError {
@@ -435,8 +435,8 @@ kernel = "/kernel"
 rootfs = "/rootfs"
 
 [resources]
-cpu_milli = 100
-memory_bytes = 134217728
+cpu = '100m'
+memory = '128MiB'
 "#
         );
         let input = WorkloadSpecInput::from_toml_str(&toml)
@@ -482,8 +482,8 @@ kernel = "/kernel"
 rootfs = "/rootfs"
 
 [resources]
-cpu_milli = 100
-memory_bytes = 134217728
+cpu = '100m'
+memory = '128MiB'
 
 [health_check]
 startup = []

@@ -17,6 +17,8 @@
 //! handshake, real reqwest. Gated by the `integration-tests` feature at
 //! the `tests/integration.rs` entrypoint.
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::net::SocketAddr;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -109,7 +111,10 @@ fn payments_spec() -> JobSpecInput {
     JobSpecInput {
         id: "payments".to_owned(),
         replicas: 3,
-        resources: ResourcesInput { cpu_milli: 500, memory_bytes: 536_870_912 }, // 512 MiB
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(500),
+            memory: ByteSize::new(536_870_912),
+        }, // 512 MiB
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/bin/true".to_string(),
@@ -430,7 +435,10 @@ fn service_spec(id: &str, port: u16) -> ServiceSpecInput {
     ServiceSpecInput {
         id: id.to_owned(),
         replicas: 2,
-        resources: ResourcesInput { cpu_milli: 250, memory_bytes: 268_435_456 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(250),
+            memory: ByteSize::new(268_435_456),
+        },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/bin/true".to_string(),
@@ -526,11 +534,14 @@ fn arb_valid_job_spec() -> impl Strategy<Value = JobSpecInput> {
     // and the default PROPTEST_CASES=256 completes within the
     // integration-test wall-clock budget.
     let id = "[a-z][a-z0-9]{0,15}";
-    (id, 1u32..100u32, 1u32..10_000u32, 1u64..(1u64 << 40)).prop_map(
-        |(id, replicas, cpu_milli, memory_bytes)| JobSpecInput {
+    (id, 1u32..100u32, 1u32..10_000u32, 1u64..(1u64 << 20)).prop_map(
+        |(id, replicas, millicores, memory_mib)| JobSpecInput {
             id,
             replicas,
-            resources: ResourcesInput { cpu_milli, memory_bytes },
+            resources: ResourcesInput {
+                cpu: CpuQuantity::from_millis(millicores),
+                memory: ByteSize::new(memory_mib * 1024 * 1024),
+            },
             driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
                 volume: None,
                 command: "/bin/true".to_string(),

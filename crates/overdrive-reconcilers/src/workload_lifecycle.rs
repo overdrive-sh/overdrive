@@ -1,5 +1,7 @@
 //! `WorkloadLifecycle` reconciler — first real reconciler (US-03).
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
 
@@ -578,8 +580,8 @@ fn baseline_nodes_phase1() -> BTreeMap<NodeId, Node> {
     let node = Node::new(NodeSpecInput {
         id: "local".to_string(),
         region: "local".to_string(),
-        cpu_milli: 4_000,
-        memory_bytes: 8 * 1024 * 1024 * 1024,
+        cpu: CpuQuantity::from_millis(4_000),
+        memory: ByteSize::new(8 * 1024 * 1024 * 1024),
     })
     .expect("baseline 'local' node spec is valid");
     nodes.insert(node.id.clone(), node);
@@ -2260,6 +2262,8 @@ mod project_service_listen_ports_tests {
     //! S-PORTSET equality property structurally honest (D-BLOCKER1: one
     //! source, two readers).
 
+    use overdrive_core::byte_size::ByteSize;
+    use overdrive_core::cpu_quantity::CpuQuantity;
     use std::num::{NonZeroU16, NonZeroU32};
 
     use proptest::prelude::*;
@@ -2282,7 +2286,10 @@ mod project_service_listen_ports_tests {
         Job {
             id: wid(id),
             replicas: NonZeroU32::new(1).expect("1 is non-zero"),
-            resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+            resources: Resources {
+                cpu: CpuQuantity::from_millis(100),
+                memory: ByteSize::new(128 * 1024 * 1024),
+            },
             driver: WorkloadDriver::Vm(Vm {
                 volume: None,
                 command: "/bin/serve".to_string(),
@@ -2301,7 +2308,10 @@ mod project_service_listen_ports_tests {
         let input = ServiceSpecInput {
             id: "svc".to_string(),
             replicas: 1,
-            resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+            resources: ResourcesInput {
+                cpu: CpuQuantity::from_millis(100),
+                memory: ByteSize::new(128 * 1024 * 1024),
+            },
             driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
                 volume: None,
                 command: "/bin/serve".to_string(),
@@ -2381,7 +2391,10 @@ mod project_service_listen_ports_tests {
         let intent = WorkloadIntent::Service(Service {
             id: wid("mixed-listeners"),
             replicas: NonZeroU32::new(1).expect("one replica"),
-            resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+            resources: Resources {
+                cpu: CpuQuantity::from_millis(100),
+                memory: ByteSize::new(128 * 1024 * 1024),
+            },
             driver: WorkloadDriver::Vm(Vm {
                 volume: None,
                 command: "/bin/serve".to_owned(),
@@ -2466,6 +2479,8 @@ mod service_vip_release_emission_tests {
     //! VIP. The gate keys on `desired.job.is_none()` alone, never on
     //! `desired_to_stop`, `is_operator_stopped`, or `row.terminal`.
 
+    use overdrive_core::byte_size::ByteSize;
+    use overdrive_core::cpu_quantity::CpuQuantity;
     use std::collections::{BTreeMap, BTreeSet};
     use std::num::NonZeroU32;
 
@@ -2487,7 +2502,10 @@ mod service_vip_release_emission_tests {
         Job {
             id: wid(id),
             replicas: NonZeroU32::new(1).expect("1 is non-zero"),
-            resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+            resources: Resources {
+                cpu: CpuQuantity::from_millis(100),
+                memory: ByteSize::new(128 * 1024 * 1024),
+            },
             driver: WorkloadDriver::Vm(Vm {
                 volume: None,
                 command: "/bin/serve".to_string(),
@@ -2922,14 +2940,15 @@ mod baseline_nodes_tests {
 
         let local_id = NodeId::new("local").expect("valid NodeId");
         let local = nodes.get(&local_id).expect("local node must be present");
-        assert_eq!(local.capacity.cpu_milli, 4_000, "cpu must be exactly 4000 mCPU");
+        assert_eq!(local.capacity.cpu.millis(), 4_000, "cpu must be exactly 4000 mCPU");
         assert_eq!(
-            local.capacity.memory_bytes,
+            local.capacity.memory.bytes(),
             8_u64 * 1024 * 1024 * 1024,
             "memory must be exactly 8 GiB",
         );
         assert_eq!(
-            local.capacity.memory_bytes, 8_589_934_592_u64,
+            local.capacity.memory.bytes(),
+            8_589_934_592_u64,
             "memory must be exactly 8 GiB = 8589934592 bytes",
         );
     }
@@ -2937,6 +2956,8 @@ mod baseline_nodes_tests {
 
 #[cfg(test)]
 mod eligibility_tests {
+    use overdrive_core::byte_size::ByteSize;
+    use overdrive_core::cpu_quantity::CpuQuantity;
     use std::collections::{BTreeMap, BTreeSet};
     use std::num::NonZeroU32;
     use std::time::{Duration, Instant};
@@ -2980,7 +3001,10 @@ mod eligibility_tests {
         let job = Job {
             id: workload_id.clone(),
             replicas: NonZeroU32::new(1).expect("one replica"),
-            resources: Resources { cpu_milli: 100, memory_bytes: 1024 },
+            resources: Resources {
+                cpu: CpuQuantity::from_millis(100),
+                memory: ByteSize::new(1024),
+            },
             driver: WorkloadDriver::Vm(Vm {
                 volume: None,
                 command: "/bin/true".into(),
@@ -3046,6 +3070,8 @@ mod eligibility_tests {
 /// `WorkloadLifecycle::reconcile` / `next_evaluation_at` output.
 #[cfg(test)]
 mod netns_density_lifecycle_fixture {
+    use overdrive_core::byte_size::ByteSize;
+    use overdrive_core::cpu_quantity::CpuQuantity;
     use std::collections::{BTreeMap, BTreeSet};
     use std::num::NonZeroU32;
     use std::time::{Duration, Instant};
@@ -3094,7 +3120,10 @@ mod netns_density_lifecycle_fixture {
         Job {
             id: wid(),
             replicas: NonZeroU32::new(1).expect("one replica"),
-            resources: Resources { cpu_milli: 500, memory_bytes: 128 * 1024 * 1024 },
+            resources: Resources {
+                cpu: CpuQuantity::from_millis(500),
+                memory: ByteSize::new(128 * 1024 * 1024),
+            },
             driver: WorkloadDriver::Vm(Vm {
                 volume: None,
                 command: "/sbin/serve".to_owned(),
@@ -3111,7 +3140,10 @@ mod netns_density_lifecycle_fixture {
             Node {
                 id: nid(),
                 region: Region::new("local").expect("valid region"),
-                capacity: Resources { cpu_milli: 4_000, memory_bytes: 8 * 1024 * 1024 * 1024 },
+                capacity: Resources {
+                    cpu: CpuQuantity::from_millis(4_000),
+                    memory: ByteSize::new(8 * 1024 * 1024 * 1024),
+                },
             },
         )])
     }

@@ -37,6 +37,8 @@
     reason = "a test composition asserts its own preconditions; protocol names are prose; the two consumers (R5-PROBE-COUNT and the conformance driver) each use a subset of the composition"
 )]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::collections::BTreeMap;
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::num::NonZeroU16;
@@ -266,7 +268,10 @@ pub(super) fn service_intent(probes: ProbeSet) -> WorkloadIntent {
     let svc = Service::from_submit(ServiceSpecInput {
         id: WORKLOAD.to_owned(),
         replicas: 1,
-        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(128 * 1024 * 1024),
+        },
         driver: DriverInput::Vm(VmInput {
             volume: None,
             command: "/bin/serve".to_owned(),
@@ -300,7 +305,10 @@ pub(super) fn vm_spec(
             kernel: PathBuf::from("/kernel"),
             rootfs: PathBuf::from("/rootfs"),
         }),
-        resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+        resources: Resources {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(128 * 1024 * 1024),
+        },
         probe_descriptors: project_probe_descriptors(intent),
         transport: Some(GuestTransportAssignment::new(
             WORKLOAD_ADDR,

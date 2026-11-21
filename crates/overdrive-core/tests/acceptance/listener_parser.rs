@@ -54,8 +54,8 @@ kernel = "/kernel"
 rootfs = "/rootfs"
 
 [resources]
-cpu_milli = 500
-memory_bytes = 134217728
+cpu = '500m'
+memory = '128MiB'
 "#
     )
 }

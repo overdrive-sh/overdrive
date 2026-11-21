@@ -1,4 +1,4 @@
-//! S-VM-69 / S-VM-70 — declared `[resources] cpu_milli` sizes the guest's
+//! S-VM-69 / S-VM-70 — declared `[resources] cpu` sizes the guest's
 //! REAL online vCPU count (Tier-3, `@real-io` `@requires-kvm`, AC-17,
 //! US-VM-5; `docs/feature/microvm-driver-cloud-hypervisor/distill/
 //! test-scenarios.md` §§2236-2258).
@@ -32,9 +32,9 @@
 //!
 //! # Port-to-port litmus
 //!
-//! Delete the `cpu_milli -> vcpus` wiring in `VmDriver::start` (revert to
+//! Delete the `cpu -> vcpus` wiring in `VmDriver::start` (revert to
 //! the fixed `VmHostLayout.vcpus` template of 1) and S-VM-69 stays RED:
-//! `cpu_milli = 2000` would boot 1 vCPU, the guest would exit 1, and the
+//! `cpu = 2000` would boot 1 vCPU, the guest would exit 1, and the
 //! expected `exit_code` of 2 would never arrive.
 //!
 //! `#[serial(cgroup)]` — every test here boots a real `overdrive serve`
@@ -44,6 +44,7 @@
 #![cfg(all(feature = "integration-tests", feature = "kvm-tests"))]
 #![allow(clippy::missing_panics_doc, clippy::unwrap_used, clippy::expect_used)]
 
+use overdrive_core::byte_size::ByteSize;
 use std::net::SocketAddr;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -252,15 +253,15 @@ fn config_path(tmp: &Path) -> PathBuf {
     tmp.join("conf").join(".overdrive").join("config")
 }
 
-/// A `[job]`+`[vm]`+`[resources]` TOML with a caller-chosen `cpu_milli`,
+/// A `[job]`+`[vm]`+`[resources]` TOML with a caller-chosen `cpu`,
 /// memory fixed at 256 MiB. The sibling vCPU cases (S-VM-69/70) vary only
-/// `cpu_milli`; S-VM-71 varies `memory_bytes` via [`vm_job_toml_sized`].
-fn vm_job_toml(id: &str, command: &str, kernel: &Path, rootfs: &Path, cpu_milli: u32) -> String {
-    vm_job_toml_sized(id, command, kernel, rootfs, cpu_milli, 268_435_456)
+/// `cpu`; S-VM-71 varies `memory` via [`vm_job_toml_sized`].
+fn vm_job_toml(id: &str, command: &str, kernel: &Path, rootfs: &Path, millicores: u32) -> String {
+    vm_job_toml_sized(id, command, kernel, rootfs, millicores, 268_435_456)
 }
 
-/// A `[job]`+`[vm]`+`[resources]` TOML with a caller-chosen `cpu_milli`
-/// AND `memory_bytes`. The `[resources]` block is the single source of
+/// A `[job]`+`[vm]`+`[resources]` TOML with a caller-chosen `cpu`
+/// AND `memory`. The `[resources]` block is the single source of
 /// truth for VM size (feature-delta §263 — `[vm]` carries no cpu/memory
 /// field).
 fn vm_job_toml_sized(
@@ -268,13 +269,13 @@ fn vm_job_toml_sized(
     command: &str,
     kernel: &Path,
     rootfs: &Path,
-    cpu_milli: u32,
-    memory_bytes: u64,
+    millicores: u32,
+    memory_size: u64,
 ) -> String {
     format!(
         "[job]\nid = \"{id}\"\n\n[vm]\ncommand = \"{command}\"\nargs = []\n\
-         kernel = \"{}\"\nrootfs = \"{}\"\n\n[resources]\ncpu_milli = {cpu_milli}\n\
-         memory_bytes = {memory_bytes}\n",
+         kernel = \"{}\"\nrootfs = \"{}\"\n\n[resources]\ncpu = \"{millicores}m\"\n\
+         memory = \"{memory_size}B\"\n",
         kernel.display(),
         rootfs.display(),
     )
@@ -353,16 +354,16 @@ fn guest_reported_mem_units_16mib(out: &WorkloadDescribeOutput) -> i32 {
 }
 
 // ---------------------------------------------------------------------
-// S-VM-69 — declared 2000 cpu_milli yields exactly two guest vCPUs.
+// S-VM-69 — declared 2000 cpu yields exactly two guest vCPUs.
 // ---------------------------------------------------------------------
 
-/// S-VM-69 — A VM declaring `cpu_milli = 2000` boots a guest that reports
+/// S-VM-69 — A VM declaring `cpu = 2000` boots a guest that reports
 /// exactly TWO online CPUs, observed from inside the guest (never against
 /// the constructed hypervisor config). `round_up(2000 / 1000) = 2`.
 #[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test]
 #[serial(cgroup)]
-async fn declared_cpu_milli_2000_yields_two_guest_online_cpus() {
+async fn declared_cpu_2000_yields_two_guest_online_cpus() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
     let tmp = tempfile::Builder::new()
@@ -382,13 +383,13 @@ async fn declared_cpu_milli_2000_yields_two_guest_online_cpus() {
     );
     let submit = deploy(DeployArgs { spec: spec_path, config_path: cfg.clone() })
         .await
-        .expect("deploy the 2000-cpu_milli [vm] spec");
+        .expect("deploy the 2000-cpu [vm] spec");
 
     let out = poll_until_terminal(&cfg, &submit.workload_id, Duration::from_secs(60)).await;
     assert_eq!(
         guest_reported_cpu_count(&out),
         2,
-        "cpu_milli=2000 must derive 2 vCPUs (round_up(2000/1000)) and the guest must observe \
+        "cpu = '2' must derive 2 vCPUs (round_up(2000/1000)) and the guest must observe \
          exactly 2 online CPUs FROM INSIDE (available_parallelism), never VmConfig.vcpus",
     );
 
@@ -399,7 +400,7 @@ async fn declared_cpu_milli_2000_yields_two_guest_online_cpus() {
 // S-VM-70 — a sub-core request still yields ONE usable vCPU + Running.
 // ---------------------------------------------------------------------
 
-/// S-VM-70 — A VM declaring `cpu_milli = 250` (sub-core) still boots a
+/// S-VM-70 — A VM declaring `cpu = 250` (sub-core) still boots a
 /// usable guest with exactly ONE online CPU (floor at 1 — no fractional
 /// vCPU) and the allocation reaches Running. The guest reporting
 /// `exit_code = 1` proves BOTH: it observed exactly one online CPU, AND it
@@ -408,7 +409,7 @@ async fn declared_cpu_milli_2000_yields_two_guest_online_cpus() {
 #[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test]
 #[serial(cgroup)]
-async fn sub_core_cpu_milli_250_yields_one_guest_online_cpu_and_reaches_running() {
+async fn sub_core_cpu_250_yields_one_guest_online_cpu_and_reaches_running() {
     let fixture =
         VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
     let tmp = tempfile::Builder::new()
@@ -428,13 +429,13 @@ async fn sub_core_cpu_milli_250_yields_one_guest_online_cpu_and_reaches_running(
     );
     let submit = deploy(DeployArgs { spec: spec_path, config_path: cfg.clone() })
         .await
-        .expect("deploy the 250-cpu_milli [vm] spec");
+        .expect("deploy the 250-cpu [vm] spec");
 
     let out = poll_until_terminal(&cfg, &submit.workload_id, Duration::from_secs(60)).await;
     assert_eq!(
         guest_reported_cpu_count(&out),
         1,
-        "cpu_milli=250 must floor at 1 vCPU (max(1, round_up(250/1000))) and the guest must \
+        "cpu = '250m' must floor at 1 vCPU (max(1, round_up(250/1000))) and the guest must \
          observe exactly 1 online CPU FROM INSIDE; the exit code arriving at all proves the \
          allocation reached Running and executed (a 0-vCPU VM would be unbootable)",
     );
@@ -449,7 +450,7 @@ async fn sub_core_cpu_milli_250_yields_one_guest_online_cpu_and_reaches_running(
 // 2026-08-18, deferred to GH #97/#43/#22).
 // ---------------------------------------------------------------------
 
-/// S-VM-71 — A VM declaring `memory_bytes = 2147483648` (2 GiB) boots a
+/// S-VM-71 — A VM declaring `memory = 2147483648` (2 GiB) boots a
 /// guest that observes approximately 2 GiB of RAM FROM INSIDE (its own
 /// `sysinfo(2)` `totalram`, never the generated hypervisor config — which
 /// would only prove we wrote what we wrote), AND `overdrive workload
@@ -471,8 +472,8 @@ async fn sub_core_cpu_milli_250_yields_one_guest_online_cpu_and_reaches_running(
 ///
 /// # Describe parity (criterion 2)
 ///
-/// `overdrive workload describe` renders the declared `memory_bytes` for
-/// the VM allocation, sourced from the same per-row `resources.memory_bytes`
+/// `overdrive workload describe` renders the declared `memory` for
+/// the VM allocation, sourced from the same per-row `resources.memory.bytes()`
 /// the describe handler populates from the workload intent for EVERY kind
 /// (`handlers` builds it from `job.resources` / `svc.resources` /
 /// `sched.job.resources`). A VM is a Job-kind workload, so it reports the
@@ -536,7 +537,7 @@ async fn declared_memory_2gib_is_guest_observed_and_reported_by_describe() {
     let observed_units = guest_reported_mem_units_16mib(&out);
     assert!(
         (MIN_UNITS..=DECLARED_UNITS).contains(&observed_units),
-        "declared memory_bytes=2 GiB must be observed as ~2 GiB inside the guest \
+        "declared memory = 2 GiB must be observed as ~2 GiB inside the guest \
          (sysinfo totalram, never the generated hypervisor config): expected \
          {MIN_UNITS}..={DECLARED_UNITS} units of 16 MiB (a little below 2 GiB for kernel \
          reservation, never above), got {observed_units} ({} MiB)",
@@ -548,12 +549,15 @@ async fn declared_memory_2gib_is_guest_observed_and_reported_by_describe() {
     let rendered = overdrive_cli::render::workload_describe(&out);
     let memory_line_reports_declared = rendered.lines().any(|line| {
         let trimmed = line.trim();
-        trimmed.starts_with("Memory:") && trimmed.contains(&DECLARED_MEMORY_BYTES.to_string())
+        trimmed.starts_with("Memory:")
+            && trimmed.contains(
+                &overdrive_core::byte_size::ByteSize::new(DECLARED_MEMORY_BYTES).to_string(),
+            )
     });
     assert!(
         memory_line_reports_declared,
-        "overdrive workload describe must report the declared memory_bytes={DECLARED_MEMORY_BYTES} \
-         for the VM allocation (the same resources.memory_bytes a process allocation carries, \
+        "overdrive workload describe must report the declared memory={DECLARED_MEMORY_BYTES} bytes \
+         for the VM allocation (the same resources.memory.bytes() a process allocation carries, \
          rendered the same way); got:\n{rendered}",
     );
     // The render reads the typed snapshot; pin that it carries the declared
@@ -564,9 +568,10 @@ async fn declared_memory_2gib_is_guest_observed_and_reported_by_describe() {
             .first()
             .expect("one allocation row for the deployed VM job")
             .resources
-            .memory_bytes,
+            .memory
+            .bytes(),
         DECLARED_MEMORY_BYTES,
-        "the describe snapshot row must carry the declared memory_bytes verbatim",
+        "the describe snapshot row must carry the declared memory verbatim",
     );
 
     handle.shutdown().await.expect("clean shutdown");
@@ -579,15 +584,15 @@ async fn declared_memory_2gib_is_guest_observed_and_reported_by_describe() {
 // with Slice 04 (volumes cut 2026-08-18 → GH #97/#43/#22), so this
 // reduces to a single-backing sizing-parity case that asserts BOTH
 // dimensions together — the "AND" AC-17 requires, which neither
-// S-VM-69/70 (cpu only, 256 MiB) nor S-VM-71 (memory only, cpu_milli=1000)
+// S-VM-69/70 (cpu only, 256 MiB) nor S-VM-71 (memory only, cpu = '1')
 // makes on one shape. The typed resize-rejection half of S-VM-72 lives
 // in `overdrive-worker/tests/acceptance/vm_driver_stop_totality.rs`
 // (port-to-port at `Driver::resize`, which `overdrive-cli` cannot reach —
 // it has no `overdrive-worker` dependency).
 // ---------------------------------------------------------------------
 
-/// S-VM-72 (sizing-parity half) — a VM declaring `cpu_milli = 2000` AND
-/// `memory_bytes = 2 GiB` (2147483648) boots a guest that observes BOTH
+/// S-VM-72 (sizing-parity half) — a VM declaring `cpu = 2000` AND
+/// `memory = 2 GiB` (2147483648) boots a guest that observes BOTH
 /// exactly two online vCPUs AND ~2 GiB of RAM, FROM INSIDE the guest
 /// (`available_parallelism` / `sysinfo(2)` totalram — never the generated
 /// hypervisor config), on the single private memory backing.
@@ -597,12 +602,12 @@ async fn declared_memory_2gib_is_guest_observed_and_reported_by_describe() {
 /// once reporting online vCPUs (expect 2 = `round_up(2000/1000)`), once
 /// reporting total RAM (expect ~2 GiB, a little below for kernel
 /// reservation, never above). Both deploys carry the identical
-/// `[resources]` (`cpu_milli=2000`, `memory_bytes=2` GiB), so the assertion
+/// `[resources]` (`cpu=2000`, `memory=2` GiB), so the assertion
 /// is "for one VM shape, both sizing dimensions land correctly".
 ///
 /// # Port-to-port litmus
 ///
-/// Revert either the `cpu_milli -> vcpus` wiring or the `MemoryPlan`
+/// Revert either the `cpu -> vcpus` wiring or the `MemoryPlan`
 /// guest-RAM sizing in `VmDriver::start` and exactly one dimension goes
 /// RED while the other stays GREEN — the two halves fail independently.
 #[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
@@ -653,12 +658,12 @@ async fn declared_cpu_and_memory_match_guest_observed_on_single_private_backing(
     );
     let cpu_submit = deploy(DeployArgs { spec: cpu_spec, config_path: cfg.clone() })
         .await
-        .expect("deploy the cpu-report [vm] spec (cpu_milli=2000, memory=2 GiB)");
+        .expect("deploy the cpu-report [vm] spec (cpu=2000, memory=2 GiB)");
     let cpu_out = poll_until_terminal(&cfg, &cpu_submit.workload_id, Duration::from_secs(90)).await;
     assert_eq!(
         guest_reported_cpu_count(&cpu_out),
         2,
-        "cpu_milli=2000 (with memory=2 GiB) must derive 2 vCPUs and the guest must observe \
+        "cpu = '2' (with memory=2 GiB) must derive 2 vCPUs and the guest must observe \
          exactly 2 online CPUs FROM INSIDE, on the single private backing",
     );
 
@@ -680,12 +685,12 @@ async fn declared_cpu_and_memory_match_guest_observed_on_single_private_backing(
     );
     let mem_submit = deploy(DeployArgs { spec: mem_spec, config_path: cfg.clone() })
         .await
-        .expect("deploy the mem-report [vm] spec (cpu_milli=2000, memory=2 GiB)");
+        .expect("deploy the mem-report [vm] spec (cpu=2000, memory=2 GiB)");
     let mem_out = poll_until_terminal(&cfg, &mem_submit.workload_id, Duration::from_secs(90)).await;
     let observed_units = guest_reported_mem_units_16mib(&mem_out);
     assert!(
         (MIN_UNITS..=DECLARED_UNITS).contains(&observed_units),
-        "declared memory_bytes=2 GiB (with cpu_milli=2000) must be observed as ~2 GiB inside the \
+        "declared memory = '2B' GiB (with cpu = '2') must be observed as ~2 GiB inside the \
          guest on the single private backing: expected {MIN_UNITS}..={DECLARED_UNITS} units of \
          16 MiB, got {observed_units} ({} MiB)",
         observed_units * 16,

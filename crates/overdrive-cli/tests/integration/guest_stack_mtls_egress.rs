@@ -27,6 +27,8 @@
     reason = "Tier-3 fixtures fail fast, and Contract Shape declarations use exact mandated tokens"
 )]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read as _, Write as _};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener};
@@ -1460,7 +1462,10 @@ async fn genuine_pre_change_contract(
         node_id: raw.node_id.to_string(),
         state,
         reason: raw.reason.clone(),
-        resources: ResourcesBody { cpu_milli: 500, memory_bytes: 134_217_728 },
+        resources: ResourcesBody {
+            cpu: CpuQuantity::from_millis(500),
+            memory: ByteSize::new(134_217_728),
+        },
         // This is the genuine pre-step API contract: every durable input is
         // projected independently, while the one field that did not exist in
         // the pre-change response is absent.
@@ -1547,11 +1552,13 @@ fn frozen_pre_change_render_contract(out: &WorkloadDescribeOutput) -> String {
          \n\
          {header}\n\
          {attempt}\n\
-         Memory:        {memory_bytes}\n\
+         Memory:        {memory}\n\
+         CPU:           {cpu}\n\
          Issued certificates:\n",
         workload_id = out.workload_id,
         spec_digest = out.spec_digest,
-        memory_bytes = row.resources.memory_bytes,
+        memory = row.resources.memory,
+        cpu = row.resources.cpu,
     );
     let _ = writeln!(contract, "  serial:        {}", issued.serial);
     let _ = writeln!(contract, "    spiffe_id:     {}", issued.spiffe_id);

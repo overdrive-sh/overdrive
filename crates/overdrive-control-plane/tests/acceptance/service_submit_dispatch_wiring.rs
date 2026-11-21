@@ -16,6 +16,8 @@
 #![allow(clippy::expect_used, clippy::expect_fun_call, clippy::unwrap_used)]
 #![allow(clippy::large_futures)]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -63,7 +65,10 @@ fn payments_service_spec() -> ServiceSpecInput {
     ServiceSpecInput {
         id: "payments-v0".to_string(),
         replicas: 1,
-        resources: ResourcesInput { cpu_milli: 500, memory_bytes: 134_217_728 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(500),
+            memory: ByteSize::new(134_217_728),
+        },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/usr/local/bin/payments".to_string(),

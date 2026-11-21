@@ -6,6 +6,8 @@
 //! `AllocationHandle.pid` — `SimDriver` never sets a PID, so a
 //! `Some(_)` would prove a real process was spawned.
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -32,7 +34,10 @@ async fn default_lane_does_not_spawn_real_processes() {
             kernel: PathBuf::from("/nonexistent/kernel"),
             rootfs: PathBuf::from("/nonexistent/rootfs"),
         }),
-        resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
+        resources: Resources {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(64 * 1024 * 1024),
+        },
         probe_descriptors: Vec::new(),
         // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the
         // mTLS-composed boot gate — no provisioned netns/veth.

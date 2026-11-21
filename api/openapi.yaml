@@ -1865,17 +1865,15 @@ components:
         `From<&Resources> for ResourceEnvelope` projection in slice 01
         GREEN.
       required:
-      - cpu_milli
-      - memory_bytes
+      - cpu
+      - memory
       properties:
-        cpu_milli:
-          type: integer
-          format: int32
-          minimum: 0
-        memory_bytes:
-          type: integer
-          format: int64
-          minimum: 0
+        cpu:
+          type: string
+          example: 500m
+        memory:
+          type: string
+          example: 128MiB
     ResourcesBody:
       type: object
       description: |-
@@ -1884,17 +1882,18 @@ components:
         Mirrors the internal `overdrive_core::traits::driver::Resources` shape
         for the wire. Conversion is mechanical via [`From<&Resources>`].
       required:
-      - cpu_milli
-      - memory_bytes
+      - cpu
+      - memory
       properties:
-        cpu_milli:
-          type: integer
-          format: int32
-          minimum: 0
-        memory_bytes:
-          type: integer
-          format: int64
-          minimum: 0
+        cpu:
+          type: string
+          description: CPU quantity as its canonical string, e.g. `500m` or `2`.
+          example: 500m
+        memory:
+          type: string
+          description: Memory size as its canonical string, e.g. `128MiB`.
+          example: 128MiB
+      additionalProperties: false
     ResourcesInput:
       type: object
       description: |-
@@ -1905,20 +1904,20 @@ components:
         serde-only / utoipa-only concerns; this twin carries the wire-side
         derives. The projection onto `Resources` is field-by-field inside
         `Job::from_submit` (no `From` impl: the ≥3-call-sites rule isn't met,
-        and the validation rules — `memory_bytes != 0` — must fire on the
+        and the validation rules — a non-zero whole-MiB `memory` — must fire on the
         way through anyway).
       required:
-      - cpu_milli
-      - memory_bytes
+      - cpu
+      - memory
       properties:
-        cpu_milli:
-          type: integer
-          format: int32
-          minimum: 0
-        memory_bytes:
-          type: integer
-          format: int64
-          minimum: 0
+        cpu:
+          type: string
+          description: 'CPU quantity: `500m`, `0.5` or `2`.'
+          example: 500m
+        memory:
+          type: string
+          description: 'Memory size: `<digits><unit>` over `B`, `KiB`, `MiB`, `GiB`, `TiB`.'
+          example: 128MiB
       additionalProperties: false
     RestartBudget:
       type: object

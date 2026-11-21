@@ -42,6 +42,8 @@ use overdrive_core::aggregate::{
     Service, VmInput, WorkloadSpecInput,
 };
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use overdrive_core::guest_transport::{GUEST_PROBE_SLOTS, guest_reserved_ports};
 use overdrive_core::observation::{ProbeIdx, ProbeRole};
 use proptest::prelude::*;
@@ -63,7 +65,7 @@ fn service_toml_with_listeners(ports: &[(u16, &str)]) -> String {
         "[service]\nid = \"frontend\"\nreplicas = 1\n\n{listeners}\n\
          [vm]\ncommand = \"/opt/frontend/bin/server\"\nargs = []\n\
          kernel = \"/kernel\"\nrootfs = \"/rootfs\"\n\n\
-         [resources]\ncpu_milli = 500\nmemory_bytes = 134217728\n"
+         [resources]\ncpu = '500m'\nmemory = '128MiB'\n"
     )
 }
 
@@ -72,7 +74,10 @@ fn service_submit_with_listeners(ports: &[(u16, &str)]) -> ServiceSpecInput {
     ServiceSpecInput {
         id: "frontend".to_string(),
         replicas: 1,
-        resources: ResourcesInput { cpu_milli: 500, memory_bytes: 134_217_728 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(500),
+            memory: ByteSize::new(134_217_728),
+        },
         driver: DriverInput::Vm(VmInput {
             volume: None,
             command: "/opt/frontend/bin/server".to_string(),

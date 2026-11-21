@@ -4,6 +4,8 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -131,7 +133,10 @@ fn spec(
             kernel,
             rootfs,
         }),
-        resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+        resources: Resources {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(128 * 1024 * 1024),
+        },
         probe_descriptors: Vec::new(),
         // A VM start needs the guest transport (`GuestTransportMissing`
         // otherwise); the lease's handoff record for one CID.

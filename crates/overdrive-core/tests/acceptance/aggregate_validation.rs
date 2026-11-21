@@ -36,6 +36,8 @@ use overdrive_core::aggregate::{
     NodeSpecInput, ResourcesInput, Service,
 };
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use overdrive_core::id::IdParseError;
 
 // ---------------------------------------------------------------------------
@@ -49,7 +51,10 @@ fn job_from_spec_rejects_zero_replicas_with_validation_variant_naming_replicas_f
     let spec = JobSpecInput {
         id: "payments".to_string(),
         replicas: 0,
-        resources: ResourcesInput { cpu_milli: 2000, memory_bytes: 4 * 1024 * 1024 * 1024 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(2000),
+            memory: ByteSize::new(4 * 1024 * 1024 * 1024),
+        },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/bin/true".to_string(),
@@ -90,7 +95,10 @@ fn job_from_spec_rejects_forbidden_space_in_id_via_id_parse_error_passthrough_wi
     let spec = JobSpecInput {
         id: "PAY MENTS".to_string(),
         replicas: 1,
-        resources: ResourcesInput { cpu_milli: 2000, memory_bytes: 4 * 1024 * 1024 * 1024 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(2000),
+            memory: ByteSize::new(4 * 1024 * 1024 * 1024),
+        },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/bin/true".to_string(),
@@ -134,16 +142,16 @@ fn job_from_spec_rejects_forbidden_space_in_id_via_id_parse_error_passthrough_wi
 }
 
 // ---------------------------------------------------------------------------
-// Job: zero memory → Validation { field: "memory_bytes", .. }
+// Job: zero memory → Validation { field: "memory", .. }
 // ---------------------------------------------------------------------------
 
 #[test]
-fn job_from_spec_rejects_zero_memory_with_validation_variant_naming_memory_bytes_field() {
-    // Given a Job spec with zero memory_bytes and every other field valid.
+fn job_from_spec_rejects_zero_memory_with_validation_variant_naming_memory_field() {
+    // Given a Job spec with zero memory and every other field valid.
     let spec = JobSpecInput {
         id: "payments".to_string(),
         replicas: 1,
-        resources: ResourcesInput { cpu_milli: 2000, memory_bytes: 0 },
+        resources: ResourcesInput { cpu: CpuQuantity::from_millis(2000), memory: ByteSize::new(0) },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/bin/true".to_string(),
@@ -156,36 +164,36 @@ fn job_from_spec_rejects_zero_memory_with_validation_variant_naming_memory_bytes
     // When Ana calls the validating constructor.
     let err = Job::from_submit(spec).expect_err("zero memory must be rejected");
 
-    // Then the error names the memory_bytes field.
+    // Then the error names the memory field.
     match err {
         AggregateError::Validation { field, message: _ } => {
-            assert_eq!(field, "memory_bytes", "field must name `memory_bytes`; got {field:?}");
+            assert_eq!(field, "memory", "field must name `memory`; got {field:?}");
         }
         other => panic!("expected AggregateError::Validation, got {other:?}"),
     }
 }
 
 // ---------------------------------------------------------------------------
-// Node: zero memory → Validation { field: "memory_bytes", .. }
+// Node: zero memory → Validation { field: "memory", .. }
 // ---------------------------------------------------------------------------
 
 #[test]
-fn node_new_rejects_zero_memory_with_validation_variant_naming_memory_bytes_field() {
-    // Given a Node spec with zero memory_bytes and every other field valid.
+fn node_new_rejects_zero_memory_with_validation_variant_naming_memory_field() {
+    // Given a Node spec with zero memory and every other field valid.
     let spec = NodeSpecInput {
         id: "worker-01".to_string(),
         region: "eu-west-1".to_string(),
-        cpu_milli: 8000,
-        memory_bytes: 0,
+        cpu: CpuQuantity::from_millis(8000),
+        memory: ByteSize::new(0),
     };
 
     // When Ana calls the validating constructor.
     let err = Node::new(spec).expect_err("zero memory must be rejected");
 
-    // Then the error names the memory_bytes field.
+    // Then the error names the memory field.
     match err {
         AggregateError::Validation { field, message: _ } => {
-            assert_eq!(field, "memory_bytes", "field must name `memory_bytes`; got {field:?}");
+            assert_eq!(field, "memory", "field must name `memory`; got {field:?}");
         }
         other => panic!("expected AggregateError::Validation, got {other:?}"),
     }
@@ -201,8 +209,8 @@ fn node_new_rejects_forbidden_char_in_id_via_id_parse_error_passthrough() {
     let spec = NodeSpecInput {
         id: "worker 01".to_string(),
         region: "eu-west-1".to_string(),
-        cpu_milli: 8000,
-        memory_bytes: 16 * 1024 * 1024 * 1024,
+        cpu: CpuQuantity::from_millis(8000),
+        memory: ByteSize::new(16 * 1024 * 1024 * 1024),
     };
 
     // When Ana calls the validating constructor.
@@ -228,8 +236,8 @@ fn node_new_rejects_empty_region_via_id_parse_error_passthrough() {
     let spec = NodeSpecInput {
         id: "worker-01".to_string(),
         region: String::new(),
-        cpu_milli: 8000,
-        memory_bytes: 16 * 1024 * 1024 * 1024,
+        cpu: CpuQuantity::from_millis(8000),
+        memory: ByteSize::new(16 * 1024 * 1024 * 1024),
     };
 
     // When Ana calls the validating constructor.
@@ -312,7 +320,7 @@ fn err_branch_of_from_spec_carries_no_job_value_by_construction() {
     let spec = JobSpecInput {
         id: "PAY MENTS".to_string(),
         replicas: 0, // triply-invalid, picks up whichever fails first
-        resources: ResourcesInput { cpu_milli: 2000, memory_bytes: 0 },
+        resources: ResourcesInput { cpu: CpuQuantity::from_millis(2000), memory: ByteSize::new(0) },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/bin/true".to_string(),
@@ -350,6 +358,8 @@ fn err_branch_of_from_spec_carries_no_job_value_by_construction() {
 
 mod property {
     use super::*;
+    use overdrive_core::byte_size::ByteSize;
+    use overdrive_core::cpu_quantity::CpuQuantity;
     use proptest::prelude::*;
 
     proptest! {
@@ -365,7 +375,7 @@ mod property {
                 let spec = JobSpecInput {
                     id: "payments".to_string(),
                     replicas: 0,
-                    resources: ResourcesInput { cpu_milli: cpu, memory_bytes: mem },
+                    resources: ResourcesInput { cpu: CpuQuantity::from_millis(cpu), memory: ByteSize::new(mem) },
                     driver: DriverInput::Vm(overdrive_core::aggregate::VmInput { volume: None,
                         command: "/bin/true".to_string(),
                         args: vec![],
@@ -385,18 +395,18 @@ mod property {
                 }
             }
 
-            /// For any otherwise-valid Job spec where `memory_bytes == 0`
+            /// For any otherwise-valid Job spec where `memory == 0`
             /// and `replicas >= 1`, `from_spec` must return
-            /// `Validation { field: "memory_bytes", .. }`.
+            /// `Validation { field: "memory", .. }`.
             #[test]
-            fn zero_memory_always_yields_memory_bytes_validation(
+            fn zero_memory_always_yields_memory_validation(
                 cpu in 0u32..10_000,
                 replicas in 1u32..=1_000_000,
             ) {
                 let spec = JobSpecInput {
                     id: "payments".to_string(),
                     replicas,
-                    resources: ResourcesInput { cpu_milli: cpu, memory_bytes: 0 },
+                    resources: ResourcesInput { cpu: CpuQuantity::from_millis(cpu), memory: ByteSize::new(0) },
                     driver: DriverInput::Vm(overdrive_core::aggregate::VmInput { volume: None,
                         command: "/bin/true".to_string(),
                         args: vec![],
@@ -406,35 +416,35 @@ mod property {
                 };
                 match Job::from_submit(spec) {
                     Err(AggregateError::Validation { field, .. }) => {
-                        prop_assert_eq!(field, "memory_bytes");
+                        prop_assert_eq!(field, "memory");
                     }
                     other => prop_assert!(
                         false,
-                        "expected Validation{{field: \"memory_bytes\"}}, got {:?}",
+                        "expected Validation{{field: \"memory\"}}, got {:?}",
                         other
                     ),
                 }
             }
 
-            /// For any otherwise-valid Node spec where `memory_bytes == 0`,
-            /// `new` must return `Validation { field: "memory_bytes", .. }`.
+            /// For any otherwise-valid Node spec where `memory == 0`,
+            /// `new` must return `Validation { field: "memory", .. }`.
             #[test]
-            fn node_zero_memory_always_yields_memory_bytes_validation(
+            fn node_zero_memory_always_yields_memory_validation(
                 cpu in 0u32..10_000,
             ) {
                 let spec = NodeSpecInput {
                     id: "worker-01".to_string(),
                     region: "eu-west-1".to_string(),
-                    cpu_milli: cpu,
-                    memory_bytes: 0,
+                    cpu: CpuQuantity::from_millis(cpu),
+                    memory: ByteSize::new(0),
                 };
                 match Node::new(spec) {
                     Err(AggregateError::Validation { field, .. }) => {
-                        prop_assert_eq!(field, "memory_bytes");
+                        prop_assert_eq!(field, "memory");
                     }
                     other => prop_assert!(
                         false,
-                        "expected Validation{{field: \"memory_bytes\"}}, got {:?}",
+                        "expected Validation{{field: \"memory\"}}, got {:?}",
                         other
                     ),
                 }
@@ -443,8 +453,8 @@ mod property {
 }
 
 // ---------------------------------------------------------------------------
-// Service: zero memory → Validation { field: "memory_bytes", .. }
-// Closes the mutation gap on the `resources.memory_bytes == 0` guard in
+// Service: zero memory → Validation { field: "memory", .. }
+// Closes the mutation gap on the `resources.memory.bytes() == 0` guard in
 // `Service::from_submit` (Phase 5 aggregate gate, May 2026). Symmetric
 // to the equivalent Job / Node tests above.
 // ---------------------------------------------------------------------------
@@ -453,7 +463,10 @@ fn canonical_service_spec() -> ServiceSpecInput {
     ServiceSpecInput {
         id: "payments".to_string(),
         replicas: 1,
-        resources: ResourcesInput { cpu_milli: 500, memory_bytes: 128 * 1024 * 1024 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(500),
+            memory: ByteSize::new(128 * 1024 * 1024),
+        },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/bin/true".to_string(),
@@ -469,19 +482,19 @@ fn canonical_service_spec() -> ServiceSpecInput {
 }
 
 #[test]
-fn service_from_submit_rejects_zero_memory_with_validation_variant_naming_memory_bytes_field() {
-    // Given a Service spec with zero memory_bytes and every other field valid.
+fn service_from_submit_rejects_zero_memory_with_validation_variant_naming_memory_field() {
+    // Given a Service spec with zero memory and every other field valid.
     let mut spec = canonical_service_spec();
-    spec.resources.memory_bytes = 0;
+    spec.resources.memory = ByteSize::new(0);
 
     // When Ana calls the validating constructor.
     let err = Service::from_submit(spec).expect_err("zero memory must be rejected");
 
-    // Then the error names the memory_bytes field — same shape as Job /
+    // Then the error names the memory field — same shape as Job /
     // Node so the HTTP layer per ADR-0015 maps it uniformly to 400.
     match err {
         AggregateError::Validation { field, message: _ } => {
-            assert_eq!(field, "memory_bytes", "field must name `memory_bytes`; got {field:?}");
+            assert_eq!(field, "memory", "field must name `memory`; got {field:?}");
         }
         other => panic!("expected AggregateError::Validation, got {other:?}"),
     }

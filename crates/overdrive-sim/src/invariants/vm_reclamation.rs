@@ -471,6 +471,8 @@ mod ending_in_flight_teeth {
 
 #[cfg(all(test, feature = "integration-tests"))]
 mod service_vm_boot_redrive {
+    use overdrive_core::byte_size::ByteSize;
+    use overdrive_core::cpu_quantity::CpuQuantity;
     use std::collections::BTreeSet;
     use std::path::PathBuf;
     use std::sync::Arc;
@@ -529,7 +531,10 @@ mod service_vm_boot_redrive {
         let service = Service::from_submit(ServiceSpecInput {
             id: workload_id.to_string(),
             replicas: 1,
-            resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+            resources: ResourcesInput {
+                cpu: CpuQuantity::from_millis(100),
+                memory: ByteSize::new(128 * 1024 * 1024),
+            },
             driver: DriverInput::Vm(VmInput {
                 volume: None,
                 command: "/bin/serve".to_owned(),

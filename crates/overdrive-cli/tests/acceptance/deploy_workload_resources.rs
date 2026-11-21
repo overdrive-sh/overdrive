@@ -91,7 +91,6 @@ fn assert_refusal(shape: &str, what: &str, message: &str, key: &str, keyword: Op
 /// (the config does not exist, so reaching the server would be a different error).
 /// CONTRACT_SHAPE: pure-function (spec text in, typed refusal out).
 #[tokio::test]
-#[should_panic(expected = "the spec must be refused as a spec error before any server call")]
 async fn sad_deploy_refuses_the_removed_keys_naming_the_unknown_key() {
     for (body, unknown) in [
         ("cpu_milli = 500\nmemory_bytes = 134217728", "cpu_milli"),
@@ -120,7 +119,6 @@ async fn sad_deploy_refuses_the_removed_keys_naming_the_unknown_key() {
 /// for a fractional count). One representative per shape; the full class matrix is the parser test.
 /// A bare number is never silently read as bytes. CONTRACT_SHAPE: pure-function.
 #[tokio::test]
-#[should_panic(expected = "the refusal must not point the operator at a removed key")]
 async fn sad_deploy_refuses_malformed_memory_naming_the_expected_form() {
     let by_shape = [
         ("[job]", "memory = \"128MB\"", Some("MiB")),
@@ -142,7 +140,6 @@ async fn sad_deploy_refuses_malformed_memory_naming_the_expected_form() {
 /// fractional digits). One representative per shape.
 /// CONTRACT_SHAPE: pure-function.
 #[tokio::test]
-#[should_panic(expected = "the refusal must not point the operator at a removed key")]
 async fn sad_deploy_refuses_malformed_cpu_naming_the_expected_grammar() {
     let by_shape = [
         ("[job]", "cpu = \"500M\"", Some("lowercase")),
@@ -165,7 +162,6 @@ async fn sad_deploy_refuses_malformed_cpu_naming_the_expected_grammar() {
 /// field `memory`, naming the rule ("non-zero", "whole number of MiB") before any server call.
 /// `0MiB` is a valid size in the grammar and is refused by admission. CONTRACT_SHAPE: pure-function.
 #[tokio::test]
-#[should_panic(expected = "the refusal must name the memory field")]
 async fn sad_deploy_refuses_zero_and_sub_mib_aligned_memory_naming_the_memory_field() {
     for (memory, needle) in
         [("0MiB", "non-zero"), ("1000B", "whole number of MiB"), ("1536KiB", "whole number of MiB")]
@@ -197,7 +193,6 @@ async fn sad_deploy_refuses_zero_and_sub_mib_aligned_memory_naming_the_memory_fi
 /// if any, is the missing operator config (a transport / config error), never a spec refusal.
 /// CONTRACT_SHAPE: pure-function.
 #[tokio::test]
-#[should_panic(expected = "an accepted spec must pass local validation")]
 async fn a_spec_in_the_new_shape_passes_local_validation() {
     for (cpu, memory) in
         [("500m", "128MiB"), ("0.5", "1024MiB"), ("2", "1GiB"), ("0", "1MiB"), ("1.5", "1536MiB")]

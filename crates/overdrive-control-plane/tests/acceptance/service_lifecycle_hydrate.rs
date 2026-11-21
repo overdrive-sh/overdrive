@@ -36,6 +36,8 @@
     clippy::unused_async
 )]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use overdrive_core::observation::{ProbeRunSeq, SameStatusRuns};
 use std::collections::BTreeMap;
 use std::str::FromStr;
@@ -159,7 +161,10 @@ fn build_service_spec(wid: &WorkloadId, startup_probes: Vec<ProbeDescriptor>) ->
     let input = ServiceSpecInput {
         id: wid.as_str().to_string(),
         replicas: 1,
-        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(128 * 1024 * 1024),
+        },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/bin/serve".to_string(),

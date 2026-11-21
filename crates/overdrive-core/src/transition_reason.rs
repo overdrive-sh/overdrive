@@ -29,6 +29,8 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use crate::byte_size::ByteSize;
+use crate::cpu_quantity::CpuQuantity;
 use crate::traits::driver::{
     ConfinementControl, DriverStartClass, DriverStartFailure, VmStartFailure,
 };
@@ -889,8 +891,10 @@ pub enum CancelledBy {
     rkyv::Deserialize,
 )]
 pub struct ResourceEnvelope {
-    pub cpu_milli: u32,
-    pub memory_bytes: u64,
+    #[schema(value_type = String, example = "500m")]
+    pub cpu: CpuQuantity,
+    #[schema(value_type = String, example = "128MiB")]
+    pub memory: ByteSize,
 }
 
 impl TransitionReason {
@@ -956,11 +960,11 @@ impl TransitionReason {
             Self::Cancelled { by: CancelledBy::Cluster } => "cancelled (by cluster)".to_owned(),
             Self::NoCapacity { requested, free } => {
                 format!(
-                    "no capacity (requested cpu={req_cpu}m mem={req_mem}b / free cpu={free_cpu}m mem={free_mem}b)",
-                    req_cpu = requested.cpu_milli,
-                    req_mem = requested.memory_bytes,
-                    free_cpu = free.cpu_milli,
-                    free_mem = free.memory_bytes,
+                    "no capacity (requested cpu={req_cpu} mem={req_mem} / free cpu={free_cpu} mem={free_mem})",
+                    req_cpu = requested.cpu,
+                    req_mem = requested.memory,
+                    free_cpu = free.cpu,
+                    free_mem = free.memory,
                 )
             }
 

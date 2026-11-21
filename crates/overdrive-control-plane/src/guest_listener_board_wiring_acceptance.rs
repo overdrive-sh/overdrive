@@ -40,6 +40,8 @@
     reason = "test fixtures assert their own preconditions and CONTRACT_SHAPE is an exact protocol marker"
 )]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::sync::Arc;
 use std::time::Duration;
 use std::{net::Ipv4Addr, net::SocketAddr};
@@ -202,7 +204,10 @@ impl Node {
         let spec = ServiceSpecInput {
             id: id.to_owned(),
             replicas: 1,
-            resources: ResourcesInput { cpu_milli: 500, memory_bytes: 128 * 1024 * 1024 },
+            resources: ResourcesInput {
+                cpu: CpuQuantity::from_millis(500),
+                memory: ByteSize::new(128 * 1024 * 1024),
+            },
             driver: DriverInput::Vm(VmInput {
                 volume: None,
                 command: "/sbin/workload".to_owned(),

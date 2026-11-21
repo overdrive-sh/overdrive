@@ -24,6 +24,8 @@
 
 #![allow(clippy::expect_used, clippy::doc_markdown, clippy::too_many_lines)]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::collections::BTreeMap;
 use std::num::NonZeroU32;
 use std::time::{Duration, Instant};
@@ -187,7 +189,10 @@ fn job() -> Job {
     Job {
         id: jid(WORKLOAD),
         replicas: NonZeroU32::new(1).expect("non-zero"),
-        resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+        resources: Resources {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(128 * 1024 * 1024),
+        },
         driver: WorkloadDriver::Vm(Vm {
             volume: None,
             command: "/bin/serve".to_owned(),
@@ -232,7 +237,10 @@ fn state(
             Node {
                 id: nid(NODE),
                 region: Region::new("local").expect("region"),
-                capacity: Resources { cpu_milli: 4_000, memory_bytes: 8 * 1024 * 1024 * 1024 },
+                capacity: Resources {
+                    cpu: CpuQuantity::from_millis(4_000),
+                    memory: ByteSize::new(8 * 1024 * 1024 * 1024),
+                },
             },
         )]),
         allocations,

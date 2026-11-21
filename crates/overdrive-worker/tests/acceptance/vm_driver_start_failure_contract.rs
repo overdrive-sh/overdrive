@@ -12,6 +12,8 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::os::unix::fs::FileTypeExt as _;
 use std::path::Path;
 use std::path::PathBuf;
@@ -127,7 +129,10 @@ fn build_spec(alloc: &AllocationId, tmp: &TempDir, cid_offset: u32) -> Allocatio
             kernel: fixture_kernel_path(tmp),
             rootfs: fixture_rootfs_path(tmp),
         }),
-        resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+        resources: Resources {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(128 * 1024 * 1024),
+        },
         probe_descriptors: Vec::new(),
         transport: Some(super::support::transport(
             "100.96.0.6".parse().expect("valid fixture guest address"),

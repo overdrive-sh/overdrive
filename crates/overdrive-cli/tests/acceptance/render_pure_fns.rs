@@ -4,6 +4,8 @@
 
 #![allow(clippy::expect_used)]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::time::Duration;
 
 use overdrive_cli::commands::workload::WorkloadDescribeOutput;
@@ -76,7 +78,10 @@ fn minimal_row(state: AllocStateWire, exit_code: Option<i32>) -> AllocStatusRowB
         node_id: "node-a".to_string(),
         state,
         reason: None,
-        resources: ResourcesBody { cpu_milli: 100, memory_bytes: 1024 },
+        resources: ResourcesBody {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(1024),
+        },
         workload_addr: None,
         started_at: None,
         exit_code,

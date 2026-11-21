@@ -47,6 +47,8 @@
               real-kernel scenario"
 )]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::num::NonZeroU16;
@@ -776,7 +778,10 @@ fn member_spec(alloc: &str, address: Ipv4Addr) -> AllocationSpec {
             kernel: "/nonexistent/kernel".into(),
             rootfs: "/nonexistent/rootfs".into(),
         }),
-        resources: Resources { cpu_milli: 50, memory_bytes: 32 * 1024 * 1024 },
+        resources: Resources {
+            cpu: CpuQuantity::from_millis(50),
+            memory: ByteSize::new(32 * 1024 * 1024),
+        },
         probe_descriptors: Vec::new(),
         transport: Some(GuestTransportAssignment::new(
             address,

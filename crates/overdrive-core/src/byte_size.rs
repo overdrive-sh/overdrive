@@ -33,6 +33,7 @@ const CANONICAL_UNITS: [(&str, u64); 5] = [
     Eq,
     PartialOrd,
     Ord,
+    Hash,
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,

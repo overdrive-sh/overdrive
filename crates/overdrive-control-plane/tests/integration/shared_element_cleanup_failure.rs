@@ -108,6 +108,8 @@
 //! `cargo xtask lima run -- cargo nextest run -p overdrive-control-plane
 //! --features integration-tests -E 'test(shared_element_cleanup_failure)'`.
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use overdrive_core::guest_transport::GuestFlowPorts;
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{Ipv4Addr, SocketAddrV4};
@@ -748,7 +750,10 @@ fn spec(name: &str, transport: Option<GuestTransportAssignment>) -> AllocationSp
             kernel: PathBuf::from("/nonexistent/kernel"),
             rootfs: PathBuf::from("/nonexistent/rootfs"),
         }),
-        resources: Resources { cpu_milli: 50, memory_bytes: 32 * 1024 * 1024 },
+        resources: Resources {
+            cpu: CpuQuantity::from_millis(50),
+            memory: ByteSize::new(32 * 1024 * 1024),
+        },
         probe_descriptors: Vec::new(),
         transport,
         declared_listeners: declared_listeners(),

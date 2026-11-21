@@ -17,6 +17,7 @@
 //! drives the `Vmm` port only and structurally cannot reach the
 //! relocated guest half of `stop`.
 
+use overdrive_core::byte_size::ByteSize;
 use std::collections::btree_map::Entry;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{self, SeekFrom};
@@ -1360,11 +1361,9 @@ impl VmDriver {
         // on write failure, retaining the ADR-0026 D9 discipline
         // — a limit-write failure must not abort a boot that is
         // otherwise healthy.
-        let memory = MemoryPlan::derive(spec.resources.memory_bytes);
-        let cgroup_resources = Resources {
-            cpu_milli: spec.resources.cpu_milli,
-            memory_bytes: memory.cgroup_max_bytes(),
-        };
+        let memory = MemoryPlan::derive(spec.resources.memory.bytes());
+        let cgroup_resources =
+            Resources { cpu: spec.resources.cpu, memory: ByteSize::new(memory.cgroup_max_bytes()) };
         if let Err(err) = self.cgroup_manager.write_resource_limits(&scope, &cgroup_resources).await
         {
             warn!(
@@ -1417,11 +1416,11 @@ impl VmDriver {
             cmdline,
             memory,
             // vCPUs are DERIVED per-allocation from this allocation's own
-            // `[resources] cpu_milli` — `max(1, round_up(cpu_milli/1000))`,
+            // `[resources] cpu` — `max(1, round_up(cpu/1000))`,
             // floor 1 (US-VM-5, ADR-0082 §D2). `[resources]` is the single
             // source of truth for VM size — there is no per-node vCPU
             // template (step 06-01).
-            vcpus: vcpus_for(spec.resources.cpu_milli),
+            vcpus: vcpus_for(spec.resources.cpu),
             run_dir: run_dir.clone(),
             confinement: self.layout.confinement.clone(),
             cgroup_scope: scope.clone(),
@@ -2398,6 +2397,8 @@ mod quint_flows_beacon;
 mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+    use overdrive_core::byte_size::ByteSize;
+    use overdrive_core::cpu_quantity::CpuQuantity;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use overdrive_core::SpiffeId;
@@ -2721,7 +2722,10 @@ mod tests {
                 kernel,
                 rootfs: master,
             }),
-            resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+            resources: Resources {
+                cpu: CpuQuantity::from_millis(100),
+                memory: ByteSize::new(128 * 1024 * 1024),
+            },
             probe_descriptors: vec![],
             transport: Some(test_transport()),
         };

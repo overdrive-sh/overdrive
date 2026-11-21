@@ -26,6 +26,8 @@
 // sibling equivalence tests (`hydration_move_equivalence`) rather than churn it.
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::doc_markdown)]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -75,7 +77,10 @@ fn vm_spec(name: &str) -> AllocationSpec {
             kernel: PathBuf::from("/nonexistent/kernel"),
             rootfs: PathBuf::from("/nonexistent/rootfs"),
         }),
-        resources: Resources { cpu_milli: 100, memory_bytes: 32 * 1024 * 1024 },
+        resources: Resources {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(32 * 1024 * 1024),
+        },
         probe_descriptors: Vec::new(),
         transport: None,
     }

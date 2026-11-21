@@ -30,6 +30,8 @@
     clippy::type_complexity
 )]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -338,7 +340,10 @@ fn vm_spec(alloc: &AllocationId, workload: &WorkloadId) -> AllocationSpec {
             kernel: PathBuf::from("/sim/kernel"),
             rootfs: PathBuf::from("/sim/rootfs"),
         }),
-        resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
+        resources: Resources {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(64 * 1024 * 1024),
+        },
         probe_descriptors: Vec::new(),
         transport: None,
     }

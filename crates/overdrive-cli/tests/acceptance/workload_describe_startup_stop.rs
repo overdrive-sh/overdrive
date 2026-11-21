@@ -20,6 +20,8 @@ use overdrive_control_plane::api::{
 };
 use overdrive_core::aggregate::WorkloadKind;
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use overdrive_core::observation::{ProbeIdx, ProbeRole};
 use overdrive_core::transition_reason::{StoppedBy, TerminalCondition};
 
@@ -40,7 +42,10 @@ fn row(
         node_id: "node-a".to_owned(),
         state,
         reason: None,
-        resources: ResourcesBody { cpu_milli: 100, memory_bytes: 1024 },
+        resources: ResourcesBody {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(1024),
+        },
         workload_addr: None,
         started_at: None,
         exit_code: None,

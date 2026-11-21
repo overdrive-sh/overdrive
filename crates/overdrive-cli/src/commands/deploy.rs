@@ -210,8 +210,8 @@ pub async fn deploy(args: DeployArgs) -> Result<DeployOutput, CliError> {
                 }),
             },
             resources: LegacyResourcesInput {
-                cpu_milli: job_spec.resources.cpu_milli,
-                memory_bytes: job_spec.resources.memory_bytes,
+                cpu: job_spec.resources.cpu,
+                memory: job_spec.resources.memory,
             },
         },
         // Service-kind deploy in the JSON-ack lane. Routes to the
@@ -309,8 +309,8 @@ async fn deploy_service(
         id: service_spec.id,
         replicas: service_spec.replicas,
         resources: LegacyResourcesInput {
-            cpu_milli: service_spec.resources.cpu_milli,
-            memory_bytes: service_spec.resources.memory_bytes,
+            cpu: service_spec.resources.cpu,
+            memory: service_spec.resources.memory,
         },
         driver: project_service_driver(service_spec.driver),
         listeners,
@@ -570,8 +570,8 @@ async fn deploy_streaming_job(
             }),
         },
         resources: LegacyResourcesInput {
-            cpu_milli: job_spec.resources.cpu_milli,
-            memory_bytes: job_spec.resources.memory_bytes,
+            cpu: job_spec.resources.cpu,
+            memory: job_spec.resources.memory,
         },
     };
 
@@ -651,8 +651,8 @@ async fn deploy_streaming_service(
         id: service_spec.id,
         replicas: service_spec.replicas,
         resources: LegacyResourcesInput {
-            cpu_milli: service_spec.resources.cpu_milli,
-            memory_bytes: service_spec.resources.memory_bytes,
+            cpu: service_spec.resources.cpu,
+            memory: service_spec.resources.memory,
         },
         driver: project_service_driver(service_spec.driver),
         listeners,

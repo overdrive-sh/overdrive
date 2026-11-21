@@ -19,6 +19,7 @@
 //! `cgroup_root` and `fs` must be supplied at construction — no
 //! `Default`, no `with_fs` / `with_cgroup_root` builder.
 
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -150,11 +151,11 @@ impl WorkloadsBootstrapError {
     }
 }
 
-/// Compute `cpu.weight` from `cpu_milli` per ADR-0026 D9:
-/// `clamp(cpu_milli / 10, 1, 10000)`.
+/// Compute `cpu.weight` from `cpu` per ADR-0026 D9:
+/// `clamp(millicores / 10, 1, 10000)`.
 #[must_use]
-pub fn cpu_weight_for(cpu_milli: u32) -> u32 {
-    (cpu_milli / 10).clamp(1, 10_000)
+pub fn cpu_weight_for(cpu: CpuQuantity) -> u32 {
+    (cpu.millis() / 10).clamp(1, 10_000)
 }
 
 // ---------------------------------------------------------------------------
@@ -235,9 +236,9 @@ impl CgroupManager {
         resources: &Resources,
     ) -> Result<(), std::io::Error> {
         let dir = scope.resolve(&self.cgroup_root);
-        let weight = cpu_weight_for(resources.cpu_milli);
+        let weight = cpu_weight_for(resources.cpu);
         let weight_payload = format!("{weight}\n");
-        let memory_payload = format!("{}\n", resources.memory_bytes);
+        let memory_payload = format!("{}\n", resources.memory.bytes());
         self.fs.write(&dir.join("cpu.weight"), weight_payload.as_bytes()).await?;
         self.fs.write(&dir.join("memory.max"), memory_payload.as_bytes()).await?;
         Ok(())
@@ -380,8 +381,9 @@ impl CgroupManager {
 #[allow(clippy::expect_used, clippy::unwrap_used, clippy::doc_markdown)]
 mod tests {
     use super::*;
+    use overdrive_core::cpu_quantity::CpuQuantity;
 
-    /// `cpu_weight_for` is `cpu_milli / 10` clamped to `[1, 10000]`.
+    /// `cpu_weight_for` is `cpu / 10` clamped to `[1, 10000]`.
     /// Pin samples at the divider, lower clamp, and upper clamp —
     /// together they kill the four mutations on this function:
     ///
@@ -391,11 +393,23 @@ mod tests {
     ///   - `/` → `%` — 1000 mCPU becomes 0, then clamps to 1, not 100
     #[test]
     fn cpu_weight_for_pins_division_and_clamp() {
-        assert_eq!(cpu_weight_for(100), 10, "100 mCPU → weight 10");
-        assert_eq!(cpu_weight_for(1), 1, "1 mCPU clamps up to 1 (lower bound)");
-        assert_eq!(cpu_weight_for(100_000), 10_000, "100k mCPU at upper clamp");
-        assert_eq!(cpu_weight_for(200_000), 10_000, "200k mCPU clamps down to 10_000");
-        assert_eq!(cpu_weight_for(1000), 100, "1000 mCPU → weight 100");
+        assert_eq!(cpu_weight_for(CpuQuantity::from_millis(100)), 10, "100 mCPU → weight 10");
+        assert_eq!(
+            cpu_weight_for(CpuQuantity::from_millis(1)),
+            1,
+            "1 mCPU clamps up to 1 (lower bound)"
+        );
+        assert_eq!(
+            cpu_weight_for(CpuQuantity::from_millis(100_000)),
+            10_000,
+            "100k mCPU at upper clamp"
+        );
+        assert_eq!(
+            cpu_weight_for(CpuQuantity::from_millis(200_000)),
+            10_000,
+            "200k mCPU clamps down to 10_000"
+        );
+        assert_eq!(cpu_weight_for(CpuQuantity::from_millis(1000)), 100, "1000 mCPU → weight 100");
     }
 
     /// `WorkloadsBootstrapError::from_subtree_control_io` discriminates

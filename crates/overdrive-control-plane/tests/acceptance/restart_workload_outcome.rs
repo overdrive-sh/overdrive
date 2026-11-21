@@ -26,6 +26,8 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -88,7 +90,10 @@ fn spec_for(id: &str) -> JobSpecInput {
     JobSpecInput {
         id: id.to_owned(),
         replicas: 1,
-        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(256 * 1024 * 1024),
+        },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/bin/true".to_string(),

@@ -45,6 +45,8 @@
     reason = "shared by the default-lane bodies and the integration-tests conformance drivers; each lane uses a subset"
 )]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::sync::Arc;
@@ -429,7 +431,7 @@ impl Composition {
                 kernel: std::path::PathBuf::from("/nonexistent/kernel"),
                 rootfs: std::path::PathBuf::from("/nonexistent/rootfs"),
             }),
-            resources: Resources { cpu_milli: 1, memory_bytes: 1 },
+            resources: Resources { cpu: CpuQuantity::from_millis(1), memory: ByteSize::new(1) },
             probe_descriptors: Vec::new(),
             transport: Some(lease.plan.assignment().clone()),
         };

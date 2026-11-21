@@ -15,6 +15,8 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
@@ -46,7 +48,10 @@ fn payments_job() -> Job {
     Job::from_submit(JobSpecInput {
         id: "payments".to_string(),
         replicas: 1,
-        resources: ResourcesInput { cpu_milli: 500, memory_bytes: 256 * 1024 * 1024 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(500),
+            memory: ByteSize::new(256 * 1024 * 1024),
+        },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/bin/true".to_string(),
@@ -62,8 +67,8 @@ fn node_alpha() -> Node {
     Node::new(NodeSpecInput {
         id: "node-alpha".to_string(),
         region: "local".to_string(),
-        cpu_milli: 4000,
-        memory_bytes: 8 * 1024 * 1024 * 1024,
+        cpu: CpuQuantity::from_millis(4000),
+        memory: ByteSize::new(8 * 1024 * 1024 * 1024),
     })
     .expect("valid Node spec")
 }

@@ -84,8 +84,8 @@ id = "payments"
 replicas = 3
 
 [resources]
-cpu_milli = 500
-memory_bytes = 536870912
+cpu = '500m'
+memory = '512MiB'
 
 [vm]
 command = "/bin/true"

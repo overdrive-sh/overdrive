@@ -10,6 +10,8 @@
     reason = "the required per-test CONTRACT_SHAPE declaration is a literal protocol marker"
 )]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::num::NonZeroU16;
 
 use overdrive_core::aggregate::{
@@ -51,7 +53,10 @@ fn payload_v1(startup_probes: Vec<ProbeDescriptor>) -> ServiceSpecV1 {
             kernel: "/kernel".to_string(),
             rootfs: "/rootfs".to_string(),
         }),
-        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 134_217_728 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(134_217_728),
+        },
         listeners: listeners(),
         startup_probes,
         readiness_probes: vec![],
@@ -74,7 +79,10 @@ fn payload_v2(
             rootfs: "/rootfs".to_string(),
             volume,
         }),
-        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 134_217_728 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(134_217_728),
+        },
         listeners: listeners(),
         startup_probes,
         readiness_probes: vec![],

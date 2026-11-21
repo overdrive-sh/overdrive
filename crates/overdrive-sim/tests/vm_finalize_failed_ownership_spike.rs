@@ -13,6 +13,8 @@
     reason = "bounded diagnostic retains its required Contract Shape and seed evidence"
 )]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -340,7 +342,10 @@ async fn drive(seed: u64) {
     let svc = Service::from_submit(ServiceSpecInput {
         id: "vm-finalize-ownership".to_owned(),
         replicas: 1,
-        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(128 * 1024 * 1024),
+        },
         driver: DriverInput::Vm(VmInput {
             volume: None,
             command: "/long-lived-http-server".to_owned(),

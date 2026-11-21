@@ -82,6 +82,8 @@
     reason = "Tier-3 adapter-integration test bodies: fixture preconditions panic with informative messages; evidence goes to stderr; leg F/C are the ADR-0069 contract vocabulary; the PEM fields share their encoding suffix; const-fn-ability of test helpers is not load-bearing; the install error's size is the production type's"
 )]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::{Read, Write};
@@ -427,7 +429,10 @@ fn intercept_live_spec(alloc: &AllocationId, guest: GuestAddressing) -> Allocati
             kernel: "/nonexistent/kernel".into(),
             rootfs: "/nonexistent/rootfs".into(),
         }),
-        resources: Resources { cpu_milli: 50, memory_bytes: 32 * 1024 * 1024 },
+        resources: Resources {
+            cpu: CpuQuantity::from_millis(50),
+            memory: ByteSize::new(32 * 1024 * 1024),
+        },
         probe_descriptors: Vec::new(),
         transport: Some(GuestTransportAssignment::new(
             guest.address,

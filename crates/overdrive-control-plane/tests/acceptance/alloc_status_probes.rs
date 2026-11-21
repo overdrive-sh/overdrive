@@ -23,6 +23,8 @@
 
 #![allow(clippy::expect_used, clippy::expect_fun_call, clippy::unwrap_used)]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use overdrive_core::observation::{ProbeRunSeq, SameStatusRuns};
 use std::str::FromStr;
 use std::sync::Arc;
@@ -127,7 +129,10 @@ async fn install_service(state: &AppState) -> Service {
     let spec = ServiceSpecInput {
         id: SERVICE_ID.to_owned(),
         replicas: 1,
-        resources: ResourcesInput { cpu_milli: 500, memory_bytes: 134_217_728 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(500),
+            memory: ByteSize::new(134_217_728),
+        },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/usr/local/bin/payments".to_owned(),
@@ -177,7 +182,10 @@ async fn install_job(state: &AppState) -> Job {
     let job = Job::from_submit(JobSpecInput {
         id: JOB_ID.to_owned(),
         replicas: 1,
-        resources: ResourcesInput { cpu_milli: 500, memory_bytes: 134_217_728 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(500),
+            memory: ByteSize::new(134_217_728),
+        },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/bin/true".to_owned(),

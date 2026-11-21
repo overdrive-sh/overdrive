@@ -17,8 +17,12 @@ WorkloadLifecycle(
                 ),
                 replicas: 1,
                 resources: Resources {
-                    cpu_milli: 100,
-                    memory_bytes: 134217728,
+                    cpu: CpuQuantity(
+                        100,
+                    ),
+                    memory: ByteSize(
+                        134217728,
+                    ),
                 },
                 driver: Vm(
                     VmV2 {
@@ -46,8 +50,12 @@ WorkloadLifecycle(
                     "local",
                 ),
                 capacity: Resources {
-                    cpu_milli: 4000,
-                    memory_bytes: 8589934592,
+                    cpu: CpuQuantity(
+                        4000,
+                    ),
+                    memory: ByteSize(
+                        8589934592,
+                    ),
                 },
             },
         },
@@ -87,8 +95,12 @@ WorkloadLifecycle(
                     "local",
                 ),
                 capacity: Resources {
-                    cpu_milli: 4000,
-                    memory_bytes: 8589934592,
+                    cpu: CpuQuantity(
+                        4000,
+                    ),
+                    memory: ByteSize(
+                        8589934592,
+                    ),
                 },
             },
         },

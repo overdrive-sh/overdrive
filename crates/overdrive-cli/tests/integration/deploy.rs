@@ -104,8 +104,8 @@ id = "payments"
 replicas = 3
 
 [resources]
-cpu_milli = 500
-memory_bytes = 536870912
+cpu = '500m'
+memory = '512MiB'
 
 [vm]
 command = "/bin/true"
@@ -190,8 +190,8 @@ id = "payments"
 replicas = 0
 
 [resources]
-cpu_milli = 500
-memory_bytes = 536870912
+cpu = '500m'
+memory = '512MiB'
 
 [vm]
 command = "/bin/true"
@@ -244,7 +244,7 @@ async fn submit_with_malformed_toml_syntax_returns_invalid_spec() {
     let broken_syntax = r#"
 id = "payments"
 replicas = [1, 2, 3
-cpu_milli = 500
+cpu = '500m'
 "#;
     let spec_path = tmp.path().join("broken_syntax.toml");
     std::fs::write(&spec_path, broken_syntax).expect("write broken_syntax.toml");
@@ -372,8 +372,8 @@ kernel = "/kernel"
 rootfs = "/rootfs"
 
 [resources]
-cpu_milli = 100
-memory_bytes = 67108864
+cpu = '100m'
+memory = '64MiB'
 "#;
     let path = tmp.path().join("job-section.toml");
     std::fs::write(&path, spec).expect("write job-section.toml");

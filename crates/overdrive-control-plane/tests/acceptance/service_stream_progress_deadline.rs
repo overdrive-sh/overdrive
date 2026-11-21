@@ -14,6 +14,8 @@
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::too_many_lines)]
 #![allow(clippy::doc_markdown, clippy::print_stderr, clippy::large_futures)]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::time::Duration;
 
 use overdrive_control_plane::streaming::{JobSubmitEvent, LastAttemptWire, ServiceSubmitEvent};
@@ -221,7 +223,10 @@ async fn a_job_stream_keeps_the_streaming_cap_and_its_timeout_line() {
     let job = JobSpecInput {
         id: "batch-once".to_owned(),
         replicas: 1,
-        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(64 * 1024 * 1024),
+        },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/bin/sleep".into(),

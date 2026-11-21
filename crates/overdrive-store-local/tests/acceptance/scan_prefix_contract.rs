@@ -33,6 +33,8 @@ use bytes::Bytes;
 use overdrive_core::aggregate::{
     DriverInput, IntentKey, Job, JobSpecInput, ResourcesInput, WorkloadIntent, WorkloadKind,
 };
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use overdrive_core::id::WorkloadId;
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_store_local::LocalIntentStore;
@@ -46,7 +48,10 @@ fn job_intent(id_str: &str) -> WorkloadIntent {
     let spec = JobSpecInput {
         id: id_str.to_string(),
         replicas: 1,
-        resources: ResourcesInput { cpu_milli: 500, memory_bytes: 128 * 1024 * 1024 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(500),
+            memory: ByteSize::new(128 * 1024 * 1024),
+        },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/bin/true".to_string(),

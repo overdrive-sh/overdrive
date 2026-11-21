@@ -46,8 +46,8 @@ kernel = "/kernel"
 rootfs = "/rootfs"
 
 [resources]
-cpu_milli = 500
-memory_bytes = 134217728
+cpu = '500m'
+memory = '128MiB'
 "#;
 
 /// Canonical valid `[job]` body.
@@ -62,8 +62,8 @@ kernel = "/kernel"
 rootfs = "/rootfs"
 
 [resources]
-cpu_milli = 100
-memory_bytes = 67108864
+cpu = '100m'
+memory = '64MiB'
 "#;
 
 /// Canonical valid `[job] + [schedule]` body.
@@ -81,8 +81,8 @@ kernel = "/kernel"
 rootfs = "/rootfs"
 
 [resources]
-cpu_milli = 200
-memory_bytes = 134217728
+cpu = '200m'
+memory = '128MiB'
 "#;
 
 // ---------------------------------------------------------------------------
@@ -151,8 +151,8 @@ kernel = "/kernel"
 rootfs = "/rootfs"
 
 [resources]
-cpu_milli = 100
-memory_bytes = 67108864
+cpu = '100m'
+memory = '64MiB'
 "#;
     let err = parse(toml).expect_err("mixed [service] + [job] must be rejected");
     let display = err.to_string();
@@ -177,8 +177,8 @@ kernel = "/kernel"
 rootfs = "/rootfs"
 
 [resources]
-cpu_milli = 100
-memory_bytes = 67108864
+cpu = '100m'
+memory = '64MiB'
 "#;
     let err = parse(toml).expect_err("[schedule] without [job] must be rejected");
     let display = err.to_string();
@@ -214,8 +214,8 @@ kernel = "/kernel"
 rootfs = "/rootfs"
 
 [resources]
-cpu_milli = 100
-memory_bytes = 67108864
+cpu = '100m'
+memory = '64MiB'
 "#;
     let err = parse(toml).expect_err("[schedule] + [service] must be rejected");
     let display = err.to_string();
@@ -238,8 +238,8 @@ fn s_01_07_missing_supported_driver_rejected() {
 id = "coinflip"
 
 [resources]
-cpu_milli = 100
-memory_bytes = 67108864
+cpu = '100m'
+memory = '64MiB'
 "#;
     let err = parse(toml).expect_err("a spec without the supported driver must be rejected");
     assert!(
@@ -279,8 +279,8 @@ args = []
 kernel = "/kernel"
 rootfs = "/rootfs"
 [resources]
-cpu_milli = 1
-memory_bytes = 1
+cpu = '1m'
+memory = '1B'
 "#,
         // [schedule] alone
         r#"
@@ -292,8 +292,8 @@ args = []
 kernel = "/kernel"
 rootfs = "/rootfs"
 [resources]
-cpu_milli = 1
-memory_bytes = 1
+cpu = '1m'
+memory = '1B'
 "#,
         // [schedule] + [service]
         r#"
@@ -311,16 +311,16 @@ args = []
 kernel = "/kernel"
 rootfs = "/rootfs"
 [resources]
-cpu_milli = 1
-memory_bytes = 1
+cpu = '1m'
+memory = '1B'
 "#,
         // missing [vm]
         r#"
 [job]
 id = "x"
 [resources]
-cpu_milli = 1
-memory_bytes = 1
+cpu = '1m'
+memory = '1B'
 "#,
         // missing [resources]
         r#"
@@ -413,7 +413,7 @@ mod s_01_09 {
             out.push('\n');
         }
         out.push_str(
-            "[vm]\ncommand = \"/bin/true\"\nargs = []\nkernel = \"/kernel\"\nrootfs = \"/rootfs\"\n\n[resources]\ncpu_milli = 1\nmemory_bytes = 1\n",
+            "[vm]\ncommand = \"/bin/true\"\nargs = []\nkernel = \"/kernel\"\nrootfs = \"/rootfs\"\n\n[resources]\ncpu = '1m'\nmemory = '1B'\n",
         );
         out
     }

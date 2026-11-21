@@ -26,6 +26,8 @@
 
 #![allow(clippy::expect_used)]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
@@ -100,7 +102,10 @@ fn dispatch_routes_workload_lifecycle_triple_to_workload_lifecycle_view() {
     let local = Node {
         id: NodeId::new("local").expect("valid NodeId"),
         region: Region::new("local").expect("valid Region"),
-        capacity: Resources { cpu_milli: 1_000, memory_bytes: 1024 * 1024 * 1024 },
+        capacity: Resources {
+            cpu: CpuQuantity::from_millis(1_000),
+            memory: ByteSize::new(1024 * 1024 * 1024),
+        },
     };
     nodes.insert(local.id.clone(), local);
 

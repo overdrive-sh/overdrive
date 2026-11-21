@@ -42,7 +42,7 @@ fn service_request(id: &str) -> Value {
             "kind": "service",
             "id": id,
             "replicas": 1,
-            "resources": { "cpu_milli": 100, "memory_bytes": 67_108_864_u64 },
+            "resources": { "cpu": "100m", "memory": "64MiB" },
             "vm": {
                 "command": "/bin/true",
                 "args": [],

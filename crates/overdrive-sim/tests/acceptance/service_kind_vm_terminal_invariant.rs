@@ -15,6 +15,8 @@
     clippy::too_many_lines
 )]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
@@ -618,7 +620,10 @@ async fn seeded_probe_result_wake_converges_vm_readiness_without_restart() {
     let spec = Service::from_submit(ServiceSpecInput {
         id: workload_id.to_string(),
         replicas: 1,
-        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(128 * 1024 * 1024),
+        },
         driver: DriverInput::Vm(VmInput {
             volume: None,
             command: "/long-lived-http-server".to_owned(),

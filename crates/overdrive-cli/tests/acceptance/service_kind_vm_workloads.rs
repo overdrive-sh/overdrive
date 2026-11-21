@@ -56,8 +56,8 @@ kernel = "/kernel"
 rootfs = "/rootfs"
 
 [resources]
-cpu_milli = 100
-memory_bytes = 1048576
+cpu = '100m'
+memory = '1MiB'
 
 [[listener]]
 port = 8080

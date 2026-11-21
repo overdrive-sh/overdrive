@@ -83,6 +83,8 @@
 // A-1'/A-6'/A-8'/A-9' etc. read as prose labels in the scenario docs, not code.
 #![allow(clippy::doc_markdown)]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use overdrive_core::guest_transport::GuestFlowPorts;
 use std::collections::BTreeMap;
 use std::net::{Ipv4Addr, SocketAddrV4};
@@ -208,7 +210,10 @@ fn build_spec(alloc: &AllocationId) -> AllocationSpec {
                 rootfs: PathBuf::from("/nonexistent/rootfs"),
             },
         ),
-        resources: Resources { cpu_milli: 50, memory_bytes: 32 * 1024 * 1024 },
+        resources: Resources {
+            cpu: CpuQuantity::from_millis(50),
+            memory: ByteSize::new(32 * 1024 * 1024),
+        },
         probe_descriptors: Vec::new(),
         // The C3 provision seam SETS these — supplied `None` so the seam's own
         // assign/provision/inject runs for real.

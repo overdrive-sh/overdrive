@@ -32,7 +32,6 @@ fn no_capacity(requested: (&str, &str), free: (&str, &str)) -> TransitionReason 
 /// same `Display` as everywhere else: `no capacity (requested cpu=500m mem=128MiB / free cpu=0 mem=0B)`.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "string cpu/memory resources are not accepted yet")]
 fn no_capacity_prose_renders_the_canonical_quantities() {
     let reason = no_capacity(("500m", "128MiB"), ("0", "0B"));
     assert_eq!(

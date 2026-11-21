@@ -351,6 +351,8 @@ impl ListenerFactStore {
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::unwrap_used)]
 mod tests {
+    use overdrive_core::byte_size::ByteSize;
+    use overdrive_core::cpu_quantity::CpuQuantity;
     use std::num::NonZeroU16;
     use std::str::FromStr;
     use std::sync::Arc;
@@ -470,7 +472,10 @@ mod tests {
         let svc = overdrive_core::aggregate::Service::from_submit(ServiceSpecInput {
             id: id.to_string(),
             replicas: 1,
-            resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+            resources: ResourcesInput {
+                cpu: CpuQuantity::from_millis(100),
+                memory: ByteSize::new(128 * 1024 * 1024),
+            },
             driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
                 volume: None,
                 command: "/bin/serve".to_string(),
@@ -507,7 +512,10 @@ mod tests {
             overdrive_core::aggregate::Job::from_submit(overdrive_core::aggregate::JobSpecInput {
                 id: id.to_string(),
                 replicas: 1,
-                resources: ResourcesInput { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
+                resources: ResourcesInput {
+                    cpu: CpuQuantity::from_millis(100),
+                    memory: ByteSize::new(64 * 1024 * 1024),
+                },
                 driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
                     volume: None,
                     command: "/bin/run".to_string(),
@@ -799,7 +807,10 @@ mod tests {
             let svc = overdrive_core::aggregate::Service::from_submit(ServiceSpecInput {
                 id: "novip".to_string(),
                 replicas: 1,
-                resources: ResourcesInput { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
+                resources: ResourcesInput {
+                    cpu: CpuQuantity::from_millis(100),
+                    memory: ByteSize::new(64 * 1024 * 1024),
+                },
                 driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
                     volume: None,
                     command: "/bin/serve".to_string(),
@@ -1137,7 +1148,10 @@ mod tests {
             let svc = overdrive_core::aggregate::Service::from_submit(ServiceSpecInput {
                 id: name.clone(),
                 replicas: 1,
-                resources: ResourcesInput { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
+                resources: ResourcesInput {
+                    cpu: CpuQuantity::from_millis(100),
+                    memory: ByteSize::new(64 * 1024 * 1024),
+                },
                 driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
                     volume: None,
                     command: "/bin/serve".to_string(),
@@ -1276,7 +1290,10 @@ mod tests {
         SubmitSpecInput::Service(WireServiceSpec {
             id: id.to_owned(),
             replicas: 1,
-            resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+            resources: ResourcesInput {
+                cpu: CpuQuantity::from_millis(100),
+                memory: ByteSize::new(128 * 1024 * 1024),
+            },
             driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
                 volume: None,
                 command: "/bin/serve".to_string(),
@@ -1301,7 +1318,10 @@ mod tests {
         SubmitSpecInput::Job(JobSpecInput {
             id: id.to_owned(),
             replicas: 1,
-            resources: ResourcesInput { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
+            resources: ResourcesInput {
+                cpu: CpuQuantity::from_millis(100),
+                memory: ByteSize::new(64 * 1024 * 1024),
+            },
             driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
                 volume: None,
                 command: "/bin/run".to_string(),

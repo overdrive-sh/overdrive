@@ -344,9 +344,9 @@ mod acceptance {
     mod vm_config_pure_functions; // S-VM-08, S-VM-16, S-VM-17, S-VM-18, S-VM-20 — ADR-0082 §D2
 
     // microvm-driver-cloud-hypervisor step 06-01 (US-VM-5, ADR-0082 §D2
-    // "derived from cpu_milli, floor 1", GH #42) — S-VM-73: the pure
+    // "derived from cpu, floor 1", GH #42) — S-VM-73: the pure
     // vCPU-derivation `@property` `@tier1`. `vcpus_for` is
-    // `max(1, round_up(cpu_milli / 1000))` saturated into `NonZeroU8`, for
+    // `max(1, round_up(cpu / 1000))` saturated into `NonZeroU8`, for
     // any u32 including 0 and non-multiples of 1000; never zero. The
     // Tier-3 guest-observed halves (S-VM-69/70) live in overdrive-cli's
     // `tests/integration/vm_resources_sizing.rs`.

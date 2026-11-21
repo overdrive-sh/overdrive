@@ -8,6 +8,8 @@ use overdrive_core::aggregate::{
     Service, VmInput, WorkloadSpecInput,
 };
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use overdrive_core::observation::{ProbeIdx, ProbeRole};
 use proptest::prelude::*;
 
@@ -15,7 +17,10 @@ fn service_input() -> ServiceSpecInput {
     ServiceSpecInput {
         id: "guest-listener-input".to_owned(),
         replicas: 1,
-        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 134_217_728 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(134_217_728),
+        },
         driver: DriverInput::Vm(VmInput {
             volume: None,
             command: "/bin/serve".to_owned(),
@@ -131,7 +136,7 @@ fn raw_service_guest_listeners_as_sole_startup_is_admitted() {
 const SERVICE_TOML: &str = "[service]\nid = \"guest-listener-input\"\nreplicas = 1\n\n\
 [[listener]]\nport = 8080\nprotocol = \"tcp\"\n\n\
 [vm]\ncommand = \"/bin/serve\"\nargs = []\nkernel = \"/kernel\"\nrootfs = \"/rootfs\"\n\n\
-[resources]\ncpu_milli = 100\nmemory_bytes = 134217728\n";
+[resources]\ncpu = '100m'\nmemory = '128MiB'\n";
 
 /// D14-E2: the canonical token, in either case, is recognized as a
 /// platform-only mechanic in each Service role at its exact position.

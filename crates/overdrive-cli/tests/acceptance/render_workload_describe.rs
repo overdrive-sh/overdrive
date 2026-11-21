@@ -39,6 +39,8 @@ use overdrive_control_plane::api::{
     AllocStateWire, AllocStatusResponse, AllocStatusRowBody, IssuedCertSummary, ResourcesBody,
 };
 use overdrive_core::aggregate::{Listener, WorkloadKind};
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use overdrive_core::dataplane::Proto;
 use overdrive_core::id::{CertSerial, SpiffeId};
 use overdrive_core::wall_clock::UnixInstant;
@@ -444,7 +446,10 @@ fn row_with_state(
         node_id: "node-a".to_string(),
         state,
         reason: None,
-        resources: ResourcesBody { cpu_milli: 100, memory_bytes: 1024 },
+        resources: ResourcesBody {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(1024),
+        },
         workload_addr: None,
         started_at: None,
         exit_code,
@@ -1268,7 +1273,8 @@ const ND295_SERVICE_GOLDEN: &str = concat!(
     "      guest console: kernel panic\n",
     "      guest console: halted\n",
     "    exit code: 137\n",
-    "Memory:        1024\n",
+    "Memory:        1KiB\n",
+    "CPU:           100m\n",
     "Addresses:\n",
     "  alloc-cache-6: 10.99.128.6\n",
     "VIP:           10.96.0.7\n",
@@ -1296,7 +1302,8 @@ const ND295_JOB_GOLDEN: &str = concat!(
     "    restarts: 2\n",
     "    last terminated stderr (last 5 lines):\n",
     "      Segmentation fault\n",
-    "Memory:        1024\n",
+    "Memory:        1KiB\n",
+    "CPU:           100m\n",
 );
 
 /// The output the renderer must produce when the row keyed `row_key` in

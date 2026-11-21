@@ -37,8 +37,12 @@ emitted_actions:
                 },
             ),
             resources: Resources {
-                cpu_milli: 100,
-                memory_bytes: 134217728,
+                cpu: CpuQuantity(
+                    100,
+                ),
+                memory: ByteSize(
+                    134217728,
+                ),
             },
             probe_descriptors: [],
             transport: None,

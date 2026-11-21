@@ -44,6 +44,8 @@
 
 #![allow(clippy::doc_markdown)]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::fs::File;
@@ -338,7 +340,10 @@ impl Node {
         let spec = JobSpecInput {
             id: id.to_owned(),
             replicas: 1,
-            resources: ResourcesInput { cpu_milli: 500, memory_bytes: LANE_VM_MEMORY_BYTES },
+            resources: ResourcesInput {
+                cpu: CpuQuantity::from_millis(500),
+                memory: ByteSize::new(LANE_VM_MEMORY_BYTES),
+            },
             driver: DriverInput::Vm(VmInput {
                 volume: None,
                 command: GUEST_PEER_GUEST_PATH.to_owned(),
@@ -366,7 +371,10 @@ impl Node {
         let spec = ServiceSpecInput {
             id: id.to_owned(),
             replicas: 1,
-            resources: ResourcesInput { cpu_milli: 500, memory_bytes: LANE_VM_MEMORY_BYTES },
+            resources: ResourcesInput {
+                cpu: CpuQuantity::from_millis(500),
+                memory: ByteSize::new(LANE_VM_MEMORY_BYTES),
+            },
             driver: DriverInput::Vm(VmInput {
                 volume: None,
                 command: GUEST_PEER_GUEST_PATH.to_owned(),
@@ -398,7 +406,10 @@ impl Node {
         let spec = ServiceSpecInput {
             id: id.to_owned(),
             replicas: 1,
-            resources: ResourcesInput { cpu_milli: 500, memory_bytes: LANE_VM_MEMORY_BYTES },
+            resources: ResourcesInput {
+                cpu: CpuQuantity::from_millis(500),
+                memory: ByteSize::new(LANE_VM_MEMORY_BYTES),
+            },
             driver: DriverInput::Vm(VmInput {
                 volume: None,
                 command: GUEST_PEER_GUEST_PATH.to_owned(),

@@ -746,6 +746,8 @@ mod release_for_exit_emission_tests {
     //! once step 01-03 wires the firing site.
     use super::*;
     use overdrive_core::SpiffeId;
+    use overdrive_core::byte_size::ByteSize;
+    use overdrive_core::cpu_quantity::CpuQuantity;
     use overdrive_core::traits::driver::{AllocationSpec, DriverPayload, Resources, VmPayload};
     use std::path::PathBuf;
     use std::str::FromStr;
@@ -763,7 +765,10 @@ mod release_for_exit_emission_tests {
                 kernel: PathBuf::from("/nonexistent/kernel"),
                 rootfs: PathBuf::from("/nonexistent/rootfs"),
             }),
-            resources: Resources { cpu_milli: 100, memory_bytes: 32 * 1024 * 1024 },
+            resources: Resources {
+                cpu: CpuQuantity::from_millis(100),
+                memory: ByteSize::new(32 * 1024 * 1024),
+            },
             probe_descriptors: Vec::new(),
             transport: None,
         }

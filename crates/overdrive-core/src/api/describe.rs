@@ -134,8 +134,10 @@ mod tests {
 
     /// Strategy producing an arbitrary `ResourcesInput`.
     fn resources_strategy() -> impl Strategy<Value = ResourcesInput> {
-        (any::<u32>(), any::<u64>())
-            .prop_map(|(cpu_milli, memory_bytes)| ResourcesInput { cpu_milli, memory_bytes })
+        (any::<u32>(), 1..=u64::from(u32::MAX)).prop_map(|(cpu, mib)| ResourcesInput {
+            cpu: crate::cpu_quantity::CpuQuantity::from_millis(cpu),
+            memory: crate::byte_size::ByteSize::new(mib * 1024 * 1024),
+        })
     }
 
     /// Strategy producing an arbitrary VM `DriverInput`.
@@ -278,7 +280,10 @@ mod tests {
         JobSpecInput {
             id: "describe-job".to_owned(),
             replicas: 2,
-            resources: ResourcesInput { cpu_milli: 500, memory_bytes: 64 * 1024 * 1024 },
+            resources: ResourcesInput {
+                cpu: crate::cpu_quantity::CpuQuantity::from_millis(500),
+                memory: crate::byte_size::ByteSize::new(64 * 1024 * 1024),
+            },
             driver: DriverInput::Vm(crate::aggregate::VmInput {
                 volume: None,
                 command: "/sbin/init".to_owned(),
@@ -322,7 +327,10 @@ mod tests {
         let input = ServiceSpecInput {
             id: "describe-svc".to_owned(),
             replicas: 3,
-            resources: ResourcesInput { cpu_milli: 250, memory_bytes: 32 * 1024 * 1024 },
+            resources: ResourcesInput {
+                cpu: crate::cpu_quantity::CpuQuantity::from_millis(250),
+                memory: crate::byte_size::ByteSize::new(32 * 1024 * 1024),
+            },
             driver: DriverInput::Vm(crate::aggregate::VmInput {
                 volume: None,
                 command: "/sbin/init".to_owned(),

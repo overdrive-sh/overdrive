@@ -73,6 +73,8 @@
     reason = "acceptance bodies fail at once on a broken precondition, naming it"
 )]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::Ipv4Addr;
 use std::num::NonZeroU16;
@@ -507,7 +509,10 @@ fn spec(name: &str) -> AllocationSpec {
             kernel: PathBuf::from("/prelaunch/kernel"),
             rootfs: PathBuf::from("/prelaunch/rootfs.ext4"),
         }),
-        resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
+        resources: Resources {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(64 * 1024 * 1024),
+        },
         probe_descriptors: Vec::new(),
         transport: None,
         declared_listeners: vec![overdrive_core::aggregate::Listener {
@@ -784,7 +789,10 @@ impl Rig {
         let service = Service::from_submit(ServiceSpecInput {
             id: WORKLOAD.to_owned(),
             replicas: 1,
-            resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+            resources: ResourcesInput {
+                cpu: CpuQuantity::from_millis(100),
+                memory: ByteSize::new(128 * 1024 * 1024),
+            },
             driver: DriverInput::Vm(VmInput {
                 volume: None,
                 command: "/bin/serve".to_owned(),
@@ -1541,7 +1549,10 @@ impl Rig {
             overdrive_core::aggregate::Job::from_submit(overdrive_core::aggregate::JobSpecInput {
                 id: WORKLOAD.to_owned(),
                 replicas: 1,
-                resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+                resources: ResourcesInput {
+                    cpu: CpuQuantity::from_millis(100),
+                    memory: ByteSize::new(128 * 1024 * 1024),
+                },
                 driver: DriverInput::Vm(VmInput {
                     volume: None,
                     command: "/bin/true".to_owned(),

@@ -24,6 +24,8 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
@@ -155,7 +157,10 @@ async fn run_convergence_tick_populates_now_unix_from_state_clock() {
     let job = Job::from_submit(JobSpecInput {
         id: "payments".to_string(),
         replicas: 1,
-        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(256 * 1024 * 1024),
+        },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/bin/true".to_string(),

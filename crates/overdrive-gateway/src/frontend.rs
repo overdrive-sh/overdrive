@@ -77,6 +77,8 @@ mod acceptance {
         reason = "CONTRACT_SHAPE metadata and one exhaustive closed adapter-error matrix"
     )]
 
+    use overdrive_core::byte_size::ByteSize;
+    use overdrive_core::cpu_quantity::CpuQuantity;
     use std::collections::{BTreeMap, BTreeSet};
     use std::num::{NonZeroU16, NonZeroU32};
 
@@ -171,7 +173,7 @@ mod acceptance {
     }
 
     fn resources() -> Resources {
-        Resources { cpu_milli: 10, memory_bytes: 16 * 1024 * 1024 }
+        Resources { cpu: CpuQuantity::from_millis(10), memory: ByteSize::new(16 * 1024 * 1024) }
     }
 
     fn job(id: &WorkloadId) -> Job {

@@ -21,7 +21,9 @@ use rkyv::util::AlignedVec;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::byte_size::ByteSize;
 use crate::codec::{EnvelopeError, VersionedEnvelope, decode_envelope_bytes};
+use crate::cpu_quantity::CpuQuantity;
 use crate::id::{
     AllocationId, ContentHash, CorrelationKey, InvestigationId, NodeId, PolicyId,
     PublicCertifiedKeyId, Region, WorkloadId,
@@ -368,6 +370,27 @@ impl From<JobV1> for JobV2 {
     }
 }
 
+/// Bytes in one MiB: the granularity workload memory is admitted at (DD-8).
+const BYTES_PER_MIB: u64 = 1024 * 1024;
+
+/// Admit a workload `memory`: a non-zero whole number of MiB. Node capacity
+/// is not guest RAM and keeps only the non-zero check in [`Node::new`].
+fn validate_workload_memory(memory: ByteSize) -> Result<(), AggregateError> {
+    if memory.bytes() == 0 {
+        return Err(AggregateError::Validation {
+            field: "memory",
+            message: "memory must be non-zero".to_string(),
+        });
+    }
+    if !memory.bytes().is_multiple_of(BYTES_PER_MIB) {
+        return Err(AggregateError::Validation {
+            field: "memory",
+            message: format!("memory must be a whole number of MiB; got {memory}"),
+        });
+    }
+    Ok(())
+}
+
 impl JobV2 {
     /// Validating constructor for the wire-side
     /// [`crate::api::submit::SubmitSpecInput::Job`] payload per
@@ -377,7 +400,7 @@ impl JobV2 {
     /// intent-side `Job` aggregate; every CLI handler and every server
     /// handler routes through here.
     ///
-    /// Rejects zero replicas, zero-byte memory capacity, and empty or
+    /// Rejects zero replicas, zero or non-whole-MiB memory, and empty or
     /// whitespace-only VM commands. Wraps
     /// [`WorkloadId`]'s `FromStr` error through `AggregateError::Id(..)` via
     /// `#[from]`.
@@ -388,20 +411,12 @@ impl JobV2 {
             field: "replicas",
             message: format!("replica count must be non-zero; got {replicas}"),
         })?;
-        if resources.memory_bytes == 0 {
-            return Err(AggregateError::Validation {
-                field: "memory_bytes",
-                message: "memory capacity must be non-zero".to_string(),
-            });
-        }
+        validate_workload_memory(resources.memory)?;
         let driver = validate_driver_input(driver, replicas)?;
         Ok(Self {
             id,
             replicas,
-            resources: Resources {
-                cpu_milli: resources.cpu_milli,
-                memory_bytes: resources.memory_bytes,
-            },
+            resources: Resources { cpu: resources.cpu, memory: resources.memory },
             driver,
         })
     }
@@ -638,7 +653,7 @@ impl ServiceV2 {
     ///
     /// * `id` non-empty after trim → [`WorkloadId::new`].
     /// * `replicas > 0` → [`NonZeroU32`].
-    /// * `resources.memory_bytes != 0`.
+    /// * `resources.memory` is a non-zero whole number of MiB.
     /// * Driver validation (`vm.command` non-empty after trim, per
     ///   ADR-0083).
     /// * `listeners.len() >= 1`
@@ -671,12 +686,7 @@ impl ServiceV2 {
             field: "replicas",
             message: format!("replica count must be non-zero; got {replicas}"),
         })?;
-        if resources.memory_bytes == 0 {
-            return Err(AggregateError::Validation {
-                field: "memory_bytes",
-                message: "memory capacity must be non-zero".to_string(),
-            });
-        }
+        validate_workload_memory(resources.memory)?;
 
         let driver = validate_driver_input(driver, replicas)?;
 
@@ -707,10 +717,7 @@ impl ServiceV2 {
         Ok(Self {
             id,
             replicas,
-            resources: Resources {
-                cpu_milli: resources.cpu_milli,
-                memory_bytes: resources.memory_bytes,
-            },
+            resources: Resources { cpu: resources.cpu, memory: resources.memory },
             driver,
             listeners: validated,
             startup_probes,
@@ -1153,13 +1160,17 @@ pub struct JobSpecInput {
 /// serde-only / utoipa-only concerns; this twin carries the wire-side
 /// derives. The projection onto `Resources` is field-by-field inside
 /// `Job::from_submit` (no `From` impl: the ≥3-call-sites rule isn't met,
-/// and the validation rules — `memory_bytes != 0` — must fire on the
+/// and the validation rules — a non-zero whole-MiB `memory` — must fire on the
 /// way through anyway).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, utoipa::ToSchema)]
 #[serde(deny_unknown_fields)]
 pub struct ResourcesInput {
-    pub cpu_milli: u32,
-    pub memory_bytes: u64,
+    /// CPU quantity: `500m`, `0.5` or `2`.
+    #[schema(value_type = String, example = "500m")]
+    pub cpu: CpuQuantity,
+    /// Memory size: `<digits><unit>` over `B`, `KiB`, `MiB`, `GiB`, `TiB`.
+    #[schema(value_type = String, example = "128MiB")]
+    pub memory: ByteSize,
 }
 
 /// Driver dispatch on a [`JobSpecInput`].
@@ -1222,10 +1233,7 @@ impl From<&Job> for JobSpecInput {
         Self {
             id: job.id.to_string(),
             replicas: job.replicas.get(),
-            resources: ResourcesInput {
-                cpu_milli: job.resources.cpu_milli,
-                memory_bytes: job.resources.memory_bytes,
-            },
+            resources: ResourcesInput { cpu: job.resources.cpu, memory: job.resources.memory },
             driver,
         }
     }
@@ -1320,10 +1328,7 @@ impl ServiceV2 {
         crate::api::describe::ServiceSpecOutput {
             id: self.id.to_string(),
             replicas: self.replicas.get(),
-            resources: ResourcesInput {
-                cpu_milli: self.resources.cpu_milli,
-                memory_bytes: self.resources.memory_bytes,
-            },
+            resources: ResourcesInput { cpu: self.resources.cpu, memory: self.resources.memory },
             driver,
             listeners,
             startup_probes: self.startup_probes.clone(),
@@ -1383,16 +1388,16 @@ impl Node {
     /// Wraps [`NodeId`] and [`Region`] `FromStr` errors through
     /// `AggregateError::Id(..)` via `#[from]`.
     pub fn new(spec: NodeSpecInput) -> Result<Self, AggregateError> {
-        let NodeSpecInput { id, region, cpu_milli, memory_bytes } = spec;
+        let NodeSpecInput { id, region, cpu, memory } = spec;
         let id = NodeId::new(&id)?;
         let region = Region::new(&region)?;
-        if memory_bytes == 0 {
+        if memory.bytes() == 0 {
             return Err(AggregateError::Validation {
-                field: "memory_bytes",
+                field: "memory",
                 message: "node capacity must not declare zero memory".to_string(),
             });
         }
-        let capacity = Resources { cpu_milli, memory_bytes };
+        let capacity = Resources { cpu, memory };
         Ok(Self { id, region, capacity })
     }
 }
@@ -1402,8 +1407,8 @@ impl Node {
 pub struct NodeSpecInput {
     pub id: String,
     pub region: String,
-    pub cpu_milli: u32,
-    pub memory_bytes: u64,
+    pub cpu: CpuQuantity,
+    pub memory: ByteSize,
 }
 
 // ---------------------------------------------------------------------------

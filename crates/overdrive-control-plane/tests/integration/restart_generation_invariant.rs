@@ -655,7 +655,7 @@ impl World {
         json!({
             "id": WORKLOAD,
             "replicas": 1,
-            "resources": {"cpu_milli": 0, "memory_bytes": 262_144u64},
+            "resources": {"cpu": "0", "memory": "1MiB"},
             "vm": {"command": "/sbin/init", "args": [], "kernel": "/kernel", "rootfs": "/rootfs"},
         })
     }

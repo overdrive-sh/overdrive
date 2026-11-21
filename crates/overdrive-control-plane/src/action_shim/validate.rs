@@ -124,6 +124,8 @@ pub fn validate_reconcile_output(actions: &[Action]) -> Result<(), ConflictingAl
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::unwrap_used)]
 mod tests {
+    use overdrive_core::byte_size::ByteSize;
+    use overdrive_core::cpu_quantity::CpuQuantity;
     use overdrive_core::reconcilers::Action;
 
     use super::{ReclaimConflictAction, validate_reconcile_output};
@@ -157,7 +159,10 @@ mod tests {
                 kernel: std::path::PathBuf::from("/nd295/kernel"),
                 rootfs: std::path::PathBuf::from("/nd295/rootfs.ext4"),
             }),
-            resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
+            resources: Resources {
+                cpu: CpuQuantity::from_millis(100),
+                memory: ByteSize::new(64 * 1024 * 1024),
+            },
             probe_descriptors: Vec::new(),
             transport: None,
         }

@@ -33,6 +33,8 @@ use overdrive_control_plane::api::{
 };
 use overdrive_core::aggregate::probe_descriptor::{ProbeDescriptor, ProbeMechanic};
 use overdrive_core::aggregate::{Listener, WorkloadKind};
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use overdrive_core::dataplane::Proto;
 use overdrive_core::id::{CertSerial, SpiffeId};
 use overdrive_core::observation::probe_result_row::{ProbeIdx, ProbeRole};
@@ -60,8 +62,8 @@ fn fixture_row(
         state,
         reason: None,
         resources: overdrive_control_plane::api::ResourcesBody {
-            cpu_milli: 100,
-            memory_bytes: 64 * 1024 * 1024,
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(64 * 1024 * 1024),
         },
         workload_addr: None,
         started_at: started_at.map(str::to_string),

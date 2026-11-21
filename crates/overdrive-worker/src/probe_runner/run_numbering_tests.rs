@@ -28,6 +28,8 @@
     reason = "test fixtures assert their own preconditions; the CONTRACT_SHAPE declaration is an exact machine-read line"
 )]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::collections::BTreeMap;
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::num::NonZeroU16;
@@ -155,7 +157,10 @@ fn vm_spec(alloc: &AllocationId) -> AllocationSpec {
             kernel: PathBuf::from("/kernel"),
             rootfs: PathBuf::from("/rootfs"),
         }),
-        resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
+        resources: Resources {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(64 * 1024 * 1024),
+        },
         probe_descriptors: vec![liveness_descriptor()],
         transport: Some(GuestTransportAssignment::new(
             WORKLOAD_ADDR,

@@ -16,8 +16,8 @@ rootfs = "/srv/vm/overdrive-testing/svm-e08/rootfs.ext4"
 size = "1000TiB"
 
 [resources]
-cpu_milli = 500
-memory_bytes = 134217728
+cpu = "500m"
+memory = "128MiB"
 
 [[health_check.startup]]
 type = "tcp"

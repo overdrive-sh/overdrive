@@ -9,6 +9,8 @@
 //! Bonus: a `SimCgroupFs` error injection on `cpu.weight` exercises the
 //! warn-and-continue arm and asserts no panic + control returns.
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::io;
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -28,7 +30,8 @@ async fn write_resource_limits_warn_on_error_writes_files_on_success() {
         .expect("valid CgroupPath");
     manager.create_workload_scope(&scope).await.expect("create scope");
 
-    let resources = Resources { cpu_milli: 200, memory_bytes: 1024 * 1024 };
+    let resources =
+        Resources { cpu: CpuQuantity::from_millis(200), memory: ByteSize::new(1024 * 1024) };
     manager.write_resource_limits_warn_on_error(&scope, &resources).await;
 
     let snap = sim.snapshot();
@@ -59,7 +62,8 @@ async fn write_resource_limits_warn_on_error_swallows_injected_write_failure() {
     );
     sim.inject_error(SimOp::Write, weight_path.clone(), io::ErrorKind::PermissionDenied);
 
-    let resources = Resources { cpu_milli: 200, memory_bytes: 1024 * 1024 };
+    let resources =
+        Resources { cpu: CpuQuantity::from_millis(200), memory: ByteSize::new(1024 * 1024) };
     // Warn-and-continue: returns unit, no panic, no propagation.
     manager.write_resource_limits_warn_on_error(&scope, &resources).await;
 

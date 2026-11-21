@@ -18,6 +18,8 @@
 
 #![allow(clippy::doc_markdown)]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener};
 use std::os::fd::{AsRawFd as _, OwnedFd};
@@ -1169,7 +1171,7 @@ fn allocation_spec_at(name: &str, address: Ipv4Addr) -> AllocationSpec {
             kernel: "/kernel".into(),
             rootfs: "/rootfs".into(),
         }),
-        resources: Resources { cpu_milli: 1, memory_bytes: 1 },
+        resources: Resources { cpu: CpuQuantity::from_millis(1), memory: ByteSize::new(1) },
         probe_descriptors: Vec::new(),
         transport: Some(GuestTransportAssignment::new(
             address,

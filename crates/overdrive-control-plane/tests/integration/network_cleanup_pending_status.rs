@@ -30,6 +30,8 @@
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
 )]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::collections::BTreeMap;
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -432,7 +434,10 @@ fn vm_service(id: &str) -> SubmitSpecInput {
     SubmitSpecInput::Service(ServiceSpecInput {
         id: id.to_owned(),
         replicas: 1,
-        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 134_217_728 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(134_217_728),
+        },
         driver: DriverInput::Vm(VmInput {
             volume: None,
             command: "/bin/sleep".to_owned(),
@@ -451,7 +456,10 @@ fn vm_job(id: &str) -> SubmitSpecInput {
     SubmitSpecInput::Job(JobSpecInput {
         id: id.to_owned(),
         replicas: 1,
-        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 134_217_728 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(134_217_728),
+        },
         driver: DriverInput::Vm(VmInput {
             volume: None,
             command: "/bin/sleep".to_owned(),

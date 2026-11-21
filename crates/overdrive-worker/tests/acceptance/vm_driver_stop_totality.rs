@@ -25,6 +25,8 @@
     reason = "acceptance tests require exact CONTRACT_SHAPE markers and diagnostic assertions"
 )]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::future::Future as _;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -157,7 +159,10 @@ fn build_spec(alloc: &AllocationId, tmp: &TempDir) -> AllocationSpec {
                 rootfs: fixture_rootfs_path(tmp),
             },
         ),
-        resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+        resources: Resources {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(128 * 1024 * 1024),
+        },
         probe_descriptors: Vec::new(),
         transport: Some(super::support::transport(
             "100.96.0.6".parse().expect("valid fixture guest address"),
@@ -1705,7 +1710,13 @@ async fn resize_rejects_with_resize_unsupported_naming_gh_92() {
     // The typed rejection — the variant, the self-named driver family,
     // the allocation resize was called on, and `#92` in the detail.
     let err = driver
-        .resize(&handle, Resources { cpu_milli: 4000, memory_bytes: 4 * 1024 * 1024 * 1024 })
+        .resize(
+            &handle,
+            Resources {
+                cpu: CpuQuantity::from_millis(4000),
+                memory: ByteSize::new(4 * 1024 * 1024 * 1024),
+            },
+        )
         .await
         .expect_err("resize must reject, never return Ok(()) as a silent no-op");
     match err {
@@ -1726,7 +1737,7 @@ async fn resize_rejects_with_resize_unsupported_naming_gh_92() {
     // Unconditional: a second, differently-sized call is refused identically,
     // and the operator-facing `Display` names the driver + allocation.
     let shown = driver
-        .resize(&handle, Resources { cpu_milli: 1, memory_bytes: 1 })
+        .resize(&handle, Resources { cpu: CpuQuantity::from_millis(1), memory: ByteSize::new(1) })
         .await
         .expect_err("resize rejects every call, unconditionally")
         .to_string();

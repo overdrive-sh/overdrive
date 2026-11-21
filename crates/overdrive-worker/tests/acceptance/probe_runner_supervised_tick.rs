@@ -31,6 +31,8 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::doc_markdown)]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -67,7 +69,10 @@ fn vm_spec(alloc: &AllocationId, probe_descriptors: Vec<ProbeDescriptor>) -> All
             kernel: "/kernel".into(),
             rootfs: "/rootfs".into(),
         }),
-        resources: Resources { cpu_milli: 100, memory_bytes: 32 * 1024 * 1024 },
+        resources: Resources {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(32 * 1024 * 1024),
+        },
         probe_descriptors,
         transport: None,
     }

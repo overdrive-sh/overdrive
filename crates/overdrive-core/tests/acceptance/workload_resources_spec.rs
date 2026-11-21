@@ -145,7 +145,6 @@ fn assert_refused_naming(label: &str, text: &str, key: &str, keyword: Option<&st
 /// `2.0` are `2`, `0.5` is `500m`. This is the one test whose RED is the TOML parser itself
 /// (`unknown field cpu`). CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "a spec in the new resources shape must parse")]
 fn a_non_canonical_spelling_is_read_back_canonically() {
     for (cpu, memory, canon_cpu, canon_memory) in [
         ("500m", "128MiB", "500m", "128MiB"),
@@ -180,7 +179,6 @@ fn a_non_canonical_spelling_is_read_back_canonically() {
 /// alone or beside the new keys, naming the unknown key and the expected `cpu` and `memory`.
 /// There is no alias and no fallback. CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "the removed key must be refused at parse time")]
 fn sad_the_removed_keys_are_refused_naming_the_unknown_key_and_the_expected_ones() {
     let cases: &[(&str, &str)] = &[
         ("cpu_milli = 500\nmemory_bytes = 134217728", "cpu_milli"),
@@ -218,7 +216,6 @@ fn sad_the_removed_keys_are_refused_naming_the_unknown_key_and_the_expected_ones
 /// AC-1.2: a spec missing `cpu` or `memory` is refused (both are required), naming the missing key.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "the missing key must be named")]
 fn sad_a_missing_cpu_or_memory_is_refused_naming_it() {
     for (body, missing) in [("memory = \"128MiB\"", "cpu"), ("cpu = \"500m\"", "memory")] {
         let text = parse_err(&service_toml(body));
@@ -241,7 +238,6 @@ fn sad_a_missing_cpu_or_memory_is_refused_naming_it() {
 /// fractional count, "too large" for overflow. A bare number is never read as bytes.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "the refusal must not point the operator at a removed key")]
 fn sad_each_malformed_memory_is_refused_at_parse_time_naming_the_grammar() {
     let rows: &[(&str, &str, Option<&str>)] = &[
         ("empty", "\"\"", Some("MiB")),
@@ -263,7 +259,6 @@ fn sad_each_malformed_memory_is_refused_at_parse_time_naming_the_grammar() {
 /// the `cpu` key and, where DESIGN pins wording for the class, that wording: "lowercase" for an uppercase milli suffix, "three" for four fractional digits,
 /// "too large" for overflow. CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "the refusal must not point the operator at a removed key")]
 fn sad_each_malformed_cpu_is_refused_at_parse_time_naming_the_grammar() {
     let rows: &[(&str, &str, Option<&str>)] = &[
         ("empty", "\"\"", None),
@@ -288,7 +283,6 @@ fn sad_each_malformed_cpu_is_refused_at_parse_time_naming_the_grammar() {
 /// `Resources`; the canonical strings denote the pinned quantities (memory 128MiB is 134217728
 /// bytes, cpu 500m is 500 millicores). CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "string cpu/memory resources are not accepted yet")]
 fn an_admitted_workload_carries_the_declared_size_in_its_intent_resources() {
     let job = admit_job("500m", "128MiB").expect("the declared size is admitted");
     assert_eq!(intent_resources(&job), json!({ "cpu": "500m", "memory": "128MiB" }));
@@ -317,7 +311,6 @@ enum Admission {
 /// straddle the MiB boundary and are refused), and zero CPU stays admitted. A refusal names the
 /// field `memory`, the rule, and the received canonical value. CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "string cpu/memory resources are not accepted yet")]
 fn sad_admission_follows_the_non_zero_and_whole_mib_rules_at_both_sites() {
     use Admission::{Admitted, NotWholeMib, ZeroMemory};
     let rows: &[(&str, &str, Admission)] = &[
@@ -390,7 +383,6 @@ fn sad_admission_follows_the_non_zero_and_whole_mib_rules_at_both_sites() {
 /// `POST /v1/workloads` bodies): `cpu_milli` / `memory_bytes` are unknown fields, alone or beside
 /// the new keys, and the refusal names the unknown key. CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "the wire must refuse the removed key naming it")]
 fn sad_the_wire_refuses_the_removed_keys() {
     for (resources, unknown) in [
         (json!({ "cpu_milli": 500, "memory_bytes": 134_217_728 }), "cpu_milli"),
@@ -414,7 +406,6 @@ fn sad_the_wire_refuses_the_removed_keys() {
 /// the same bytes and has the same spec digest, so an idempotent re-deploy is not a conflict.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "string cpu/memory resources are not accepted yet")]
 fn equal_sizes_in_different_spellings_have_the_same_spec_digest() {
     let spellings =
         [("2", "1GiB"), ("2000m", "1024MiB"), ("2.0", "1073741824B"), ("2.000", "1048576KiB")];
@@ -439,7 +430,6 @@ fn equal_sizes_in_different_spellings_have_the_same_spec_digest() {
 /// string for both quantities, so `1024MiB` is read back as `1GiB` and `0.5` as `500m`, for
 /// Job and Service. CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "string cpu/memory resources are not accepted yet")]
 fn describe_reads_back_the_canonical_form() {
     let job = admit_job("0.5", "1024MiB").expect("admitted");
     let wire = serde_json::to_value(job.to_describe()).expect("serialises");

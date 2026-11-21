@@ -14,5 +14,5 @@ kernel = "/srv/vm/overdrive-testing/svm-e08/kernel"
 rootfs = "/srv/vm/overdrive-testing/svm-e08/rootfs.ext4"
 
 [resources]
-cpu_milli = 500
-memory_bytes = 134217728
+cpu = "500m"
+memory = "128MiB"

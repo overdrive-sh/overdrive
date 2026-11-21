@@ -199,8 +199,8 @@ rootfs = "/master.img"
 [vm.volume]
 size = "40GiB"
 [resources]
-cpu_milli = 100
-memory_bytes = 134217728
+cpu = '100m'
+memory = '128MiB'
 [[listener]]
 port = 8080
 protocol = "tcp"
@@ -418,7 +418,7 @@ pub fn declaration_wire(root: &str) -> serde_json::Value {
             "kind": "service",
             "id": WORKLOAD,
             "replicas": 1,
-            "resources": {"cpu_milli": 100, "memory_bytes": 134_217_728u64},
+            "resources": {"cpu": "100m", "memory": "128MiB"},
             "vm": {
                 "command": "/sbin/init", "args": [],
                 "kernel": format!("{root}/vmlinuz"), "rootfs": format!("{root}/master.img"),

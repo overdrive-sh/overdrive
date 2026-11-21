@@ -76,6 +76,8 @@
     reason = "test support and conformance drivers: fixture preconditions are asserted with expect, and handler signatures follow the action map"
 )]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::collections::BTreeSet;
 use std::net::Ipv4Addr;
 use std::num::NonZeroU16;
@@ -216,7 +218,10 @@ fn service_spec(root: &Path, alloc: &AllocationId) -> AllocationSpec {
             kernel: root.join("vmlinuz"),
             rootfs: root.join("master.img"),
         }),
-        resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+        resources: Resources {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(128 * 1024 * 1024),
+        },
         probe_descriptors: Vec::new(),
         transport: None,
         declared_listeners,

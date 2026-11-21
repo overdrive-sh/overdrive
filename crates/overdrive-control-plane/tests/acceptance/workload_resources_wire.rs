@@ -20,7 +20,6 @@ placement!(host_pure);
 /// DD-6: a row's `resources` block reads any accepted spelling and is emitted canonically:
 /// `{"cpu":"0.5","memory":"1024MiB"}` is `{"cpu":"500m","memory":"1GiB"}`. CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "the resources block with string cpu and memory must decode")]
 fn the_resources_block_is_emitted_as_canonical_strings() {
     let body: ResourcesBody = serde_json::from_value(json!({ "cpu": "0.5", "memory": "1024MiB" }))
         .unwrap_or_else(|e| {
@@ -35,7 +34,6 @@ fn the_resources_block_is_emitted_as_canonical_strings() {
 /// DD-6: the removed keys are not an alias: neither `{"cpu_milli", "memory_bytes"}` nor a mixed body
 /// decodes, and the refusal names the unknown key. CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "the removed keys must not decode")]
 fn sad_the_resources_block_refuses_the_removed_keys() {
     for (wire, unknown) in [
         (json!({ "cpu_milli": 500, "memory_bytes": 134_217_728 }), "cpu_milli"),
@@ -70,7 +68,6 @@ fn schema_block(yaml: &str, name: &str) -> String {
 /// generator's output; the existing OpenAPI gate holds `api/openapi.yaml` equal to it.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "the OpenAPI schema must describe cpu and memory as strings")]
 fn openapi_describes_cpu_and_memory_as_strings_in_the_three_schemas() {
     let generated = openapi::generate_yaml().expect("generate_yaml must succeed");
     for schema in ["ResourcesInput", "ResourcesBody", "ResourceEnvelope"] {

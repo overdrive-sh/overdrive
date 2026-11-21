@@ -20,6 +20,8 @@
 //! 3. `non_terminal_transitions_emit_none` — Pending → Running with
 //!    budget remaining: every event/row carries `terminal: None`.
 //!
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -169,7 +171,10 @@ async fn terminal_backoff_exhausted_appears_on_alloc_status_and_streaming() {
     let job = Job::from_submit(JobSpecInput {
         id: "backoff-exhaust".to_string(),
         replicas: 1,
-        resources: ResourcesInput { cpu_milli: 50, memory_bytes: 64 * 1024 * 1024 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(50),
+            memory: ByteSize::new(64 * 1024 * 1024),
+        },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/nonexistent/binary".to_string(),
@@ -269,7 +274,10 @@ async fn terminal_stopped_appears_on_both_surfaces() {
     let job = Job::from_submit(JobSpecInput {
         id: "term-stop".to_string(),
         replicas: 1,
-        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(256 * 1024 * 1024),
+        },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/bin/sleep".to_string(),
@@ -391,7 +399,10 @@ async fn non_terminal_transitions_emit_none() {
     let job = Job::from_submit(JobSpecInput {
         id: "non-term".to_string(),
         replicas: 1,
-        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(256 * 1024 * 1024),
+        },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/bin/sleep".to_string(),

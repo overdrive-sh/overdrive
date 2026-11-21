@@ -30,7 +30,6 @@ fn files_under(dir: &Path, extension: &str, out: &mut Vec<PathBuf>) {
 /// specs and are skipped; at least thirty are expected so a moved directory cannot pass empty.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "every example spec must parse with the human-readable resources")]
 fn every_example_spec_parses_with_the_human_readable_resources() {
     let mut specs = Vec::new();
     files_under(&Path::new(REPO_ROOT).join("examples"), "toml", &mut specs);

@@ -18,6 +18,8 @@
 //!   transcript errors; a single-turn transcript round-trips cleanly;
 //!   a tool-choice deviation returns a `TranscriptMismatch` error.
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 use std::str::FromStr;
@@ -330,7 +332,10 @@ fn sample_spec() -> AllocationSpec {
             kernel: PathBuf::from("/nonexistent/kernel"),
             rootfs: PathBuf::from("/nonexistent/rootfs"),
         }),
-        resources: Resources { cpu_milli: 500, memory_bytes: 256 * 1024 * 1024 },
+        resources: Resources {
+            cpu: CpuQuantity::from_millis(500),
+            memory: ByteSize::new(256 * 1024 * 1024),
+        },
         probe_descriptors: Vec::new(),
         // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the mTLS-composed boot gate.
         transport: None,
@@ -543,7 +548,10 @@ async fn sim_driver_resize_returns_error_for_unknown_allocation() {
     };
 
     let err = driver
-        .resize(&unknown_handle, Resources { cpu_milli: 100, memory_bytes: 1024 })
+        .resize(
+            &unknown_handle,
+            Resources { cpu: CpuQuantity::from_millis(100), memory: ByteSize::new(1024) },
+        )
         .await
         .expect_err("resize on an unknown allocation must fail");
     assert!(matches!(err, DriverError::NotFound { .. }));
@@ -561,7 +569,10 @@ async fn sim_driver_resize_succeeds_for_running_allocation() {
         .expect("start succeeds");
 
     driver
-        .resize(&handle, Resources { cpu_milli: 1000, memory_bytes: 2048 })
+        .resize(
+            &handle,
+            Resources { cpu: CpuQuantity::from_millis(1000), memory: ByteSize::new(2048) },
+        )
         .await
         .expect("resize on a running allocation succeeds");
 }

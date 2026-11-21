@@ -60,8 +60,8 @@ kernel = "/kernel"
 rootfs = "/rootfs"
 
 [resources]
-cpu_milli = 100
-memory_bytes = 134217728
+cpu = '100m'
+memory = '128MiB'
 
 [[health_check.startup]]
 type = "tcp"
@@ -82,8 +82,8 @@ kernel = "/kernel"
 rootfs = "/rootfs"
 
 [resources]
-cpu_milli = 100
-memory_bytes = 134217728
+cpu = '100m'
+memory = '128MiB'
 
 [[health_check.readiness]]
 type = "tcp"
@@ -106,8 +106,8 @@ kernel = "/kernel"
 rootfs = "/rootfs"
 
 [resources]
-cpu_milli = 100
-memory_bytes = 134217728
+cpu = '100m'
+memory = '128MiB'
 
 [[health_check.readiness]]
 type = "tcp"

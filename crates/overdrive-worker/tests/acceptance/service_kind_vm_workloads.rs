@@ -9,6 +9,8 @@
 // Contract-shape declarations intentionally use the repository-mandated token.
 #![allow(clippy::doc_markdown, clippy::expect_used, clippy::missing_panics_doc)]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -101,7 +103,10 @@ fn allocation_spec(
         identity: SpiffeId::new("spiffe://overdrive.local/workload/vm-service/alloc/test")
             .expect("valid SPIFFE ID"),
         driver,
-        resources: Resources { cpu_milli: 100, memory_bytes: 32 * 1024 * 1024 },
+        resources: Resources {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(32 * 1024 * 1024),
+        },
         probe_descriptors,
         transport: workload_addr
             .map(|address| super::support::transport(address, GUEST_NODE_GATEWAY, 0)),

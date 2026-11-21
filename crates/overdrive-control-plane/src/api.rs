@@ -33,7 +33,9 @@ use overdrive_core::api::describe::{DescribeSpecOutput, ScheduleSpecOutput, Serv
 use overdrive_core::api::submit::{
     ListenerInput, ScheduleSpecInput, ServiceSpecInput, SubmitSpecInput,
 };
+use overdrive_core::byte_size::ByteSize;
 use overdrive_core::ca::issue_failure::{SvidIssueFailure, SvidIssueFailureCause};
+use overdrive_core::cpu_quantity::CpuQuantity;
 use overdrive_core::id::{CertSerial, SpiffeId};
 use overdrive_core::traits::driver::DriverType;
 use overdrive_core::traits::observation_store::AllocState;
@@ -1120,14 +1122,19 @@ pub struct RestartBudget {
 /// Mirrors the internal `overdrive_core::traits::driver::Resources` shape
 /// for the wire. Conversion is mechanical via [`From<&Resources>`].
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub struct ResourcesBody {
-    pub cpu_milli: u32,
-    pub memory_bytes: u64,
+    /// CPU quantity as its canonical string, e.g. `500m` or `2`.
+    #[schema(value_type = String, example = "500m")]
+    pub cpu: CpuQuantity,
+    /// Memory size as its canonical string, e.g. `128MiB`.
+    #[schema(value_type = String, example = "128MiB")]
+    pub memory: ByteSize,
 }
 
 impl From<&overdrive_core::traits::driver::Resources> for ResourcesBody {
     fn from(r: &overdrive_core::traits::driver::Resources) -> Self {
-        Self { cpu_milli: r.cpu_milli, memory_bytes: r.memory_bytes }
+        Self { cpu: r.cpu, memory: r.memory }
     }
 }
 

@@ -26,7 +26,6 @@ placement!(host_pure);
 /// control the aggregate matrix in `workload_resources_spec` covers. CONTRACT_SHAPE:
 /// unbounded-preservation (the refusal leaves the store as it was).
 #[tokio::test]
-#[should_panic(expected = "the submit must be refused as a 400 validation naming the memory field")]
 async fn sad_memory_that_is_not_a_whole_number_of_mib_is_refused_and_nothing_is_stored() {
     let node = Node::boot(372).await;
     let router = Router::new()

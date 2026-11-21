@@ -460,7 +460,7 @@ mod loop_shutdown {
             let wire = serde_json::json!({
                 "spec": {
                     "kind": "service", "id": id, "replicas": 1,
-                    "resources": {"cpu_milli": 100, "memory_bytes": 134_217_728u64},
+                    "resources": {"cpu": "100m", "memory": "128MiB"},
                     "vm": {"command": "/sbin/init", "args": [], "kernel": "/kernel", "rootfs": "/rootfs"},
                     "listeners": [{"port": 8080, "protocol": "tcp"}],
                     "startup_probes": [], "readiness_probes": [], "liveness_probes": []

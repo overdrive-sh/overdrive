@@ -29,6 +29,8 @@ use overdrive_control_plane::api::{
 use overdrive_core::aggregate::{DriverInput, JobSpecInput, ResourcesInput, VmInput};
 use overdrive_core::api::describe::DescribeSpecOutput;
 use overdrive_core::api::submit::SubmitSpecInput;
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use proptest::prelude::*;
 use utoipa::ToSchema;
 
@@ -40,7 +42,10 @@ fn sample_job_spec() -> JobSpecInput {
     JobSpecInput {
         id: "payments".to_string(),
         replicas: 3,
-        resources: ResourcesInput { cpu_milli: 500, memory_bytes: 256 * 1024 * 1024 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(500),
+            memory: ByteSize::new(256 * 1024 * 1024),
+        },
         driver: DriverInput::Vm(VmInput {
             volume: None,
             command: "/sbin/init".to_string(),
@@ -252,8 +257,8 @@ fn alloc_status_response_round_trips_with_empty_and_populated_rows() {
             state: overdrive_control_plane::api::AllocStateWire::Running,
             reason: None,
             resources: overdrive_control_plane::api::ResourcesBody {
-                cpu_milli: 500,
-                memory_bytes: 134_217_728,
+                cpu: CpuQuantity::from_millis(500),
+                memory: ByteSize::new(134_217_728),
             },
             workload_addr: Some("10.99.128.2".parse().expect("valid workload address")),
             started_at: None,

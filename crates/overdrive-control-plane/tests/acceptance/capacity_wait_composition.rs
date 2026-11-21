@@ -48,6 +48,8 @@
     reason = "a test rig fails at once on a broken precondition, naming it; helpers are shared with sibling files"
 )]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::collections::BTreeSet;
 use std::net::Ipv4Addr;
 use std::num::NonZeroU16;
@@ -238,7 +240,7 @@ impl Node {
         json!({
             "id": id,
             "replicas": 1,
-            "resources": {"cpu_milli": 0, "memory_bytes": 262_144u64},
+            "resources": {"cpu": "0", "memory": "1MiB"},
             "vm": {"command": "/sbin/init", "args": [], "kernel": "/kernel", "rootfs": "/rootfs"},
         })
     }
@@ -358,7 +360,10 @@ impl Node {
                     kernel: PathBuf::from("/kernel"),
                     rootfs: PathBuf::from("/rootfs"),
                 }),
-                resources: Resources { cpu_milli: 0, memory_bytes: 262_144 },
+                resources: Resources {
+                    cpu: CpuQuantity::from_millis(0),
+                    memory: ByteSize::new(1024 * 1024),
+                },
                 probe_descriptors: Vec::new(),
                 transport: None,
                 declared_listeners: vec![overdrive_core::aggregate::Listener {

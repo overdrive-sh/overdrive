@@ -26,6 +26,8 @@
     reason = "counts and nanosecond totals of one replicate are far below 2^52"
 )]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::fmt::{Debug, Display};
 use std::io::{ErrorKind, Read, Write};
 use std::net::{Ipv4Addr, Shutdown, SocketAddr, SocketAddrV4, TcpListener, TcpStream};
@@ -1152,7 +1154,10 @@ fn intercept_spec(
             rootfs: "/nonexistent/rootfs".into(),
             volume: None,
         }),
-        resources: Resources { cpu_milli: 50, memory_bytes: 32 * 1024 * 1024 },
+        resources: Resources {
+            cpu: CpuQuantity::from_millis(50),
+            memory: ByteSize::new(32 * 1024 * 1024),
+        },
         probe_descriptors: Vec::new(),
         transport: Some(GuestTransportAssignment::new(
             lease.workload_addr(),

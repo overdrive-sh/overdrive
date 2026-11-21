@@ -19,6 +19,8 @@
 //!   (f) `from_config` with malformed base64 CA → `CliError::ConfigLoad`
 //!       with non-raw cause
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::path::Path;
 use std::sync::Arc;
@@ -177,7 +179,10 @@ async fn submit_job_then_describe_round_trips_via_http_client() {
     let spec = JobSpecInput {
         id: "payments".to_owned(),
         replicas: 3,
-        resources: ResourcesInput { cpu_milli: 500, memory_bytes: 536_870_912 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(500),
+            memory: ByteSize::new(536_870_912),
+        },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/bin/true".to_string(),
@@ -288,7 +293,10 @@ async fn submit_with_invalid_spec_returns_http_status_400_with_error_body() {
     let bad = JobSpecInput {
         id: "payments".to_owned(),
         replicas: 0,
-        resources: ResourcesInput { cpu_milli: 500, memory_bytes: 536_870_912 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(500),
+            memory: ByteSize::new(536_870_912),
+        },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/bin/true".to_string(),

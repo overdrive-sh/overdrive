@@ -22,6 +22,8 @@
 #![allow(dead_code)] // helpers are referenced from sibling modules; nextest
 // sees each module file independently.
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::collections::BTreeMap;
 use std::num::NonZeroU32;
 use std::time::Duration;
@@ -59,8 +61,8 @@ pub fn region(s: &str) -> Region {
 }
 
 #[must_use]
-pub const fn res(cpu_milli: u32, memory_bytes: u64) -> Resources {
-    Resources { cpu_milli, memory_bytes }
+pub const fn res(millicores: u32, memory_size: u64) -> Resources {
+    Resources { cpu: CpuQuantity::from_millis(millicores), memory: ByteSize::new(memory_size) }
 }
 
 #[must_use]
@@ -171,8 +173,9 @@ pub fn valid_label() -> impl Strategy<Value = String> {
 /// An arbitrary valid `Resources` envelope. Bounded so the proptest
 /// exercises both "fits everywhere" and "exhausted" cases.
 pub fn arb_resources() -> impl Strategy<Value = Resources> {
-    (0u32..=64_000u32, 1u64..=(64u64 * 1024 * 1024 * 1024))
-        .prop_map(|(cpu_milli, memory_bytes)| Resources { cpu_milli, memory_bytes })
+    (0u32..=64_000u32, 1u64..=(64u64 * 1024 * 1024 * 1024)).prop_map(|(millicores, memory_size)| {
+        Resources { cpu: CpuQuantity::from_millis(millicores), memory: ByteSize::new(memory_size) }
+    })
 }
 
 /// An arbitrary valid `Node` with the given id label.

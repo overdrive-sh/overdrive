@@ -27,6 +27,8 @@
 // whose `panic!` body has no `.await` until 02-05 fills in the real DST body.
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::doc_markdown, clippy::unused_async)]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddr;
 use std::num::NonZeroU16;
@@ -136,7 +138,10 @@ fn service_intent(workload: &str, listeners: &[Listener]) -> Service {
     Service::from_submit(ServiceSpecInput {
         id: workload.to_string(),
         replicas: 1,
-        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(128 * 1024 * 1024),
+        },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/bin/serve".to_string(),

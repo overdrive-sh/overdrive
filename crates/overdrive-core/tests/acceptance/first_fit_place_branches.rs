@@ -33,6 +33,8 @@
 
 #![allow(clippy::expect_used)]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::collections::BTreeMap;
 use std::num::NonZeroU32;
 use std::time::{Duration, Instant};
@@ -184,12 +186,17 @@ fn placement_returns_node_when_capacity_fits() {
     // emits `StartAllocation { node_id: local, … }`. Asserting on the
     // action's `node_id` proves the Ok→StartAllocation adoption.
     let mut nodes = BTreeMap::new();
-    let local =
-        make_node("local", Resources { cpu_milli: 4_000, memory_bytes: 8 * 1024 * 1024 * 1024 });
+    let local = make_node(
+        "local",
+        Resources {
+            cpu: CpuQuantity::from_millis(4_000),
+            memory: ByteSize::new(8 * 1024 * 1024 * 1024),
+        },
+    );
     nodes.insert(local.id.clone(), local);
     let job = make_job_with_resources(
         "payments",
-        Resources { cpu_milli: 500, memory_bytes: 1024 * 1024 * 1024 },
+        Resources { cpu: CpuQuantity::from_millis(500), memory: ByteSize::new(1024 * 1024 * 1024) },
     );
 
     let actions = placement_actions(nodes, job, BTreeMap::new());
@@ -221,12 +228,18 @@ fn placement_returns_none_when_one_resource_fits_other_does_not() {
     let mut nodes = BTreeMap::new();
     nodes.insert(
         nid("local"),
-        make_node("local", Resources { cpu_milli: 4_000, memory_bytes: 1024 }),
+        make_node(
+            "local",
+            Resources { cpu: CpuQuantity::from_millis(4_000), memory: ByteSize::new(1024) },
+        ),
     );
     // Job needs more memory than the node has.
     let job = make_job_with_resources(
         "memhog",
-        Resources { cpu_milli: 1_000, memory_bytes: 4 * 1024 * 1024 * 1024 },
+        Resources {
+            cpu: CpuQuantity::from_millis(1_000),
+            memory: ByteSize::new(4 * 1024 * 1024 * 1024),
+        },
     );
 
     let actions = placement_actions(nodes, job, BTreeMap::new());
@@ -288,11 +301,20 @@ fn placement_excludes_non_running_allocs_on_same_node() {
     let mut nodes = BTreeMap::new();
     nodes.insert(
         nid("local"),
-        make_node("local", Resources { cpu_milli: 1_500, memory_bytes: 2 * 1024 * 1024 * 1024 }),
+        make_node(
+            "local",
+            Resources {
+                cpu: CpuQuantity::from_millis(1_500),
+                memory: ByteSize::new(2 * 1024 * 1024 * 1024),
+            },
+        ),
     );
     let job = make_job_with_resources(
         "payments",
-        Resources { cpu_milli: 1_000, memory_bytes: 1024 * 1024 * 1024 },
+        Resources {
+            cpu: CpuQuantity::from_millis(1_000),
+            memory: ByteSize::new(1024 * 1024 * 1024),
+        },
     );
     let mut allocs = BTreeMap::new();
     allocs.insert(

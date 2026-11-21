@@ -32,6 +32,8 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::too_many_lines)]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::collections::BTreeMap;
 use std::io;
 use std::path::PathBuf;
@@ -153,7 +155,10 @@ fn spec(alloc: &AllocationId, probe_descriptors: Vec<ProbeDescriptor>) -> Alloca
             kernel: PathBuf::from("/kernel"),
             rootfs: PathBuf::from("/rootfs"),
         }),
-        resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
+        resources: Resources {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(64 * 1024 * 1024),
+        },
         probe_descriptors,
         transport: None,
         declared_listeners: Vec::new(),

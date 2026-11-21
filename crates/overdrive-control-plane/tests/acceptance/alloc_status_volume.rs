@@ -81,7 +81,7 @@ async fn install_volume_service(state: &AppState) {
     let spec: ServiceSpecInput = serde_json::from_value(json!({
         "id": WORKLOAD,
         "replicas": 1,
-        "resources": {"cpu_milli": 500, "memory_bytes": 134_217_728u64},
+        "resources": {"cpu": "500m", "memory": "128MiB"},
         "vm": {
             "command": "/sbin/init", "args": [], "kernel": "/kernel", "rootfs": "/rootfs",
             "volume": {"size": "40GiB"}

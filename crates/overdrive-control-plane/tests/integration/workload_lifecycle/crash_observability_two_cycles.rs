@@ -25,6 +25,8 @@
     reason = "the required CONTRACT_SHAPE line is an exact repository token"
 )]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -67,7 +69,10 @@ fn crashing_spec(alloc: &AllocationId) -> AllocationSpec {
             kernel: PathBuf::from("/kernel"),
             rootfs: PathBuf::from("/rootfs"),
         }),
-        resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
+        resources: Resources {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(64 * 1024 * 1024),
+        },
         probe_descriptors: Vec::new(),
         transport: None,
     }

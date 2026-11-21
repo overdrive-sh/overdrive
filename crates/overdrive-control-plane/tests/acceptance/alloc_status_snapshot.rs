@@ -19,6 +19,8 @@
 
 #![allow(clippy::expect_used, clippy::expect_fun_call, clippy::unwrap_used)]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -105,7 +107,10 @@ fn sample_spec() -> JobSpecInput {
     JobSpecInput {
         id: sample_job_id_str().to_string(),
         replicas: 1,
-        resources: ResourcesInput { cpu_milli: 500, memory_bytes: 134_217_728 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(500),
+            memory: ByteSize::new(134_217_728),
+        },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/usr/local/bin/payments".to_string(),
@@ -220,8 +225,8 @@ async fn s_as_01_running_snapshot_carries_six_actionable_fields() {
 
     let row = body.rows.first().expect("rows must contain the running alloc");
     assert_eq!(row.state, AllocStateWire::Running);
-    assert_eq!(row.resources.cpu_milli, 500);
-    assert_eq!(row.resources.memory_bytes, 134_217_728);
+    assert_eq!(row.resources.cpu.millis(), 500);
+    assert_eq!(row.resources.memory.bytes(), 134_217_728);
     let last = row.last_transition.as_ref().expect("last_transition populated");
     assert_eq!(last.reason, TransitionReason::Started);
     assert_eq!(last.to, AllocStateWire::Running);
@@ -279,8 +284,14 @@ fn arb_transition_reason() -> impl Strategy<Value = TransitionReason> {
             .prop_map(|by| TransitionReason::Cancelled { by }),
         (any::<u32>(), any::<u64>(), any::<u32>(), any::<u64>()).prop_map(|(rc, rm, fc, fm)| {
             TransitionReason::NoCapacity {
-                requested: ResourceEnvelope { cpu_milli: rc, memory_bytes: rm },
-                free: ResourceEnvelope { cpu_milli: fc, memory_bytes: fm },
+                requested: ResourceEnvelope {
+                    cpu: CpuQuantity::from_millis(rc),
+                    memory: ByteSize::new(rm),
+                },
+                free: ResourceEnvelope {
+                    cpu: CpuQuantity::from_millis(fc),
+                    memory: ByteSize::new(fm),
+                },
             }
         },),
         (any::<u64>(), any::<u64>()).prop_map(|(limit_bytes, oom_kill_count)| {

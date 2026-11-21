@@ -22,6 +22,8 @@
 #![allow(clippy::expect_used)]
 #![allow(clippy::expect_fun_call)]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::any::{TypeId, type_name};
 use std::num::NonZeroU32;
 
@@ -42,7 +44,10 @@ fn job_from_spec_accepts_canonical_input() {
     let spec = JobSpecInput {
         id: "payments".to_string(),
         replicas: 1,
-        resources: ResourcesInput { cpu_milli: 2000, memory_bytes: 4 * 1024 * 1024 * 1024 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(2000),
+            memory: ByteSize::new(4 * 1024 * 1024 * 1024),
+        },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/bin/true".to_string(),
@@ -66,8 +71,8 @@ fn job_from_spec_accepts_canonical_input() {
         NonZeroU32::new(1).expect("static valid replicas"),
         "replicas must round-trip through NonZeroU32"
     );
-    assert_eq!(job.resources.cpu_milli, 2000, "cpu_milli must round-trip");
-    assert_eq!(job.resources.memory_bytes, 4 * 1024 * 1024 * 1024, "memory_bytes must round-trip");
+    assert_eq!(job.resources.cpu.millis(), 2000, "cpu must round-trip");
+    assert_eq!(job.resources.memory.bytes(), 4 * 1024 * 1024 * 1024, "memory must round-trip");
 }
 
 #[test]
@@ -76,8 +81,8 @@ fn node_new_accepts_canonical_input() {
     let spec = NodeSpecInput {
         id: "worker-01".to_string(),
         region: "eu-west-1".to_string(),
-        cpu_milli: 8000,
-        memory_bytes: 16 * 1024 * 1024 * 1024,
+        cpu: CpuQuantity::from_millis(8000),
+        memory: ByteSize::new(16 * 1024 * 1024 * 1024),
     };
 
     // When Ana calls the validating constructor.
@@ -86,8 +91,8 @@ fn node_new_accepts_canonical_input() {
     // Then the Node carries typed newtypes and a `Resources` envelope.
     assert_eq!(node.id, NodeId::new("worker-01").expect("static valid NodeId"));
     assert_eq!(node.region, Region::new("eu-west-1").expect("static valid Region"));
-    assert_eq!(node.capacity.cpu_milli, 8000);
-    assert_eq!(node.capacity.memory_bytes, 16 * 1024 * 1024 * 1024);
+    assert_eq!(node.capacity.cpu.millis(), 8000);
+    assert_eq!(node.capacity.memory.bytes(), 16 * 1024 * 1024 * 1024);
 }
 
 #[test]
@@ -135,7 +140,10 @@ fn job_resources_and_node_capacity_resolve_to_the_same_resources_type() {
     let job = Job::from_submit(JobSpecInput {
         id: "payments".to_string(),
         replicas: 1,
-        resources: ResourcesInput { cpu_milli: 1000, memory_bytes: 1_073_741_824 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(1000),
+            memory: ByteSize::new(1_073_741_824),
+        },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/bin/true".to_string(),
@@ -148,8 +156,8 @@ fn job_resources_and_node_capacity_resolve_to_the_same_resources_type() {
     let node = Node::new(NodeSpecInput {
         id: "worker-01".to_string(),
         region: "eu-west-1".to_string(),
-        cpu_milli: 1000,
-        memory_bytes: 1_073_741_824,
+        cpu: CpuQuantity::from_millis(1000),
+        memory: ByteSize::new(1_073_741_824),
     })
     .expect("canonical Node input");
 
@@ -268,7 +276,10 @@ fn job_public_fields_are_typed_newtypes_not_raw_primitives() {
     let job = Job::from_submit(JobSpecInput {
         id: "payments".to_string(),
         replicas: 1,
-        resources: ResourcesInput { cpu_milli: 1000, memory_bytes: 1_073_741_824 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(1000),
+            memory: ByteSize::new(1_073_741_824),
+        },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/bin/true".to_string(),
@@ -303,8 +314,8 @@ fn node_public_fields_are_typed_newtypes_not_raw_primitives() {
     let node = Node::new(NodeSpecInput {
         id: "worker-01".to_string(),
         region: "eu-west-1".to_string(),
-        cpu_milli: 1000,
-        memory_bytes: 1_073_741_824,
+        cpu: CpuQuantity::from_millis(1000),
+        memory: ByteSize::new(1_073_741_824),
     })
     .expect("canonical input");
 

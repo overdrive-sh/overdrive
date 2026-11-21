@@ -248,7 +248,7 @@ pub fn workload_describe(out: &WorkloadDescribeOutput) -> String {
     // Kind-specific body (the workload-kind-discriminator [D4] design).
     render_kind_aware_body(&mut s, &out.snapshot);
 
-    // Declared memory figure (`[resources] memory_bytes`, the SSOT for VM
+    // Declared memory figure (`[resources] memory`, the SSOT for VM
     // and process size alike). Read from the per-row `resources` the
     // describe handler populates from the workload intent for EVERY kind,
     // so a VM (Job-kind) allocation reports the declared figure identically
@@ -552,9 +552,9 @@ fn render_svid_issue_failure_detail(
     );
 }
 
-/// Append the operator-facing `Memory:` line to `out` IFF the workload's
-/// first allocation row carries a non-zero declared `memory_bytes` — the
-/// `[resources] memory_bytes` single source of truth.
+/// Append the operator-facing `Memory:` and `CPU:` lines to `out` IFF the workload's
+/// first allocation row carries a non-zero declared `memory` — the
+/// `[resources] memory` single source of truth.
 ///
 /// The describe handler populates every row's `resources` from the workload
 /// intent (`handlers` builds `ResourcesBody` from `job.resources` /
@@ -579,11 +579,11 @@ fn render_memory_section(
     let Some(row) = rows.first() else {
         return;
     };
-    let memory_bytes = row.resources.memory_bytes;
-    if memory_bytes == 0 {
+    if row.resources.memory.bytes() == 0 {
         return;
     }
-    let _ = writeln!(out, "Memory:        {memory_bytes}");
+    let _ = writeln!(out, "Memory:        {}", row.resources.memory);
+    let _ = writeln!(out, "CPU:           {}", row.resources.cpu);
 }
 
 /// Append canonical workload addresses, one allocation per line, when present.

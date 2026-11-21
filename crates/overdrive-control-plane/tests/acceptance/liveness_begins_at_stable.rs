@@ -12,6 +12,8 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::too_many_lines)]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::path::PathBuf;
 use std::str::FromStr as _;
 use std::sync::Arc;
@@ -62,7 +64,10 @@ fn spec(alloc: &AllocationId, roles: &[ProbeRole]) -> AllocationSpec {
             kernel: "/kernel".into(),
             rootfs: "/rootfs".into(),
         }),
-        resources: Resources { cpu_milli: 100, memory_bytes: 32 * 1024 * 1024 },
+        resources: Resources {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(32 * 1024 * 1024),
+        },
         probe_descriptors: roles.iter().map(|r| descriptor(*r)).collect(),
         transport: None,
     }

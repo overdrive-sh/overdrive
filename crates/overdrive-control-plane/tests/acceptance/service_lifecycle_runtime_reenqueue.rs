@@ -23,6 +23,8 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::doc_markdown)]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use overdrive_core::observation::{ProbeRunSeq, SameStatusRuns};
 use std::sync::Arc;
 use std::time::Duration;
@@ -244,7 +246,10 @@ async fn service_lifecycle_reenqueues_until_pass_then_emits_stable() {
     let svc = Service::from_submit(ServiceSpecInput {
         id: "payments".to_string(),
         replicas: 1,
-        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(128 * 1024 * 1024),
+        },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/bin/serve".to_string(),

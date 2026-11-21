@@ -5,6 +5,8 @@
 // Contract-shape declarations intentionally use the repository-mandated token.
 #![allow(clippy::doc_markdown, clippy::missing_panics_doc)]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::collections::BTreeMap;
 use std::net::{IpAddr, Ipv4Addr};
 use std::num::NonZeroU32;
@@ -406,7 +408,10 @@ fn service_job(workload_id: &WorkloadId) -> Job {
     Job {
         id: workload_id.clone(),
         replicas: NonZeroU32::new(1).expect("one replica is non-zero"),
-        resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+        resources: Resources {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(128 * 1024 * 1024),
+        },
         driver: WorkloadDriver::Vm(Vm {
             volume: None,
             command: "/bin/serve".to_string(),

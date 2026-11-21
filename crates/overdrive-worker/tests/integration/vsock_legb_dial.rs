@@ -227,6 +227,8 @@ async fn a_marked_dial_to_an_unregistered_tuple_is_refused_and_reaches_no_host_s
 /// a test PKI, and RAII scrubbing of the node-global intercept state.
 /// DISTILL test support, not production API.
 pub(super) mod node {
+    use overdrive_core::byte_size::ByteSize;
+    use overdrive_core::cpu_quantity::CpuQuantity;
     use std::collections::BTreeMap;
     use std::fmt::Display;
     use std::io::{self, Read as _};
@@ -456,7 +458,10 @@ pub(super) mod node {
                 kernel: "/nonexistent/kernel".into(),
                 rootfs: "/nonexistent/rootfs".into(),
             }),
-            resources: Resources { cpu_milli: 50, memory_bytes: 32 * 1024 * 1024 },
+            resources: Resources {
+                cpu: CpuQuantity::from_millis(50),
+                memory: ByteSize::new(32 * 1024 * 1024),
+            },
             probe_descriptors: Vec::new(),
             transport: Some(GuestTransportAssignment::new(
                 addr,

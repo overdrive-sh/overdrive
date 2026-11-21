@@ -3465,6 +3465,8 @@ mod tests {
     //! integration suite; these bodies exercise the worker's owner and drain
     //! invariants through its internal test adapters.
 
+    use overdrive_core::byte_size::ByteSize;
+    use overdrive_core::cpu_quantity::CpuQuantity;
     use std::collections::{BTreeMap, BTreeSet, VecDeque};
     use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream};
     use std::num::NonZeroU16;
@@ -4086,7 +4088,7 @@ mod tests {
                 kernel: PathBuf::from("/nonexistent/kernel"),
                 rootfs: PathBuf::from("/nonexistent/rootfs"),
             }),
-            resources: Resources { cpu_milli: 1, memory_bytes: 1 },
+            resources: Resources { cpu: CpuQuantity::from_millis(1), memory: ByteSize::new(1) },
             probe_descriptors: Vec::new(),
             transport: None,
             declared_listeners: Vec::new(),

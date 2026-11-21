@@ -49,7 +49,6 @@ fn intent_resources(latest: &WorkloadIntentLatest) -> Value {
 /// `memory_bytes = 128 MiB` is `500m` / `128MiB`).
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "the archived resources must read back as canonical strings")]
 fn the_workload_intent_fixture_decodes_unchanged_and_reads_back_canonically() {
     // The frozen V1 fixture of a service with guest listeners is decoded through the current
     // envelope (V1 is up-converted to the latest payload), so old stored bytes are what is checked.
@@ -66,7 +65,6 @@ fn the_workload_intent_fixture_decodes_unchanged_and_reads_back_canonically() {
 /// AC-1.6 / AC-2.6: the parser-side service spec fixture decodes through the current envelope and its
 /// `[resources]` reads back canonically (`100` millicores, 128 MiB). CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "the archived resources must read back as canonical strings")]
 fn the_service_spec_fixture_decodes_unchanged_and_reads_back_canonically() {
     let hex = literal(SERVICE_SPEC_FIXTURES, "FIXTURE_V1_GUEST_LISTENERS");
     let latest = decode_envelope_v_latest::<ServiceSpecEnvelope>(&hex);

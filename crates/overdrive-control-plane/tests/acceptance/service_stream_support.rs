@@ -16,6 +16,8 @@
 #![allow(dead_code)]
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::too_many_lines)]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::net::Ipv4Addr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -128,7 +130,10 @@ pub fn service_spec(id: &str, interval_seconds: u32, max_attempts: u32) -> Servi
     ServiceSpecInput {
         id: id.to_owned(),
         replicas: 1,
-        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(64 * 1024 * 1024),
+        },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/bin/sleep".into(),

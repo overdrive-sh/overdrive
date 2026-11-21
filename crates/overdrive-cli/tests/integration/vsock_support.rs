@@ -309,8 +309,8 @@ impl Lane {
         let args_toml = args.iter().map(|a| format!("\"{a}\"")).collect::<Vec<_>>().join(", ");
         let body = format!(
             "[job]\nid = \"{id}\"\n\n[vm]\ncommand = \"{GUEST_PEER_GUEST_PATH}\"\nargs = [{args_toml}]\n\
-             kernel = \"{}\"\nrootfs = \"{}\"\n\n[resources]\ncpu_milli = 500\n\
-             memory_bytes = {LANE_VM_MEMORY_BYTES}\n",
+             kernel = \"{}\"\nrootfs = \"{}\"\n\n[resources]\ncpu = \"500m\"\n\
+             memory = \"{LANE_VM_MEMORY_BYTES}B\"\n",
             self.kit.kernel_path.display(),
             self.image.rootfs.display(),
         );
@@ -333,7 +333,7 @@ impl Lane {
         let body = format!(
             "[service]\nid = \"{id}\"\nreplicas = 1\n\n[vm]\ncommand = \"{GUEST_PEER_GUEST_PATH}\"\n\
              args = [{args_toml}]\nkernel = \"{}\"\nrootfs = \"{}\"\n\n[resources]\n\
-             cpu_milli = 500\nmemory_bytes = {LANE_VM_MEMORY_BYTES}\n\n[[listener]]\n\
+             cpu = \"500m\"\nmemory = \"{LANE_VM_MEMORY_BYTES}B\"\n\n[[listener]]\n\
              port = {ADMISSION_PORT}\nprotocol = \"tcp\"\n",
             self.kit.kernel_path.display(),
             self.image.rootfs.display(),
@@ -358,8 +358,8 @@ impl Lane {
         let body = format!(
             "[service]\nid = \"{id}\"\nreplicas = 1\n\n[vm]\n\
              command = \"{GUEST_PEER_GUEST_PATH}\"\nargs = [\"v6-peer\", \"{population}\"]\n\
-             kernel = \"{}\"\nrootfs = \"{}\"\n\n[resources]\ncpu_milli = 500\n\
-             memory_bytes = {LANE_VM_MEMORY_BYTES}\n\n{listeners}\
+             kernel = \"{}\"\nrootfs = \"{}\"\n\n[resources]\ncpu = \"500m\"\n\
+             memory = \"{LANE_VM_MEMORY_BYTES}B\"\n\n{listeners}\
              [[health_check.readiness]]\ntype = \"tcp\"\nhost = \"0.0.0.0\"\n\
              port = {V6_TCP_PROBE_PORT}\ninterval_seconds = 1\ntimeout_seconds = 1\n\
              max_attempts = 30\nfailure_threshold = 1\nsuccess_threshold = 1\n\n\
@@ -378,8 +378,8 @@ impl Lane {
             "[service]\nid = \"{id}\"\nreplicas = 1\n\n[vm]\n\
              command = \"{GUEST_PEER_GUEST_PATH}\"\nargs = [\"v6-client\", \"{peer_name}\", \
              \"{peer_vip}\", \"{off_tcp}\", \"{off_udp}\", \"{population}\", \"{tag}\"]\n\
-             kernel = \"{}\"\nrootfs = \"{}\"\n\n[resources]\ncpu_milli = 500\n\
-             memory_bytes = {LANE_VM_MEMORY_BYTES}\n\n[[listener]]\n\
+             kernel = \"{}\"\nrootfs = \"{}\"\n\n[resources]\ncpu = \"500m\"\n\
+             memory = \"{LANE_VM_MEMORY_BYTES}B\"\n\n[[listener]]\n\
              port = {V6_CLIENT_ADMISSION_PORT}\nprotocol = \"tcp\"\n",
             self.kit.kernel_path.display(),
             self.image.rootfs.display(),

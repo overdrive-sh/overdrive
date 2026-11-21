@@ -15,6 +15,8 @@
     reason = "seed diagnostics and exact Contract Shape lines are required acceptance evidence"
 )]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::collections::{BTreeMap, VecDeque};
 use std::io;
 use std::path::Path;
@@ -356,7 +358,10 @@ fn successor_spec(
         alloc: successor.clone(),
         identity: SpiffeId::for_allocation(workload, successor),
         driver: payload(driver_type),
-        resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+        resources: Resources {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(128 * 1024 * 1024),
+        },
         probe_descriptors: Vec::new(),
         transport: None,
     }

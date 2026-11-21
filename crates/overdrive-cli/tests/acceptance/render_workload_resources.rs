@@ -67,7 +67,6 @@ fn has_line(output: &str, line: &str) -> bool {
 /// lines holding the canonical strings (value column at offset 15), not raw bytes or milli-units; a
 /// size declared as `1024MiB` / `2000m` reads back as `1GiB` / `2`. CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "string cpu/memory resources are not accepted yet")]
 fn describe_prints_the_canonical_memory_and_cpu_lines_for_every_kind() {
     for kind in ["Job", "Service", "Schedule"] {
         for (cpu, memory, shown_cpu, shown_memory) in [
@@ -98,7 +97,6 @@ fn describe_prints_the_canonical_memory_and_cpu_lines_for_every_kind() {
 /// (every row of a workload carries the same declared size), under the existing presence guard.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "string cpu/memory resources are not accepted yet")]
 fn describe_prints_the_size_once_for_a_multi_replica_workload() {
     let rows: Vec<Value> = (0..3).map(|_| row("500m", "128MiB")).collect();
     let out = render(snapshot("Service", &rows));
@@ -110,7 +108,6 @@ fn describe_prints_the_size_once_for_a_multi_replica_workload() {
 /// `Memory:`, and a zero CPU renders as its canonical zero form `0` (not blank, not `0m`).
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "string cpu/memory resources are not accepted yet")]
 fn describe_prints_a_zero_cpu_as_the_canonical_zero() {
     for kind in ["Job", "Service", "Schedule"] {
         let out = render(snapshot(kind, &[row("0", "128MiB")]));
@@ -129,7 +126,6 @@ fn describe_prints_a_zero_cpu_as_the_canonical_zero() {
 /// `From<AllocStatusRow>` default before the handler overlays the intent), there is no resolved size to
 /// show, so neither line is printed. CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "string cpu/memory resources are not accepted yet")]
 fn describe_omits_both_size_lines_without_a_resolved_size() {
     let out = render(snapshot("Service", &[]));
     assert!(

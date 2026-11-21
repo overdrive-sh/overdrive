@@ -26,6 +26,8 @@
 // to extract. Allow it at file scope for the fixture surface.
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::too_many_lines)]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -141,7 +143,10 @@ async fn noop_heartbeat_against_converged_target_does_not_re_enqueue() {
     let job = Job::from_submit(JobSpecInput {
         id: "payments".to_string(),
         replicas: 1,
-        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(256 * 1024 * 1024),
+        },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/bin/true".to_string(),
@@ -344,7 +349,10 @@ async fn eval_dispatch_runs_only_the_named_reconciler() {
     let job = Job::from_submit(JobSpecInput {
         id: "payments".to_string(),
         replicas: 1,
-        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(256 * 1024 * 1024),
+        },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/bin/true".to_string(),
@@ -586,7 +594,10 @@ async fn stop_after_failed_alloc_drains_broker() {
     let job = Job::from_submit(JobSpecInput {
         id: "payments".to_string(),
         replicas: 1,
-        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(256 * 1024 * 1024),
+        },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/does/not/exist".to_string(),
@@ -912,7 +923,10 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
     let job = Job::from_submit(JobSpecInput {
         id: "payments".to_string(),
         replicas: 1,
-        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(256 * 1024 * 1024),
+        },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/does/not/exist".to_string(),
@@ -1041,11 +1055,12 @@ async fn runtime_reconcile_is_idempotent_across_simulated_control_plane_restart(
         overdrive_core::aggregate::Node::new(overdrive_core::aggregate::NodeSpecInput {
             id: "local".to_string(),
             region: "local".to_string(),
-            cpu_milli: 4_000,
-            memory_bytes: 8 * 1024 * 1024 * 1024,
+            cpu: CpuQuantity::from_millis(4_000),
+            memory: ByteSize::new(8 * 1024 * 1024 * 1024),
         })
         .expect("baseline node spec");
-    let _ = Resources { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 }; // type used by job spec
+    let _ =
+        Resources { cpu: CpuQuantity::from_millis(100), memory: ByteSize::new(256 * 1024 * 1024) }; // type used by job spec
     nodes.insert(local_node.id.clone(), local_node);
 
     let desired = AnyState::WorkloadLifecycle(WorkloadLifecycleState {
@@ -1248,7 +1263,10 @@ async fn run_one_tick_with_seeded_view(restart_counts_value: u32) -> u64 {
     let job = Job::from_submit(JobSpecInput {
         id: "payments".to_string(),
         replicas: 1,
-        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(256 * 1024 * 1024),
+        },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/bin/true".to_string(),

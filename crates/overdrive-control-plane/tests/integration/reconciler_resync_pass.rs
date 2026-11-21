@@ -33,6 +33,8 @@
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
 )]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::net::Ipv4Addr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -360,7 +362,10 @@ impl Node {
         let spec = SubmitSpecInput::Job(JobSpecInput {
             id: id.to_owned(),
             replicas: 1,
-            resources: ResourcesInput { cpu_milli: 100, memory_bytes: 134_217_728 },
+            resources: ResourcesInput {
+                cpu: CpuQuantity::from_millis(100),
+                memory: ByteSize::new(134_217_728),
+            },
             driver: DriverInput::Vm(VmInput {
                 volume: None,
                 command: "/bin/sleep".to_owned(),
@@ -376,7 +381,10 @@ impl Node {
         let spec = SubmitSpecInput::Service(ServiceSpecInput {
             id: id.to_owned(),
             replicas: 1,
-            resources: ResourcesInput { cpu_milli: 100, memory_bytes: 134_217_728 },
+            resources: ResourcesInput {
+                cpu: CpuQuantity::from_millis(100),
+                memory: ByteSize::new(134_217_728),
+            },
             driver: DriverInput::Vm(VmInput {
                 volume: None,
                 command: "/bin/sleep".to_owned(),

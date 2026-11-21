@@ -24,6 +24,8 @@
 //! `run_server_with_obs_and_driver` composition instead, so its fault can
 //! enter through the required `ServerConfig.mtls_intercept` port.
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -285,7 +287,10 @@ async fn graceful_shutdown_propagates_worker_failure_without_a_retry_capability(
     let spec = SubmitSpecInput::Job(JobSpecInput {
         id: "shutdown-job".to_owned(),
         replicas: 1,
-        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 134_217_728 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(134_217_728),
+        },
         driver: DriverInput::Vm(VmInput {
             volume: None,
             command: "/bin/sleep".to_owned(),
@@ -569,8 +574,8 @@ async fn all_adr_0008_paths_return_200_on_stub_router() {
             "id": "routing-check",
             "replicas": 1,
             "resources": {
-                "cpu_milli": 100,
-                "memory_bytes": 67_108_864_u64,
+                "cpu": "100m",
+                "memory": "64MiB",
             },
             "vm": {
                 "command": "/bin/true",

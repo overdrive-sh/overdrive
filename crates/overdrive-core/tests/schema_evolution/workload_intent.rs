@@ -10,6 +10,8 @@
     reason = "the required per-test CONTRACT_SHAPE declaration is a literal protocol marker"
 )]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::num::{NonZeroU16, NonZeroU32};
 
 use overdrive_core::aggregate::{
@@ -48,7 +50,10 @@ fn job_v1() -> JobV1 {
     JobV1 {
         id: WorkloadId::new("svc-v1-job").expect("valid workload id"),
         replicas: NonZeroU32::new(1).expect("non-zero replicas"),
-        resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
+        resources: Resources {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(64 * 1024 * 1024),
+        },
         driver: vm_v1(COMMAND),
     }
 }
@@ -57,7 +62,10 @@ fn service_v1(startup_probes: Vec<ProbeDescriptor>) -> ServiceV1 {
     ServiceV1 {
         id: WorkloadId::new("svc-v1-service").expect("valid workload id"),
         replicas: NonZeroU32::new(2).expect("non-zero replicas"),
-        resources: Resources { cpu_milli: 500, memory_bytes: 128 * 1024 * 1024 },
+        resources: Resources {
+            cpu: CpuQuantity::from_millis(500),
+            memory: ByteSize::new(128 * 1024 * 1024),
+        },
         driver: vm_v1("/usr/bin/frontend"),
         listeners: vec![Listener {
             port: NonZeroU16::new(8080).expect("non-zero port"),
@@ -75,7 +83,10 @@ fn schedule_v1() -> ScheduleV1 {
         job: JobV1 {
             id: WorkloadId::new("svc-v1-schedule").expect("valid workload id"),
             replicas: NonZeroU32::new(1).expect("non-zero replicas"),
-            resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
+            resources: Resources {
+                cpu: CpuQuantity::from_millis(100),
+                memory: ByteSize::new(64 * 1024 * 1024),
+            },
             driver: vm_v1("/usr/local/bin/cleanup"),
         },
         cron_expr: CronExpr::new("0 2 * * *").expect("valid cron expr"),
@@ -118,7 +129,10 @@ fn job_v2(volume: Option<VmVolume>) -> Job {
     Job {
         id: WorkloadId::new("svc-v1-job").expect("valid workload id"),
         replicas: NonZeroU32::new(1).expect("non-zero replicas"),
-        resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
+        resources: Resources {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(64 * 1024 * 1024),
+        },
         driver: vm_v2(COMMAND, volume),
     }
 }
@@ -127,7 +141,10 @@ fn service_v2(startup_probes: Vec<ProbeDescriptor>) -> Service {
     Service {
         id: WorkloadId::new("svc-v1-service").expect("valid workload id"),
         replicas: NonZeroU32::new(2).expect("non-zero replicas"),
-        resources: Resources { cpu_milli: 500, memory_bytes: 128 * 1024 * 1024 },
+        resources: Resources {
+            cpu: CpuQuantity::from_millis(500),
+            memory: ByteSize::new(128 * 1024 * 1024),
+        },
         driver: vm_v2("/usr/bin/frontend", None),
         listeners: vec![Listener {
             port: NonZeroU16::new(8080).expect("non-zero port"),
@@ -145,7 +162,10 @@ fn schedule_v2() -> Schedule {
         job: Job {
             id: WorkloadId::new("svc-v1-schedule").expect("valid workload id"),
             replicas: NonZeroU32::new(1).expect("non-zero replicas"),
-            resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
+            resources: Resources {
+                cpu: CpuQuantity::from_millis(100),
+                memory: ByteSize::new(64 * 1024 * 1024),
+            },
             driver: vm_v2("/usr/local/bin/cleanup", None),
         },
         cron_expr: CronExpr::new("0 2 * * *").expect("valid cron expr"),

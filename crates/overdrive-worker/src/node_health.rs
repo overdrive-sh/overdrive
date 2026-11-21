@@ -9,6 +9,8 @@
 //! `NodeId` is resolved from the `[node].id` config override, falling
 //! back to `hostname` per ADR-0025.
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::sync::Arc;
 
 use overdrive_core::id::{NodeId, Region};
@@ -116,7 +118,10 @@ impl Default for NodeConfig {
         Self {
             id_override: None,
             region: "local".to_owned(),
-            capacity: overdrive_core::traits::driver::Resources { cpu_milli: 0, memory_bytes: 0 },
+            capacity: overdrive_core::traits::driver::Resources {
+                cpu: CpuQuantity::from_millis(0),
+                memory: ByteSize::new(0),
+            },
         }
     }
 }
@@ -152,6 +157,8 @@ mod tests {
     //! criteria.
 
     use super::*;
+    use overdrive_core::byte_size::ByteSize;
+    use overdrive_core::cpu_quantity::CpuQuantity;
     use overdrive_sim::adapters::clock::SimClock;
     use overdrive_sim::adapters::observation_store::SimObservationStore;
     use std::time::Duration;
@@ -183,7 +190,10 @@ mod tests {
         let config = NodeConfig {
             id_override: Some("explicit-node-id".to_owned()),
             region: "us-west-2".to_owned(),
-            capacity: overdrive_core::traits::driver::Resources { cpu_milli: 0, memory_bytes: 0 },
+            capacity: overdrive_core::traits::driver::Resources {
+                cpu: CpuQuantity::from_millis(0),
+                memory: ByteSize::new(0),
+            },
         };
 
         write_node_health_row(&obs, &config, &clock)
@@ -239,7 +249,10 @@ mod tests {
         let config = NodeConfig {
             id_override: None,
             region: "local".to_owned(),
-            capacity: overdrive_core::traits::driver::Resources { cpu_milli: 0, memory_bytes: 0 },
+            capacity: overdrive_core::traits::driver::Resources {
+                cpu: CpuQuantity::from_millis(0),
+                memory: ByteSize::new(0),
+            },
         };
 
         let expected_hostname_os = hostname::get().expect("hostname syscall succeeds");
@@ -293,7 +306,10 @@ mod tests {
         let config = NodeConfig {
             id_override: Some("wrapper-test-node".to_owned()),
             region: "local".to_owned(),
-            capacity: overdrive_core::traits::driver::Resources { cpu_milli: 0, memory_bytes: 0 },
+            capacity: overdrive_core::traits::driver::Resources {
+                cpu: CpuQuantity::from_millis(0),
+                memory: ByteSize::new(0),
+            },
         };
 
         crate::start_local_node(&obs, &config, &clock)

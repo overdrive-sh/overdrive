@@ -4,8 +4,10 @@
 //! E1 CONVERT row 13 — SimCgroupFs-backed analogue of the pre-refactor
 //! `write_resource_limits_writes_cpu_weight_and_memory_max` inline
 //! tempfile test. Pins both writes and the `cpu_weight_for` delegation:
-//! 100 mCPU → weight 10; `memory_bytes` flows through verbatim.
+//! 100 mCPU → weight 10; `memory` flows through verbatim.
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -24,7 +26,8 @@ async fn write_resource_limits_writes_cpu_weight_and_memory_max() {
         .expect("valid CgroupPath");
     manager.create_workload_scope(&scope).await.expect("create scope");
 
-    let resources = Resources { cpu_milli: 100, memory_bytes: 256 * 1024 * 1024 };
+    let resources =
+        Resources { cpu: CpuQuantity::from_millis(100), memory: ByteSize::new(256 * 1024 * 1024) };
     let result = manager.write_resource_limits(&scope, &resources).await;
     assert!(result.is_ok(), "write_resource_limits must succeed; got {result:?}");
 
@@ -34,7 +37,7 @@ async fn write_resource_limits_writes_cpu_weight_and_memory_max() {
     );
     let (weight_entry, weight_bytes) = snap.get(&weight_path).expect("cpu.weight written");
     assert_eq!(*weight_entry, SimEntry::File);
-    assert_eq!(weight_bytes.as_slice(), b"10\n", "cpu.weight must be cpu_milli/10 = 10");
+    assert_eq!(weight_bytes.as_slice(), b"10\n", "cpu.weight must be cpu/10 = 10");
 
     let memmax_path = PathBuf::from(
         "/sys/fs/cgroup/overdrive.slice/workloads.slice/alloc-limits-0.scope/memory.max",
@@ -44,6 +47,6 @@ async fn write_resource_limits_writes_cpu_weight_and_memory_max() {
     assert_eq!(
         memmax_bytes.as_slice(),
         format!("{}\n", 256 * 1024 * 1024).as_bytes(),
-        "memory.max must equal memory_bytes",
+        "memory.max must equal memory",
     );
 }

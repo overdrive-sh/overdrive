@@ -307,7 +307,7 @@ async fn a_deployed_volume_workload_launches_through_the_composed_volume_pool() 
     std::fs::write(
         &spec,
         format!(
-            "[job]\nid = \"vol-compose\"\n\n[vm]\ncommand = \"/sbin/true\"\nargs = []\nkernel = \"{}\"\nrootfs = \"{}\"\n\n[vm.volume]\nsize = \"1GiB\"\n\n[resources]\ncpu_milli = 500\nmemory_bytes = 134217728\n",
+            "[job]\nid = \"vol-compose\"\n\n[vm]\ncommand = \"/sbin/true\"\nargs = []\nkernel = \"{}\"\nrootfs = \"{}\"\n\n[vm.volume]\nsize = \"1GiB\"\n\n[resources]\ncpu = '500m'\nmemory = '128MiB'\n",
             fixture.kernel_path.display(),
             fixture.rootfs_path.display(),
         ),

@@ -151,6 +151,8 @@
     clippy::similar_names
 )]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::collections::BTreeSet;
 use std::net::SocketAddr;
 use std::os::unix::fs::PermissionsExt;
@@ -298,8 +300,8 @@ fn stage_plain_rootfs_copy(tmp: &Path, fixture: &VmFixture) -> PathBuf {
 fn vm_job_toml(id: &str, command: &str, kernel: &Path, rootfs: &Path) -> String {
     format!(
         "[job]\nid = \"{id}\"\n\n[vm]\ncommand = \"{command}\"\nargs = []\n\
-         kernel = \"{}\"\nrootfs = \"{}\"\n\n[resources]\ncpu_milli = 500\n\
-         memory_bytes = 134217728\n",
+         kernel = \"{}\"\nrootfs = \"{}\"\n\n[resources]\ncpu = '500m'\n\
+         memory = '128MiB'\n",
         kernel.display(),
         rootfs.display(),
     )
@@ -1935,7 +1937,7 @@ fn allocation_ownership_service_toml(id: &str, kernel: &Path, rootfs: &Path) -> 
     format!(
         "[service]\nid = \"{id}\"\nreplicas = 1\n\n[[listener]]\nport = 18081\nprotocol = \"tcp\"\n\n\
          [vm]\ncommand = \"/sbin/spin\"\nargs = []\nkernel = \"{}\"\nrootfs = \"{}\"\n\n\
-         [resources]\ncpu_milli = 500\nmemory_bytes = 134217728\n\n\
+         [resources]\ncpu = '500m'\nmemory = '128MiB'\n\n\
          [[health_check.startup]]\ntype = \"tcp\"\nhost = \"0.0.0.0\"\nport = 18081\n\
          interval_seconds = 1\ntimeout_seconds = 1\nmax_attempts = 3\n",
         kernel.display(),
@@ -3494,7 +3496,7 @@ fn native_service_toml(id: &str, kernel: &Path, rootfs: &Path) -> String {
     format!(
         "[service]\nid = \"{id}\"\nreplicas = 1\n\n[[listener]]\nport = 18081\nprotocol = \"tcp\"\n\n\
          [vm]\ncommand = \"/bin/sh\"\nargs = [\"-c\", \"trap 'exit 0' TERM; /opt/overdrive/examples/svm/e08-server & child=$!; trap 'kill -TERM $child 2>/dev/null || true; wait $child || true; exit 0' TERM; wait $child\"]\n\
-         kernel = \"{}\"\nrootfs = \"{}\"\n\n[resources]\ncpu_milli = 500\nmemory_bytes = 134217728\n\n\
+         kernel = \"{}\"\nrootfs = \"{}\"\n\n[resources]\ncpu = '500m'\nmemory = '128MiB'\n\n\
          [[health_check.startup]]\ntype = \"tcp\"\nhost = \"0.0.0.0\"\nport = 18081\ninterval_seconds = 1\ntimeout_seconds = 1\nmax_attempts = 30\n",
         kernel.display(),
         rootfs.display(),
@@ -3937,8 +3939,8 @@ struct NativeBenchmarkFixture {
     cloud_hypervisor_sha256: String,
     cloud_hypervisor_version: String,
     cache_state: &'static str,
-    cpu_milli: u64,
-    memory_bytes: u64,
+    cpu: CpuQuantity,
+    memory: ByteSize,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -4688,8 +4690,8 @@ fn native_benchmark_report_retains_synthetic_ledger_and_replaces_atomically() {
         cloud_hypervisor_sha256: "cloud-hypervisor-sha256".to_owned(),
         cloud_hypervisor_version: "v53.0".to_owned(),
         cache_state: "warm-pre-read",
-        cpu_milli: 500,
-        memory_bytes: 134_217_728,
+        cpu: CpuQuantity::from_millis(500),
+        memory: ByteSize::new(134_217_728),
     };
     let report = build_native_benchmark_report(
         origin,
@@ -5234,11 +5236,11 @@ async fn native_lifecycle_profiles_meet_stage_targets_without_dropping_trials() 
         cloud_hypervisor_sha256: cloud_hypervisor_sha256.clone(),
         cloud_hypervisor_version: fixture.cloud_hypervisor_version.trim().to_owned(),
         cache_state: "warm-pre-read",
-        cpu_milli: 500,
-        memory_bytes: 134_217_728,
+        cpu: CpuQuantity::from_millis(500),
+        memory: ByteSize::new(134_217_728),
     };
     eprintln!(
-        "S-VLL-11 fixture: source_sha256={} product_version={} in_process_binary_sha256={} kernel_sha256={} rootfs_sha256={} rootfs_size={} guest_init_sha256={} cooperative_server_sha256={} cloud_hypervisor_sha256={} cloud_hypervisor={} cpu={cpu_model:?} ram={memory_total:?} host_kernel={host_kernel:?} cache=warm-pre-read cpu_milli=500 memory_bytes=134217728",
+        "S-VLL-11 fixture: source_sha256={} product_version={} in_process_binary_sha256={} kernel_sha256={} rootfs_sha256={} rootfs_size={} guest_init_sha256={} cooperative_server_sha256={} cloud_hypervisor_sha256={} cloud_hypervisor={} cpu={cpu_model:?} ram={memory_total:?} host_kernel={host_kernel:?} cache=warm-pre-read cpu = '500m' memory = '128MiB'",
         source_sha256,
         env!("CARGO_PKG_VERSION"),
         in_process_binary_sha256,

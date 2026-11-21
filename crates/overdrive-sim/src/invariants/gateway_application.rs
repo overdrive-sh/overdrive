@@ -45,6 +45,8 @@
     reason = "long owner-driving evaluators; doc comments name pinned identifiers"
 )]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::collections::BTreeMap;
 use std::io::Read as _;
 use std::net::{Ipv4Addr, SocketAddrV4, TcpStream};
@@ -716,7 +718,10 @@ async fn persist_api_service(
     let service = Service::from_submit(ServiceSpecInput {
         id: "api".to_owned(),
         replicas: 1,
-        resources: ResourcesInput { cpu_milli: 10, memory_bytes: 16 * 1024 * 1024 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(10),
+            memory: ByteSize::new(16 * 1024 * 1024),
+        },
         driver: DriverInput::Vm(VmInput {
             volume: None,
             command: "/bin/true".to_owned(),

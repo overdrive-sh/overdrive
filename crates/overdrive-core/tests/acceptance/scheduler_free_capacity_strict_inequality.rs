@@ -9,7 +9,7 @@
 //!
 //! Mutations covered:
 //!
-//!   - `scheduler.rs` `free.cpu_milli > max_free.cpu_milli` (`>` →
+//!   - `scheduler.rs` `free.cpu.millis() > max_free.cpu.millis()` (`>` →
 //!     `>=`) — this drives the `max_free` running maximum across
 //!     nodes, surfaced in `PlacementError::NoCapacity { max_free }`.
 //!     Under `>=`, the comparison is non-strict and the running
@@ -46,6 +46,8 @@
 
 #![allow(clippy::expect_used)]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::collections::BTreeMap;
 
 use overdrive_core::scheduler::{PlacementError, schedule};
@@ -137,7 +139,8 @@ fn free_capacity_includes_running_allocs_on_same_node() {
         panic!("expected NoCapacity, got {result:?}");
     };
     assert_eq!(
-        max_free.cpu_milli, 500,
+        max_free.cpu.millis(),
+        500,
         "Running alloc on same node reserves (1000, 1 GiB) → free.cpu = 500",
     );
 }
@@ -181,8 +184,17 @@ fn no_capacity_max_free_reflects_largest_per_component_across_nodes() {
     };
     assert_eq!(
         max_free,
-        Resources { cpu_milli: 2000, memory_bytes: 4 * 1024 * 1024 * 1024 },
+        Resources {
+            cpu: CpuQuantity::from_millis(2000),
+            memory: ByteSize::new(4 * 1024 * 1024 * 1024)
+        },
         "max_free must reflect per-component max across nodes",
     );
-    assert_eq!(needed, Resources { cpu_milli: 5_000, memory_bytes: 10 * 1024 * 1024 * 1024 });
+    assert_eq!(
+        needed,
+        Resources {
+            cpu: CpuQuantity::from_millis(5_000),
+            memory: ByteSize::new(10 * 1024 * 1024 * 1024)
+        }
+    );
 }

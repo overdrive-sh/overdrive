@@ -72,6 +72,8 @@
     reason = "CONTRACT_SHAPE metadata, long scenario bodies and fixture preconditions"
 )]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{Ipv4Addr, SocketAddrV4};
 use std::num::{NonZeroU64, NonZeroUsize};
@@ -980,7 +982,10 @@ async fn persist_api_service(intent: &LocalIntentStore, vip: Ipv4Addr) -> Arc<Si
     let service = Service::from_submit(ServiceSpecInput {
         id: "api".to_owned(),
         replicas: 1,
-        resources: ResourcesInput { cpu_milli: 10, memory_bytes: 16 * 1024 * 1024 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(10),
+            memory: ByteSize::new(16 * 1024 * 1024),
+        },
         driver: DriverInput::Vm(VmInput {
             volume: None,
             command: "/bin/true".to_owned(),

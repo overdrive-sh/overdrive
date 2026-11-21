@@ -10,7 +10,9 @@ use overdrive_core::aggregate::{
     WorkloadSpecInput,
 };
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
+use overdrive_core::byte_size::ByteSize;
 use overdrive_core::codec::VersionedEnvelope;
+use overdrive_core::cpu_quantity::CpuQuantity;
 
 const VM_SERVICE: &str = r#"
 [service]
@@ -22,8 +24,8 @@ args = []
 kernel = "/kernel"
 rootfs = "/rootfs"
 [resources]
-cpu_milli = 100
-memory_bytes = 1048576
+cpu = '100m'
+memory = '1MiB'
 [[listener]]
 port = 8080
 protocol = "tcp"
@@ -34,8 +36,8 @@ fn vm_input() -> ServiceSpecInput {
         id: "vm-service".to_owned(),
         replicas: 1,
         resources: overdrive_core::aggregate::ResourcesInput {
-            cpu_milli: 100,
-            memory_bytes: 1_048_576,
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(1_048_576),
         },
         driver: DriverInput::Vm(VmInput {
             volume: None,

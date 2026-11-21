@@ -9,6 +9,8 @@
 
 #![allow(clippy::doc_markdown, reason = "the exact CONTRACT_SHAPE marker is repository-mandated")]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::collections::BTreeMap;
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -77,9 +79,11 @@ fn own_row_count_strategy() -> impl Strategy<Value = usize> {
 /// isolates the attachment boundary from CPU/memory.
 fn resources_strategy() -> impl Strategy<Value = Resources> {
     prop_oneof![
-        Just(Resources { cpu_milli: 0, memory_bytes: 0 }),
-        (0_u32..=8_000, 0_u64..=(16 << 30))
-            .prop_map(|(cpu_milli, memory_bytes)| Resources { cpu_milli, memory_bytes }),
+        Just(Resources { cpu: CpuQuantity::from_millis(0), memory: ByteSize::new(0) }),
+        (0_u32..=8_000, 0_u64..=(16 << 30)).prop_map(|(millicores, memory_size)| Resources {
+            cpu: CpuQuantity::from_millis(millicores),
+            memory: ByteSize::new(memory_size)
+        }),
     ]
 }
 
@@ -94,16 +98,17 @@ fn cpu_memory_decision(
     needed: &Resources,
 ) -> Result<NodeId, PlacementError> {
     let rows = u64::try_from(own_running_rows).expect("row count fits u64");
-    let cpu_left = u64::from(node.capacity.cpu_milli)
-        .saturating_sub(u64::from(needed.cpu_milli).saturating_mul(rows));
+    let cpu_left = u64::from(node.capacity.cpu.millis())
+        .saturating_sub(u64::from(needed.cpu.millis()).saturating_mul(rows));
     let free = Resources {
-        cpu_milli: u32::try_from(cpu_left).expect("remaining CPU never exceeds the node's u32"),
-        memory_bytes: node
-            .capacity
-            .memory_bytes
-            .saturating_sub(needed.memory_bytes.saturating_mul(rows)),
+        cpu: CpuQuantity::from_millis(
+            u32::try_from(cpu_left).expect("remaining CPU never exceeds the node's u32"),
+        ),
+        memory: ByteSize::new(
+            node.capacity.memory.bytes().saturating_sub(needed.memory.bytes().saturating_mul(rows)),
+        ),
     };
-    if free.cpu_milli >= needed.cpu_milli && free.memory_bytes >= needed.memory_bytes {
+    if free.cpu.millis() >= needed.cpu.millis() && free.memory.bytes() >= needed.memory.bytes() {
         Ok(node.id.clone())
     } else {
         Err(PlacementError::NoCapacity { needed: *needed, max_free: free })

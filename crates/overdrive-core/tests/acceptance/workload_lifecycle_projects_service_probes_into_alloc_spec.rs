@@ -26,6 +26,8 @@
 #![allow(clippy::expect_used)]
 #![allow(clippy::doc_markdown)]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::collections::BTreeMap;
 use std::num::NonZeroU32;
 use std::time::{Duration, Instant};
@@ -71,7 +73,10 @@ fn make_node(id: &str) -> Node {
     Node {
         id: nid(id),
         region: local_region(),
-        capacity: Resources { cpu_milli: 4_000, memory_bytes: 8 * 1024 * 1024 * 1024 },
+        capacity: Resources {
+            cpu: CpuQuantity::from_millis(4_000),
+            memory: ByteSize::new(8 * 1024 * 1024 * 1024),
+        },
     }
 }
 
@@ -79,7 +84,10 @@ fn make_job(id: &str) -> Job {
     Job {
         id: jid(id),
         replicas: NonZeroU32::new(1).expect("1 is non-zero"),
-        resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+        resources: Resources {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(128 * 1024 * 1024),
+        },
         driver: WorkloadDriver::Vm(Vm {
             volume: None,
             command: "/bin/serve".to_string(),
@@ -414,7 +422,10 @@ fn at_04_canonical_role_order_startup_readiness_liveness_is_preserved() {
     let input = ServiceSpecInput {
         id: "svc".to_string(),
         replicas: 1,
-        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(128 * 1024 * 1024),
+        },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/bin/serve".to_string(),

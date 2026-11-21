@@ -21,6 +21,8 @@
 //! witness is `outcome` + `spec_digest`, not `commit_index`. See
 //! `redesign-drop-commit-index/design/upstream-changes.md` §7.
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -103,7 +105,10 @@ fn payments_spec() -> JobSpecInput {
     JobSpecInput {
         id: "payments".to_owned(),
         replicas: 3,
-        resources: ResourcesInput { cpu_milli: 500, memory_bytes: 536_870_912 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(500),
+            memory: ByteSize::new(536_870_912),
+        },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/bin/true".to_string(),
@@ -118,7 +123,10 @@ fn payments_spec_alt_replicas() -> JobSpecInput {
     JobSpecInput {
         id: "payments".to_owned(),
         replicas: 7,
-        resources: ResourcesInput { cpu_milli: 500, memory_bytes: 536_870_912 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(500),
+            memory: ByteSize::new(536_870_912),
+        },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/bin/true".to_string(),

@@ -154,6 +154,8 @@
     reason = "seeded proof harness: fixture preconditions fail loudly, the verdict table is the evidence"
 )]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use overdrive_core::guest_transport::GuestFlowPorts;
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::Ipv4Addr;
@@ -239,7 +241,7 @@ const POOL_GATEWAY: Ipv4Addr = Ipv4Addr::new(100, 95, 0, 1);
 /// (`workload_lifecycle::baseline_nodes_phase1`).
 const NODE: &str = "local";
 /// Per-workload memory demand; see `SimNode::operator_deploys`.
-const DEMAND_MEMORY_BYTES: u64 = 256 * 1024;
+const DEMAND_MEMORY_BYTES: u64 = 1024 * 1024;
 const SEED_ENV: &str = "OVERDRIVE_ND295_ADMISSION_SEED";
 /// `186055177052160001` and `295032`, the two seeds the recovery run recorded
 /// (TS S-ND295-05D).
@@ -1041,7 +1043,10 @@ impl SimNode {
         let job = Job::from_submit(JobSpecInput {
             id: workload.to_owned(),
             replicas: 1,
-            resources: ResourcesInput { cpu_milli: 0, memory_bytes: DEMAND_MEMORY_BYTES },
+            resources: ResourcesInput {
+                cpu: CpuQuantity::from_millis(0),
+                memory: ByteSize::new(DEMAND_MEMORY_BYTES),
+            },
             driver: DriverInput::Vm(VmInput {
                 volume: None,
                 command: "/bin/sleep".to_owned(),
@@ -1080,7 +1085,10 @@ impl SimNode {
         let service = Service::from_submit(ServiceSpecInput {
             id: workload.to_owned(),
             replicas: 1,
-            resources: ResourcesInput { cpu_milli: 0, memory_bytes: DEMAND_MEMORY_BYTES },
+            resources: ResourcesInput {
+                cpu: CpuQuantity::from_millis(0),
+                memory: ByteSize::new(DEMAND_MEMORY_BYTES),
+            },
             driver: DriverInput::Vm(VmInput {
                 volume: None,
                 command: "/bin/sleep".to_owned(),

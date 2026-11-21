@@ -27,6 +27,8 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -51,6 +53,8 @@ use overdrive_store_local::LocalIntentStore;
 use tempfile::TempDir;
 
 use overdrive_testing::placement;
+
+const DECLARED_MEMORY: ByteSize = ByteSize::new(128 * 1024 * 1024);
 
 placement!(host_pure);
 
@@ -122,7 +126,7 @@ async fn service_workload_convergence_emits_start_allocation_and_running_row() {
     let svc = overdrive_core::aggregate::Service::from_submit(ServiceSpecInput {
         id: "web-frontend".to_string(),
         replicas: 1,
-        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+        resources: ResourcesInput { cpu: CpuQuantity::from_millis(100), memory: DECLARED_MEMORY },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/bin/serve".to_string(),

@@ -63,6 +63,8 @@
     reason = "a conformance driver asserts its own preconditions; CONTRACT_SHAPE lines are machine-read"
 )]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
 use std::sync::Arc;
@@ -414,7 +416,10 @@ impl FlowsBeaconDriver {
                 kernel: self.tmp.path().join("vmlinuz"),
                 rootfs: self.tmp.path().join("master.img"),
             }),
-            resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+            resources: Resources {
+                cpu: CpuQuantity::from_millis(100),
+                memory: ByteSize::new(128 * 1024 * 1024),
+            },
             probe_descriptors: Vec::new(),
             transport: Some(GuestTransportAssignment::new(
                 Ipv4Addr::new(100, 95, 0, 2),

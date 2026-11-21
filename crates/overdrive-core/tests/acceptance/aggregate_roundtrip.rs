@@ -25,6 +25,8 @@ use overdrive_core::aggregate::{
     Allocation, AllocationSpecInput, DriverInput, Job, JobSpecInput, Node, NodeSpecInput,
     ResourcesInput,
 };
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use overdrive_core::id::ContentHash;
 use proptest::prelude::*;
 use rkyv::rancor;
@@ -37,7 +39,10 @@ fn sample_job() -> Job {
     Job::from_submit(JobSpecInput {
         id: "payments".to_owned(),
         replicas: 3,
-        resources: ResourcesInput { cpu_milli: 1500, memory_bytes: 512 * 1024 * 1024 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(1500),
+            memory: ByteSize::new(512 * 1024 * 1024),
+        },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/opt/payments/bin/payments-server".to_string(),
@@ -53,8 +58,8 @@ fn sample_node() -> Node {
     Node::new(NodeSpecInput {
         id: "worker-01".to_owned(),
         region: "eu-west-1".to_owned(),
-        cpu_milli: 8000,
-        memory_bytes: 16 * 1024 * 1024 * 1024,
+        cpu: CpuQuantity::from_millis(8000),
+        memory: ByteSize::new(16 * 1024 * 1024 * 1024),
     })
     .expect("canonical NodeSpecInput constructs a Node")
 }
@@ -314,12 +319,15 @@ fn valid_region() -> impl Strategy<Value = String> {
 
 /// An arbitrary valid `Job`.
 fn arb_job() -> impl Strategy<Value = Job> {
-    (valid_label(), 1u32..=1024, 0u32..=64_000, 1u64..=(128 * 1024 * 1024 * 1024)).prop_map(
-        |(id, replicas, cpu_milli, memory_bytes)| {
+    (valid_label(), 1u32..=1024, 0u32..=64_000, 1u64..=(128 * 1024)).prop_map(
+        |(id, replicas, millicores, memory_mib)| {
             Job::from_submit(JobSpecInput {
                 id,
                 replicas,
-                resources: ResourcesInput { cpu_milli, memory_bytes },
+                resources: ResourcesInput {
+                    cpu: CpuQuantity::from_millis(millicores),
+                    memory: ByteSize::new(memory_mib * 1024 * 1024),
+                },
                 driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
                     volume: None,
                     command: "/bin/true".to_string(),
@@ -336,9 +344,14 @@ fn arb_job() -> impl Strategy<Value = Job> {
 /// An arbitrary valid `Node`.
 fn arb_node() -> impl Strategy<Value = Node> {
     (valid_label(), valid_region(), 0u32..=128_000, 1u64..=(1024 * 1024 * 1024 * 1024)).prop_map(
-        |(id, region, cpu_milli, memory_bytes)| {
-            Node::new(NodeSpecInput { id, region, cpu_milli, memory_bytes })
-                .expect("generator yields valid Node")
+        |(id, region, millicores, memory_size)| {
+            Node::new(NodeSpecInput {
+                id,
+                region,
+                cpu: CpuQuantity::from_millis(millicores),
+                memory: ByteSize::new(memory_size),
+            })
+            .expect("generator yields valid Node")
         },
     )
 }

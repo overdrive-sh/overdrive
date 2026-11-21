@@ -44,6 +44,8 @@ mod svid;
 mod vm_reclaim;
 mod workload;
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::collections::BTreeSet;
 use std::net::Ipv4Addr;
 use std::str::FromStr;
@@ -298,7 +300,10 @@ impl Composed {
         let job = Job::from_submit(JobSpecInput {
             id: id.to_owned(),
             replicas: 1,
-            resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+            resources: ResourcesInput {
+                cpu: CpuQuantity::from_millis(100),
+                memory: ByteSize::new(128 * 1024 * 1024),
+            },
             driver: DriverInput::Vm(VmInput {
                 volume: None,
                 command: "/bin/sleep".to_owned(),
@@ -318,7 +323,10 @@ impl Composed {
         let svc = Service::from_submit(ServiceSpecInput {
             id: id.to_owned(),
             replicas: 1,
-            resources: ResourcesInput { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+            resources: ResourcesInput {
+                cpu: CpuQuantity::from_millis(100),
+                memory: ByteSize::new(128 * 1024 * 1024),
+            },
             driver: DriverInput::Vm(VmInput {
                 volume: None,
                 command: "/bin/serve".to_owned(),

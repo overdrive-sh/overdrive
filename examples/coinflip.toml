@@ -11,5 +11,5 @@ kernel = "/srv/vm/overdrive-testing/coinflip/kernel"
 rootfs = "/srv/vm/overdrive-testing/coinflip/rootfs.ext4"
 
 [resources]
-cpu_milli = 100
-memory_bytes = 67108864
+cpu = "100m"
+memory = "64MiB"

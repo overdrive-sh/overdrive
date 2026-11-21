@@ -172,6 +172,8 @@ pub enum ConvergeError {
 #[cfg(test)]
 #[allow(clippy::expect_used, clippy::unwrap_used)]
 mod tests {
+    use overdrive_core::byte_size::ByteSize;
+    use overdrive_core::cpu_quantity::CpuQuantity;
     use std::sync::Arc;
 
     use overdrive_core::id::NodeId;
@@ -298,14 +300,17 @@ mod tests {
         let node = Node::new(NodeSpecInput {
             id: "local".to_owned(),
             region: "test".to_owned(),
-            cpu_milli: 1_000,
-            memory_bytes: 1 << 30,
+            cpu: CpuQuantity::from_millis(1_000),
+            memory: ByteSize::new(1 << 30),
         })
         .expect("valid node");
         let job = Job {
             id: workload_id.clone(),
             replicas: NonZeroU32::new(1).expect("nonzero"),
-            resources: Resources { cpu_milli: 500, memory_bytes: 134_217_728 },
+            resources: Resources {
+                cpu: CpuQuantity::from_millis(500),
+                memory: ByteSize::new(134_217_728),
+            },
             driver: WorkloadDriver::Vm(Vm {
                 volume: None,
                 command: "/sbin/init".to_owned(),
@@ -496,7 +501,10 @@ mod tests {
         let job = Job {
             id: workload_id.clone(),
             replicas: std::num::NonZeroU32::new(1).expect("nonzero"),
-            resources: Resources { cpu_milli: 500, memory_bytes: 134_217_728 },
+            resources: Resources {
+                cpu: CpuQuantity::from_millis(500),
+                memory: ByteSize::new(134_217_728),
+            },
             driver: WorkloadDriver::Vm(Vm {
                 volume: None,
                 command: "/sbin/init".to_owned(),
@@ -664,6 +672,8 @@ mod tests {
     reason = "test fixtures assert their preconditions; the fixture items are shared with sibling test modules"
 )]
 pub(crate) mod sim_vm_host {
+    use overdrive_core::byte_size::ByteSize;
+    use overdrive_core::cpu_quantity::CpuQuantity;
     use std::collections::{BTreeMap, BTreeSet};
     use std::net::Ipv4Addr;
     use std::path::{Path, PathBuf};
@@ -1006,7 +1016,10 @@ pub(crate) mod sim_vm_host {
                 kernel: root.join("vmlinuz"),
                 rootfs: root.join("master.img"),
             }),
-            resources: Resources { cpu_milli: 100, memory_bytes: 128 * 1024 * 1024 },
+            resources: Resources {
+                cpu: CpuQuantity::from_millis(100),
+                memory: ByteSize::new(128 * 1024 * 1024),
+            },
             probe_descriptors: Vec::new(),
             transport: Some(plan.assignment().clone()),
         }

@@ -29,6 +29,8 @@ use std::num::NonZeroU16;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::byte_size::ByteSize;
+use crate::cpu_quantity::CpuQuantity;
 use crate::dataplane::backend_key::Proto;
 use crate::guest_transport::{GUEST_PROBE_SLOTS, guest_reserved_ports};
 
@@ -601,8 +603,12 @@ impl DriverInput {
 )]
 #[serde(deny_unknown_fields)]
 pub struct ResourcesInput {
-    pub cpu_milli: u32,
-    pub memory_bytes: u64,
+    /// CPU quantity: `500m`, `0.5` or `2`.
+    #[schema(value_type = String, example = "500m")]
+    pub cpu: CpuQuantity,
+    /// Memory size: `<digits><unit>` over `B`, `KiB`, `MiB`, `GiB`, `TiB`.
+    #[schema(value_type = String, example = "128MiB")]
+    pub memory: ByteSize,
 }
 
 // ---------------------------------------------------------------------------

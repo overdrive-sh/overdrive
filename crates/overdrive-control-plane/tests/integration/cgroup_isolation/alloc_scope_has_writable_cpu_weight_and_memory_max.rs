@@ -30,6 +30,8 @@
 
 #![cfg(target_os = "linux")]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
@@ -137,7 +139,7 @@ impl Drop for ScopeCleanup {
 }
 
 /// AC2 — boots both inits against real `/sys/fs/cgroup`, drives
-/// `CgroupManager` for an alloc with `cpu_milli=2000, memory_bytes=128MiB`,
+/// `CgroupManager` for an alloc with `cpu=2000, memory=128MiB`,
 /// asserts `cpu.weight=200` AND `memory.max=
 /// 134217728`. With the production fix in place, the per-alloc
 /// resource-limit writes succeed because `overdrive.slice` and
@@ -160,7 +162,10 @@ async fn alloc_scope_has_writable_cpu_weight_and_memory_max() {
     let alloc = AllocationId::new("alloc-subtree-control-regression").expect("valid AllocationId");
     let _cleanup = ScopeCleanup { cgroup_root: cgroup_root.to_path_buf(), alloc: alloc.clone() };
     let scope = CgroupPath::for_alloc(&alloc);
-    let resources = Resources { cpu_milli: 2_000, memory_bytes: 128 * 1024 * 1024 };
+    let resources = Resources {
+        cpu: CpuQuantity::from_millis(2_000),
+        memory: ByteSize::new(128 * 1024 * 1024),
+    };
 
     manager.create_workload_scope(&scope).await.expect("alloc scope creation succeeds");
     manager
@@ -173,7 +178,7 @@ async fn alloc_scope_has_writable_cpu_weight_and_memory_max() {
         .expect("cpu.weight readable")
         .trim()
         .to_owned();
-    assert_eq!(cpu_weight, "200", "cpu_milli=2000 must produce cpu.weight=200");
+    assert_eq!(cpu_weight, "200", "cpu = '2' must produce cpu.weight=200");
     let memory_max = std::fs::read_to_string(scope_dir.join("memory.max"))
         .expect("memory.max readable")
         .trim()
@@ -181,7 +186,7 @@ async fn alloc_scope_has_writable_cpu_weight_and_memory_max() {
     assert_eq!(
         memory_max,
         format!("{}", 128_u64 * 1024 * 1024),
-        "memory.max must match the spec's memory_bytes",
+        "memory.max must match the spec's memory",
     );
 
     manager.remove_workload_scope(&scope).await.expect("alloc scope removal succeeds");
@@ -218,7 +223,10 @@ async fn alloc_start_does_not_emit_resource_limit_warning() {
         AllocationId::new("alloc-subtree-control-warn-regression").expect("valid AllocationId");
     let _cleanup = ScopeCleanup { cgroup_root: cgroup_root.to_path_buf(), alloc: alloc.clone() };
     let scope = CgroupPath::for_alloc(&alloc);
-    let resources = Resources { cpu_milli: 2_000, memory_bytes: 128 * 1024 * 1024 };
+    let resources = Resources {
+        cpu: CpuQuantity::from_millis(2_000),
+        memory: ByteSize::new(128 * 1024 * 1024),
+    };
 
     manager.create_workload_scope(&scope).await.expect("alloc scope creation succeeds");
     manager.write_resource_limits_warn_on_error(&scope, &resources).await;

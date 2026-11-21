@@ -13,6 +13,8 @@
 
 #![allow(clippy::doc_markdown, clippy::expect_used, clippy::missing_panics_doc)]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::collections::BTreeMap;
 use std::num::NonZeroU32;
 use std::time::{Duration, Instant};
@@ -52,7 +54,10 @@ impl ComposedDriver {
         Job {
             id: wid(workload),
             replicas: NonZeroU32::new(1).expect("one replica"),
-            resources: Resources { cpu_milli: 500, memory_bytes: 128 * 1024 * 1024 },
+            resources: Resources {
+                cpu: CpuQuantity::from_millis(500),
+                memory: ByteSize::new(128 * 1024 * 1024),
+            },
             driver,
         }
     }
@@ -92,7 +97,10 @@ fn node() -> Node {
     Node {
         id: nid("local"),
         region: Region::new("local").expect("valid region"),
-        capacity: Resources { cpu_milli: 4_000, memory_bytes: 8 * 1024 * 1024 * 1024 },
+        capacity: Resources {
+            cpu: CpuQuantity::from_millis(4_000),
+            memory: ByteSize::new(8 * 1024 * 1024 * 1024),
+        },
     }
 }
 

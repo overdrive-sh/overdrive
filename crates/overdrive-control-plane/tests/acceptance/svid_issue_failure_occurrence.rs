@@ -29,6 +29,8 @@
     reason = "CONTRACT_SHAPE is required scenario metadata; fixture preconditions panic with their cause"
 )]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -229,7 +231,10 @@ impl World {
         let job = Job::from_submit(JobSpecInput {
             id: WORKLOAD_NAME.to_owned(),
             replicas: 1,
-            resources: ResourcesInput { cpu_milli: 500, memory_bytes: 134_217_728 },
+            resources: ResourcesInput {
+                cpu: CpuQuantity::from_millis(500),
+                memory: ByteSize::new(134_217_728),
+            },
             driver: DriverInput::Vm(VmInput {
                 volume: None,
                 command: "/bin/true".to_owned(),

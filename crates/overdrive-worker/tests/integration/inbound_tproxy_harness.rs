@@ -20,6 +20,8 @@
     reason = "Test harness; skip messages + evidence go to stderr; fixture preconditions must panic with informative messages"
 )]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
 use std::num::NonZeroU16;
@@ -169,7 +171,10 @@ pub fn build_inbound_spec(
                 rootfs: "/nonexistent/rootfs".into(),
             },
         ),
-        resources: Resources { cpu_milli: 50, memory_bytes: 32 * 1024 * 1024 },
+        resources: Resources {
+            cpu: CpuQuantity::from_millis(50),
+            memory: ByteSize::new(32 * 1024 * 1024),
+        },
         probe_descriptors: Vec::new(),
         transport: workload_addr.map(|address| {
             let [_, _, high, low] = address.octets();

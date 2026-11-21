@@ -10,6 +10,8 @@
     reason = "repository-required Contract Shape metadata and domain type names"
 )]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::num::{NonZeroU16, NonZeroU32};
@@ -64,7 +66,10 @@ fn service_with_ports(ports: &[NonZeroU16]) -> Service {
     Service {
         id: workload_id(),
         replicas: NonZeroU32::new(1).expect("1 is non-zero"),
-        resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
+        resources: Resources {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(64 * 1024 * 1024),
+        },
         driver: WorkloadDriver::Vm(Vm {
             volume: None,
             command: "/bin/svc".to_string(),

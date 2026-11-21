@@ -23,6 +23,8 @@
 //! Phase-1 model. Phase 2+ adds per-alloc `Resources` to
 //! `AllocStatusRow` and switches to the heterogeneous shape.
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::collections::BTreeMap;
 
 use overdrive_core::scheduler::{PlacementError, schedule};
@@ -60,12 +62,18 @@ fn scheduler_subtracts_running_allocs_from_capacity() {
     };
     assert_eq!(
         needed,
-        Resources { cpu_milli: 4000, memory_bytes: 4 * 1024 * 1024 * 1024 },
+        Resources {
+            cpu: CpuQuantity::from_millis(4000),
+            memory: ByteSize::new(4 * 1024 * 1024 * 1024)
+        },
         "needed must echo the new job's resources"
     );
     assert_eq!(
         max_free,
-        Resources { cpu_milli: 2000, memory_bytes: 2 * 1024 * 1024 * 1024 },
+        Resources {
+            cpu: CpuQuantity::from_millis(2000),
+            memory: ByteSize::new(2 * 1024 * 1024 * 1024)
+        },
         "max_free must reflect post-running-allocs free capacity"
     );
 }
@@ -87,8 +95,8 @@ fn scheduler_reports_needed_and_max_free_on_memory_exhaustion() {
     let Err(PlacementError::NoCapacity { needed, max_free }) = result else {
         panic!("expected NoCapacity, got {result:?}");
     };
-    assert_eq!(needed.memory_bytes, 8 * 1024 * 1024 * 1024, "needed.memory_bytes");
-    assert_eq!(max_free.memory_bytes, 4 * 1024 * 1024 * 1024, "max_free.memory_bytes");
+    assert_eq!(needed.memory.bytes(), 8 * 1024 * 1024 * 1024, "needed.memory.bytes()");
+    assert_eq!(max_free.memory.bytes(), 4 * 1024 * 1024 * 1024, "max_free.memory.bytes()");
 }
 
 #[test]

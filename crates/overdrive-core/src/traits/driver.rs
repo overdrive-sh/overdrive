@@ -21,6 +21,8 @@ use utoipa::ToSchema;
 
 use crate::aggregate::Listener;
 use crate::aggregate::probe_descriptor::ProbeDescriptor;
+use crate::byte_size::ByteSize;
+use crate::cpu_quantity::CpuQuantity;
 use crate::guest_transport::GuestTransportAssignment;
 use crate::{AllocationId, SpiffeId};
 
@@ -321,8 +323,8 @@ pub trait LaunchSupersession: Send + Sync {
     rkyv::Deserialize,
 )]
 pub struct Resources {
-    pub cpu_milli: u32,
-    pub memory_bytes: u64,
+    pub cpu: CpuQuantity,
+    pub memory: ByteSize,
 }
 
 /// What the scheduler handed to the node agent.

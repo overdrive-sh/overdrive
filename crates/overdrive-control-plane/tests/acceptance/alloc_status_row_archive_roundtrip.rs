@@ -27,6 +27,8 @@
 #![allow(clippy::expect_fun_call)]
 #![allow(clippy::unwrap_used)]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::str::FromStr;
 use std::time::Duration;
 
@@ -96,8 +98,14 @@ fn arb_transition_reason() -> impl Strategy<Value = TransitionReason> {
             .prop_map(|by| TransitionReason::Cancelled { by }),
         (any::<u32>(), any::<u64>(), any::<u32>(), any::<u64>()).prop_map(
             |(req_cpu, req_mem, free_cpu, free_mem)| TransitionReason::NoCapacity {
-                requested: ResourceEnvelope { cpu_milli: req_cpu, memory_bytes: req_mem },
-                free: ResourceEnvelope { cpu_milli: free_cpu, memory_bytes: free_mem },
+                requested: ResourceEnvelope {
+                    cpu: CpuQuantity::from_millis(req_cpu),
+                    memory: ByteSize::new(req_mem)
+                },
+                free: ResourceEnvelope {
+                    cpu: CpuQuantity::from_millis(free_cpu),
+                    memory: ByteSize::new(free_mem)
+                },
             }
         ),
         (any::<u64>(), any::<u64>()).prop_map(|(peak_bytes, limit_bytes)| {

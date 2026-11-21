@@ -41,7 +41,9 @@ use overdrive_core::aggregate::{
     WorkloadIntentEnvelope, WorkloadSpecInput,
 };
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
+use overdrive_core::byte_size::ByteSize;
 use overdrive_core::codec::decode_envelope_bytes;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use overdrive_core::guest_transport::GUEST_PROBE_SLOTS;
 use overdrive_core::observation::{ProbeIdx, ProbeRole};
 use proptest::prelude::*;
@@ -133,7 +135,10 @@ fn arb_service_spec_input() -> impl Strategy<Value = ServiceSpecInput> {
         .prop_map(|(startup_probes, readiness_probes, liveness_probes)| ServiceSpecInput {
             id: "svc-test".to_string(),
             replicas: 1,
-            resources: ResourcesInput { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
+            resources: ResourcesInput {
+                cpu: CpuQuantity::from_millis(100),
+                memory: ByteSize::new(64 * 1024 * 1024),
+            },
             driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
                 volume: None,
                 command: "/bin/serve".to_string(),
@@ -328,8 +333,8 @@ id = "svc-payments"
 replicas = 1
 
 [resources]
-cpu_milli = 250
-memory_bytes = 134217728
+cpu = '250m'
+memory = '128MiB'
 
 [vm]
 command = "/sbin/init"
@@ -378,8 +383,8 @@ fn at_04_toml_to_intent_end_to_end_carries_startup_probes() {
         id: service_spec.id.clone(),
         replicas: service_spec.replicas,
         resources: ResourcesInput {
-            cpu_milli: service_spec.resources.cpu_milli,
-            memory_bytes: service_spec.resources.memory_bytes,
+            cpu: service_spec.resources.cpu,
+            memory: service_spec.resources.memory,
         },
         driver: match &service_spec.driver {
             ParserDriverInput::Vm(vm) => DriverInput::Vm(overdrive_core::aggregate::VmInput {
@@ -451,7 +456,7 @@ proptest! {
         let input = ServiceSpecInput {
             id: "svc-guard".to_string(),
             replicas: 1,
-            resources: ResourcesInput { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
+            resources: ResourcesInput { cpu: CpuQuantity::from_millis(100), memory: ByteSize::new(64 * 1024 * 1024) },
             driver: DriverInput::Vm(overdrive_core::aggregate::VmInput { volume: None,
                 command: "/bin/serve".to_string(),
                 args: vec![],

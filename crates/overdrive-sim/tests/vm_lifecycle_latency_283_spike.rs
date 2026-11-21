@@ -18,6 +18,8 @@ use overdrive_control_plane::{
 };
 use overdrive_core::aggregate::{DriverInput, JobSpecInput, ResourcesInput, WorkloadKind};
 use overdrive_core::api::submit::SubmitSpecInput;
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use overdrive_core::guest_transport::NodeVsockPortConfig;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::traits::driver::{
@@ -340,7 +342,10 @@ async fn submit(client: &reqwest::Client, base: &str, id: &str) {
         spec: SubmitSpecInput::Job(JobSpecInput {
             id: id.to_owned(),
             replicas: 1,
-            resources: ResourcesInput { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
+            resources: ResourcesInput {
+                cpu: CpuQuantity::from_millis(100),
+                memory: ByteSize::new(64 * 1024 * 1024),
+            },
             driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
                 volume: None,
                 command: "/bin/sleep".to_owned(),
@@ -1217,7 +1222,10 @@ async fn runtime_job_input(state: &overdrive_control_plane::AppState, id: &str) 
     let job = Job::from_submit(JobSpecInput {
         id: id.to_owned(),
         replicas: 1,
-        resources: ResourcesInput { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
+        resources: ResourcesInput {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(64 * 1024 * 1024),
+        },
         driver: DriverInput::Vm(overdrive_core::aggregate::VmInput {
             volume: None,
             command: "/bin/sleep".to_owned(),

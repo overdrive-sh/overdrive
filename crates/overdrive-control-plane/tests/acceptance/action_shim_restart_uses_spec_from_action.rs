@@ -21,6 +21,8 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -160,7 +162,10 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
             kernel: PathBuf::from("/nonexistent/kernel"),
             rootfs: PathBuf::from("/nonexistent/rootfs"),
         }),
-        resources: Resources { cpu_milli: 200, memory_bytes: 128 * 1024 * 1024 },
+        resources: Resources {
+            cpu: CpuQuantity::from_millis(200),
+            memory: ByteSize::new(128 * 1024 * 1024),
+        },
         probe_descriptors: Vec::new(),
         // transparent-mtls-enrollment step 04-01 (JOIN-4/JOIN-6): off the mTLS-composed boot gate.
         transport: None,

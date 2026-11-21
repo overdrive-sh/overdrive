@@ -14,6 +14,8 @@
 
 #![allow(clippy::doc_markdown, clippy::expect_used, clippy::missing_panics_doc)]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
@@ -45,7 +47,7 @@ fn volume_job() -> Job {
     let spec: JobSpecInput = serde_json::from_value(json!({
         "id": WORKLOAD,
         "replicas": 1,
-        "resources": {"cpu_milli": 500, "memory_bytes": 134_217_728u64},
+        "resources": {"cpu": "500m", "memory": "128MiB"},
         "vm": {
             "command": "/sbin/init", "args": [], "kernel": "/k", "rootfs": "/r",
             "volume": {"size": "40GiB"}
@@ -71,7 +73,10 @@ fn state(
             Node {
                 id: nid(),
                 region: Region::new("local").expect("valid region"),
-                capacity: Resources { cpu_milli: 4_000, memory_bytes: 8 * 1024 * 1024 * 1024 },
+                capacity: Resources {
+                    cpu: CpuQuantity::from_millis(4_000),
+                    memory: ByteSize::new(8 * 1024 * 1024 * 1024),
+                },
             },
         )]),
         allocations,

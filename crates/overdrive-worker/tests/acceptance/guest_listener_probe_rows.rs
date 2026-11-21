@@ -17,6 +17,8 @@
     reason = "test fixtures assert their own preconditions"
 )]
 
+use overdrive_core::byte_size::ByteSize;
+use overdrive_core::cpu_quantity::CpuQuantity;
 use std::num::NonZeroU16;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -77,7 +79,10 @@ fn spec(alloc: &AllocationId, declared: Vec<Listener>) -> AllocationSpec {
             kernel: PathBuf::from("/kernel"),
             rootfs: PathBuf::from("/rootfs"),
         }),
-        resources: Resources { cpu_milli: 100, memory_bytes: 64 * 1024 * 1024 },
+        resources: Resources {
+            cpu: CpuQuantity::from_millis(100),
+            memory: ByteSize::new(64 * 1024 * 1024),
+        },
         probe_descriptors: vec![startup_descriptor()],
         transport: None,
     }

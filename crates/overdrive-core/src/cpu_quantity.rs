@@ -22,6 +22,7 @@ const MAX_FRACTIONAL_DIGITS: usize = 3;
     Eq,
     PartialOrd,
     Ord,
+    Hash,
     rkyv::Archive,
     rkyv::Serialize,
     rkyv::Deserialize,
