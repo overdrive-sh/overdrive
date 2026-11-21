@@ -562,6 +562,7 @@ struct BeaconWriter {
     commands: mpsc::Sender<ExecWriteCommand>,
     stop: watch::Sender<bool>,
     force_close: watch::Sender<bool>,
+    vmm_exited: watch::Sender<bool>,
     closed: watch::Receiver<bool>,
     emergency_gates: Arc<Mutex<Vec<oneshot::Sender<()>>>>,
     task: Mutex<Option<JoinHandle<()>>>,
@@ -579,6 +580,7 @@ impl BeaconWriter {
         let (commands, command_rx) = mpsc::channel(1);
         let (stop, stop_rx) = watch::channel(false);
         let (force_close, force_close_rx) = watch::channel(false);
+        let (vmm_exited, vmm_exited_rx) = watch::channel(false);
         let (closed_tx, closed) = watch::channel(false);
         let (lines_tx, lines_rx) = mpsc::channel(1);
         let emergency_gates = Arc::new(Mutex::new(Vec::new()));
@@ -596,12 +598,13 @@ impl BeaconWriter {
             closed: closed_tx,
             emergency_gates: Arc::clone(&emergency_gates),
         };
-        let task = tokio::spawn(run_beacon_writer(state, stop_rx, force_close_rx));
+        let task = tokio::spawn(run_beacon_writer(state, stop_rx, force_close_rx, vmm_exited_rx));
         (
             Arc::new(Self {
                 commands,
                 stop,
                 force_close,
+                vmm_exited,
                 closed,
                 emergency_gates,
                 task: Mutex::new(Some(task)),
@@ -691,6 +694,12 @@ impl BeaconWriter {
     fn force_close_after_deadline(&self) {
         let _ = self.force_close.send(true);
     }
+
+    /// The VMM has exited, so no further guest line can be produced. A
+    /// stopping writer drains what the guest already buffered, then closes.
+    fn vmm_has_exited(&self) {
+        let _ = self.vmm_exited.send(true);
+    }
 }
 
 /// All socket and gate-bearing writer state is dropped through this one owner.
@@ -714,6 +723,53 @@ impl BeaconWriterTaskState {
     async fn close_socket(&mut self) {
         if let Some(socket) = self.socket.take() {
             self.io.close(socket).await;
+        }
+    }
+
+    /// Consumes one guest line. `EXIT` is forwarded to the exit watcher (the
+    /// one consumption path for both a natural exit and a stop). Returns
+    /// `true` when the session is over: end of stream, a read error, or the
+    /// drain receiver gone.
+    async fn handle_guest_line(&mut self, line: io::Result<Option<String>>) -> bool {
+        match line {
+            Ok(Some(_)) if self.exit_seen => false,
+            Ok(Some(line)) => match line.parse::<BeaconMessage>() {
+                Ok(BeaconMessage::Listen { protocol, port }) => {
+                    self.guest_listener_board.record(&self.alloc, protocol, port);
+                    false
+                }
+                Ok(BeaconMessage::Exit { .. }) => {
+                    self.exit_seen = true;
+                    self.lines.send(Ok(Some(line))).await.is_err()
+                }
+                Ok(_) => {
+                    warn!(
+                        name: "vm.beacon.line.dropped",
+                        alloc = %self.alloc,
+                        raw = %line,
+                        "dropping unexpected guest beacon line"
+                    );
+                    false
+                }
+                Err(error) => {
+                    warn!(
+                        name: "vm.beacon.line.dropped",
+                        alloc = %self.alloc,
+                        raw = %line,
+                        error = %error,
+                        "dropping malformed guest beacon line"
+                    );
+                    false
+                }
+            },
+            Ok(None) => {
+                let _ = self.lines.send(Ok(None)).await;
+                true
+            }
+            Err(error) => {
+                let _ = self.lines.send(Err(error)).await;
+                true
+            }
         }
     }
 
@@ -750,6 +806,17 @@ impl Drop for BeaconWriter {
     }
 }
 
+/// Next guest line from the accepted beacon socket. Borrows only the io and
+/// socket so a `select!` can poll the writer's other fields beside it.
+async fn read_guest_line(
+    io: &dyn BeaconIo,
+    socket: Option<&BeaconSocket>,
+) -> io::Result<Option<String>> {
+    let socket =
+        socket.unwrap_or_else(|| unreachable!("a live beacon writer owns its accepted socket"));
+    io.read_line(socket).await
+}
+
 async fn wait_for_signal(signal: &mut watch::Receiver<bool>) {
     if *signal.borrow() {
         return;
@@ -765,6 +832,7 @@ async fn run_beacon_writer(
     mut state: BeaconWriterTaskState,
     mut stop: watch::Receiver<bool>,
     mut force_close: watch::Receiver<bool>,
+    mut vmm_exited: watch::Receiver<bool>,
 ) {
     loop {
         tokio::select! {
@@ -774,59 +842,14 @@ async fn run_beacon_writer(
             // EXIT write can become ready in the same scheduler turn; the
             // report must reach the drain receiver before stop closes the
             // accepted beacon socket.
-            line = async {
-                let socket = state.socket.as_ref().unwrap_or_else(|| {
-                    unreachable!("a live beacon writer owns its accepted socket")
-                });
-                state.io.read_line(socket).await
-            } => {
-                let terminal = match line {
-                    Ok(Some(_)) if state.exit_seen => false,
-                    Ok(Some(line)) => match line.parse::<BeaconMessage>() {
-                        Ok(BeaconMessage::Listen { protocol, port }) => {
-                            state.guest_listener_board.record(&state.alloc, protocol, port);
-                            false
-                        }
-                        Ok(BeaconMessage::Exit { .. }) => {
-                            state.exit_seen = true;
-                            state.lines.send(Ok(Some(line))).await.is_err()
-                        }
-                        Ok(_) => {
-                            warn!(
-                                name: "vm.beacon.line.dropped",
-                                alloc = %state.alloc,
-                                raw = %line,
-                                "dropping unexpected guest beacon line"
-                            );
-                            false
-                        }
-                        Err(error) => {
-                            warn!(
-                                name: "vm.beacon.line.dropped",
-                                alloc = %state.alloc,
-                                raw = %line,
-                                error = %error,
-                                "dropping malformed guest beacon line"
-                            );
-                            false
-                        }
-                    },
-                    Ok(None) => {
-                        let _ = state.lines.send(Ok(None)).await;
-                        true
-                    }
-                    Err(error) => {
-                        let _ = state.lines.send(Err(error)).await;
-                        true
-                    }
-                };
-                if terminal {
+            line = read_guest_line(state.io.as_ref(), state.socket.as_ref()) => {
+                if state.handle_guest_line(line).await {
                     state.close_socket().await;
                     return;
                 }
             }
             () = wait_for_signal(&mut stop) => {
-                stop_beacon_writer(&mut state, &mut force_close).await;
+                stop_beacon_writer(&mut state, &mut force_close, &mut vmm_exited).await;
                 return;
             }
             command = state.commands.recv() => {
@@ -872,18 +895,64 @@ async fn run_beacon_writer(
     }
 }
 
+/// Graceful stop of the beacon session: write `SHUTDOWN`, then keep reading
+/// until the guest's `EXIT` arrives or the stream ends (the guest powers off,
+/// or the VMM exits and the kernel resets the connection), and only then
+/// close. Closing right after the write would make the guest's `EXIT` write
+/// fail (ADR-0103: the supervisor sends `EXIT` after reaping the group). The
+/// driver's shutdown deadline bounds the `SHUTDOWN` write only; the wait for
+/// `EXIT` is bounded by the VMM's own termination grace, after which the
+/// writer drains what the guest had already buffered and closes.
 async fn stop_beacon_writer(
     state: &mut BeaconWriterTaskState,
     force_close: &mut watch::Receiver<bool>,
+    vmm_exited: &mut watch::Receiver<bool>,
 ) {
-    if let Some(socket) = state.socket.as_ref() {
-        tokio::select! {
+    let shutdown_written = match state.socket.as_ref() {
+        Some(socket) => {
+            tokio::select! {
+                biased;
+                () = wait_for_signal(force_close) => false,
+                written = state.io.write_line(socket, "SHUTDOWN") => written.is_ok(),
+            }
+        }
+        None => false,
+    };
+    while shutdown_written && !state.exit_seen {
+        let line = tokio::select! {
             biased;
-            () = wait_for_signal(force_close) => {},
-            _ = state.io.write_line(socket, "SHUTDOWN") => {},
+            line = read_guest_line(state.io.as_ref(), state.socket.as_ref()) => Some(line),
+            () = wait_for_signal(vmm_exited) => None,
+        };
+        let Some(line) = line else {
+            drain_buffered_guest_lines(state).await;
+            break;
+        };
+        if state.handle_guest_line(line).await {
+            break;
         }
     }
     state.close_socket().await;
+}
+
+/// After the VMM's exit, consume a line the guest had already buffered (the
+/// same bounded cooperative-yield shape as `drain_guest_report`, never a
+/// `Clock::sleep`).
+async fn drain_buffered_guest_lines(state: &mut BeaconWriterTaskState) {
+    for _ in 0..GUEST_REPORT_DRAIN_MAX_YIELDS {
+        if state.exit_seen {
+            return;
+        }
+        tokio::select! {
+            biased;
+            line = read_guest_line(state.io.as_ref(), state.socket.as_ref()) => {
+                if state.handle_guest_line(line).await {
+                    return;
+                }
+            }
+            () = tokio::task::yield_now() => {}
+        }
+    }
 }
 
 /// The claim's `Held` payload once `Vmm::create` has returned
@@ -1894,56 +1963,54 @@ impl Driver for VmDriver {
             Some(mut writer_task) => {
                 let writer_deadline = self.clock.sleep(VM_SHUTDOWN_REQUEST_DEADLINE);
                 tokio::pin!(writer_deadline);
+                let writer = beacon.as_ref();
+                // The writer keeps reading after SHUTDOWN so the guest's EXIT
+                // arrives; the VMM's exit is what ends that wait, so
+                // termination is always driven alongside the writer.
                 tokio::select! {
                     biased;
                     _ = &mut termination => {
+                        if let Some(writer) = writer {
+                            writer.vmm_has_exited();
+                        }
                         tokio::select! {
                             biased;
-                            _ = &mut writer_task => {
-                                tracing::info!(
-                                    name: "vm.lifecycle.writer_finished",
-                                    alloc = %handle.alloc,
-                                    disposition = "completed",
-                                    "VM beacon writer consumed"
-                                );
-                            }
+                            _ = &mut writer_task => {}
                             () = &mut writer_deadline => {
-                                if let Some(writer) = beacon.as_ref() {
+                                if let Some(writer) = writer {
                                     writer.force_close_after_deadline();
                                 }
                                 let _ = writer_task.await;
-                                tracing::info!(
-                                    name: "vm.lifecycle.writer_finished",
-                                    alloc = %handle.alloc,
-                                    disposition = "completed",
-                                    "VM beacon writer consumed"
-                                );
                             }
                         }
                     }
                     _ = &mut writer_task => {
-                        tracing::info!(
-                            name: "vm.lifecycle.writer_finished",
-                            alloc = %handle.alloc,
-                            disposition = "completed",
-                            "VM beacon writer consumed"
-                        );
                         let _ = termination.await;
                     }
                     () = &mut writer_deadline => {
-                        if let Some(writer) = beacon.as_ref() {
+                        if let Some(writer) = writer {
                             writer.force_close_after_deadline();
                         }
-                        let _ = writer_task.await;
-                        tracing::info!(
-                            name: "vm.lifecycle.writer_finished",
-                            alloc = %handle.alloc,
-                            disposition = "completed",
-                            "VM beacon writer consumed"
-                        );
-                        let _ = termination.await;
+                        tokio::select! {
+                            biased;
+                            _ = &mut writer_task => {
+                                let _ = termination.await;
+                            }
+                            _ = &mut termination => {
+                                if let Some(writer) = writer {
+                                    writer.vmm_has_exited();
+                                }
+                                let _ = writer_task.await;
+                            }
+                        }
                     }
                 }
+                tracing::info!(
+                    name: "vm.lifecycle.writer_finished",
+                    alloc = %handle.alloc,
+                    disposition = "completed",
+                    "VM beacon writer consumed"
+                );
             }
         }
 
