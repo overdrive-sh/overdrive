@@ -681,8 +681,9 @@ impl BeaconWriter {
     }
 
     /// Signal stop without waiting for the command queue, then transfer task
-    /// ownership to the stop path so its already-started deadline can bound
-    /// both SHUTDOWN and any interrupted EXEC.
+    /// ownership to the stop path. The stop path's two-second deadline bounds
+    /// only the SHUTDOWN write (and any interrupted EXEC); after SHUTDOWN the
+    /// writer keeps reading until EXIT, stream end, or VMM exit.
     fn request_stop(&self) -> Option<JoinHandle<()>> {
         let _ = self.stop.send(true);
         self.task.lock().take()
@@ -726,8 +727,10 @@ impl BeaconWriterTaskState {
         }
     }
 
-    /// Consumes one guest line. `EXIT` is forwarded to the exit watcher (the
-    /// one consumption path for both a natural exit and a stop). Returns
+    /// Consumes one guest line. `EXIT` is forwarded to the exit watcher. On a
+    /// natural exit the watcher records the status; on a stop the stop path
+    /// already owns the entry, so the status is consumed but not recorded --
+    /// reading it is what lets the guest's EXIT write succeed. Returns
     /// `true` when the session is over: end of stream, a read error, or the
     /// drain receiver gone.
     async fn handle_guest_line(&mut self, line: io::Result<Option<String>>) -> bool {
@@ -1946,8 +1949,9 @@ impl Driver for VmDriver {
 
         // The writer bound and the sole VMM grace begin together. A completed
         // writer never turns its two-second maximum into a sleep; an early
-        // VMM completion consumes the writer immediately, and a writer
-        // timeout aborts/joins it while the same VMM wait continues.
+        // VMM completion ends the writer's read-until-EXIT wait immediately,
+        // and the deadline only force-closes an in-flight SHUTDOWN write
+        // while the same VMM wait continues.
         let termination = self.vmm.terminate(&control, VM_STOP_GRACE);
         tokio::pin!(termination);
         match beacon.as_ref().and_then(|writer| writer.request_stop()) {
@@ -2377,6 +2381,8 @@ async fn run_exit_watcher(
     if let Some(writer) = beacon.upgrade()
         && let Some(task) = writer.request_stop()
     {
+        // The VMM is gone, so the read loop must not wait for further lines.
+        writer.vmm_has_exited();
         let _ = task.await;
     }
     {

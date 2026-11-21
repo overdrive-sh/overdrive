@@ -242,6 +242,27 @@ fn build_spin_binary(tmp: &Path) -> PathBuf {
     out
 }
 
+/// Builds a static musl binary whose `main` returns at once: used as a guest
+/// `/sbin/init`, PID 1 exiting makes the kernel panic ("Attempted to kill
+/// init"), `panic=1` resets the guest, and the launcher's
+/// `--guest-reset-action exit-vmm` ends the VMM with status 0 — a guest that
+/// dies before it ever beacons.
+fn build_exit_at_once_binary(tmp: &Path) -> PathBuf {
+    let src = tmp.join("exit_at_once.rs");
+    std::fs::write(&src, "fn main() {}").expect("write the exit-at-once init source");
+    let out = tmp.join("exit_at_once");
+    let status = Command::new("rustc")
+        .args(["--edition", "2021", "-C", "opt-level=0", "-C", "target-feature=+crt-static"])
+        .args(["--target", "x86_64-unknown-linux-musl"])
+        .arg("-o")
+        .arg(&out)
+        .arg(&src)
+        .status()
+        .expect("spawn rustc for the exit-at-once init binary");
+    assert!(status.success(), "rustc must build the exit-at-once init binary");
+    out
+}
+
 /// Stages a PER-TEST COPY of the shared fixture's rootfs image with an
 /// additional static binary injected at `/sbin/<guest_name>`, via a
 /// loopback mount on the HOST before the guest ever boots. The shared
@@ -1033,6 +1054,101 @@ async fn guest_that_never_beacons_reports_the_boot_deadline_and_console_tail() {
 
     // An aborted boot leaves nothing behind, hypervisor included.
     assert_no_allocation_scoped_vm_residue(&alloc, &silent_rootfs, &server_tmp.path().join("data"));
+
+    handle.shutdown().await.expect("clean shutdown");
+}
+
+/// S-VM-36's complement / `@contract-shape:bounded-change` — a guest that
+/// boots and then dies before it ever beacons is reported as the hypervisor's
+/// exit, not as a boot-deadline breach: `Failed / VmGuestExitUnreported` with
+/// the VMM's exit status 0 and no signal (ADR-0083 §D5 row 7), the live console
+/// tail as the row's verbatim detail, and never a pass through Running.
+///
+/// ```gherkin
+/// Given Ana has deployed a VM workload whose guest init exits immediately,
+///   before it dials the beacon
+/// When the guest resets and the hypervisor exits with status 0
+/// Then the allocation is Failed with VmGuestExitUnreported, exit 0, no signal
+/// And the allocation never passes through Running
+/// And the row carries the guest console tail the hypervisor produced
+/// And the rendered operator view names the cause and shows that tail
+/// And nothing of the allocation is left behind
+/// ```
+///
+/// Why this is not S-VM-36: there the guest stays up and the 30 s boot deadline
+/// fires (`VmBootDeadlineExceeded`). Here the guest dies, so the VMM-exit arm
+/// of the boot race wins within seconds; a 90 s ceiling proves the exit arm, not
+/// the deadline, resolved it.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
+#[tokio::test]
+#[serial(cgroup)]
+async fn guest_that_dies_before_beaconing_reports_the_hypervisor_exit_and_console_tail() {
+    let fixture =
+        VmFixture::provision(&shared_staging_root()).expect("provision the shared VM fixture");
+    let artifact_tmp = tempfile::Builder::new()
+        .prefix("vm-dies-before-beacon-")
+        .tempdir_in(shared_staging_root())
+        .expect("tempdir on the shared reflink-capable staging root (never tmpfs -- cloud-hypervisor disk I/O needs O_DIRECT, which tmpfs cannot support)");
+    let exits = build_exit_at_once_binary(artifact_tmp.path());
+    let dying_rootfs =
+        build_rootfs_with_init(artifact_tmp.path(), "dies-before-beacon-rootfs.ext4", &exits);
+
+    let (handle, server_tmp) = spawn_vm_server().await;
+    let cfg = config_path(server_tmp.path());
+    let spec_path = write_toml(
+        server_tmp.path(),
+        "vm-dies-before-beacon.toml",
+        &vm_job_toml("vm-dies-before-beacon", &fixture.kernel_path, &dying_rootfs),
+    );
+
+    let submit = deploy(DeployArgs { spec: spec_path, config_path: cfg.clone() })
+        .await
+        .expect("deploy the VM workload whose guest dies before it beacons");
+
+    let (out, observed) =
+        poll_until_failed_recording_states(&cfg, &submit.workload_id, Duration::from_secs(90))
+            .await;
+    let row =
+        out.snapshot.rows.first().expect("one failed allocation row for the deployed VM workload");
+    let alloc = AllocationId::new(&row.alloc_id).expect("server allocation id is valid");
+
+    assert!(
+        !observed.contains(&AllocStateWire::Running),
+        "a guest that dies before it beacons must NEVER pass through Running; observed: {observed:?}",
+    );
+    assert_eq!(row.state, AllocStateWire::Failed, "reason={:?}", row.reason);
+
+    let reason = row.reason.clone().expect("a failed VM allocation must carry a structured reason");
+    let detail = row.error.clone().expect("the verbatim driver diagnostic must be preserved");
+    assert_eq!(
+        reason,
+        TransitionReason::VmGuestExitUnreported { vmm_exit_code: Some(0), vmm_signal: None },
+        "the guest's death is the hypervisor's exit 0, not a boot-deadline breach; verbatim \
+         driver detail: {detail}",
+    );
+
+    // The row's detail is the live console tail: the guest's own last words.
+    // The tail is bounded to the console's last lines, so the panic header has
+    // scrolled off; what always ends it is the `panic=1` reboot notice the
+    // kernel prints just before the reset that ends the VMM.
+    assert!(
+        detail.contains("Rebooting in 1 seconds"),
+        "the console tail must end with the kernel's panic reboot notice:\n{detail}",
+    );
+
+    let rendered = overdrive_cli::render::workload_describe(&out);
+    assert_named_cause_is_rendered(&rendered, &reason, &detail);
+    for line in detail.lines().map(str::trim_end) {
+        if !line.is_empty() {
+            assert!(
+                rendered.contains(line),
+                "the rendered operator view must carry console line {line:?}:\n{rendered}",
+            );
+        }
+    }
+
+    // An aborted boot leaves nothing behind, hypervisor included.
+    assert_no_allocation_scoped_vm_residue(&alloc, &dying_rootfs, &server_tmp.path().join("data"));
 
     handle.shutdown().await.expect("clean shutdown");
 }

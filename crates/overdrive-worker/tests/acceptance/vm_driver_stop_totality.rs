@@ -1944,8 +1944,8 @@ async fn completed_shutdown_write_has_no_two_second_floor() {
 /// CONTRACT_SHAPE: bounded-change.
 /// S-VLL-08. Parameterize accepted-writer completion/error/EOF/absence and
 /// backpressure using the real BeaconWriter plus existing held Vmm decorator.
-/// Both waits enter together; at 2s the writer is consumed while the SAME 10s
-/// termination wait continues; early VMM exit consumes the writer immediately.
+/// Both waits enter together; at 2s an in-flight SHUTDOWN write is force-closed while the
+/// SAME 10s termination wait continues; early VMM exit consumes the writer immediately.
 /// Every arm retains EndingInFlight and completes existing cleanup calls before
 /// return. Normal/forced termination and missing cleanup remain distinct.
 #[allow(

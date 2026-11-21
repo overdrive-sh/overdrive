@@ -124,6 +124,8 @@ struct State {
     conns: BTreeMap<u64, Conn>,
     /// Keys the driver closed.
     closed_by_driver: BTreeSet<BeaconConnKey>,
+    /// For each connection the driver closed, the guest lines it had not read.
+    unread_at_close: BTreeMap<BeaconConnKey, usize>,
     /// Stepped mode: `accept` deliveries granted and not yet taken.
     accept_grants: usize,
     /// `accept` calls currently waiting.
@@ -271,6 +273,16 @@ impl SimBeaconIo {
     pub fn written_lines(&self, key: BeaconConnKey) -> Option<Vec<String>> {
         let state = self.state.lock();
         state.conns.values().find(|conn| conn.key == key).map(|conn| conn.outbound.clone())
+    }
+
+    /// **TEST-HOOK-ONLY.** How many guest lines the driver had not read when it
+    /// closed the connection `key` (`Some(0)`: it read everything the guest
+    /// wrote); `None` while the driver has not closed it. A guest write after
+    /// the close is already refused by the sim, so this is the host-side
+    /// evidence that a line written before the close was consumed, not dropped.
+    #[must_use]
+    pub fn guest_lines_unread_at_close(&self, key: BeaconConnKey) -> Option<usize> {
+        self.state.lock().unread_at_close.get(&key).copied()
     }
 
     /// Wake every parked call so it re-checks its VMM's liveness. Call after
@@ -537,6 +549,7 @@ impl BeaconIo for SimBeaconIo {
             unreachable!("a live BeaconSocket names an open connection");
         };
         state.closed_by_driver.insert(conn.key);
+        state.unread_at_close.insert(conn.key, conn.inbound.len());
         drop(state);
         self.wake.notify_waiters();
     }
