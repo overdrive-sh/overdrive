@@ -1,9 +1,9 @@
 {
   "schema": 1,
   "subsystem": "node-local-volume",
-  "run_id": "4092562-1795350889.076",
-  "started": "2026-11-22T12:34:49.075810816Z",
-  "finished": "2026-11-22T12:40:46.413519104Z",
+  "run_id": "142670-1795354425.236",
+  "started": "2026-11-22T13:33:45.236273408Z",
+  "finished": "2026-11-22T13:40:12.715858176Z",
   "jobs": 16,
   "tools": {
     "quint": "0.32.0",
@@ -12,13 +12,13 @@
     "kernel": "7.0.0-38-generic"
   },
   "git": {
-    "head": "b69e19b53f40d7cdac4ffeeedb56b039c9dd1627",
+    "head": "336ab0b576939a410a9aec13d5537a0fae0721e1",
     "dirty": true
   },
   "inputs": {
     "checks.toml": "0ce435f04d962c2622e7d61c594de1d09b22010672e026e508f9c4f06994d2c6",
     "hazard/volume_hazards.qnt": "f4242d6f367af98b1c1c5b3056b534034b2a7be6e07a05a11e1d400b4fd1bd15",
-    "node_volume.qnt": "b14f1a655d0ef37b0cc0b1455b50cd700872979d0050192b69892f5bf6a94d5c"
+    "node_volume.qnt": "d144997fba5465dd029bb51c2c777994e72454eb06f1b8bd3978ee78264745ea"
   },
   "checks": [
     {
@@ -33,16 +33,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 356.889,
+      "seconds": 386.97,
       "retry_seconds": 0.0,
-      "wall_seconds": 356.889,
+      "wall_seconds": 386.97,
       "timeout_secs": 1500,
       "cause": null,
       "trace": null,
       "condensed": null,
       "failure_log": null,
-      "input_key": "8992562b94bcabed86e5cdcbd2fe80e93dfadf4b317221285e1ea6810c8a23bf",
-      "run_id": "4092562-1795350889.076"
+      "input_key": "447e230ade8b7ef1784fefb787534f91b4829a37296f9c226c8412dc29d4c98e",
+      "run_id": "142670-1795354425.236"
     },
     {
       "name": "vol-live-start",
@@ -56,16 +56,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 12.922,
+      "seconds": 16.584,
       "retry_seconds": 0.0,
-      "wall_seconds": 12.922,
+      "wall_seconds": 16.585,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
       "failure_log": null,
-      "input_key": "1b1d0b47ee3d5c05ea5410733c9f5f99a0059b73da3d6ba98fae5fdb043af854",
-      "run_id": "4092562-1795350889.076"
+      "input_key": "8b2385d250876e5e20b69a90d1400a854804b4abd25f46716377b4cbcb0eab09",
+      "run_id": "142670-1795354425.236"
     },
     {
       "name": "vol-hazard-wait",
@@ -79,16 +79,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 20.475,
+      "seconds": 22.207,
       "retry_seconds": 0.0,
-      "wall_seconds": 20.475,
+      "wall_seconds": 22.207,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/vol-hazard-wait.tlc.txt",
       "condensed": "traces/vol-hazard-wait.txt",
       "failure_log": null,
-      "input_key": "bd2b50a370d6b46a1e381aed8039cd9035245b0683bd096fccd9343e99ca1975",
-      "run_id": "4092562-1795350889.076"
+      "input_key": "03c5785f36734664851d8504ada62929eca72a427a3ad16192dfe7782f378b02",
+      "run_id": "142670-1795354425.236"
     },
     {
       "name": "vol-hazard-ensure",
@@ -102,16 +102,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 19.66,
+      "seconds": 23.106,
       "retry_seconds": 0.0,
-      "wall_seconds": 19.66,
+      "wall_seconds": 23.107,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/vol-hazard-ensure.tlc.txt",
       "condensed": "traces/vol-hazard-ensure.txt",
       "failure_log": null,
-      "input_key": "27beee3e1aed9f3e35ff9933d66f828dcd72d240f6913d6c6bf972072cf4d457",
-      "run_id": "4092562-1795350889.076"
+      "input_key": "10a2d33b45f2454b8ed34978e347230dfcaa8a94cb4d538e17eeba6719b46d5b",
+      "run_id": "142670-1795354425.236"
     },
     {
       "name": "vol-hazard-stop",
@@ -125,16 +125,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 15.753,
+      "seconds": 21.958,
       "retry_seconds": 0.0,
-      "wall_seconds": 15.753,
+      "wall_seconds": 21.958,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/vol-hazard-stop.tlc.txt",
       "condensed": "traces/vol-hazard-stop.txt",
       "failure_log": null,
-      "input_key": "66c824b7da5868712f73c9423cb3aa415d3e21eb59da1bccaa2a2479f3198993",
-      "run_id": "4092562-1795350889.076"
+      "input_key": "64701a907a02ee2cf79a00d56929d301748b73a387050c82b928860c065e7bf8",
+      "run_id": "142670-1795354425.236"
     },
     {
       "name": "vol-hazard-interrupt",
@@ -148,16 +148,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 16.272,
+      "seconds": 26.695,
       "retry_seconds": 0.0,
-      "wall_seconds": 16.272,
+      "wall_seconds": 26.695,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/vol-hazard-interrupt.tlc.txt",
       "condensed": "traces/vol-hazard-interrupt.txt",
       "failure_log": null,
-      "input_key": "81c947459d9f881aa2ce5ed46a0bfb32bb0eca3c95eed55ab7101e8c6564cbf9",
-      "run_id": "4092562-1795350889.076"
+      "input_key": "2914c6000d2a8fac34825977a85825c0e804eb7b7572dee83ecb15039cd0e29b",
+      "run_id": "142670-1795354425.236"
     },
     {
       "name": "vol-run-happy-path-deploy-to-running",
@@ -171,16 +171,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 3.824,
+      "seconds": 3.807,
       "retry_seconds": 0.0,
-      "wall_seconds": 3.824,
+      "wall_seconds": 3.807,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
       "failure_log": null,
-      "input_key": "5954ae68da95b875b89f44811ce8fae7b158c4c74532f8874f65cd3c64ea544d",
-      "run_id": "4092562-1795350889.076"
+      "input_key": "2a29407923fde29ea84a2a206f11d05b118ed2888318859c42906579e4c24f2c",
+      "run_id": "142670-1795354425.236"
     },
     {
       "name": "vol-run-restart-waits-for-drain-then-attaches",
@@ -194,16 +194,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 4.595,
+      "seconds": 5.137,
       "retry_seconds": 0.0,
-      "wall_seconds": 4.596,
+      "wall_seconds": 5.137,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
       "failure_log": null,
-      "input_key": "3a74467019e012d790597166eef279ec483ca3d1fa380079622d7a37353a9f30",
-      "run_id": "4092562-1795350889.076"
+      "input_key": "c7e42909f0dbc7d03b331f1fa7f347760430c0d33e5db3a9163e5fcb3874ea57",
+      "run_id": "142670-1795354425.236"
     },
     {
       "name": "vol-run-stop-keeps-volume-and-restart-reattaches",
@@ -217,16 +217,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 5.123,
+      "seconds": 6.957,
       "retry_seconds": 0.0,
-      "wall_seconds": 5.123,
+      "wall_seconds": 6.957,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
       "failure_log": null,
-      "input_key": "db438e1f049c08900ef1ebb4f8c74f4e18425204400328c9b56457046c90b03e",
-      "run_id": "4092562-1795350889.076"
+      "input_key": "c1f3349e66e26566bfdfeffdedc47e8fde5400d28d4b574ce3b007b309c326d8",
+      "run_id": "142670-1795354425.236"
     },
     {
       "name": "vol-run-crash-after-create-before-attach-reuses-volume",
@@ -240,16 +240,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 3.821,
+      "seconds": 4.625,
       "retry_seconds": 0.0,
-      "wall_seconds": 3.821,
+      "wall_seconds": 4.625,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
       "failure_log": null,
-      "input_key": "a2de5bcec86d3e8edb4e27eb96ded1be25e0a3f731ae45b80d221b63b2375d9d",
-      "run_id": "4092562-1795350889.076"
+      "input_key": "8a538b1feaa0619a035462829658eae060e8697d0c7c9634fa08584a522021f3",
+      "run_id": "142670-1795354425.236"
     },
     {
       "name": "vol-run-node-reboot-reactivates-and-data-survives",
@@ -263,16 +263,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 4.614,
+      "seconds": 5.909,
       "retry_seconds": 0.0,
-      "wall_seconds": 4.614,
+      "wall_seconds": 5.909,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
       "failure_log": null,
-      "input_key": "7d0cf5cc62f048574ae7c3e7ad0de89352ad64aae42f45c4d65608f506afd1fa",
-      "run_id": "4092562-1795350889.076"
+      "input_key": "dd64e2c2f3dad1d564c992ab98f86cd088a55fb6fb3c29e406636baa1e9e85e1",
+      "run_id": "142670-1795354425.236"
     },
     {
       "name": "vol-run-launch-bound-exceeded-fails-typed-and-charges-budget",
@@ -286,16 +286,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 4.869,
+      "seconds": 6.704,
       "retry_seconds": 0.0,
-      "wall_seconds": 4.869,
+      "wall_seconds": 6.704,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
       "failure_log": null,
-      "input_key": "32cdcdd3fed8482c8b8a7520b83d02df99f8d420f3ab2f2d4fd28ead6a1f533b",
-      "run_id": "4092562-1795350889.076"
+      "input_key": "9b161cc10a03d5ec45ebc2038a75a393306439552f337a90d173899c1531a9d0",
+      "run_id": "142670-1795354425.236"
     },
     {
       "name": "vol-run-no-space-fails-typed-and-never-attaches",
@@ -309,16 +309,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 4.867,
+      "seconds": 6.695,
       "retry_seconds": 0.0,
-      "wall_seconds": 4.867,
+      "wall_seconds": 6.695,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
       "failure_log": null,
-      "input_key": "a42e3e48d607691c0e20a6fd81594c42ca6fd674447039dfe3e0d37c790a9fef",
-      "run_id": "4092562-1795350889.076"
+      "input_key": "3e51998e115a82654f4631b7e304cc688ef9f782aacd2e3d8e76fae9f4a1631b",
+      "run_id": "142670-1795354425.236"
     },
     {
       "name": "vol-run-store-absent-fails-typed-and-never-attaches",
@@ -332,16 +332,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 4.361,
+      "seconds": 5.398,
       "retry_seconds": 0.0,
-      "wall_seconds": 4.361,
+      "wall_seconds": 5.398,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
       "failure_log": null,
-      "input_key": "59487bcb02af71fa41fd7c0830f7aad00cbe69eb2f8e13b7ec658f9beeb18f86",
-      "run_id": "4092562-1795350889.076"
+      "input_key": "d59e31dbd706186e31b60e838b11edb32795168311009f141c1640490a3cc830",
+      "run_id": "142670-1795354425.236"
     },
     {
       "name": "vol-run-superseded-launch-result-discarded",
@@ -355,16 +355,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 10.508,
+      "seconds": 14.408,
       "retry_seconds": 0.0,
-      "wall_seconds": 10.508,
+      "wall_seconds": 14.408,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
       "failure_log": null,
-      "input_key": "aa7e07da0a43017b35b4100590c0f23a11056f130c4ed29df6ecb5adf1f76f3e",
-      "run_id": "4092562-1795350889.076"
+      "input_key": "b2709b384a4e958aa25ee56d34265a255c2646279fa30b29e211730a4ec74851",
+      "run_id": "142670-1795354425.236"
     },
     {
       "name": "vol-run-stop-during-boot-wait-terminates-vmm-and-keeps-volume",
@@ -378,16 +378,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 4.33,
+      "seconds": 5.91,
       "retry_seconds": 0.0,
-      "wall_seconds": 4.33,
+      "wall_seconds": 5.91,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
       "failure_log": null,
-      "input_key": "d7bea7a31bed61b2287261287d9e6afca0bbbe3a80ed833611b3df69d2fee239",
-      "run_id": "4092562-1795350889.076"
+      "input_key": "e65c9849128b219b6dd999706aeb5919aa093626eae6508d77b470957c5625b0",
+      "run_id": "142670-1795354425.236"
     },
     {
       "name": "vol-run-stop-during-ensure-lets-ensure-finish-then-abandons",
@@ -401,16 +401,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 4.334,
+      "seconds": 5.65,
       "retry_seconds": 0.0,
-      "wall_seconds": 4.334,
+      "wall_seconds": 5.65,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
       "failure_log": null,
-      "input_key": "a76c227248801d4f38a63d3f93a125503cc6f63836a420ae6e3de54a964d0f41",
-      "run_id": "4092562-1795350889.076"
+      "input_key": "c36229cf12106af95986c284a9c40918a174ee3d6f47d84647b5cd42aad81c7c",
+      "run_id": "142670-1795354425.236"
     },
     {
       "name": "vol-run-shutdown-abandons-every-launch-including-one-admitted-late",
@@ -424,16 +424,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 4.355,
+      "seconds": 5.907,
       "retry_seconds": 0.0,
-      "wall_seconds": 4.356,
+      "wall_seconds": 5.907,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
       "failure_log": null,
-      "input_key": "c79642bdfbb8c6f55db9674bc139533468653d74528755de41db6101236af783",
-      "run_id": "4092562-1795350889.076"
+      "input_key": "792ec94f8fac51f898674c4ec4c2b02cac9da5dee97d00cfdf57bec82410dbe2",
+      "run_id": "142670-1795354425.236"
     }
   ]
 }

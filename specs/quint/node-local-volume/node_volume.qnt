@@ -571,7 +571,7 @@ module node_volume {
     .then(WlStart(1))
     .expect(st.as.get(1) == FAILED and st.why.get(1) == W_UNAVAIL and st.charged == 1 and not(st.lv)
             and st.nCreated == 0 and st.claim == 0 and not(st.ran.get(1)) and Safety)
-    .then(WlStart(2)).then(WlStart(3))
+    .then(WlStart(2)).then(WlStart(3)).then(WlStart(4)).then(WlStart(5)).then(WlStart(6))
     .expect(st.charged == LIMIT and exhausted(st) and AL.forall(a => not(canStart(st, a)))
             and AL.forall(a => not(st.ran.get(a))) and not(st.lv) and st.nCreated == 0 and Safety)
 
@@ -663,11 +663,13 @@ module vol_ok {
     OPS = Set("stop", "restart", "shutdown", "storeAbsent", "poolFull"), NA = 4, FB = 2,
     LIMIT = 3, DVMAX = 2).* from "./node_volume"
 }
-// the named runs; the #[quint_test] pins
+// the named runs; the #[quint_test] pins. LIMIT = 6 is production's restart ceiling (RESTART_BACKOFF_CEILING = 5) + 1, as in restart-generation: production
+// restarts a failed row iff its count is below the ceiling, so a chain fails ceiling + 1 times before BackoffExhausted; the
+// exhaustive and hazard mains keep LIMIT = 3 to bound the state space.
 module vol_conf {
   import node_volume(OFF = Set(), REC = true,
-    OPS = Set("stop", "restart", "shutdown", "storeAbsent", "poolFull"), NA = 4, FB = 2,
-    LIMIT = 3, DVMAX = 2).* from "./node_volume"
+    OPS = Set("stop", "restart", "shutdown", "storeAbsent", "poolFull"), NA = 6, FB = 2,
+    LIMIT = 6, DVMAX = 2).* from "./node_volume"
 }
 // liveness: never stopped or restarted, faults finite (FB < LIMIT)
 module vol_live_start {

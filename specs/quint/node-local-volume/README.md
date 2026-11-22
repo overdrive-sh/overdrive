@@ -25,7 +25,7 @@ Not modelled: volume size and `SizeMismatch`, `NameOccupied` and foreign logical
 | Instance | Use |
 |---|---|
 | `vol_ok` | exhaustive safety (TLC): 4 allocation ids, fault budget 2, `LIMIT = 3`, every operator and boot-time action including `shutdown` |
-| `vol_conf` | the named runs (REC = true: `conf_step` records the action for the conformance driver) |
+| `vol_conf` | the named runs (REC = true: `conf_step` records the action for the conformance driver); 6 allocation ids and `LIMIT = 6`, production's `RESTART_BACKOFF_CEILING` + 1 (a chain fails ceiling + 1 times before `BackoffExhausted`), so the replay's `exhausted` matches production |
 | `vol_live_start` | liveness: never stopped or restarted, fault budget 2 < `LIMIT` |
 | `hazard/volume_hazards.qnt` | one weakened rule per decision |
 

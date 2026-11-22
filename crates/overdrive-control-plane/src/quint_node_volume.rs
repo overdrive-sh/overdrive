@@ -117,7 +117,7 @@ use axum::Json;
 use axum::extract::{Path, State as AxumState};
 use axum::http::HeaderMap;
 use itf::Value;
-use overdrive_core::aggregate::WorkloadSpecInput;
+use overdrive_core::aggregate::{WorkloadKind, WorkloadSpecInput};
 use overdrive_core::guest_network::GuestNetworkExecWiring;
 use overdrive_core::guest_transport::GuestCid;
 use overdrive_core::guest_transport::VsockListenPort;
@@ -141,6 +141,7 @@ use overdrive_core::vm::config::{
     Gid, HostArch, KERNEL_MAGIC_WINDOW, VmConfig, VmConfinement, VmmIdentity, VolumeAttachment,
     VsockPort,
 };
+use overdrive_reconcilers::{AnyState, current_alloc};
 use overdrive_sim::adapters::beacon_io::SimBeaconIo;
 use overdrive_sim::adapters::ca::SimCa;
 use overdrive_sim::adapters::clock::SimClock;
@@ -171,7 +172,7 @@ use crate::guest_network::{
 };
 use crate::handlers::{restart_workload, stop_workload, submit_workload};
 use crate::reconciler_runtime::{
-    ConvergenceError, ReconcilerRuntime,
+    ConvergenceError, ReconcilerRuntime, hydrate_desired_for_test,
     run_convergence_tick_with_guest_network_provisioner_for_test,
 };
 use crate::vm_reclamation_boot::sim_vm_host::{GATEWAY, RecordingVmm, SimVmmHost};
@@ -182,9 +183,9 @@ placement!(host_pure);
 /// The conformance main and the module declaring the variables.
 const MAIN: &str = "vol_conf";
 const MODULE: &str = "node_volume";
-/// The instance's allocation ids (`NA`) and restart-budget limit (`LIMIT`).
-const NA: i64 = 4;
-const LIMIT: i64 = 3;
+/// The conformance main's allocation ids (`NA`) and restart-budget limit (`LIMIT`, production's `RESTART_BACKOFF_CEILING` + 1: a chain fails ceiling + 1 times before `BackoffExhausted`).
+const NA: i64 = 6;
+const LIMIT: i64 = 6;
 /// The one workload of the model and its volume declaration.
 const WORKLOAD: &str = "vol-w";
 pub const DECLARATION: &str = r#"
@@ -921,8 +922,47 @@ impl NodeVolumeDriver {
         })?;
         if self.state_of(a) == Some(AllocState::Failed) {
             self.volume_launch_fails("WlStart", a)?;
+            self.finalize_observed()?;
         }
         Ok(())
+    }
+
+    /// The reconciler's own decision about the workload's current row: when the ended current row
+    /// has no terminal claim yet and the reconciler will not restart it (the restart ceiling is
+    /// spent), one evaluation finalises it with `BackoffExhausted`, which the model's `exhausted`
+    /// reads. When a restart would follow, no tick runs: the next `WlStart` is that placement.
+    fn finalize_observed(&mut self) -> std::result::Result<(), DriverError> {
+        let rows = self.rows()?;
+        let refs: Vec<&AllocStatusRow> = rows.iter().collect();
+        let Some(current) = current_alloc(&refs) else { return Ok(()) };
+        if current.state != AllocState::Failed || current.terminal.is_some() {
+            return Ok(());
+        }
+        let current = current.clone();
+        let serve = self.serve("WlStart")?;
+        let reconciler = serve.state.runtime.get(&reconciler_name()).ok_or_else(|| {
+            DriverError::Production("workload-lifecycle is not registered".to_owned())
+        })?;
+        let desired = serve
+            .rt
+            .block_on(hydrate_desired_for_test(reconciler, &target(), &serve.state))
+            .map_err(|error| DriverError::Production(format!("hydrate_desired: {error}")))?;
+        let AnyState::WorkloadLifecycle(desired) = desired else {
+            return Err(DriverError::Production(
+                "hydrate_desired returned another state".to_owned(),
+            ));
+        };
+        let (_, will_restart) = serve.state.runtime.restart_status_for_alloc(
+            &target(),
+            WorkloadKind::Service,
+            !desired.desired_to_stop,
+            &current,
+            desired.generation,
+        );
+        if will_restart {
+            return Ok(());
+        }
+        self.run_tick_to_end("WlStart")
     }
 
     fn stop_alloc(&mut self, a: i64) -> std::result::Result<(), DriverError> {
@@ -1666,11 +1706,6 @@ fn quint_vol_launch_bound_exceeded_fails_typed_and_charges_budget() -> impl Driv
     test = "no_space_fails_typed_and_never_attaches",
     max_samples = 1
 )]
-// PENDING: the spec's `LIMIT` is 3 and the production restart ceiling (`RESTART_BACKOFF_CEILING`)
-// is 5, so after the third typed failure the model's `exhausted` holds and production has not
-// written `BackoffExhausted` (a further tick still restarts). The mismatch is `exhausted`
-// (spec true, implementation false) at the third `WlStart`; the launch itself conforms.
-#[should_panic(expected = "State invariant failed")]
 fn quint_vol_no_space_fails_typed_and_never_attaches() -> impl Driver {
     NodeVolumeDriver::new()
 }
@@ -1749,21 +1784,21 @@ fn quint_vol_shutdown_abandons_every_launch_including_one_admitted_late() -> imp
 
 /// Randomized `vol_conf` traces (seed printed on failure).
 ///
-/// The seed is pinned while the driver is pending: an unpinned run draws a fresh seed, and each
-/// seed's first failing step is a different launch action, so no single marker could name the
-/// semantic RED. Seed 1 first fails at `LaunchSuperseded` (step 19). The activation step removes
-/// the `seed` argument together with the marker.
+/// The conformance main instantiates the spec's restart limit with production's
+/// `RESTART_BACKOFF_CEILING` + 1.
 /// CONTRACT_SHAPE: bounded-change.
+///
+/// Pending until step 05-02: quint-connect prints only the generic text for a
+/// state mismatch. The mismatch is `alloc[1]`: the spec holds PENDING (a lane
+/// born raised after Shutdown observes the signal before the volume check)
+/// while production fails it typed (FAILED), because the volume launch path
+/// does not yet observe the shutdown/supersession signal.
+#[should_panic(expected = "State invariant failed")]
 #[quint_run(
     spec = "../../specs/quint/node-local-volume/node_volume.qnt",
     main = "vol_conf",
     seed = "1"
 )]
-// PENDING: the spec's `LIMIT` is 3 and the production restart ceiling (`RESTART_BACKOFF_CEILING`)
-// is 5, so after the third typed failure the model's `exhausted` holds and production has not
-// written `BackoffExhausted` (a further tick still restarts). The mismatch is `exhausted`
-// (spec true, implementation false) at the third `WlStart`; the launch itself conforms.
-#[should_panic(expected = "State invariant failed")]
 fn quint_vol_randomized() -> impl Driver {
     NodeVolumeDriver::new()
 }

@@ -1066,7 +1066,7 @@ cover them. The runs are the ones DISTILL pins with `#[quint_test]`, each in the
 | (H1) `workload restart` of a Job that completed: nothing pending, no id issued (main `rg_conf_job`) | restart-generation | `restart_of_completed_job_does_nothing_and_issues_no_id` |
 | (H1) stop then `workload restart` of a Job: stays down, no id issued (main `rg_conf_job`) | restart-generation | `resume_of_stopped_job_does_nothing_and_issues_no_id` |
 
-Twelve runs are in the volume spec and ten in the restart-generation spec. One run takes `Boot` (the volume spec's shutdown run), so DISTILL pins
+The volume spec's restart limit `LIMIT` is a model parameter: the exhaustive, liveness and hazard mains use 3 to bound the state space, and the conformance main `vol_conf` (every named run) uses 6, production's `RESTART_BACKOFF_CEILING` + 1 (production restarts a failed row iff its count is below the ceiling, so a chain fails ceiling + 1 times), so `exhausted` holds at the same failure count in the model and in production. Twelve runs are in the volume spec and ten in the restart-generation spec. One run takes `Boot` (the volume spec's shutdown run), so DISTILL pins
 `Boot` in the volume driver only. A `workload restart` or `workload stop` commit enables a `LaunchLost` in a run but does not force it (the
 launch may already be past its last observation point): the model is a superset of production.
 
