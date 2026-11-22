@@ -1,8 +1,30 @@
 #!/usr/bin/env bash
 # External owner-observation partition, not a fabricated systemd execution.
+# `stop` models only the owner-signalling half of a unit stop under
+# KillMode=mixed: SIGTERM goes to the main process alone (the child of the
+# `timeout` wrapper recorded in METAL_FIXTURE_UNIT_PID) and the stop waits for
+# the wrapper to end; the supervisor's own reaction is real.
 set -euo pipefail
+alive() {
+  local state
+  state="$(ps -o stat= -p "$1" 2>/dev/null || true)"
+  [ -n "$state" ] && [ "${state#Z}" = "$state" ]
+}
 case "$*" in
   *--property=LoadState*) printf 'loaded\n' ;;
   *--property=ActiveState*) cat "$METAL_FIXTURE_UNIT_STATE" ;;
+  stop\ *)
+    [ -r "${METAL_FIXTURE_UNIT_PID:-}" ] || { printf 'Unit not loaded.\n' >&2; exit 5; }
+    pid="$(cat "$METAL_FIXTURE_UNIT_PID")"
+    main="$(pgrep -P "$pid" | head -n1)"
+    kill -TERM "$main"
+    for _ in $(seq 1 200); do
+      alive "$pid" || break
+      sleep 0.05
+    done
+    ! alive "$pid" || exit 1
+    printf 'inactive\n' >"$METAL_FIXTURE_UNIT_STATE"
+    rm -f "$METAL_FIXTURE_UNIT_PID"
+    ;;
   *) printf 'unsupported fixture systemctl request: %s\n' "$*" >&2; exit 94 ;;
 esac

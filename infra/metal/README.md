@@ -108,6 +108,32 @@ automatic pruning. A `checkout_timeout` diagnostic names the run holding the
 checkout lease as `holder=<run-id>`, so `cargo xtask metal collect <run-id>`
 retrieves it; the field is omitted when the holder's owner record is unreadable.
 
+A long run holds its checkout lease and, for `--exclusive`, the maintenance
+barrier, so another run, sync or pull of that checkout waits for it. Stop a run
+that is no longer wanted by its id:
+
+```bash
+cargo xtask metal cancel <run-id>
+```
+
+`cancel` stops only that run's own transient unit and takes neither lock, so it
+works while the run blocks everything else. The unit's `KillMode=mixed` signals
+the supervisor, which forwards the stop to the command's process group; systemd
+then kills what remains in the unit's control group (TLC/JVM, nextest, guests)
+and runs the unit's finalizer, so the owned roots are removed and the checkout
+lease and admission are released as for a run that ended on its own. A running
+run prints `OVERDRIVE_METAL_RUN_CANCELLED run_id=<run-id>` and exits 0. A run
+that has already finished prints `OVERDRIVE_METAL_RUN_FINISHED run_id=<run-id>`,
+exits 0, and is left untouched. An unknown id is `run_not_found` (66) and a
+malformed one `invalid_run_id` (64); a stop systemd refuses, with the unit still
+live, is `cancel_failed` (74). A run stopped while queued behind a lease never
+starts: `collect` reports `run_not_started` (75). A run stopped after its command
+started is retained with the existing `supervisor_terminated` cause, so
+`cargo xtask metal collect <run-id>` prints the output captured so far and
+`OVERDRIVE_METAL_RUN_COMPLETE ... exit_code=143 cause=supervisor_terminated`
+(143 is the command's own SIGTERM status; a command that traps the signal
+reports whatever it exits with).
+
 Ordinary commands use a closed existing-command grammar: Cargo
 build/check/clippy/fmt, doctests, approved xtask build/setup/lint/model
 commands, nextest, and the declared pure Sim programs. Other commands refuse before execution. `cargo nextest run`

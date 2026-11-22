@@ -177,7 +177,8 @@ enum Task {
     /// (`infra/metal/bootstrap.sh`). `run` rsyncs the tree up, including a
     /// standalone `.git`, and then executes the command under a durable
     /// transient systemd service that keeps running if the ssh route is lost;
-    /// `collect` retrieves its retained log and exit status by run id. By
+    /// `collect` retrieves its retained log and exit status by run id, and
+    /// `cancel` stops it by run id. By
     /// default the command runs as root (`sudo -n env "HOME=$HOME" "PATH=$PATH"
     /// ...` inside a `bash -lc` login shell) so the KVM / cgroup tests get the
     /// permission surface they need.
@@ -503,6 +504,14 @@ enum MetalAction {
     },
     /// Collect a previously registered Metal run by its durable run id.
     Collect {
+        /// Exactly 24 lowercase hexadecimal characters printed by `metal run`.
+        run_id: String,
+    },
+    /// Stop a registered Metal run by its durable run id. Stops only that run's
+    /// own transient unit, so its whole process tree ends and its checkout lease
+    /// and admission are released; it never waits on another run or on the
+    /// maintenance barrier. An already finished run is reported and left alone.
+    Cancel {
         /// Exactly 24 lowercase hexadecimal characters printed by `metal run`.
         run_id: String,
     },
@@ -1003,17 +1012,13 @@ fn metal_sync(target: &str) -> Result<()> {
 fn metal(action: MetalAction) -> Result<u8> {
     match action {
         MetalAction::Collect { run_id } => {
-            if !valid_metal_run_id(&run_id) {
-                eprintln!("OVERDRIVE_METAL_RUNNER_ERROR error=invalid_run_id");
-                return Ok(64);
-            }
-            which_or_hint(
-                "ssh",
-                "install an OpenSSH client (ships with macOS; `apt-get install openssh-client` on Linux)",
-            )?;
-            let target = metal_target()?;
-            metal_collect(&target, &run_id)
+            metal_run_record("metal collect (read-only durable run record)", "--collect", &run_id)
         }
+        MetalAction::Cancel { run_id } => metal_run_record(
+            "metal cancel (stop one run's own unit, no lease)",
+            "--cancel",
+            &run_id,
+        ),
         action => {
             which_or_hint(
                 "ssh",
@@ -1071,7 +1076,9 @@ fn metal(action: MetalAction) -> Result<u8> {
                     command.args([METAL_BOOTSTRAP, &target, "--pull", "--"]).args(paths);
                     sh_status("metal pull (tree-locked rsync from the box)", &mut command)
                 }
-                MetalAction::Collect { .. } => unreachable!("collect handled above"),
+                MetalAction::Collect { .. } | MetalAction::Cancel { .. } => {
+                    unreachable!("run-record actions handled above")
+                }
             }
         }
     }
@@ -1094,14 +1101,20 @@ fn sh_status(label: &str, cmd: &mut Command) -> Result<u8> {
     Ok(status.code().and_then(|code| u8::try_from(code).ok()).unwrap_or(255))
 }
 
-/// `cargo xtask metal collect` deliberately does not resolve guest artifacts
-/// or run the normal Metal preflight.  The bootstrap collector only needs the
-/// target and the validated opaque run id.
-fn metal_collect(target: &str, run_id: &str) -> Result<u8> {
-    sh_status(
-        "metal collect (read-only durable run record)",
-        Command::new("bash").args([METAL_BOOTSTRAP, target, "--collect", run_id]),
-    )
+/// `cargo xtask metal collect` and `cancel` deliberately do not resolve guest
+/// artifacts or run the normal Metal preflight.  The bootstrap helper only needs
+/// the target and the validated opaque run id; neither takes a lease.
+fn metal_run_record(label: &str, verb: &str, run_id: &str) -> Result<u8> {
+    if !valid_metal_run_id(run_id) {
+        eprintln!("OVERDRIVE_METAL_RUNNER_ERROR error=invalid_run_id");
+        return Ok(64);
+    }
+    which_or_hint(
+        "ssh",
+        "install an OpenSSH client (ships with macOS; `apt-get install openssh-client` on Linux)",
+    )?;
+    let target = metal_target()?;
+    sh_status(label, Command::new("bash").args([METAL_BOOTSTRAP, &target, verb, run_id]))
 }
 
 /// Single-quote-wrap an argument so it survives `bash -lc` re-parsing

@@ -2020,7 +2020,7 @@ Runner diagnostics print as `OVERDRIVE_METAL_RUNNER_ERROR error=<name>`:
 | 64 | the status-64 set above; `collect` also uses `invalid_run_id` |
 | 66 | `run_not_found` (collect) |
 | 70 | `supervisor_lost` (collect) |
-| 74 | `run_artifact_io`, `cleanup_failed` |
+| 74 | `run_artifact_io`, `cleanup_failed`, `cancel_failed` (cancel) |
 | 75 | `maintenance_timeout`, `checkout_timeout`, `runner_preparation_failed` (including missing remote `rsync`), and `run_not_started` (collect's report for a run recorded as `lease_timeout`, `launch_aborted`, `controller_eof_before_start` or `command_launch_failed`) |
 | 78 | `checkout_identity_conflict`, `source_mismatch`, `preflight_failed probe=<arch\|virtualization\|cpu\|kvm_device\|kvm_api\|cgroup_v2\|vmm\|guest_kernel\|guest_rootfs\|owner\|source>` |
 
@@ -2028,6 +2028,16 @@ Runner diagnostics print as `OVERDRIVE_METAL_RUNNER_ERROR error=<name>`:
 holds the checkout lease, followed by a line giving the `cargo xtask metal
 collect <id>` command for it; the field is omitted when the holder's owner
 record is absent or unreadable at timeout.
+
+`cargo xtask metal cancel <run-id>` stops that run: it stops only the run's own
+transient unit (so the whole process tree ends and the finalizer releases the
+checkout lease and admission) and takes neither lock, so it works while the run
+blocks the checkout or the maintenance barrier. It prints
+`OVERDRIVE_METAL_RUN_CANCELLED run_id=<id>` (0) for a running run and
+`OVERDRIVE_METAL_RUN_FINISHED run_id=<id>` (0) for one already finished; a
+cancelled run collects with the existing `supervisor_terminated` cause. An
+unknown id is `run_not_found` (66), a malformed one `invalid_run_id` (64), and a
+stop that leaves the unit live is `cancel_failed` (74).
 
 Outputs a metal run writes into the remote tree (recorded evidence, generated
 files) do not come back on their own. `cargo xtask metal pull <path>...`

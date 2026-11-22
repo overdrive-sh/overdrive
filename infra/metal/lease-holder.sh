@@ -4,7 +4,7 @@
 # The ordinary positional mode at the bottom of this file preserves the
 # bootstrap/sync/shell lease protocol.  `--durable` is the private service
 # entrypoint used by `bootstrap.sh --run`; `--collect` is its read-only record
-# reader.  Keeping both paths in this file makes the canonical flock and
+# reader and `--cancel` stops one run by its own unit.  Keeping both paths in this file makes the canonical flock and
 # token-matched owner cleanup one implementation.
 set -euo pipefail
 
@@ -858,6 +858,63 @@ collect_run() {
   done
 }
 
+collector_cancel_failed() {
+  collector_marker cancel_failed
+  return 74
+}
+
+# Stop one registered run by stopping its own transient unit.  The unit's
+# KillMode=mixed hands SIGTERM to the supervisor, which forwards it to the
+# command's process group and records the `supervisor_terminated` terminal;
+# systemd then kills whatever remains in the unit's cgroup and runs the
+# ExecStopPost finalizer, so the checkout lease, the maintenance barrier and
+# the owned roots are released exactly as for a run that ended by itself.
+# Cancellation never takes either lock: a long run holds them, and stopping
+# that run is the purpose.  It touches only `overdrive-metal-run-<id>.service`.
+cancel_run() {
+  local run_id="$1"
+  local runs_root="$2"
+  local run_directory="${runs_root}/${run_id}"
+  local unit="overdrive-metal-run-${run_id}.service"
+  local terminal="${run_directory}/terminal.v1"
+
+  if ! valid_run_id "$run_id"; then
+    collector_marker invalid_run_id
+    return 64
+  fi
+
+  if [ ! -d "$run_directory" ] && ! unit_is_live "$unit"; then
+    sleep 0.1
+    if ! unit_is_live "$unit"; then
+      collector_not_found
+      return 66
+    fi
+  fi
+
+  if ! unit_is_live "$unit"; then
+    printf 'OVERDRIVE_METAL_RUN_FINISHED run_id=%s\n' "$run_id"
+    return 0
+  fi
+
+  if ! systemctl stop "$unit"; then
+    # The unit may have ended between the liveness check and the stop.
+    if unit_is_live "$unit"; then
+      collector_cancel_failed
+      return 74
+    fi
+    printf 'OVERDRIVE_METAL_RUN_FINISHED run_id=%s\n' "$run_id"
+    return 0
+  fi
+
+  # A run that returned by itself inside that window is finished, not cancelled.
+  if [ -f "$terminal" ] && terminal_valid "$terminal" "$run_id" && \
+    [ "$TERMINAL_KIND" = command ] && [ "$TERMINAL_CAUSE" = command_returned ]; then
+    printf 'OVERDRIVE_METAL_RUN_FINISHED run_id=%s\n' "$run_id"
+    return 0
+  fi
+  printf 'OVERDRIVE_METAL_RUN_CANCELLED run_id=%s\n' "$run_id"
+}
+
 durable_main() {
   [ "$#" -eq 18 ] || {
     printf 'durable lease holder: expected 18 arguments\n' >&2
@@ -1322,6 +1379,23 @@ if [ "${1:-}" = --finalize ]; then
     exit 64
   }
   finalize_run "$1" "$2"
+  exit $?
+fi
+
+if [ "${1:-}" = --cancel ]; then
+  shift
+  [ "$#" -eq 1 ] || [ "$#" -eq 2 ] || \
+    [ "$#" -eq 4 ] || [ "$#" -eq 5 ] || {
+    collector_marker invalid_run_id
+    exit 64
+  }
+  run_id="$1"
+  if [ "$#" -eq 2 ] || [ "$#" -eq 5 ]; then
+    runs_root="$2"
+  else
+    runs_root="$RUNS_ROOT_DEFAULT"
+  fi
+  cancel_run "$run_id" "$runs_root"
   exit $?
 fi
 

@@ -274,6 +274,7 @@ impl Fixture {
             .env("METAL_FIXTURE_SSH_LOG", self.temp.path().join("ssh.log"))
             .env("METAL_FIXTURE_FORBIDDEN_INSTALL", self.temp.path().join("forbidden-install"))
             .env("METAL_FIXTURE_UNIT_STATE", self.temp.path().join("unit-state"))
+            .env("METAL_FIXTURE_UNIT_PID", self.temp.path().join("unit-pid"))
             .env("OVERDRIVE_METAL_LOCK_PATH", self.temp.path().join("maintenance.lock"))
             .env("OVERDRIVE_METAL_OWNER_PATH", self.temp.path().join("maintenance.owner"))
             .env("OVERDRIVE_METAL_LEASE_TIMEOUT_SECONDS", "1")
@@ -314,6 +315,16 @@ impl Fixture {
             .args(["--kill-after=2s", "5s", "bash"])
             .arg(workspace_file("infra/metal/lease-holder.sh"))
             .args(["--collect", run_id])
+            .arg(&self.runs);
+        self.environment(&mut command);
+        command
+    }
+    pub fn cancel(&self, run_id: &str) -> Command {
+        let mut command = Command::new("timeout");
+        command
+            .args(["--kill-after=2s", "10s", "bash"])
+            .arg(workspace_file("infra/metal/lease-holder.sh"))
+            .args(["--cancel", run_id])
             .arg(&self.runs);
         self.environment(&mut command);
         command
@@ -520,6 +531,11 @@ impl Durable {
     }
     pub fn terminal(&mut self) {
         self.wait_for(&self.directory.join("terminal.v1"), "kind=");
+    }
+    /// The owner's process id: the leader of the group the fixture `systemctl
+    /// stop` signals.
+    pub fn pid(&self) -> u32 {
+        self.child.id()
     }
     pub fn is_live(&mut self) -> bool {
         self.child.try_wait().expect("owner liveness").is_none()

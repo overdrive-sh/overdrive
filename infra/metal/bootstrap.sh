@@ -24,6 +24,7 @@
 #   infra/metal/bootstrap.sh root@1.2.3.4 --sync-only
 #   infra/metal/bootstrap.sh root@1.2.3.4 --run -- cargo nextest run
 #   infra/metal/bootstrap.sh root@1.2.3.4 --collect <RUN_ID>
+#   infra/metal/bootstrap.sh root@1.2.3.4 --cancel <RUN_ID>
 #   infra/metal/bootstrap.sh root@1.2.3.4 --pull -- specs/quint/<subsystem>/evidence
 set -euo pipefail
 
@@ -281,7 +282,7 @@ validate_remote_artifact_paths() {
   done
 }
 
-[ $# -ge 1 ] || { echo "usage: $0 <user@host> [--data-disk DEV] [--sync-only | --pull -- PATH... | --run [--exclusive] -- CMD... | --run --benchmark FAMILY [--spike NAME] | --shell | --collect ID]" >&2; exit 1; }
+[ $# -ge 1 ] || { echo "usage: $0 <user@host> [--data-disk DEV] [--sync-only | --pull -- PATH... | --run [--exclusive] -- CMD... | --run --benchmark FAMILY [--spike NAME] | --shell | --collect ID | --cancel ID]" >&2; exit 1; }
 TARGET="$1"; shift
 
 DATA_DISK=""
@@ -293,6 +294,9 @@ EXCLUSIVE_MODE=0
 SHELL_MODE=0
 COLLECT_MODE=0
 COLLECT_RUN_ID=""
+# `--collect` and `--cancel` both address one registered run by id and reach the
+# remote helper the same way; this names the helper verb.
+RUN_RECORD_VERB="--collect"
 NO_SYNC=0
 NO_SUDO=0
 RUN_ARGS=()
@@ -312,6 +316,9 @@ while [ $# -gt 0 ]; do
     --collect)
       [ $# -ge 2 ] || { echo "FATAL: --collect requires a run id" >&2; exit 64; }
       COLLECT_MODE=1; COLLECT_RUN_ID="$2"; shift 2 ;;
+    --cancel)
+      [ $# -ge 2 ] || { echo "FATAL: --cancel requires a run id" >&2; exit 64; }
+      COLLECT_MODE=1; RUN_RECORD_VERB="--cancel"; COLLECT_RUN_ID="$2"; shift 2 ;;
     --benchmark)
       [ $# -ge 2 ] || invalid_mode
       BENCHMARK_MODE=1; BENCHMARK_FAMILY="$2"; shift 2 ;;
@@ -727,8 +734,8 @@ collect_remote() {
   # The collector itself validates the run id again before deriving any unit
   # or path, and it never opens the canonical lease.
   printf -v remote_command \
-    'lease_script=$(printf %%s %q | base64 -d); exec %s bash -c "$lease_script" overdrive-metal-lease --collect %q %q %q %q %q' \
-    "${helper_b64}" "${SUDO}" "${COLLECT_RUN_ID:-$1}" "${METAL_RUNS_ROOT}" \
+    'lease_script=$(printf %%s %q | base64 -d); exec %s bash -c "$lease_script" overdrive-metal-lease %s %q %q %q %q %q' \
+    "${helper_b64}" "${SUDO}" "${RUN_RECORD_VERB}" "${COLLECT_RUN_ID:-$1}" "${METAL_RUNS_ROOT}" \
     "${METAL_LEASE_TIMEOUT_SECONDS}" "${METAL_LOCK_PATH}" "${METAL_OWNER_PATH}"
   set +e
   ssh "${SSH_OPTS[@]}" "${TARGET}" "${remote_command}"

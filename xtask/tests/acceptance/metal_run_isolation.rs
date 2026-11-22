@@ -18,6 +18,8 @@
 mod admission;
 #[path = "metal_run_isolation/benchmark_form.rs"]
 mod benchmark_form;
+#[path = "metal_run_isolation/cancellation.rs"]
+mod cancellation;
 #[path = "metal_run_isolation/collection.rs"]
 mod collection;
 #[path = "metal_run_isolation/controller.rs"]
