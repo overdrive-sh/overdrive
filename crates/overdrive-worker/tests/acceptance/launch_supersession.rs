@@ -902,6 +902,29 @@ async fn a_volume_launch_superseded_in_its_boot_wait_tears_the_vmm_down_and_keep
     node.assert_nothing_left(0, what);
 }
 
+/// Point 5 for a volume launch: the VMM exits busy (111) and the signal is raised in the same
+/// instant, neither seen by the launch before it is next polled. The stop wins over the busy-disk
+/// exit: the launch ends `StartSuperseded`, never `VolumeUnavailable { Held }` or an unreported
+/// exit; the VMM is torn down and the volume is kept.
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+async fn a_stop_beats_a_busy_disk_exit_at_the_same_instant_in_the_boot_wait() {
+    let what = "a volume launch whose VMM exits busy as the signal is raised";
+    let sim = pool(1024);
+    let mut node = Node::new(Some(sim.clone()), PoolOnNode::Composed).await;
+    let signal = unraised();
+    let launch = node.begin(Some(40), &signal);
+    let pid = node.wait_vmm(0).await;
+    node.settle().await;
+    // Both events land with no await between them: the single-threaded runtime cannot poll the
+    // launch task until `expect_superseded` yields, so the boot race sees both ready at once.
+    assert!(node.vmm.exit_process(pid, Some(111), None), "the VMM was live");
+    signal.raise();
+    node.expect_superseded(launch, 0, what).await;
+    assert_eq!(sim.volumes_created(), 1, "{what} must keep the ensured volume");
+    node.assert_nothing_left(0, what);
+}
+
 /// A volume launch whose signal is never raised is the volume launch of the launch path: `ensure`
 /// once, the claim polled, one VMM with the volume as its second disk.
 /// CONTRACT_SHAPE: bounded-change.
