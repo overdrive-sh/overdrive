@@ -85,6 +85,153 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-11-20T19:37:43Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-20T22:43:22Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-20T23:34:14Z"
+    },
+    {
+      "sid": "02-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-20T23:34:26Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-21T01:16:17Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-21T02:13:00Z"
+    },
+    {
+      "sid": "02-04",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-21T02:13:15Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-21T04:04:53Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: RED was held by the pre-authored should_panic markers, which ran RED on every prior run; no separate RED run was executed this dispatch",
+      "t": "2026-11-21T04:05:14Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "CHECKPOINT_PENDING: GREEN complete; commit withheld until the acceptance designer retargets 3 dependent should_panic markers (node_volume_launch, node_volume_boundaries x2)",
+      "t": "2026-11-21T04:05:14Z"
+    },
+    {
+      "sid": "03-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-21T11:58:25Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: RED proven in step 01-01 on the should_panic markers; markers removed here, adapter written directly",
+      "t": "2026-11-21T14:23:49Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: 19 of 20 volume tests pass; sad_an_ensure_blocked_on_the_group_lock_times_out_as_a_command_failure fails on a test defect (holder.kill() orphans the forked sleep 90 that holds the lock); needs nw-acceptance-designer fix",
+      "t": "2026-11-21T14:23:49Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: not committed, GREEN blocked by the acceptance test defect; work left uncommitted in the tree",
+      "t": "2026-11-21T14:23:50Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-21T14:34:42Z"
+    },
+    {
+      "sid": "03-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-21T14:37:50Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-21T22:33:43Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-21T22:41:45Z"
+    },
+    {
+      "sid": "04-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-21T22:51:33Z"
+    },
+    {
+      "sid": "04-02",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-22T03:35:33Z"
+    },
+    {
+      "sid": "04-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-22T04:28:58Z"
+    },
+    {
+      "sid": "04-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-22T04:35:26Z"
     }
   ]
 }
