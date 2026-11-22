@@ -33,6 +33,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use async_trait::async_trait;
 use overdrive_control_plane::ca_boot::{self, CaBootError};
 use overdrive_control_plane::ca_issuance::{self, CaIssuanceError};
+use overdrive_core::ca::issued_certificate_row::IssuedFor;
 use overdrive_core::ca::kek::KEK_LEN;
 use overdrive_core::ca::root_key_envelope::RootCaKeyRecord;
 use overdrive_core::ca::{SKEW_TOLERANCE, WORKLOAD_SVID_TTL};
@@ -741,6 +742,13 @@ fn issuing_node() -> NodeId {
 /// window and builds its own from the injected clock (the clock is the single
 /// window SSOT) — this window is consumed only by the direct `issue_svid`
 /// callers in the restart-chain tests.
+/// The allocation the workload SVID is issued for.
+fn workload_issued_for() -> IssuedFor {
+    IssuedFor::Allocation(
+        overdrive_core::id::AllocationId::new("dns-resolver-0").expect("valid allocation id"),
+    )
+}
+
 fn workload_request() -> SvidRequest {
     let now = SystemTime::now().duration_since(UNIX_EPOCH).expect("wall-clock after epoch");
     let not_before = UnixInstant::from_unix_duration(now.saturating_sub(Duration::from_secs(60)));
@@ -774,10 +782,16 @@ async fn issuance_writes_issued_certificates_row_matching_the_minted_cert() {
 
     // WHEN the workload-start path issues the SVID through the issuance seam,
     // which writes the audit row through the `ObservationStore` port.
-    let svid =
-        ca_issuance::issue_and_audit(&ca, audit.as_ref(), &clock, &node, request.spiffe_id())
-            .await
-            .expect("issuance + audit write succeeds");
+    let svid = ca_issuance::issue_and_audit(
+        &ca,
+        audit.as_ref(),
+        &clock,
+        &node,
+        request.spiffe_id(),
+        workload_issued_for(),
+    )
+    .await
+    .expect("issuance + audit write succeeds");
 
     // AND the issuer serial the audit row should carry is the node
     // intermediate's serial (the chain link recorded on the row).
@@ -842,9 +856,16 @@ async fn audit_window_mirrors_the_issued_leaf_window_with_skew_backoff() {
     let request = workload_request();
 
     // WHEN the workload-start path issues the SVID through the issuance seam.
-    ca_issuance::issue_and_audit(&ca, audit.as_ref(), &clock, &node, request.spiffe_id())
-        .await
-        .expect("issuance + audit write succeeds");
+    ca_issuance::issue_and_audit(
+        &ca,
+        audit.as_ref(),
+        &clock,
+        &node,
+        request.spiffe_id(),
+        workload_issued_for(),
+    )
+    .await
+    .expect("issuance + audit write succeeds");
 
     // THEN the single audit row's window is reconstructed from the SHARED
     // constants: `issued_at` is the clock snapshot, `not_before` is backed off
@@ -902,7 +923,15 @@ async fn issuance_that_cannot_write_audit_row_surfaces_an_error() {
     let request = workload_request();
 
     // WHEN issuance is attempted.
-    let result = ca_issuance::issue_and_audit(&ca, &obs, &clock, &node, request.spiffe_id()).await;
+    let result = ca_issuance::issue_and_audit(
+        &ca,
+        &obs,
+        &clock,
+        &node,
+        request.spiffe_id(),
+        workload_issued_for(),
+    )
+    .await;
 
     // THEN the issuance is REFUSED with a typed audit error — NO SvidMaterial is
     // returned, so no unaudited certificate escapes (issuance is never silent).
@@ -941,14 +970,26 @@ async fn svid_is_reissued_on_demand_without_control_plane_restart() {
     let request = workload_request();
 
     // WHEN the SAME identity is issued twice against the SAME running composition.
-    let first =
-        ca_issuance::issue_and_audit(&ca, audit.as_ref(), &clock, &node, request.spiffe_id())
-            .await
-            .expect("first issuance succeeds");
-    let second =
-        ca_issuance::issue_and_audit(&ca, audit.as_ref(), &clock, &node, request.spiffe_id())
-            .await
-            .expect("re-issue on the running control plane succeeds (no restart)");
+    let first = ca_issuance::issue_and_audit(
+        &ca,
+        audit.as_ref(),
+        &clock,
+        &node,
+        request.spiffe_id(),
+        workload_issued_for(),
+    )
+    .await
+    .expect("first issuance succeeds");
+    let second = ca_issuance::issue_and_audit(
+        &ca,
+        audit.as_ref(),
+        &clock,
+        &node,
+        request.spiffe_id(),
+        workload_issued_for(),
+    )
+    .await
+    .expect("re-issue on the running control plane succeeds (no restart)");
 
     // THEN both leaves carry the SAME identity but the re-issue is a FRESH leaf:
     // a distinct serial (re-issue is not cached — Ca::issue_svid mints anew).
@@ -1024,10 +1065,16 @@ async fn svid_is_reissued_on_demand_without_control_plane_restart() {
     // pre-restart row (S-OC-12: a post-restart serial change reads as the CURRENT
     // cert, not an anomaly). This is cross-restart monotonicity as a property of
     // the source, not something the design bolts on.
-    let third =
-        ca_issuance::issue_and_audit(&ca, audit.as_ref(), &clock, &node, request.spiffe_id())
-            .await
-            .expect("post-restart re-issue against the SAME persisted store succeeds");
+    let third = ca_issuance::issue_and_audit(
+        &ca,
+        audit.as_ref(),
+        &clock,
+        &node,
+        request.spiffe_id(),
+        workload_issued_for(),
+    )
+    .await
+    .expect("post-restart re-issue against the SAME persisted store succeeds");
     let rows_after = audit.issued_certificate_rows().await.expect("read back audit rows");
     let third_row = rows_after
         .iter()

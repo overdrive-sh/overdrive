@@ -39,7 +39,7 @@ use std::time::Duration;
 
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::WorkloadKind;
-use overdrive_core::ca::issued_certificate_row::IssuedCertificateRow;
+use overdrive_core::ca::issued_certificate_row::{IssuedCertificateRow, IssuedFor};
 use overdrive_core::id::{
     AllocationId, CertSerial, ContentHash, CorrelationKey, IssuanceOrdinal, NodeId, Region,
     ServiceId, SpiffeId, WorkloadId,
@@ -118,6 +118,9 @@ fn issued_cert_row() -> IssuedCertificateRow {
         node_id: nid("cp-0"),
         issued_at: at,
         issuance_ordinal: IssuanceOrdinal::new(0),
+        issued_for: IssuedFor::Allocation(
+            AllocationId::new("payments-0").expect("alloc id parses"),
+        ),
     }
 }
 

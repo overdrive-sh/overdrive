@@ -9,6 +9,7 @@
 //! slot synchronously in the process.
 
 use overdrive_core::ca::issue_failure::SvidIssueFailure;
+use overdrive_core::ca::issued_certificate_row::IssuedFor;
 use overdrive_core::reconcilers::Action;
 use overdrive_core::traits::ca::Ca;
 use overdrive_core::traits::clock::Clock;
@@ -45,7 +46,7 @@ pub(crate) async fn dispatch_issue(
     let Action::IssueGatewaySvid { epoch, spiffe_id, node_id, .. } = action else {
         unreachable!("dispatch_issue is called only from the IssueGatewaySvid arm")
     };
-    match issue_and_audit(ca, observation, clock, node_id, spiffe_id).await {
+    match issue_and_audit(ca, observation, clock, node_id, spiffe_id, IssuedFor::Gateway).await {
         Ok(material) => Ok(target.hold_audited(*epoch, material)),
         Err(error) => {
             target.record_issue_failure(SvidIssueFailure {

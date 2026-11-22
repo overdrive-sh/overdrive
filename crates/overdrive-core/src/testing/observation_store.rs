@@ -78,7 +78,7 @@ use futures::future::join_all;
 use tokio::time::timeout;
 
 use crate::UnixInstant;
-use crate::ca::issued_certificate_row::IssuedCertificateRow;
+use crate::ca::issued_certificate_row::{IssuedCertificateRow, IssuedFor};
 use crate::id::{AllocationId, CertSerial, IssuanceOrdinal, NodeId, Region, SpiffeId, WorkloadId};
 use crate::observation::{ProbeIdx, ProbeResultRow, ProbeRole, ProbeStatus};
 use crate::traits::observation_store::{
@@ -231,6 +231,7 @@ fn issued_cert_row(serial: &CertSerial, spiffe: &str) -> IssuedCertificateRow {
         // The append-only contract case distinguishes rows by `spiffe` body
         // difference, not ordinal; a fixed ordinal suffices here.
         issuance_ordinal: IssuanceOrdinal::new(0),
+        issued_for: IssuedFor::Allocation(AllocationId::new("alloc-0").expect("alloc id parses")),
     }
 }
 

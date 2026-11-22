@@ -29,6 +29,7 @@
 
 use overdrive_core::UnixInstant;
 use overdrive_core::ca::issue_failure::SvidIssueFailure;
+use overdrive_core::ca::issued_certificate_row::IssuedFor;
 use overdrive_core::reconcilers::Action;
 use overdrive_core::traits::ca::Ca;
 use overdrive_core::traits::clock::Clock;
@@ -119,7 +120,15 @@ pub async fn dispatch_issue(
     // The occurrence is recorded from the CONFIRMED `Err`, after it returns,
     // never at emit (R-50). The record is atomic in the store; a failed record
     // is surfaced alongside the issuance failure and not counted.
-    let svid = match ca_issuance::issue_and_audit(ca, observation, clock, node_id, spiffe_id).await
+    let svid = match ca_issuance::issue_and_audit(
+        ca,
+        observation,
+        clock,
+        node_id,
+        spiffe_id,
+        IssuedFor::Allocation(alloc_id.clone()),
+    )
+    .await
     {
         Ok(svid) => svid,
         Err(issuance) => {

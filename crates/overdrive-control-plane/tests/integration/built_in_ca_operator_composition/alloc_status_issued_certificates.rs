@@ -43,7 +43,7 @@ use overdrive_control_plane::handlers::{AllocStatusQuery, alloc_status};
 use overdrive_control_plane::reconciler_runtime::ReconcilerRuntime;
 use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{DriverInput, IntentKey, Job, JobSpecInput, ResourcesInput};
-use overdrive_core::ca::issued_certificate_row::IssuedCertificateRow;
+use overdrive_core::ca::issued_certificate_row::{IssuedCertificateRow, IssuedFor};
 use overdrive_core::id::{AllocationId, CertSerial, IssuanceOrdinal, NodeId, SpiffeId, WorkloadId};
 use overdrive_core::traits::driver::{Driver, DriverType};
 use overdrive_core::traits::intent_store::IntentStore;
@@ -172,7 +172,13 @@ async fn write_running_row(state: &AppState, alloc: &AllocationId, workload_id: 
 
 /// Write an `issued_certificates` audit row for `spiffe` at the given serial /
 /// ordinal, with the SHARED tied `issued_at`.
-async fn write_issued_cert(state: &AppState, serial: &str, spiffe: &SpiffeId, ordinal: u64) {
+async fn write_issued_cert(
+    state: &AppState,
+    serial: &str,
+    spiffe: &SpiffeId,
+    ordinal: u64,
+    issued_for: IssuedFor,
+) {
     let at = UnixInstant::from_unix_duration(Duration::from_secs(TIED_ISSUED_AT_SECS));
     let row = IssuedCertificateRow {
         serial: CertSerial::new(serial).expect("valid serial"),
@@ -183,6 +189,7 @@ async fn write_issued_cert(state: &AppState, serial: &str, spiffe: &SpiffeId, or
         node_id: writer_node(),
         issued_at: at,
         issuance_ordinal: IssuanceOrdinal::new(ordinal),
+        issued_for,
     };
     state
         .obs
@@ -216,9 +223,23 @@ async fn alloc_status_projects_current_cert_by_ordinal_not_issued_at() {
 
     // Row A (OLDER): ordinal 0, LARGER serial — the one the OLD projection
     // would (wrongly) pick on the `issued_at` tie.
-    write_issued_cert(&state, STALE_LARGER_SERIAL, &spiffe, 0).await;
+    write_issued_cert(
+        &state,
+        STALE_LARGER_SERIAL,
+        &spiffe,
+        0,
+        IssuedFor::Allocation(alloc.clone()),
+    )
+    .await;
     // Row B (NEWER): ordinal 1, SMALLER serial — the genuinely current cert.
-    write_issued_cert(&state, CURRENT_SMALLER_SERIAL, &spiffe, 1).await;
+    write_issued_cert(
+        &state,
+        CURRENT_SMALLER_SERIAL,
+        &spiffe,
+        1,
+        IssuedFor::Allocation(alloc.clone()),
+    )
+    .await;
 
     let resp = alloc_status(
         State(state.clone()),

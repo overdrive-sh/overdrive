@@ -112,6 +112,7 @@ async fn fixture(world: &World) -> Fixture {
                 node.clock.as_ref(),
                 &node.state.node_id,
                 &spiffe,
+                overdrive_core::ca::issued_certificate_row::IssuedFor::Allocation(alloc_id.clone()),
             )
             .await
             .expect("pre-issue");
@@ -137,6 +138,7 @@ async fn fixture(world: &World) -> Fixture {
             node.clock.as_ref(),
             &node.state.node_id,
             &spiffe,
+            overdrive_core::ca::issued_certificate_row::IssuedFor::Allocation(alloc_id.clone()),
         )
         .await
         .expect("pre-issue the orphan");

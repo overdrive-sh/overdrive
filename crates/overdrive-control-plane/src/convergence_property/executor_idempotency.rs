@@ -245,6 +245,7 @@ fn applying_the_svid_drop_twice_equals_applying_it_once() {
             world.clock.as_ref(),
             &world.state.node_id,
             &spiffe,
+            overdrive_core::ca::issued_certificate_row::IssuedFor::Allocation(alloc.clone()),
         )
         .await
         .expect("pre-issue");

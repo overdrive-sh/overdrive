@@ -27,7 +27,8 @@ use overdrive_core::aggregate::{
     AggregateError, IntentKey, Job, Service, WorkloadIntent, WorkloadKind,
 };
 use overdrive_core::api::describe::DescribeSpecOutput;
-use overdrive_core::id::{SpiffeId, WorkloadId};
+use overdrive_core::ca::issued_certificate_row::{IssuedCertificateRow, IssuedFor};
+use overdrive_core::id::WorkloadId;
 use overdrive_core::reconcilers::{Reconciler, ReconcilerName, TargetResource};
 use overdrive_core::traits::intent_store::{PutOutcome, TxnOp};
 use overdrive_core::traits::observation_store::AllocState;
@@ -1371,16 +1372,16 @@ async fn probe_results_for_rows(
 /// that deterministic order — no `HashMap` is introduced.
 fn issued_certificates_for_rows(
     workload_rows: &[AllocStatusRow],
-    issued_cert_rows: &[overdrive_core::ca::issued_certificate_row::IssuedCertificateRow],
+    issued_cert_rows: &[IssuedCertificateRow],
 ) -> Vec<api::IssuedCertSummary> {
     workload_rows
         .iter()
         .filter(|row| matches!(row.state, AllocState::Running))
         .filter_map(|row| {
-            let spiffe = SpiffeId::for_allocation(&row.workload_id, &row.alloc_id);
+            let issued_for = IssuedFor::Allocation(row.alloc_id.clone());
             issued_cert_rows
                 .iter()
-                .filter(|c| c.spiffe_id == spiffe)
+                .filter(|c| c.issued_for == issued_for)
                 .max_by_key(|c| c.issuance_ordinal)
                 .map(|c| api::IssuedCertSummary {
                     serial: c.serial.clone(),

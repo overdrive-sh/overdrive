@@ -27,7 +27,7 @@
 //! (`RootCaKeyRecordV1::from_store_bytes` emits `health.startup.refused`
 //! and refuses to start), observation **logs-and-skips** the offending row
 //! so convergence proceeds for the surviving rows.
-//! [`IssuedCertificateRowV1::from_store_bytes`] implements the observation
+//! [`IssuedCertificateRowV2::from_store_bytes`] implements the observation
 //! side — on an [`EnvelopeError`] (unknown future version OR malformed
 //! bytes) it logs a single `tracing::warn!` and returns
 //! [`ObservationStoreError::Envelope`], which the adapter's row-reader
@@ -37,7 +37,7 @@
 //!
 //! Per ADR-0048 + `.claude/rules/development.md` § "rkyv schema
 //! evolution", the public name is an **alias to the payload**
-//! ([`IssuedCertificateRow`] `= IssuedCertificateRowV1`); the
+//! ([`IssuedCertificateRow`] `= IssuedCertificateRowV2`); the
 //! [`IssuedCertificateRowEnvelope`] enum is `pub` but **NOT re-exported
 //! from `lib.rs`** (Layer 1) and direct variant construction is rejected
 //! by the `xtask::dst_lint` scanner (Layer 2). Writers wrap via
@@ -60,13 +60,15 @@ use crate::wall_clock::UnixInstant;
 /// Public alias to the latest [`IssuedCertificateRow`] payload — callers
 /// construct `IssuedCertificateRow { .. }` directly (UI-02
 /// alias-to-payload).
-pub type IssuedCertificateRow = IssuedCertificateRowV1;
+pub type IssuedCertificateRow = IssuedCertificateRowV2;
 
 /// Documentation alias for "the latest payload" — used by the
 /// schema-evolution harness and the version-bump procedure.
-pub type IssuedCertificateRowLatest = IssuedCertificateRowV1;
+pub type IssuedCertificateRowLatest = IssuedCertificateRowV2;
 
 /// V1 persisted shape of an `issued_certificates` audit row (ADR-0063 D6).
+/// Frozen: a V1 row carries a per-allocation identity and no `issued_for`; it
+/// is refused on read, never translated (ADR-0345, greenfield single cut).
 ///
 /// The audit *inputs* — the facts observed when a certificate was issued:
 ///
@@ -106,9 +108,6 @@ pub struct IssuedCertificateRowV1 {
 /// SVID, or the public-ingress gateway's own. A sum type, not an optional
 /// `AllocationId`: the gateway SVID shares the `issued_certificates` table and
 /// has no allocation.
-///
-/// SCAFFOLD: true. Shape pinned by the `workload-spiffe-identity` feature
-/// delta; not yet wired into the envelope or the public alias (DELIVER).
 #[derive(
     Debug,
     Clone,
@@ -131,10 +130,6 @@ pub enum IssuedFor {
 
 /// V2 persisted shape of an `issued_certificates` audit row (ADR-0345): the V1
 /// fields plus `issued_for`.
-///
-/// SCAFFOLD: true. Pinned by the `workload-spiffe-identity` feature delta; the
-/// envelope variant, the public alias re-point and the `issue_and_audit`
-/// parameter are DELIVER's single version-bump commit.
 #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub struct IssuedCertificateRowV2 {
     /// Serial number of the issued certificate.
@@ -165,50 +160,49 @@ pub struct IssuedCertificateRowV2 {
 #[derive(Debug, Clone, PartialEq, Eq, rkyv::Archive, rkyv::Serialize, rkyv::Deserialize)]
 pub enum IssuedCertificateRowEnvelope {
     V1(IssuedCertificateRowV1),
+    V2(IssuedCertificateRowV2),
 }
 
 impl VersionedEnvelope for IssuedCertificateRowEnvelope {
-    type Latest = IssuedCertificateRowV1;
+    type Latest = IssuedCertificateRowV2;
 
     fn latest(payload: Self::Latest) -> Self {
-        Self::V1(payload)
+        Self::V2(payload)
     }
 
+    /// A V1 row is refused, never translated (ADR-0345, DD-5): it carries a
+    /// per-allocation identity and no `issued_for`, and is discarded with the
+    /// data directory. Observation reads log and skip it.
     fn into_latest(self) -> Result<Self::Latest, EnvelopeError> {
         match self {
-            Self::V1(v1) => Ok(v1),
+            Self::V1(_) => Err(EnvelopeError::UnknownVersion {
+                observed: 0,
+                type_name: Self::type_name(),
+                supported_max: 1,
+            }),
+            Self::V2(v2) => Ok(v2),
         }
     }
 
     /// Discriminant offset for `IssuedCertificateRowEnvelope` archives,
     /// measured from the END of the archive bytes.
     ///
-    /// Empirically pinned against canonical V1 payloads of varying
-    /// `CertSerial` / `SpiffeId` / `NodeId` string lengths: rkyv 0.8 places
-    /// the outer enum's discriminant byte at a fixed offset from the END of
-    /// the archive (the variable-length string slabs grow the leading
-    /// region; the trailing root structure has a fixed footprint).
-    /// Triangulated against `GOLDEN_DISCRIMINANT_OFFSET_V1` in
+    /// rkyv 0.8 places the outer enum's discriminant byte at a fixed offset
+    /// from the END of the archive (the variable-length string slabs grow the
+    /// leading region; the trailing root structure has a fixed footprint).
+    /// The root is sized to the largest variant, so appending `V2` moved it
+    /// from `104` to `120` (ADR-0345). Triangulated against
+    /// `GOLDEN_DISCRIMINANT_OFFSET` in
     /// `tests/schema_evolution/issued_certificate_row.rs`; both update in
-    /// lockstep on a `V<N+1>` bump per `development.md` § "Version-bump
-    /// procedure".
-    ///
-    /// Empirically located at `104` by flipping each byte of a canonical V1
-    /// archive to an out-of-set tag and observing which one causes rkyv's
-    /// bytecheck to surface `invalid discriminant '99' for enum
-    /// 'ArchivedIssuedCertificateRowEnvelope'` (the
-    /// `probe_discriminant_offset` helper in the schema-evolution fixture).
-    /// Re-pinned from `96` → `104` when the `issuance_ordinal` `u64` field was
-    /// appended to V1 (greenfield single-cut, feature-delta § D1-AMEND-3): the
-    /// 8-byte trailing field pushes the discriminant 8 bytes further from the
-    /// archive's end.
+    /// lockstep on a `V<N+1>` bump per `development.md` Version-bump
+    /// procedure.
     fn discriminant_offset_from_end() -> Option<usize> {
-        Some(104)
+        Some(120)
     }
 
     fn known_discriminants() -> &'static [u8] {
-        // V1 carries rkyv discriminant 0 (declaration order).
-        &[0]
+        // V1 and V2 carry rkyv discriminants 0 and 1 (declaration order).
+        &[0, 1]
     }
 
     fn type_name() -> &'static str {
@@ -216,19 +210,19 @@ impl VersionedEnvelope for IssuedCertificateRowEnvelope {
     }
 }
 
-impl IssuedCertificateRowV1 {
+impl IssuedCertificateRowV2 {
     /// Archive this row for persistence — wraps in the latest envelope and
     /// rkyv-serialises to canonical bytes.
     ///
     /// # Postconditions
     ///
     /// On `Ok(bytes)`, `bytes` is the canonical rkyv-archived sequence of
-    /// `IssuedCertificateRowEnvelope::V1(self.clone())`. Two archivals of
+    /// `IssuedCertificateRowEnvelope::V2(self.clone())`. Two archivals of
     /// the same logical row produce byte-identical output.
     ///
     /// # Observable invariants
     ///
-    /// `IssuedCertificateRowV1::from_store_bytes(&self.archive_for_store()?, None)`
+    /// `IssuedCertificateRowV2::from_store_bytes(&self.archive_for_store()?, None)`
     /// returns `Ok(self_owned)` bit-equivalent to `self`.
     ///
     /// # Errors

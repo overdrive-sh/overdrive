@@ -190,13 +190,18 @@ fn service_lifecycle_manages_services_and_not_jobs() {
 
 /// Mint an SVID for `alloc` of `workload` through the production issuance path
 /// (audit row first, then the leaf), as `IssueSvid` does.
-async fn issue(world: &Composed, spiffe: &SpiffeId) -> overdrive_core::traits::ca::SvidMaterial {
+async fn issue(
+    world: &Composed,
+    spiffe: &SpiffeId,
+    issued_for: overdrive_core::ca::issued_certificate_row::IssuedFor,
+) -> overdrive_core::traits::ca::SvidMaterial {
     crate::ca_issuance::issue_and_audit(
         world.state.ca.as_ref(),
         world.obs.as_ref(),
         world.clock.as_ref(),
         &node("local"),
         spiffe,
+        issued_for,
     )
     .await
     .expect("issue and audit")
@@ -215,14 +220,29 @@ fn svid_lifecycle_manages_workloads_with_running_allocations_or_a_held_svid_and_
         // held with no row: the hold outlived a failed row write.
         let held_alloc = overdrive_core::id::AllocationId::new("held-only-0").expect("alloc");
         let held_spiffe = SpiffeId::for_allocation(&workload_id("held-only"), &held_alloc);
-        let material = issue(&world, &held_spiffe).await;
+        let material = issue(
+            &world,
+            &held_spiffe,
+            overdrive_core::ca::issued_certificate_row::IssuedFor::Allocation(held_alloc.clone()),
+        )
+        .await;
         world.state.identity.hold(held_alloc, material);
         // issued once, no longer held, no row: `ever_issued` alone manages nothing.
         let ever_alloc = overdrive_core::id::AllocationId::new("ever-only-0").expect("alloc");
-        issue(&world, &SpiffeId::for_allocation(&workload_id("ever-only"), &ever_alloc)).await;
+        issue(
+            &world,
+            &SpiffeId::for_allocation(&workload_id("ever-only"), &ever_alloc),
+            overdrive_core::ca::issued_certificate_row::IssuedFor::Allocation(ever_alloc.clone()),
+        )
+        .await;
         // a held entry whose identity does not invert to a workload.
         let gateway_like = SpiffeId::new("spiffe://overdrive.local/gateway/local").expect("spiffe");
-        let material = issue(&world, &gateway_like).await;
+        let material = issue(
+            &world,
+            &gateway_like,
+            overdrive_core::ca::issued_certificate_row::IssuedFor::Gateway,
+        )
+        .await;
         world
             .state
             .identity

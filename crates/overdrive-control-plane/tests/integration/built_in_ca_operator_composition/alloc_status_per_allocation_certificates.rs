@@ -8,20 +8,9 @@
 //! projection joins on `issued_for = Allocation(row.alloc_id)`, then selects the
 //! max `IssuanceOrdinal` among that allocation's rows.
 //!
-//! HELD: names `IssuedCertificateRow.issued_for` / `IssuedFor` (V2 row) and the
-//! real `SpiffeId::for_workload`, none of which compile against the V1 row the
-//! alias still points at. Gated with the marker below; DELIVER removes the gate
-//! in the step that lands the V2 row and `alloc status` re-key, and lands this
-//! body UNCHANGED. The sibling test
-//! `alloc_status_projects_current_cert_by_ordinal_not_issued_at` re-keys its row
-//! literals to V2 in the same step (compiler-enumerated).
-//!
 //! Default-lane in-process (`AppState::new` over sim stores), like its sibling.
 //! CONTRACT_SHAPE: bounded-change.
 
-// distill-pending-owner-api: IssuedCertificateRow.issued_for + IssuedFor (ADR-0345, V2 alias re-point)
-// and SpiffeId::for_workload; activated by DELIVER's IssuedCertificateRow V2 step.
-#![cfg(any())]
 #![allow(clippy::expect_used, clippy::expect_fun_call, clippy::unwrap_used)]
 
 use std::collections::BTreeSet;

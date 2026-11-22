@@ -43,7 +43,7 @@
 //! not the trigger.
 
 use overdrive_core::ca::issue_failure::SvidIssueFailureCause;
-use overdrive_core::ca::issued_certificate_row::IssuedCertificateRow;
+use overdrive_core::ca::issued_certificate_row::{IssuedCertificateRow, IssuedFor};
 use overdrive_core::ca::{SKEW_TOLERANCE, WORKLOAD_SVID_TTL};
 use overdrive_core::traits::ca::{Ca, CaError, SvidMaterial, SvidRequest};
 use overdrive_core::traits::clock::Clock;
@@ -197,6 +197,7 @@ pub async fn issue_and_audit(
     clock: &dyn Clock,
     node: &NodeId,
     spiffe_id: &SpiffeId,
+    issued_for: IssuedFor,
 ) -> Result<SvidMaterial, CaIssuanceError> {
     // The node intermediate is the issuer of the leaf; its serial is the audit
     // row's `issuer_serial` (the chain link an auditor walks). Single-node: the
@@ -255,6 +256,7 @@ pub async fn issue_and_audit(
         node_id: node.clone(),
         issued_at,
         issuance_ordinal: ordinal,
+        issued_for,
     };
 
     // Bind issuance + audit: write the audit row through the `ObservationStore`

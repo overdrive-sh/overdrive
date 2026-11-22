@@ -232,6 +232,7 @@ async fn fixture(world: &World) -> Fixture {
             node.clock.as_ref(),
             &node.state.node_id,
             &subject,
+            overdrive_core::ca::issued_certificate_row::IssuedFor::Gateway,
         )
         .await
         .expect("pre-issue");

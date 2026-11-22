@@ -32,11 +32,12 @@ use std::time::Duration;
 
 use overdrive_control_plane::GatewayAppStateComposition;
 use overdrive_control_plane::ca_issuance::issue_and_audit;
+use overdrive_core::ca::issued_certificate_row::IssuedFor;
 use overdrive_core::gateway_identity::{
     GatewayIdentityDesired, GatewayIdentityEpoch, GatewayIdentityFacts, GatewayIdentityView,
 };
 use overdrive_core::guest_network::GuestAttachmentOccupancy;
-use overdrive_core::id::{CertSerial, NodeId, SpiffeId};
+use overdrive_core::id::{AllocationId, CertSerial, NodeId, SpiffeId};
 use overdrive_core::reconcilers::{HydrationContext, TargetResource};
 use overdrive_core::traits::driver::DriverRegistry;
 use overdrive_core::wall_clock::UnixInstant;
@@ -155,10 +156,17 @@ impl World {
 
     /// Write one issued-certificate audit row for `subject` through the
     /// production issuance path.
-    async fn audit_issuance(&self, subject: &SpiffeId) {
-        issue_and_audit(&self.ca, &self.observation, &SimClock::new(), &self.node_id, subject)
-            .await
-            .expect("issue_and_audit writes the audit row");
+    async fn audit_issuance(&self, subject: &SpiffeId, issued_for: IssuedFor) {
+        issue_and_audit(
+            &self.ca,
+            &self.observation,
+            &SimClock::new(),
+            &self.node_id,
+            subject,
+            issued_for,
+        )
+        .await
+        .expect("issue_and_audit writes the audit row");
     }
 }
 
@@ -280,10 +288,15 @@ async fn ever_issued_is_derived_only_from_audit_rows_of_the_gateway_subject() {
 
     let workload = SpiffeId::from_str("spiffe://overdrive.local/workload/payments/alloc/a1")
         .expect("fixture workload SPIFFE id");
-    world.audit_issuance(&workload).await;
+    world
+        .audit_issuance(
+            &workload,
+            IssuedFor::Allocation(AllocationId::new("workload-0").expect("alloc id")),
+        )
+        .await;
     assert!(!ever_issued().await, "another subject's row is not the gateway's restart marker");
 
-    world.audit_issuance(&gateway).await;
+    world.audit_issuance(&gateway, IssuedFor::Gateway).await;
     assert!(ever_issued().await, "a gateway issuance row marks that the gateway was issued");
 }
 
