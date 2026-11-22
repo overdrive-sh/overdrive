@@ -41,12 +41,12 @@ use overdrive_core::traits::driver::{
 use overdrive_core::traits::vmm::{
     VMM_CONSOLE_TAIL_MAX_BYTES, VmControl, VmExitWatch, Vmm, VmmDiagnostics, VmmError, VmmExit,
 };
+use overdrive_core::traits::volume_backing::{ClaimState, VolumeBackingError};
 use overdrive_core::vm::beacon::{BeaconConnKey, BeaconIo, BeaconMessage, BeaconSocket};
 use overdrive_core::vm::config::{
     HostArch, KERNEL_MAGIC_WINDOW, KernelCmdline, KernelImage, MemoryPlan, RootfsPlan, VmConfig,
     VmConfinement, VmRunDir, VolumeAttachment, vcpus_for,
 };
-use overdrive_core::traits::volume_backing::{ClaimState, VolumeBackingError};
 use overdrive_core::volume::{VolumeOperation, VolumeUnavailableCause};
 use parking_lot::Mutex;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
@@ -168,9 +168,17 @@ const VOLUME_CLAIM_BOUND: Duration = Duration::from_secs(30);
 /// The claim poll interval of the launch's claim wait.
 const VOLUME_CLAIM_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
-/// A typed `VolumeUnavailable` start failure.
-fn volume_unavailable(cause: VolumeUnavailableCause) -> DriverError {
-    let detail = format!("workload volume unavailable: {cause:?}");
+/// A typed `VolumeUnavailable` start failure. `source` is the underlying pool
+/// error, when there is one; its `Display` is kept in the detail so an operator
+/// can tell, for example, `EACCES` from `EIO`.
+fn volume_unavailable(
+    cause: VolumeUnavailableCause,
+    source: Option<&VolumeBackingError>,
+) -> DriverError {
+    let detail = source.map_or_else(
+        || format!("workload volume unavailable: {cause:?}"),
+        |error| format!("workload volume unavailable: {cause:?}: {error}"),
+    );
     start_rejected(VmStartFailure::VolumeUnavailable { cause }, detail)
 }
 
@@ -184,15 +192,15 @@ const fn ensure_cause(error: &VolumeBackingError) -> VolumeUnavailableCause {
         VolumeBackingError::PoolCommand { operation, .. } => {
             VolumeUnavailableCause::PoolCommandFailed { operation: *operation }
         }
-        VolumeBackingError::NotFound { .. } | _ => {
+        // `ensure` creates the volume, so a `NotFound` from it is a bug in the
+        // adapter; the nearest named cause is a failed activation.
+        VolumeBackingError::NotFound { .. } => {
             VolumeUnavailableCause::PoolCommandFailed { operation: VolumeOperation::Activate }
         }
+        // `VolumeBackingError` is `#[non_exhaustive]`; a future variant is an
+        // unclassified pool failure, reported as a failed activation.
+        _ => VolumeUnavailableCause::PoolCommandFailed { operation: VolumeOperation::Activate },
     }
-}
-
-/// The cause of a failed `claim_state`: always the claim operation.
-const fn claim_cause(_error: &VolumeBackingError) -> VolumeUnavailableCause {
-    VolumeUnavailableCause::PoolCommandFailed { operation: VolumeOperation::Claim }
 }
 
 /// Construct a `DriverError::StartRejected` for a VM failure with no named
@@ -1374,21 +1382,26 @@ impl VmDriver {
             return Ok(None);
         };
         let Some(pool) = self.volumes.as_ref() else {
-            return Err(volume_unavailable(VolumeUnavailableCause::PoolAbsent));
+            return Err(volume_unavailable(VolumeUnavailableCause::PoolAbsent, None));
         };
         let device = pool
             .ensure(&declared.workload, declared.size)
             .await
-            .map_err(|error| volume_unavailable(ensure_cause(&error)))?;
+            .map_err(|error| volume_unavailable(ensure_cause(&error), Some(&error)))?;
         let deadline = self.clock.now() + VOLUME_CLAIM_BOUND;
         loop {
             match pool.claim_state(&declared.workload).await {
                 Ok(ClaimState::Free) => return Ok(Some(VolumeAttachment { device })),
                 Ok(ClaimState::Held) => {}
-                Err(error) => return Err(volume_unavailable(claim_cause(&error))),
+                Err(error) => {
+                    let cause = VolumeUnavailableCause::PoolCommandFailed {
+                        operation: VolumeOperation::Claim,
+                    };
+                    return Err(volume_unavailable(cause, Some(&error)));
+                }
             }
             if self.clock.now() >= deadline {
-                return Err(volume_unavailable(VolumeUnavailableCause::Held));
+                return Err(volume_unavailable(VolumeUnavailableCause::Held, None));
             }
             self.clock.sleep(VOLUME_CLAIM_POLL_INTERVAL).await;
         }

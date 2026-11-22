@@ -239,7 +239,6 @@ pub mod gateway_application;
 // `data_survives_restart`, `no_drain_failure_charges_budget`). They drive the real
 // `VmDriver::start` launch path over `SimVmm`, `SimClock` and `SimVolumeBacking`
 // fault injection; the evaluator bodies live in `crate::invariants::volume_launch`.
-// All three variants are in `Invariant::ALL`.
 pub mod volume_launch;
 
 /// Catalogue of invariants the DST harness evaluates.
@@ -697,21 +696,18 @@ pub enum Invariant {
     /// reaches the VMM while the volume's claim is held and at most one VMM is alive, for
     /// any seeded schedule of launches, kills, delayed claim releases, reboots,
     /// control-plane restarts, a crash between the create and the attach, and a failing
-    /// command. The evaluator
-    /// body lives in `crate::invariants::volume_launch`.
+    /// command. The evaluator body lives in `crate::invariants::volume_launch`.
     VolumeSingleWriter,
 
     /// node-local-persistent-volume (GH #348) — always invariant. One volume is ever
     /// created for the workload and every launch attaches that one volume's device, for
-    /// any seeded schedule. The evaluator body lives in
-    /// `crate::invariants::volume_launch`.
+    /// any seeded schedule. The evaluator body lives in `crate::invariants::volume_launch`.
     VolumeDataSurvivesRestart,
 
     /// node-local-persistent-volume (GH #348) — safety plus convergence. A successor that
     /// finds the claim still held (drain delay inside the 30 s bound, chosen by the seed)
     /// neither fails nor creates a second VMM, and eventually attaches once the claim
-    /// drains. The evaluator body lives in
-    /// `crate::invariants::volume_launch`.
+    /// drains. The evaluator body lives in `crate::invariants::volume_launch`.
     VolumeNoDrainFailureChargesBudget,
 }
 
