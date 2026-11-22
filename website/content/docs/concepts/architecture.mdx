@@ -294,7 +294,7 @@ operator a client leaf, and binds a rustls listener. It writes the endpoint, the
 CA pin, and the operator certificate to `~/.overdrive/config` as one unit — the
 "trust triple" every CLI command reads. The connection is mutually
 authenticated; there is no flag to turn that off. These are standard X.509
-certificates. (SPIFFE identifiers also appear in the data model — every allocation
+certificates. (SPIFFE identifiers also appear in the data model — every workload
 carries one — and they now drive a separate, transparent handshake for traffic
 between workloads; see [transparent mTLS](/docs/concepts/transparent-mtls).)
 

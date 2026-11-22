@@ -1379,7 +1379,7 @@ C4Context
 ### C4 Level 2 — Container
 
 `overdrive-core` gains the pure `SvidLifecycle` reconciler + its View + the two
-`Action` variants + `SpiffeId::for_allocation` + the `IdentityRead` port — **no
+`Action` variants + `SpiffeId::for_workload` / `workload_id` + the `IdentityRead` port — **no
 CA handle, no `.await`** (dst-lint boundary). `overdrive-control-plane` gains
 `IdentityMgr` (the in-process `RwLock<BTreeMap>` holder) + the
 `action_shim/issue_svid.rs` executor (the sole CA-I/O site) + the two
@@ -1400,7 +1400,7 @@ C4Container
 
   Container(cli, "overdrive-cli", "Rust binary", "Composition root — composes Arc<dyn Ca> (ca_boot, lib.rs:50) + IdentityMgr::new(Some(Ca::trust_bundle())); wires both into AppState")
   Container(ctrl, "overdrive-control-plane", "Rust crate (adapter-host)", "NEW IdentityMgr (RwLock<BTreeMap<AllocationId, SvidMaterial>> + Option<TrustBundle>) + action_shim/issue_svid.rs executor (the only CA-I/O site). AppState gains ca + identity")
-  Container(core, "overdrive-core", "Rust crate (class core)", "NEW SvidLifecycle reconciler (pure) + SvidLifecycleView + Action::IssueSvid/DropSvid + SpiffeId::for_allocation + IdentityRead port. NO Ca handle, NO .await (dst-lint). Reuses SvidMaterial/TrustBundle/CorrelationKey/AllocationId/NodeId/WorkloadId/CertSerial")
+  Container(core, "overdrive-core", "Rust crate (class core)", "NEW SvidLifecycle reconciler (pure) + SvidLifecycleView + Action::IssueSvid/DropSvid + SpiffeId::for_workload/workload_id + IdentityRead port. NO Ca handle, NO .await (dst-lint). Reuses SvidMaterial/TrustBundle/CorrelationKey/AllocationId/NodeId/WorkloadId/CertSerial")
   Container(ca, "Built-in CA (#28)", "Ca port + ca_issuance::issue_and_audit", "Mints the leaf, writes the audit row, refuses issuance on audit-write failure; supplies trust_bundle(). REUSED AS-IS (ADR-0063)")
   Container(sim, "overdrive-sim", "adapter-sim", "NEW SimIdentityRead (preloaded BTreeMap + Option<TrustBundle>); the identity_read_equivalence DST test drives it vs IdentityMgr")
   ContainerDb(view, "RedbViewStore (redb)", "ViewStore (reconciler memory)", "SvidLifecycleView — RETRY MEMORY only (attempts, last_failure_seen_at). NO serial/issued_at success facts, NO derived expires_at. Runtime owns persistence")
@@ -1438,7 +1438,7 @@ C4Component
     Component(recon, "SvidLifecycle reconciler (NEW)", "reconcilers/svid_lifecycle.rs", "Pure reconcile(): converges desired=running allocs vs actual=IdentityMgr HELD SET. running∧¬held→IssueSvid (incl. restart re-issue), ¬running∧held→DropSvid, running∧held(valid)→Noop. BUILDS the SpiffeId (pure). #40 near-expiry branch (running∧held(near-expiry)) pre-wired, emit GATED (ROTATION_ENABLED=false), keyed off actual.not_after")
     Component(view, "SvidLifecycleView + IssueRetry (NEW)", "reconcilers/svid_lifecycle.rs", "retry: BTreeMap<AllocationId, IssueRetry{attempts, last_failure_seen_at}>. RETRY MEMORY only — a failed IssueSvid backs off. NO serial/issued_at/spiffe_id success facts (held-ness is actual; success is the issued_certificates row). 6 derive bounds (+Eq); manual Default")
     Component(actions, "Action::IssueSvid / DropSvid (NEW)", "reconcilers/mod.rs", "IssueSvid{alloc_id, spiffe_id, node_id, correlation} / DropSvid{alloc_id, correlation}. Plain enum +2 variants; +3 dispatch-enum variants (AnyState/AnyReconciler/AnyReconcilerView). correlation = CorrelationKey::derive(svid-lifecycle/<alloc>, spec_hash, issue-svid)")
-    Component(spiffe, "SpiffeId::for_allocation (NEW impl)", "id.rs", "Infallible for_allocation(&WorkloadId, &AllocationId) -> Self; #[must_use]; trust-domain overdrive.local; builds spiffe://…/job/<wl>/alloc/<id>; validates via new with unwrap_or_else(|| unreachable!(…))")
+    Component(spiffe, "SpiffeId::for_workload / workload_id (impl)", "id.rs", "Infallible for_workload(&WorkloadId) -> Self; #[must_use]; trust-domain overdrive.local; builds spiffe://overdrive.local/workload/<wl>, shared by all the workload's allocations; workload_id inverts it; validates via new with unwrap_or_else(|| unreachable!(…))")
     Component(readport, "IdentityRead port (NEW)", "traits/identity_read.rs", "svid_for(&AllocationId) -> Option<SvidMaterial> + current_bundle() -> Option<TrustBundle>. Sync, owned clones. 5 rustdoc clauses: no-issue, no-mutate, None=absent, owned-clone, post-drop None")
     Component(svidmat, "SvidMaterial / TrustBundle (REUSE)", "traits/ca.rs", "Existing — cert + node-held leaf_key (redacted Debug, ADR-0063 D9); trust bundle. No change")
     Component(corr, "CorrelationKey::derive (REUSE)", "id.rs", "Existing derive(target, spec_hash, purpose). No change")
@@ -2071,7 +2071,7 @@ flowchart LR
     OP -->|"Published Language — Install/Replace Certified Key"| CK
     PI -->|"Service Listener Reference → exact frontend; prepared upstream socket + ServiceKey"| SD
     SL -->|"Published Language — ServiceBackendRow; gateway is not a consumer"| SD
-    SD -->|"BPF Selection Receipt + exact applied Backend.alloc identity"| PI
+    SD -->|"BPF Selection Receipt + exact applied Backend.workload_identity"| PI
     PI -->|"connected socket + receipt-selected identity"| WI
     CK -->|"opaque usable resolver snapshot"| PI
     WI -->|"gateway-SVID exact-peer authenticated upstream stream"| PI
@@ -2084,7 +2084,8 @@ socket and owns receipt and identity state; Workload Identity owns the SVID and
 peer authentication. Receipt ownership is
 [ADR-0228](adr-0228-dataplane-selection-receipt-ownership.md); Applied Backend
 Identity Association ownership is
-[ADR-0241](adr-0241-dataplane-applied-backend-identity-association.md).
+[ADR-0347](adr-0347-dataplane-backend-identity-association-carries-the-workload-identity.md)
+(the association carries the workload identity and follows the workload programmed at the endpoint).
 
 ---
 
@@ -2242,7 +2243,7 @@ C4Component
   Container_Boundary(dp, "dataplane / mTLS owners") {
     Component(prep, "Upstream socket preparation", "EbpfDataplane", "Creates the socket in the serve task, marks it, binds 127.0.0.1, reads SO_COOKIE and registers (cookie, ServiceKey)")
     Component(registry, "Gateway Connect Registry + gateway selection cgroup/connect4 program", "EbpfDataplane + BPF (separate gateway program; the cgroup_connect4_service it sat beside is removed, ADR-0322)", "Registered sockets select via Maglev (BACKEND_MAP.healthy is not read) and record Selected BackendId or NoBackend")
-    Component(assoc, "Service-map commit guard + Applied Backend Identity", "EbpfDataplane", "Outer-map commit publishes selection before the immutable BackendId-to-applied-Backend.alloc becomes readable")
+    Component(assoc, "Service-map commit guard + Applied Backend Identity", "EbpfDataplane", "Outer-map commit publishes selection before the BackendId-to-applied-Backend.workload_identity association (the workload most recently programmed at the endpoint) becomes readable")
     Component(slot, "Gateway Identity Slot + ClientIdentityAccess", "dedicated holder/capability", "Owns desired epoch + audited SVID + the process-local issuance-failure record the owner projects onto the status row (ADR-0274); only crate-private clock-checked client use may borrow material")
     Component(gmtls, "HostGatewayClientMtls", "rustls client", "Presents leaf+intermediate, roots at the bundle anchor, pins the exact selected SPIFFE peer, then arms kernel TLS through the relay")
     Component(relay, "HostGatewayRelay", "overdrive-dataplane gateway_relay; rustls KernelConnection + kTLS + splice", "Completes the public TLS 1.3 handshake and arms kTLS; reads heads through their terminator; handles KeyUpdate, NewSessionTicket and close_notify per leg; splices body octets between the two kTLS sockets through a private 64 KiB pipe; Earned-Trust probe before bind")

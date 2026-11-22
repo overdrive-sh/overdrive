@@ -97,15 +97,18 @@ You cannot change these limits in this version. Issue
 Backend selection happens in the kernel. A BPF program runs on every `connect()`
 the gateway makes (a `cgroup/connect4` program attached to the gateway's cgroup).
 It picks a backend from the same Service maps the mesh uses. The gateway therefore
-runs no userspace load balancer and keeps no copy of the backend list. The program ignores the `healthy` flag in the backend map. A request
-that arrives in the roughly one second after a backend starts, before it listens,
-gets `502`.
+runs no userspace load balancer and keeps no copy of the backend list. The
+program ignores the `healthy` flag in the backend map. A request that arrives
+in the roughly one second after a backend starts, before it listens, gets `502`.
 
 The gateway then opens a mutual-TLS connection to the backend using its own SVID,
-the SPIFFE identity certificate the node issues. That SVID sits in a dedicated slot, separate from the per-allocation SVIDs the
-[identity model](/docs/concepts/identity) describes. The handshake pins the exact
-peer the BPF selection chose, so the connection reaches the backend the kernel chose
-and no other.
+the SPIFFE identity certificate the node issues. That SVID sits in a dedicated
+slot, separate from the workload SVIDs the
+[identity model](/docs/concepts/identity) describes. The gateway verifies that the
+peer presents the workload identity of the backend the BPF selection chose. A
+replacement allocation of the same workload presents that identity and passes.
+A different workload answering at the same address does not, and the request gets
+`502`.
 
 A Service that stops keeps its backend in the kernel map. A request to it gets
 `502` and never reaches a different peer.

@@ -1,5 +1,111 @@
 {
-  "schema_version": "5.0",
+  "schema_version": "3.0",
   "feature_id": "workload-spiffe-identity",
-  "events": []
+  "events": [
+    {
+      "sid": "01-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-21T21:12:30Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-21T21:19:36Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-21T21:19:49Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-21T21:21:05Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-21T23:21:01Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-21T23:21:18Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: AT pending markers were proven RED by should_panic in DISTILL; removed with implementation",
+      "t": "2026-11-22T00:19:27Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-22T00:19:27Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-22T00:19:58Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-22T02:06:24Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-22T02:06:24Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-22T02:06:43Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: pending tests were proven RED by DISTILL should_panic markers; markers removed and body unchanged",
+      "t": "2026-11-22T04:20:48Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-22T04:20:48Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-22T04:21:10Z"
+    }
+  ]
 }

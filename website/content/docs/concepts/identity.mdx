@@ -1,6 +1,6 @@
 ---
 title: Identity
-description: Overdrive's built-in SPIFFE certificate authority — it mints short-lived workload SVIDs from a persistent, envelope-encrypted root, wired into overdrive serve. The control plane issues, holds, and audits an identity for every running allocation, and a node-agent L4 proxy now presents it on the wire to encrypt traffic between workloads.
+description: Overdrive's built-in SPIFFE certificate authority — it mints short-lived workload SVIDs from a persistent, envelope-encrypted root, wired into overdrive serve. The control plane issues, holds, and audits an identity for every running allocation, and a node-agent L4 proxy presents it on the wire to encrypt traffic between workloads.
 ---
 
 Overdrive is its own certificate authority. Every workload gets a cryptographic
@@ -8,7 +8,7 @@ identity — a SPIFFE SVID — minted by a built-in CA the platform runs itself,
 no external PKI to stand up: no SPIRE, no Vault, no cert-manager. This page
 describes the built-in CA and how it works.
 
-<Callout title="Wired into serve, and now on the wire">
+<Callout title="Wired into serve and on the wire">
 	The built-in CA runs in `overdrive serve` today. At boot the control plane
 	resolves the operator key-encryption key, decrypts and adopts the persistent
 	root, and refuses to start if the envelope will not open. Every running
@@ -26,12 +26,11 @@ describes the built-in CA and how it works.
 Overdrive has two distinct uses of TLS, with two separate trust roots, and it is
 worth keeping them apart:
 
-- **Operator ↔ control plane (shipped today).** `overdrive serve` mints a
+- **Operator ↔ control plane.** `overdrive serve` mints a
   boot-time ephemeral CA, issues itself a server leaf and you a client leaf, and
   writes the trust triple to `~/.overdrive/config`. This is the mutual TLS the CLI
   uses, described in the
   [architecture overview](/docs/concepts/architecture#identity-is-mutual-tls-minted-at-boot).
-  It runs now.
 - **Workload ↔ workload (this page).** The built-in CA issues
   identities to the *workloads themselves* — SPIFFE SVIDs that let one workload
   authenticate another. A separate subsystem with its own persistent trust root;
@@ -43,9 +42,16 @@ Everything below is the second story.
 
 A workload's identity is a **SPIFFE SVID**: an X.509 leaf certificate carrying
 exactly one SPIFFE URI as its subject alternative name, like
-`spiffe://overdrive.local/job/payments/alloc/a1b2c3`. The identity names the
-workload — its job and allocation — not a hostname or an IP, so it travels with
+`spiffe://overdrive.local/workload/payments`. The identity names the
+workload, not a hostname, an IP, or one of its allocations, so it travels with
 the workload wherever it runs.
+
+Every allocation of a workload carries the same identity. When an allocation is
+replaced, its successor presents the same SPIFFE ID as the allocation it
+replaces. A peer that verifies "this is `payments`" does not need to know which
+allocation answered. Each allocation still gets **its own certificate**, with
+its own private key, its own serial number, and its own rotation clock. Two
+allocations of `payments` hold two different SVIDs that name one identity.
 
 SVIDs are **short-lived** — a leaf is valid for about an hour — and **re-issued,
 not renewed**: as an identity nears expiry the platform mints a fresh certificate
@@ -106,11 +112,13 @@ No `overdrive` command issues a certificate. Issuance is a platform mechanism: w
 the control plane runs a workload, it mints that workload's SVID. What the operator
 *can* do is read the result — `overdrive workload describe` reports the current
 certificate for each running allocation: its serial, SPIFFE identity, issuer
-serial, and expiry. It shows the facts of issuance, never the certificate bytes or
-the private key.
+serial, and expiry. Allocations of one workload each list their own
+certificate, and the SPIFFE identity is the same on every line.
+It shows the facts of issuance, never the certificate bytes or the private key.
 
 Every issuance writes an **append-only audit row** recording the certificate's
-serial, the SPIFFE identity, the issuer, and the validity window. The audit write
+serial, the SPIFFE identity, the issuer, the validity window, and what it was
+issued for: an allocation, or the ingress gateway, which has no allocation. The audit write
 is not optional — if it fails, **issuance fails**; the platform never hands out a
 certificate it did not record. Because each issuance is a fresh certificate rather
 than a renewal, the audit trail is a complete history of every identity the
@@ -146,12 +154,12 @@ The built-in CA runs in `overdrive serve`:
   The `Ca` port trait, both adapters, the envelope-sealed root, the per-node
   intermediate, the single-SAN leaf profile, and the DST equivalence tests that pin
   host/sim parity all sit on the production path.
-- **On the wire, with consumers still to come:** a held SVID is presented on
+- **On the wire:** a held SVID is presented on
   the wire. [Transparent mTLS](/docs/concepts/transparent-mtls) reads it to run the
   mesh handshake in both directions and encrypt the connection with TLS 1.3 over
   kTLS — provable with a packet capture. The ingress gateway holds a separate SVID
   of its own in a dedicated slot and presents it on its hop to the backend. The
-  telemetry sink is unbuilt, so a workload's identity is not yet read on that
+  telemetry sink is unbuilt, so a workload's identity is not read on that
   path.
 
 ## Where to go next
