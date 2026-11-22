@@ -170,6 +170,10 @@ const EXPECTED_INVARIANTS: &[&str] = &[
     // public-ingress-gateway (ADR-0222) — Gateway Application generation and shutdown safety.
     "gateway-application-generation-lifecycle-is-safe",
     "gateway-application-shutdown-converges",
+    // node-local-persistent-volume (ADR-0317, ADR-0318) — the three volume launch invariants.
+    "volume-single-writer",
+    "volume-data-survives-restart",
+    "volume-no-drain-failure-charges-budget",
 ];
 
 // -----------------------------------------------------------------------------

@@ -436,7 +436,6 @@ fn pool(capacity_gib: u64) -> SimVolumeBacking {
 /// is the fixed `ovd-volume`.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[should_panic(expected = "a declared volume must be created once by the launch")]
 async fn a_declared_volume_is_ensured_and_attached_as_the_second_disk() {
     let sim = pool(1024);
     let mut node = Node::new(Some(sim.clone()), PoolOnNode::Composed).await;
@@ -486,7 +485,6 @@ async fn guard_a_composed_pool_is_untouched_by_a_workload_without_a_volume() {
 /// partition) and the workload declares a volume.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[should_panic(expected = "a declared volume on a node with no pool must fail VolumeUnavailable")]
 async fn sad_a_node_with_no_pool_fails_a_declared_volume_pool_absent() {
     let mut node = Node::new(Some(pool(1024)), PoolOnNode::NotComposed).await;
     let launch = node.begin(Some(40));
@@ -501,7 +499,6 @@ async fn sad_a_node_with_no_pool_fails_a_declared_volume_pool_absent() {
 /// nothing created, no VMM.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[should_panic(expected = "a declared volume that does not fit must fail VolumeUnavailable")]
 async fn sad_no_free_extent_fails_insufficient_space_naming_both_figures() {
     let sim = pool(10);
     let mut node = Node::new(Some(sim.clone()), PoolOnNode::Composed).await;
@@ -523,7 +520,6 @@ async fn sad_no_free_extent_fails_insufficient_space_naming_both_figures() {
 /// that was in progress; no VMM.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[should_panic(expected = "a declared volume whose lvm command fails must fail VolumeUnavailable")]
 async fn sad_a_failing_lvm_command_fails_naming_the_operation() {
     let sim = pool(1024);
     sim.fail_next_command();
@@ -546,7 +542,6 @@ async fn sad_a_failing_lvm_command_fails_naming_the_operation() {
 /// for the real timer, by the Tier-3 `sad_an_ensure_blocked_on_the_group_lock_times_out_as_a_command_failure`.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[should_panic(expected = "the launch must park inside ensure before simulated time passes")]
 async fn the_driver_holds_no_ensure_timer_a_parked_ensure_outlives_the_deadline() {
     let sim = pool(1024);
     sim.pause_ensure_after_create(&workload());
@@ -581,9 +576,6 @@ async fn the_driver_holds_no_ensure_timer_a_parked_ensure_outlives_the_deadline(
 /// no VMM. Only `Ok(Held)` is polled. The volume `ensure` just created stays (nothing is deleted).
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[should_panic(
-    expected = "a launch whose claim_state fails must end at once, not poll on towards the claim bound"
-)]
 async fn sad_a_claim_state_error_ends_the_launch_at_once_as_a_claim_command_failure() {
     let sim = pool(1024);
     sim.fail_next_claim_state();
@@ -621,7 +613,6 @@ async fn sad_a_claim_state_error_ends_the_launch_at_once_as_a_claim_command_fail
 /// it carries no wait duration), attaches nothing, and the volume keeps its holder.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[should_panic(expected = "a declared volume whose claim stays held must fail VolumeUnavailable")]
 async fn sad_a_claim_held_past_the_bound_fails_held_and_attaches_nothing() {
     let sim = pool(1024);
     sim.ensure(&workload(), gib(40)).await.expect("the volume whose claim is held must exist");
@@ -644,9 +635,6 @@ async fn sad_a_claim_held_past_the_bound_fails_held_and_attaches_nothing() {
 /// stays, still claimed until its holder drains.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[should_panic(
-    expected = "the launch must have created the volume the pool faults then leave in place"
-)]
 async fn pool_faults_after_the_launch_do_not_reach_the_running_allocation_or_its_stop() {
     let sim = pool(1024);
     let mut node = Node::new(Some(sim.clone()), PoolOnNode::Composed).await;
@@ -690,7 +678,6 @@ async fn pool_faults_after_the_launch_do_not_reach_the_running_allocation_or_its
 /// nothing is created while it waits, and it attaches the moment the claim drains.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[should_panic(expected = "a replacement must not create a second VMM while the claim is held")]
 async fn a_replacement_waits_for_the_claim_not_for_the_process_exit() {
     let sim = pool(1024);
     let mut node = Node::new(Some(sim.clone()), PoolOnNode::Composed).await;
@@ -719,7 +706,6 @@ async fn a_replacement_waits_for_the_claim_not_for_the_process_exit() {
 /// `ensure` activates the SAME volume and attaches it.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[should_panic(expected = "the first launch must attach a volume disk")]
 async fn after_a_node_reboot_the_next_launch_reactivates_the_same_volume() {
     let sim = pool(1024);
     let mut node = Node::new(Some(sim.clone()), PoolOnNode::Composed).await;
@@ -745,7 +731,6 @@ async fn after_a_node_reboot_the_next_launch_reactivates_the_same_volume() {
 /// VMM spawned; the next launch's `ensure` finds it and proceeds: one volume, never two.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[should_panic(expected = "the launch must park after the create effect of its ensure")]
 async fn a_control_plane_restart_between_create_and_attach_reuses_the_volume() {
     let sim = pool(1024);
     sim.pause_ensure_after_create(&workload());

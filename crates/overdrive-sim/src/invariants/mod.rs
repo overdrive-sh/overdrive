@@ -239,8 +239,7 @@ pub mod gateway_application;
 // `data_survives_restart`, `no_drain_failure_charges_budget`). They drive the real
 // `VmDriver::start` launch path over `SimVmm`, `SimClock` and `SimVolumeBacking`
 // fault injection; the evaluator bodies live in `crate::invariants::volume_launch`.
-// None of the three variants is in `Invariant::ALL` until the volume launch path
-// and the sim land (pending: reachable through `Harness::only(..)`).
+// All three variants are in `Invariant::ALL`.
 pub mod volume_launch;
 
 /// Catalogue of invariants the DST harness evaluates.
@@ -698,20 +697,20 @@ pub enum Invariant {
     /// reaches the VMM while the volume's claim is held and at most one VMM is alive, for
     /// any seeded schedule of launches, kills, delayed claim releases, reboots,
     /// control-plane restarts, a crash between the create and the attach, and a failing
-    /// command. NOT in `ALL` (pending until the volume launch path lands). The evaluator
+    /// command. The evaluator
     /// body lives in `crate::invariants::volume_launch`.
     VolumeSingleWriter,
 
     /// node-local-persistent-volume (GH #348) — always invariant. One volume is ever
     /// created for the workload and every launch attaches that one volume's device, for
-    /// any seeded schedule. NOT in `ALL` (pending). The evaluator body lives in
+    /// any seeded schedule. The evaluator body lives in
     /// `crate::invariants::volume_launch`.
     VolumeDataSurvivesRestart,
 
     /// node-local-persistent-volume (GH #348) — safety plus convergence. A successor that
     /// finds the claim still held (drain delay inside the 30 s bound, chosen by the seed)
     /// neither fails nor creates a second VMM, and eventually attaches once the claim
-    /// drains. NOT in `ALL` (pending). The evaluator body lives in
+    /// drains. The evaluator body lives in
     /// `crate::invariants::volume_launch`.
     VolumeNoDrainFailureChargesBudget,
 }
@@ -858,6 +857,11 @@ impl Invariant {
         // bodies live in `crate::invariants::gateway_application`.
         Self::GatewayApplicationGenerationLifecycleIsSafe,
         Self::GatewayApplicationShutdownConverges,
+        // node-local-persistent-volume (GH #348, ADR-0317, ADR-0318). The
+        // evaluator bodies live in `crate::invariants::volume_launch`.
+        Self::VolumeSingleWriter,
+        Self::VolumeDataSurvivesRestart,
+        Self::VolumeNoDrainFailureChargesBudget,
     ];
 
     /// The canonical kebab-case spelling of this invariant, as a static
@@ -926,7 +930,7 @@ impl Invariant {
                 "gateway-application-generation-lifecycle-is-safe"
             }
             Self::GatewayApplicationShutdownConverges => "gateway-application-shutdown-converges",
-            // node-local-persistent-volume (GH #348); pending, outside `ALL`.
+            // node-local-persistent-volume (GH #348).
             Self::VolumeSingleWriter => "volume-single-writer",
             Self::VolumeDataSurvivesRestart => "volume-data-survives-restart",
             Self::VolumeNoDrainFailureChargesBudget => "volume-no-drain-failure-charges-budget",

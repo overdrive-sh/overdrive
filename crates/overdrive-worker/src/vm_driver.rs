@@ -36,7 +36,7 @@ use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverPayload,
     DriverStartClass, DriverStartFailure, DriverType, ExitEvent, ExitKind, OomFacts, Resources,
-    STDERR_TAIL_LINES, VmStartFailure,
+    STDERR_TAIL_LINES, VmStartFailure, VolumePayload,
 };
 use overdrive_core::traits::vmm::{
     VMM_CONSOLE_TAIL_MAX_BYTES, VmControl, VmExitWatch, Vmm, VmmDiagnostics, VmmError, VmmExit,
@@ -44,8 +44,10 @@ use overdrive_core::traits::vmm::{
 use overdrive_core::vm::beacon::{BeaconConnKey, BeaconIo, BeaconMessage, BeaconSocket};
 use overdrive_core::vm::config::{
     HostArch, KERNEL_MAGIC_WINDOW, KernelCmdline, KernelImage, MemoryPlan, RootfsPlan, VmConfig,
-    VmConfinement, VmRunDir, vcpus_for,
+    VmConfinement, VmRunDir, VolumeAttachment, vcpus_for,
 };
+use overdrive_core::traits::volume_backing::{ClaimState, VolumeBackingError};
+use overdrive_core::volume::{VolumeOperation, VolumeUnavailableCause};
 use parking_lot::Mutex;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio::sync::{mpsc, oneshot, watch};
@@ -157,6 +159,40 @@ fn start_rejected(class: VmStartFailure, detail: impl Into<String>) -> DriverErr
     DriverError::StartRejected {
         failure: DriverStartFailure { class: DriverStartClass::Vm(class), detail: detail.into() },
     }
+}
+
+/// How long a launch waits for the volume's previous writer's claim to clear
+/// (ADR-0317). A policy constant, not persisted.
+const VOLUME_CLAIM_BOUND: Duration = Duration::from_secs(30);
+
+/// The claim poll interval of the launch's claim wait.
+const VOLUME_CLAIM_POLL_INTERVAL: Duration = Duration::from_millis(250);
+
+/// A typed `VolumeUnavailable` start failure.
+fn volume_unavailable(cause: VolumeUnavailableCause) -> DriverError {
+    let detail = format!("workload volume unavailable: {cause:?}");
+    start_rejected(VmStartFailure::VolumeUnavailable { cause }, detail)
+}
+
+/// The cause of a failed `ensure`. A `NotFound` for a volume `ensure` is
+/// asked to create is a bug and maps to the command failure.
+const fn ensure_cause(error: &VolumeBackingError) -> VolumeUnavailableCause {
+    match error {
+        VolumeBackingError::InsufficientSpace { needed, free } => {
+            VolumeUnavailableCause::InsufficientSpace { needed: *needed, free: *free }
+        }
+        VolumeBackingError::PoolCommand { operation, .. } => {
+            VolumeUnavailableCause::PoolCommandFailed { operation: *operation }
+        }
+        VolumeBackingError::NotFound { .. } | _ => {
+            VolumeUnavailableCause::PoolCommandFailed { operation: VolumeOperation::Activate }
+        }
+    }
+}
+
+/// The cause of a failed `claim_state`: always the claim operation.
+const fn claim_cause(_error: &VolumeBackingError) -> VolumeUnavailableCause {
+    VolumeUnavailableCause::PoolCommandFailed { operation: VolumeOperation::Claim }
 }
 
 /// Construct a `DriverError::StartRejected` for a VM failure with no named
@@ -1152,7 +1188,6 @@ pub struct VmDriver {
     /// reader is its writer, and the probe runner reads it through its port.
     guest_listener_board: Arc<crate::GuestListenerBoard>,
     /// The node's probed volume pool; `None` when no pool is composed (GH #348).
-    #[allow(dead_code, reason = "DISTILL RED scaffold: the launch path reads it in DELIVER")]
     volumes: Option<Arc<dyn overdrive_core::traits::volume_backing::VolumeBacking>>,
     live: Arc<LiveMap>,
     exit_tx: mpsc::Sender<ExitEvent>,
@@ -1326,6 +1361,39 @@ impl VmDriver {
         start_rejected_unclassified(detail)
     }
 
+    /// Ensure the workload's volume and wait for its claim to clear
+    /// (ADR-0317, ADR-0318). `None` states no volume: the pool is never
+    /// touched. `ensure` is awaited to its return (the adapter owns its
+    /// deadline); `claim_state` is polled on the driver's `Clock` until
+    /// `Free` or [`VOLUME_CLAIM_BOUND`]; any `Err` from it ends the launch.
+    async fn attach_volume(
+        &self,
+        declared: Option<&VolumePayload>,
+    ) -> Result<Option<VolumeAttachment>, DriverError> {
+        let Some(declared) = declared else {
+            return Ok(None);
+        };
+        let Some(pool) = self.volumes.as_ref() else {
+            return Err(volume_unavailable(VolumeUnavailableCause::PoolAbsent));
+        };
+        let device = pool
+            .ensure(&declared.workload, declared.size)
+            .await
+            .map_err(|error| volume_unavailable(ensure_cause(&error)))?;
+        let deadline = self.clock.now() + VOLUME_CLAIM_BOUND;
+        loop {
+            match pool.claim_state(&declared.workload).await {
+                Ok(ClaimState::Free) => return Ok(Some(VolumeAttachment { device })),
+                Ok(ClaimState::Held) => {}
+                Err(error) => return Err(volume_unavailable(claim_cause(&error))),
+            }
+            if self.clock.now() >= deadline {
+                return Err(volume_unavailable(VolumeUnavailableCause::Held));
+            }
+            self.clock.sleep(VOLUME_CLAIM_POLL_INTERVAL).await;
+        }
+    }
+
     /// Steps 0 through `Vmm::create` of `start`'s boot sequence
     /// (ADR-0082 §D3) — claim the supervision slot, create the run
     /// directory, provision the cgroup scope and
@@ -1376,6 +1444,12 @@ impl VmDriver {
                 }
             }
         }
+
+        // GH #348 (ADR-0317, ADR-0318): the volume steps run after the
+        // supervision claim and before the first host artifact, so a launch
+        // that fails here has created nothing the shim must clean up beyond
+        // the claim it releases.
+        let volume = self.attach_volume(payload.volume.as_ref()).await?;
 
         let run_dir = VmRunDir::for_alloc(&self.layout.run_dir_root, &spec.alloc);
         let scope = CgroupPath::for_alloc(&spec.alloc);
@@ -1481,7 +1555,7 @@ impl VmDriver {
             &self.layout.clone_index_dir,
         );
         let config = VmConfig {
-            volume: None,
+            volume,
             alloc: spec.alloc.clone(),
             kernel,
             rootfs: rootfs.clone(),

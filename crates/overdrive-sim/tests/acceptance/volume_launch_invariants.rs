@@ -58,7 +58,6 @@ fn assert_holds_at_every_seed(invariant: Invariant) {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[should_panic(expected = "a launch that declares a volume must hold it through its VMM")]
 fn single_writer_holds_for_every_seeded_schedule() {
     assert_holds_at_every_seed(Invariant::VolumeSingleWriter);
 }
@@ -68,7 +67,6 @@ fn single_writer_holds_for_every_seeded_schedule() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[should_panic(expected = "every launch must attach the volume's one device")]
 fn data_survives_restart_holds_for_every_seeded_schedule() {
     assert_holds_at_every_seed(Invariant::VolumeDataSurvivesRestart);
 }
@@ -79,7 +77,6 @@ fn data_survives_restart_holds_for_every_seeded_schedule() {
 ///
 /// CONTRACT_SHAPE: bounded-change.
 #[test]
-#[should_panic(expected = "the first launch must attach the volume")]
 fn no_drain_failure_charges_the_budget_and_the_replacement_eventually_attaches() {
     assert_holds_at_every_seed(Invariant::VolumeNoDrainFailureChargesBudget);
 }

@@ -782,7 +782,9 @@ async fn a_volume_launch_superseded_before_ensure_creates_nothing_and_never_call
 /// VMM is created. On `Ok` the ensured volume stays.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[should_panic(expected = "the launch must be inside ensure before the signal is raised")]
+#[should_panic(
+    expected = "a launch superseded while ensure was in flight and then succeeded must be abandoned on the supersession signal, not run on to its own bound"
+)]
 async fn a_signal_during_ensure_waits_for_ensure_then_abandons_whatever_ensure_returns() {
     for ensure_fails in [false, true] {
         let what = if ensure_fails {
@@ -842,7 +844,9 @@ async fn begin_held_claim_wait(
 /// `claim_state` is not called again.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[should_panic(expected = "the launch must be inside ensure before its volume's claim is held")]
+#[should_panic(
+    expected = "a launch superseded while it sleeps between claim polls must be abandoned on the supersession signal, not run on to its own bound"
+)]
 async fn a_signal_during_the_claim_poll_sleep_returns_at_once_without_polling_again() {
     let what = "a launch superseded while it sleeps between claim polls";
     let sim = pool(1024);
@@ -864,7 +868,9 @@ async fn a_signal_during_the_claim_poll_sleep_returns_at_once_without_polling_ag
 /// the same step. Superseded wins over `VolumeUnavailable { Held }`.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[should_panic(expected = "the launch must be inside ensure before its volume's claim is held")]
+#[should_panic(
+    expected = "a launch superseded at its claim bound must end StartSuperseded, got Err(StartRejected"
+)]
 async fn the_signal_wins_over_a_claim_held_at_the_bound() {
     let what = "a launch superseded at its claim bound";
     let sim = pool(1024);
@@ -884,7 +890,9 @@ async fn the_signal_wins_over_a_claim_held_at_the_bound() {
 /// The in-flight call is not interrupted.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[should_panic(expected = "the launch must be inside claim_state before the signal is raised")]
+#[should_panic(
+    expected = "a launch superseded as its claim wait ends must be abandoned on the supersession signal, not run on to its own bound"
+)]
 async fn a_signal_during_the_last_claim_poll_creates_nothing_after_the_claim_wait() {
     let what = "a launch superseded as its claim wait ends";
     let sim = pool(1024);
@@ -930,7 +938,6 @@ async fn a_volume_launch_superseded_in_its_boot_wait_tears_the_vmm_down_and_keep
 /// once, the claim polled, one VMM with the volume as its second disk.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[should_panic(expected = "an unsuperseded volume launch must ensure the volume once")]
 async fn a_volume_launch_whose_signal_is_never_raised_is_the_ordinary_volume_launch() {
     let sim = pool(1024);
     let mut node = Node::new(Some(sim.clone()), PoolOnNode::Composed).await;

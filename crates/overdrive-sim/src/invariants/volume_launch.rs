@@ -517,7 +517,14 @@ async fn run_schedule(steps: &[Step]) -> Result<Observed, String> {
                     rig.vmm.exit_process(pid, Some(9), None);
                 }
             }
-            Step::Drain => rig.pool.drain(&workload()),
+            // A live process's `O_EXCL` open cannot be released: only a dead holder's in-flight
+            // I/O drains. Draining while a VMM is live would release a claim production cannot
+            // release, so the step has no effect then.
+            Step::Drain => {
+                if rig.vmm.live_pids().is_empty() {
+                    rig.pool.drain(&workload());
+                }
+            }
             Step::Pass(secs) => rig.pass(u64::from(secs)).await,
             Step::Reboot => {
                 for pid in rig.vmm.live_pids() {

@@ -939,8 +939,14 @@ impl NodeVolumeDriver {
 
     fn ensure_activate(&self, _a: i64) -> std::result::Result<(), DriverError> {
         self.node("LaunchEnsureActivate")?.backing.resume_ensure(&workload_id());
-        self.settle("the launch's ensure activates", |driver| {
+        // Leaving the park is not the effect: the activation is. The model's `lv ∧ active` is
+        // `claim_state != NotFound`, so settle on that report.
+        self.settle("the launch's ensure activates the volume", |driver| {
             driver.node.as_ref().is_some_and(|node| !node.backing.ensure_parked(&workload_id()))
+                && matches!(
+                    driver.claim(),
+                    Ok(Ok(ClaimState::Held | ClaimState::Free))
+                )
         })
     }
 
@@ -1334,6 +1340,18 @@ impl NodeVolumeDriver {
     /// `NodeReboot`: every VMM is gone, the volume is inactive and every claim
     /// released, and a fresh `serve` process boots.
     fn node_reboot(&mut self) -> std::result::Result<(), DriverError> {
+        // A running allocation's VMM exits while the old process observes it: the exit observer
+        // writes the crash row the model's `NodeReboot` expects. A booting launch has no row and
+        // dies with its process.
+        let running: Vec<i64> = self
+            .alloc_of
+            .values()
+            .copied()
+            .filter(|a| self.state_of(*a) == Some(AllocState::Running))
+            .collect();
+        for a in running {
+            self.vmm_sigkill(a)?;
+        }
         let node = self.node("NodeReboot")?;
         for alloc in self.alloc_of.keys() {
             for pid in node.host.pids_of(alloc) {
@@ -1569,9 +1587,6 @@ impl State<NodeVolumeDriver> for NodeVolumeState {
     test = "happy_path_deploy_to_running",
     max_samples = 1
 )]
-#[should_panic(
-    expected = "LaunchEnsureCreate: the step did not settle within the settle bound: the launch's ensure parks after its create effect"
-)]
 fn quint_vol_happy_path_deploy_to_running() -> impl Driver {
     NodeVolumeDriver::new()
 }
@@ -1583,9 +1598,6 @@ fn quint_vol_happy_path_deploy_to_running() -> impl Driver {
     main = "vol_conf",
     test = "restart_waits_for_drain_then_attaches",
     max_samples = 1
-)]
-#[should_panic(
-    expected = "LaunchEnsureCreate: the step did not settle within the settle bound: the launch's ensure parks after its create effect"
 )]
 fn quint_vol_restart_waits_for_drain_then_attaches() -> impl Driver {
     NodeVolumeDriver::new()
@@ -1599,9 +1611,6 @@ fn quint_vol_restart_waits_for_drain_then_attaches() -> impl Driver {
     test = "stop_keeps_volume_and_restart_reattaches",
     max_samples = 1
 )]
-#[should_panic(
-    expected = "LaunchEnsureCreate: the step did not settle within the settle bound: the launch's ensure parks after its create effect"
-)]
 fn quint_vol_stop_keeps_volume_and_restart_reattaches() -> impl Driver {
     NodeVolumeDriver::new()
 }
@@ -1613,9 +1622,6 @@ fn quint_vol_stop_keeps_volume_and_restart_reattaches() -> impl Driver {
     main = "vol_conf",
     test = "crash_after_create_before_attach_reuses_volume",
     max_samples = 1
-)]
-#[should_panic(
-    expected = "LaunchEnsureCreate: the step did not settle within the settle bound: the launch's ensure parks after its create effect"
 )]
 fn quint_vol_crash_after_create_before_attach_reuses_volume() -> impl Driver {
     NodeVolumeDriver::new()
@@ -1629,9 +1635,6 @@ fn quint_vol_crash_after_create_before_attach_reuses_volume() -> impl Driver {
     test = "node_reboot_reactivates_and_data_survives",
     max_samples = 1
 )]
-#[should_panic(
-    expected = "LaunchEnsureCreate: the step did not settle within the settle bound: the launch's ensure parks after its create effect"
-)]
 fn quint_vol_node_reboot_reactivates_and_data_survives() -> impl Driver {
     NodeVolumeDriver::new()
 }
@@ -1643,9 +1646,6 @@ fn quint_vol_node_reboot_reactivates_and_data_survives() -> impl Driver {
     main = "vol_conf",
     test = "launch_bound_exceeded_fails_typed_and_charges_budget",
     max_samples = 1
-)]
-#[should_panic(
-    expected = "LaunchEnsureCreate: the step did not settle within the settle bound: the launch's ensure parks after its create effect"
 )]
 fn quint_vol_launch_bound_exceeded_fails_typed_and_charges_budget() -> impl Driver {
     NodeVolumeDriver::new()
@@ -1659,8 +1659,12 @@ fn quint_vol_launch_bound_exceeded_fails_typed_and_charges_budget() -> impl Driv
     test = "no_space_fails_typed_and_never_attaches",
     max_samples = 1
 )]
+// PENDING: the launch fails typed inside its first tick, so the spec's intermediate state after
+// `WlStart` (allocation PENDING, `ph` = LP_SUP) is never observable: the driver compares
+// `alloc[1]` = FAILED against the model's PENDING. No seam holds a launch that fails before
+// its `ensure` parks.
 #[should_panic(
-    expected = "LaunchUnavailable: the step did not settle within the settle bound: the allocation row reaches the state"
+    expected = "State invariant failed"
 )]
 fn quint_vol_no_space_fails_typed_and_never_attaches() -> impl Driver {
     NodeVolumeDriver::new()
@@ -1674,8 +1678,12 @@ fn quint_vol_no_space_fails_typed_and_never_attaches() -> impl Driver {
     test = "store_absent_fails_typed_and_never_attaches",
     max_samples = 1
 )]
+// PENDING: the launch fails typed inside its first tick, so the spec's intermediate state after
+// `WlStart` (allocation PENDING, `ph` = LP_SUP) is never observable: the driver compares
+// `alloc[1]` = FAILED against the model's PENDING. No seam holds a launch that fails before
+// its `ensure` parks.
 #[should_panic(
-    expected = "LaunchUnavailable: the step did not settle within the settle bound: the allocation row reaches the state"
+    expected = "State invariant failed"
 )]
 fn quint_vol_store_absent_fails_typed_and_never_attaches() -> impl Driver {
     NodeVolumeDriver::new()
@@ -1690,7 +1698,7 @@ fn quint_vol_store_absent_fails_typed_and_never_attaches() -> impl Driver {
     max_samples = 1
 )]
 #[should_panic(
-    expected = "LaunchEnsureCreate: the step did not settle within the settle bound: the launch's ensure parks after its create effect"
+    expected = "LaunchSuperseded: the step did not settle within the settle bound: the superseded launch's dispatch returns"
 )]
 fn quint_vol_superseded_launch_result_discarded() -> impl Driver {
     NodeVolumeDriver::new()
@@ -1705,7 +1713,7 @@ fn quint_vol_superseded_launch_result_discarded() -> impl Driver {
     max_samples = 1
 )]
 #[should_panic(
-    expected = "LaunchEnsureCreate: the step did not settle within the settle bound: the launch's ensure parks after its create effect"
+    expected = "LaunchSuperseded: the step did not settle within the settle bound: the superseded launch's dispatch returns"
 )]
 fn quint_vol_stop_during_boot_wait_terminates_vmm_and_keeps_volume() -> impl Driver {
     NodeVolumeDriver::new()
@@ -1720,7 +1728,7 @@ fn quint_vol_stop_during_boot_wait_terminates_vmm_and_keeps_volume() -> impl Dri
     max_samples = 1
 )]
 #[should_panic(
-    expected = "LaunchEnsureCreate: the step did not settle within the settle bound: the launch's ensure parks after its create effect"
+    expected = "LaunchSuperseded: the step did not settle within the settle bound: the superseded launch's dispatch returns"
 )]
 fn quint_vol_stop_during_ensure_lets_ensure_finish_then_abandons() -> impl Driver {
     NodeVolumeDriver::new()
@@ -1735,7 +1743,7 @@ fn quint_vol_stop_during_ensure_lets_ensure_finish_then_abandons() -> impl Drive
     max_samples = 1
 )]
 #[should_panic(
-    expected = "LaunchEnsureCreate: the step did not settle within the settle bound: the launch's ensure parks after its create effect"
+    expected = "LaunchSuperseded: the step did not settle within the settle bound: the superseded launch's dispatch returns"
 )]
 fn quint_vol_shutdown_abandons_every_launch_including_one_admitted_late() -> impl Driver {
     NodeVolumeDriver::new()
@@ -1754,7 +1762,7 @@ fn quint_vol_shutdown_abandons_every_launch_including_one_admitted_late() -> imp
     seed = "1"
 )]
 #[should_panic(
-    expected = "LaunchSuperseded: the step did not settle within the settle bound: the superseded launch's dispatch returns"
+    expected = "State invariant failed"
 )]
 fn quint_vol_randomized() -> impl Driver {
     NodeVolumeDriver::new()

@@ -1578,7 +1578,7 @@ mod mid_boot_volume_reclamation {
                 composed: ComposedNode::fresh(),
                 host: SimVmmHost::new(sim_vmm.clone(), false),
                 sim_vmm,
-                volumes: SimVolumeBacking::with_capacity(volume_size_gib(8)),
+                volumes: SimVolumeBacking::with_capacity(volume_size_gib(100)),
                 obs: Arc::new(SimObservationStore::single_peer(
                     NodeId::new("local").expect("valid node ID"),
                     0,
@@ -1849,7 +1849,6 @@ mod mid_boot_volume_reclamation {
     /// precondition, see the module documentation.
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[should_panic(expected = "the launch must attach the declared volume to its VMM")]
     async fn boot_reclamation_ends_a_mid_boot_vmm_before_any_launch_for_its_workload() {
         scenario(Residue::NoRow).await;
     }
@@ -1858,7 +1857,6 @@ mod mid_boot_volume_reclamation {
     /// reclamation is a `ReclaimAllocation`. PENDING on the same precondition.
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[should_panic(expected = "the launch must attach the declared volume to its VMM")]
     async fn boot_reclamation_ends_a_mid_boot_vmm_when_the_crash_left_a_running_row() {
         scenario(Residue::RunningRow).await;
     }
