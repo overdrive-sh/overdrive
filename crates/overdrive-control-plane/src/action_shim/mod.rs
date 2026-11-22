@@ -199,6 +199,22 @@ fn emit_launch_superseded(alloc: &AllocationId, workload: &WorkloadId) {
     );
 }
 
+/// Release what the shim owns for a superseded launch: the driver's
+/// supervision claim and the SVID, then record the outcome. Writes no row.
+fn release_superseded_launch(
+    drivers: &DriverRegistry,
+    driver_kind: DriverType,
+    identity: &IdentityMgr,
+    alloc: &AllocationId,
+    workload: &WorkloadId,
+) {
+    if let Some(driver) = drivers.get(driver_kind) {
+        driver.release_supervision(alloc);
+    }
+    identity.drop_svid(alloc);
+    emit_launch_superseded(alloc, workload);
+}
+
 fn is_duplicate_vm_owner(failure: &DriverStartFailure, alloc: &AllocationId) -> bool {
     matches!(
         &failure.class,
@@ -1937,11 +1953,7 @@ async fn dispatch_single(
             // driver already tore down what it created; the shim releases what
             // it owns (supervision claim, SVID, guest lease and network).
             if matches!(&start_outcome, Err(DriverError::StartSuperseded)) {
-                if let Some(driver) = drivers.get(driver_kind) {
-                    driver.release_supervision(&alloc_id);
-                }
-                identity.drop_svid(&alloc_id);
-                emit_launch_superseded(&alloc_id, &workload_id);
+                release_superseded_launch(drivers, driver_kind, identity, &alloc_id, &workload_id);
                 retire_guest_network_lease(&alloc_id, guest_network);
                 teardown_for_dispatch(&alloc_id, guest_network).await?;
                 return Ok(());
@@ -2458,11 +2470,13 @@ async fn dispatch_single(
                         Err(DriverError::StartSuperseded) => {
                             // ADR-0334: no row; the successor's lease, network
                             // and mTLS ownership are already unwound above.
-                            if let Some(driver) = drivers.get(driver_kind) {
-                                driver.release_supervision(&successor_alloc_id);
-                            }
-                            identity.drop_svid(&successor_alloc_id);
-                            emit_launch_superseded(&successor_alloc_id, &prior_row.workload_id);
+                            release_superseded_launch(
+                                drivers,
+                                driver_kind,
+                                identity,
+                                &successor_alloc_id,
+                                &prior_row.workload_id,
+                            );
                             return finish_restart(
                                 successor_abort_cleanup.map_or(Ok(()), Err),
                                 &prior_drivers,

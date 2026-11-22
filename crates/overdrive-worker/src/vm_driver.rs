@@ -35,8 +35,8 @@ use overdrive_core::traits::cgroup_accounting::CgroupAccounting;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverPayload,
-    DriverStartClass, DriverStartFailure, DriverType, ExitEvent, ExitKind, LaunchSupersession, OomFacts,
-    Resources, STDERR_TAIL_LINES, VmStartFailure, VolumePayload,
+    DriverStartClass, DriverStartFailure, DriverType, ExitEvent, ExitKind, LaunchSupersession,
+    OomFacts, Resources, STDERR_TAIL_LINES, VmStartFailure, VolumePayload,
 };
 use overdrive_core::traits::vmm::{
     VMM_CONSOLE_TAIL_MAX_BYTES, VmControl, VmExitWatch, Vmm, VmmDiagnostics, VmmError, VmmExit,
@@ -1390,9 +1390,7 @@ impl VmDriver {
         let Some(pool) = self.volumes.as_ref() else {
             return Err(volume_unavailable(VolumeUnavailableCause::PoolAbsent, None));
         };
-        let device = pool
-            .ensure(&declared.workload, declared.size)
-            .await;
+        let device = pool.ensure(&declared.workload, declared.size).await;
         // Observation point 2: `ensure` ran to its end; the signal wins over
         // either of its outcomes, and an ensured volume stays.
         if supersession.is_superseded() {
@@ -1402,13 +1400,13 @@ impl VmDriver {
             device.map_err(|error| volume_unavailable(ensure_cause(&error), Some(&error)))?;
         let deadline = self.clock.now() + VOLUME_CLAIM_BOUND;
         loop {
-            let claim = pool.claim_state(&declared.workload).await;
-            // Observation point 3: a claim poll in flight is never
-            // interrupted; the signal wins over every outcome of it and over
-            // the bound.
+            // Observation point 3: the signal is read before each claim poll;
+            // a poll in flight is never interrupted, and point 4 covers the
+            // wait's end.
             if supersession.is_superseded() {
                 return Err(DriverError::StartSuperseded);
             }
+            let claim = pool.claim_state(&declared.workload).await;
             match claim {
                 Ok(ClaimState::Free) => return Ok(Some(VolumeAttachment { device })),
                 Ok(ClaimState::Held) => {}
@@ -2001,9 +1999,6 @@ impl Driver for VmDriver {
                     )
                     .await)
             }
-            // The live capture is snapshotted HERE, while the process is
-            // still up — `VmmExit` does not exist yet on this arm, so the
-            // tail can come from nowhere else.
             BootRaceOutcome::Superseded => {
                 clear_beacon_launch(&mut self.beacon_state.lock(), &spec.alloc);
                 Err(self
@@ -2017,6 +2012,9 @@ impl Driver for VmDriver {
                     )
                     .await)
             }
+            // The live capture is snapshotted HERE, while the process is
+            // still up — `VmmExit` does not exist yet on this arm, so the
+            // tail can come from nowhere else.
             BootRaceOutcome::Deadline => {
                 clear_beacon_launch(&mut self.beacon_state.lock(), &spec.alloc);
                 let console_tail = diagnostics.console_tail();
