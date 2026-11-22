@@ -548,9 +548,6 @@ fn unraised() -> Arc<SimLaunchSupersession> {
 /// returns `StartSuperseded`.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[should_panic(
-    expected = "a launch superseded during its guest-boot wait must be abandoned on the supersession signal, not run on to its own bound"
-)]
 async fn a_signal_during_the_guest_boot_wait_abandons_the_wait_and_tears_the_vmm_down() {
     let what = "a launch superseded during its guest-boot wait";
     let mut node = Node::new(None, PoolOnNode::NotComposed).await;
@@ -569,9 +566,6 @@ async fn a_signal_during_the_guest_boot_wait_abandons_the_wait_and_tears_the_vmm
 /// failure.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[should_panic(
-    expected = "a launch superseded at its boot deadline must end StartSuperseded, got Err(StartRejected"
-)]
 async fn the_signal_wins_over_the_boot_deadline_at_the_same_instant() {
     let what = "a launch superseded at its boot deadline";
     let mut node = Node::new(None, PoolOnNode::NotComposed).await;
@@ -611,9 +605,6 @@ async fn guard_a_launch_that_won_its_boot_race_before_the_signal_is_an_ordinary_
 /// raised there. The launch abandons that wait at once and tears down.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[should_panic(
-    expected = "a launch superseded in its second boot wait must be abandoned on the supersession signal, not run on to its own bound"
-)]
 async fn a_signal_in_the_second_boot_wait_abandons_it_and_tears_down() {
     let what = "a launch superseded in its second boot wait";
     let mut node = Node::new(None, PoolOnNode::NotComposed).await;
@@ -633,9 +624,6 @@ async fn a_signal_in_the_second_boot_wait_abandons_it_and_tears_down() {
 /// over the unclassified beacon-accept rejection.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[should_panic(
-    expected = "a launch superseded at its second boot deadline must end StartSuperseded, got Err(StartRejected"
-)]
 async fn the_signal_wins_over_the_second_boot_deadline_at_the_same_instant() {
     let what = "a launch superseded at its second boot deadline";
     let mut node = Node::new(None, PoolOnNode::NotComposed).await;
@@ -656,9 +644,6 @@ async fn the_signal_wins_over_the_second_boot_deadline_at_the_same_instant() {
 /// VMM is still terminated.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[should_panic(
-    expected = "a superseded launch whose teardown fails must be abandoned on the supersession signal, not run on to its own bound"
-)]
 async fn a_failing_teardown_is_reported_as_a_start_rejection_never_as_superseded() {
     let what = "a superseded launch whose teardown fails";
     let mut node = Node::new(None, PoolOnNode::NotComposed).await;
@@ -688,9 +673,6 @@ async fn a_failing_teardown_is_reported_as_a_start_rejection_never_as_superseded
 /// born raised). The launch returns `StartSuperseded` having created nothing.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[should_panic(
-    expected = "a launch whose signal was raised before start must be abandoned on the supersession signal, not run on to its own bound"
-)]
 async fn a_signal_raised_before_start_returns_superseded_having_created_nothing() {
     let what = "a launch whose signal was raised before start";
     let mut node = Node::new(None, PoolOnNode::NotComposed).await;
@@ -732,9 +714,6 @@ async fn guard_a_signal_raised_for_another_launch_does_not_affect_this_one() {
 /// B keeps waiting and completes `Ok` when its READY arrives; B's VMM and beacon record stay.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[should_panic(
-    expected = "the launch whose own signal was raised must be abandoned on the supersession signal, not run on to its own bound"
-)]
 async fn a_signal_abandons_only_its_own_launch() {
     let what = "the launch whose own signal was raised";
     let mut node = Node::new(None, PoolOnNode::NotComposed).await;
@@ -758,9 +737,6 @@ async fn a_signal_abandons_only_its_own_launch() {
 /// `StartSuperseded`; `ensure` is never called, the claim is never polled, nothing is created.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[should_panic(
-    expected = "a volume launch whose signal was raised before start must be abandoned on the supersession signal, not run on to its own bound"
-)]
 async fn a_volume_launch_superseded_before_ensure_creates_nothing_and_never_calls_the_pool() {
     let what = "a volume launch whose signal was raised before start";
     let sim = pool(1024);
@@ -782,9 +758,6 @@ async fn a_volume_launch_superseded_before_ensure_creates_nothing_and_never_call
 /// VMM is created. On `Ok` the ensured volume stays.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[should_panic(
-    expected = "a launch superseded while ensure was in flight and then succeeded must be abandoned on the supersession signal, not run on to its own bound"
-)]
 async fn a_signal_during_ensure_waits_for_ensure_then_abandons_whatever_ensure_returns() {
     for ensure_fails in [false, true] {
         let what = if ensure_fails {
@@ -817,21 +790,28 @@ async fn a_signal_during_ensure_waits_for_ensure_then_abandons_whatever_ensure_r
     }
 }
 
-/// A volume launch's setup used by the claim-wait tests: `ensure` is held after its create
-/// effect so the claim can be taken before the driver first polls it, then released.
+/// A volume launch's setup used by the claim-wait tests: the launch's first claim poll is held
+/// in flight, and the claim is taken once `ensure` has activated the volume (only an active
+/// volume has a device node a VMM can hold). The poll then reads `Held` and the launch waits.
 async fn begin_held_claim_wait(
     node: &mut Node,
     sim: &SimVolumeBacking,
     signal: &Arc<SimLaunchSupersession>,
 ) -> Launch {
     sim.pause_ensure_after_create(&workload());
+    sim.park_next_claim_state();
     let launch = node.begin(Some(40), signal);
     assert!(
         node.eventually(|| sim.ensure_parked(&workload())).await,
-        "the launch must be inside ensure before its volume's claim is held"
+        "the launch must be inside ensure before its volume is activated"
+    );
+    sim.resume_ensure(&workload());
+    assert!(
+        node.eventually(|| sim.claim_state_parked()).await,
+        "the launch must be inside its first claim poll once ensure has activated the volume"
     );
     sim.hold_claim(&workload());
-    sim.resume_ensure(&workload());
+    sim.release_claim_state();
     assert!(
         node.eventually(|| sim.claim_state_calls() >= 1).await,
         "the launch must poll the claim after ensure"
@@ -844,9 +824,6 @@ async fn begin_held_claim_wait(
 /// `claim_state` is not called again.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[should_panic(
-    expected = "a launch superseded while it sleeps between claim polls must be abandoned on the supersession signal, not run on to its own bound"
-)]
 async fn a_signal_during_the_claim_poll_sleep_returns_at_once_without_polling_again() {
     let what = "a launch superseded while it sleeps between claim polls";
     let sim = pool(1024);
@@ -868,9 +845,6 @@ async fn a_signal_during_the_claim_poll_sleep_returns_at_once_without_polling_ag
 /// the same step. Superseded wins over `VolumeUnavailable { Held }`.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[should_panic(
-    expected = "a launch superseded at its claim bound must end StartSuperseded, got Err(StartRejected"
-)]
 async fn the_signal_wins_over_a_claim_held_at_the_bound() {
     let what = "a launch superseded at its claim bound";
     let sim = pool(1024);
@@ -890,9 +864,6 @@ async fn the_signal_wins_over_a_claim_held_at_the_bound() {
 /// The in-flight call is not interrupted.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[should_panic(
-    expected = "a launch superseded as its claim wait ends must be abandoned on the supersession signal, not run on to its own bound"
-)]
 async fn a_signal_during_the_last_claim_poll_creates_nothing_after_the_claim_wait() {
     let what = "a launch superseded as its claim wait ends";
     let sim = pool(1024);
@@ -917,9 +888,6 @@ async fn a_signal_during_the_last_claim_poll_creates_nothing_after_the_claim_wai
 /// attached the volume. The VMM is torn down (none left alive) and the volume is kept.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[should_panic(
-    expected = "a volume launch superseded during its guest-boot wait must be abandoned on the supersession signal, not run on to its own bound"
-)]
 async fn a_volume_launch_superseded_in_its_boot_wait_tears_the_vmm_down_and_keeps_the_volume() {
     let what = "a volume launch superseded during its guest-boot wait";
     let sim = pool(1024);
