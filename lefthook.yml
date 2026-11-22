@@ -181,7 +181,7 @@ pre-commit:
         # Join crate names into `rdeps(c1) | rdeps(c2) | ...`.
         filter=$(echo "$pkgs" | awk 'BEGIN{sep=""} {printf "%srdeps(%s)", sep, $0; sep=" | "}')
         echo "nextest-affected: filter = $filter"
-        infra/hooks/linux-run.sh cargo nextest run --no-fail-fast -E "$filter"
+        infra/hooks/linux-run.sh cargo nextest run --no-fail-fast --no-tests=pass -E "$filter"
       fail_text: |
         Affected tests failed. Pre-push runs the full suite — this
         smoke check caught it earlier.
