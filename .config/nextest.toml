@@ -889,6 +889,14 @@ filter = 'package(overdrive-system-conformance) & binary(vm_lifecycle_completion
 test-group = 'host-kernel-shared'
 slow-timeout = { period = "60s", terminate-after = 15 }
 
+# Node-local persistent volume journeys (GH #348, `volume_survives.rs`): each test boots
+# the volume-pool guest, then `serve`, deploys a VM workload and drives one or more
+# restarts, each waiting for a nested guest boot (up to 120 s) beside an 8 s settle or a
+# 30 s claim wait. A journey runs several minutes, so it gets ten slow periods.
+[[profile.default.overrides]]
+filter = 'package(overdrive-cli) & binary(integration) & test(/volume_survives::/)'
+slow-timeout = { period = "60s", terminate-after = 10 }
+
 # public-ingress-gateway (AT-PIG-E2E-1 and the native arms of S-PIG-56, 60, 69,
 # 70 (408), 71, 105, 109, 113, 115) - the end-to-end binary boots
 # `run_server` with the real adapters and a real VM Service, so it mutates the

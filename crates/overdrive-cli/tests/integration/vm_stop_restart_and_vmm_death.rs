@@ -151,8 +151,6 @@
     clippy::similar_names
 )]
 
-use overdrive_core::byte_size::ByteSize;
-use overdrive_core::cpu_quantity::CpuQuantity;
 use std::collections::BTreeSet;
 use std::net::SocketAddr;
 use std::os::unix::fs::PermissionsExt;

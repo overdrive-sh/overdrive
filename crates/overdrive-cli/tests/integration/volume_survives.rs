@@ -901,3 +901,142 @@ impl ExclusiveOpen for std::fs::OpenOptions {
         std::os::unix::fs::OpenOptionsExt::custom_flags(self, libc::O_EXCL)
     }
 }
+
+/// The block the holder writes through its own exclusive hold, so the test can tell afterwards
+/// that the holder's data survived the launch that lost the device.
+const HOLDER_MARK: &[u8] = b"HOLDER-DATA";
+
+/// A second opener that takes the volume's exclusive hold the moment a launch has finished its
+/// claim wait and begun its host setup, and keeps it until released.
+///
+/// The launch's run directory under `/run/overdrive/vm/<alloc>` is the production side effect that
+/// marks that moment: `VmDriver::provision_vmm` creates it right after the claim read `Free`, then
+/// spends seconds on the cgroup and the rootfs clone before the VMM opens the device. The watcher
+/// only observes that directory; it installs nothing production does not install.
+struct LateHolder {
+    release: std::sync::mpsc::Sender<()>,
+    raced: tokio::sync::mpsc::UnboundedReceiver<String>,
+    thread: std::thread::JoinHandle<()>,
+}
+
+impl LateHolder {
+    fn arm() -> Self {
+        let (release, released) = std::sync::mpsc::channel::<()>();
+        let (raced_tx, raced) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let thread = std::thread::spawn(move || {
+            let deadline = std::time::Instant::now() + Duration::from_secs(150);
+            let launch = loop {
+                let listing = std::fs::read_dir("/run/overdrive/vm").map(|entries| {
+                    entries
+                        .flatten()
+                        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                        .collect::<Vec<_>>()
+                });
+                if let Ok(names) = &listing
+                    && let Some(name) = names.first()
+                {
+                    break name.clone();
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "no launch began its host setup; /run/overdrive/vm: {listing:?}"
+                );
+                std::thread::sleep(Duration::from_millis(5));
+            };
+            let device = volume_device();
+            let mut hold = std::fs::OpenOptions::new()
+                .read(true)
+                .write(true)
+                .custom_flags_excl()
+                .open(&device)
+                .expect("the holder takes the exclusive hold after the claim wait");
+            let mut block = [0u8; BLOCK_LEN];
+            block[..HOLDER_MARK.len()].copy_from_slice(HOLDER_MARK);
+            std::io::Write::write_all(&mut hold, &block).expect("the holder writes its block");
+            hold.sync_all().expect("the holder flushes its block");
+            raced_tx.send(launch).expect("report the raced launch");
+            let _ = released.recv();
+            drop(hold);
+        });
+        Self { release, raced, thread }
+    }
+
+    /// The allocation whose launch the hold was taken against. Polls without blocking the
+    /// runtime, which also runs `serve`.
+    async fn raced_launch(&mut self) -> String {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(150);
+        loop {
+            match self.raced.try_recv() {
+                Ok(launch) => return launch,
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {}
+                Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                    panic!("the holder stopped before it took a hold against a launch")
+                }
+            }
+            assert!(tokio::time::Instant::now() < deadline, "no launch was raced by the holder");
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    }
+
+    fn release(self) {
+        let _ = self.release.send(());
+        self.thread.join().expect("the holder thread");
+    }
+}
+
+/// S-VOL-T3-14 (boundary 4, a claim taken in the gap between the claim wait and the VMM open):
+/// a launch has read the volume's claim `Free`, and another holder takes the device exclusively
+/// while the launch does its host setup. The VMM's own exclusive open then fails `EBUSY`, and
+/// that is reported as `VolumeUnavailable { Held }`, the same typed failure as a claim still held
+/// after the wait, not as a generic VMM boot failure. No VMM is left running for the failed
+/// attempt and the holder's volume data is untouched.
+/// Shape: example. Owner: `VmDriver::start` through `serve`. Oracle: CLI describe rows (the
+/// attempt's reason), the process table, the volume device contents. Tier 3.
+/// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
+#[tokio::test]
+#[serial(cgroup)]
+#[should_panic(
+    expected = "a claim taken after the claim wait must fail the launch as a held volume"
+)]
+async fn a_claim_taken_after_the_claim_wait_fails_the_launch_as_a_held_volume() {
+    let journey = Journey::new();
+    let handle = serve_at(&journey.data_dir(), &journey.config_dir()).await;
+    let mut holder = LateHolder::arm();
+    let id = journey.deploy("vol-late-hold").await;
+    let raced = holder.raced_launch().await;
+
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
+    let failed = loop {
+        let out = describe_once(&journey.cfg(), &id).await;
+        if let Some(row) = out
+            .snapshot
+            .rows
+            .iter()
+            .find(|row| row.alloc_id == raced && row.state == AllocStateWire::Failed)
+        {
+            break row.clone();
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the launch that lost the device never failed ({raced}); rows: {:?}",
+            out.snapshot.rows
+        );
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    };
+    let no_vmm_left = cloud_hypervisor_pid_matching(&raced).is_none();
+    let device = volume_device();
+    holder.release();
+    let block = read_block(&device, 0);
+
+    assert_eq!(
+        failed.reason,
+        Some(overdrive_core::TransitionReason::VmVolumeUnavailable {
+            cause: overdrive_core::volume::VolumeUnavailableCause::Held
+        }),
+        "a claim taken after the claim wait must fail the launch as a held volume; row: {failed:?}"
+    );
+    assert!(no_vmm_left, "no VMM is left running for the failed attempt ({raced})");
+    assert!(block.starts_with(HOLDER_MARK), "the holder's data is intact after the failed launch");
+    handle.shutdown().await.expect("shutdown");
+}
