@@ -65,11 +65,6 @@ pub enum DataplaneError {
          debugging.md § \"Leftover XDP attachments across runs\")"
     )]
     IfaceXdpSlotBusy { iface: String },
-    /// `update_service` found one `BackendId` already bound to a different
-    /// backend identity (the memo hit names another `Backend.workload_identity`). Returned
-    /// before any map is mutated; no identity is reserved and no id is minted.
-    #[error("backend id {backend_id} is bound to {current}, refusing {attempted}")]
-    BackendIdentityConflict { backend_id: BackendId, current: SpiffeId, attempted: SpiffeId },
     /// `update_service` found a reverse-NAT key that already maps to a different
     /// VIP (R-59). Returned from planning, before any mutation: nothing is
     /// overwritten and rollback never restores another Service's entry.
@@ -176,6 +171,16 @@ pub trait Dataplane: Send + Sync + 'static {
     /// - Idempotent re-apply: calling `update_service(frontend,
     ///   backends)` twice with identical arguments yields the same
     ///   post-state.
+    /// - A backend whose `addr` is an endpoint the adapter still memoises
+    ///   keeps that endpoint's `BackendId`. The id follows the workload now
+    ///   programmed there: `selected_backend_identity` resolves the
+    ///   `Backend.workload_identity` of the update that committed last. The
+    ///   association changes only with the commit; a failure before the
+    ///   commit leaves the prior association. The same workload at a
+    ///   memoised endpoint changes no association and no fingerprint.
+    /// - One endpoint named twice in one call (the same workload twice or two
+    ///   workloads) is refused with [`DataplaneError::LoadFailed`] before any
+    ///   write; nothing changes.
     /// - A non-empty `backends` containing a backend with an IPv6 `addr`
     ///   is refused with [`DataplaneError::LoadFailed`] as the first
     ///   validation, before any write: no `REVERSE_NAT` key is added or

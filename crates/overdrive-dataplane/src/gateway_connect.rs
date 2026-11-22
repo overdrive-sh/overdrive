@@ -38,20 +38,12 @@ use crate::EbpfDataplane;
 /// The applied-identity state of one `BackendId` (ADR-0233, ADR-0241).
 ///
 /// `Reserved` is inserted before any map work of an `update_service` and is not
-/// readable; `Applied` replaces it after the outer swap. An `Applied` identity is
-/// never changed or removed for the process lifetime.
+/// readable; `Applied` replaces it after the outer swap. An `Applied` association
+/// is never removed for the process lifetime; a later commit that programs a
+/// different workload at the id's endpoint re-associates it.
 pub(crate) enum BackendIdentityState {
-    Reserved { spiffe_id: SpiffeId },
+    Reserved,
     Applied { spiffe_id: SpiffeId },
-}
-
-impl BackendIdentityState {
-    /// The allocation this id denotes, in either state.
-    pub(crate) const fn spiffe_id(&self) -> &SpiffeId {
-        match self {
-            Self::Reserved { spiffe_id } | Self::Applied { spiffe_id } => spiffe_id,
-        }
-    }
 }
 
 /// Receipt outcome: no usable backend.
@@ -462,7 +454,7 @@ impl GatewayConnectDataplane for EbpfDataplane {
         let _published = self.service_apply_commit.read();
         match self.backend_identities.lock().get(&backend_id.get()) {
             Some(BackendIdentityState::Applied { spiffe_id }) => Ok(spiffe_id.clone()),
-            Some(BackendIdentityState::Reserved { .. }) | None => {
+            Some(BackendIdentityState::Reserved) | None => {
                 Err(GatewayConnectDataplaneError::BackendIdentityMissing { backend_id })
             }
         }

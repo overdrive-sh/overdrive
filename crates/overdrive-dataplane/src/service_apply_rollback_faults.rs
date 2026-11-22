@@ -317,8 +317,8 @@ struct Observed {
     service_reverse_nat_keys: BTreeMap<ServiceKey, BTreeSet<BackendKeyPod>>,
     /// Reverse-NAT keys awaiting a later delete.
     cleanup_debt: BTreeSet<BackendKeyPod>,
-    /// `Applied` (true) or `Reserved` (false) identity, with its allocation, by id.
-    identities: BTreeMap<u32, (bool, SpiffeId)>,
+    /// `Applied` identity (its workload) or `Reserved` (none), by id.
+    identities: BTreeMap<u32, Option<SpiffeId>>,
     /// The allocator's memo for each backend endpoint.
     memo: BTreeMap<SocketAddrV4, Option<u32>>,
 }
@@ -361,10 +361,10 @@ fn observe(dataplane: &EbpfDataplane) -> Observed {
             .map(|(id, state)| {
                 (
                     *id,
-                    (
-                        matches!(state, BackendIdentityState::Applied { .. }),
-                        state.spiffe_id().clone(),
-                    ),
+                    match state {
+                        BackendIdentityState::Applied { spiffe_id } => Some(spiffe_id.clone()),
+                        BackendIdentityState::Reserved => None,
+                    },
                 )
             })
             .collect(),
@@ -496,5 +496,5 @@ fn a_failed_in_place_backend_restore_during_rollback_is_returned_as_service_appl
     assert!(![b_id, c_id].contains(&new_b) && ![b_id, c_id].contains(&new_c) && new_b != new_c);
     assert_eq!(memo_id(&recovered, A), Some(a_id));
     assert_eq!(memo_id(&recovered, X), Some(x_id));
-    assert!(recovered.identities[&new_b].0 && recovered.identities[&new_c].0);
+    assert!(recovered.identities[&new_b].is_some() && recovered.identities[&new_c].is_some());
 }

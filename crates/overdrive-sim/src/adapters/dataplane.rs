@@ -83,9 +83,10 @@ struct ServiceState {
     backend_memo: BTreeMap<(SocketAddr, Proto), BackendId>,
     /// The next `BackendId` the monotonic counter hands out (starts at 1).
     next_backend_id: u32,
-    /// Applied identity of every `BackendId` ever minted: immutable per id and
-    /// retained after the id leaves its service, so an old receipt still
-    /// resolves (mirrors the host's process-lifetime `Applied` associations).
+    /// Applied identity of every `BackendId` ever minted: re-associated when a
+    /// different workload is programmed at the id's endpoint, and retained
+    /// after the id leaves its service, so an old receipt still resolves
+    /// (mirrors the host's process-lifetime `Applied` associations).
     identities: BTreeMap<BackendId, SpiffeId>,
 }
 
@@ -404,30 +405,15 @@ impl Dataplane for SimDataplane {
         // critical section.
         let mut state = self.state.lock();
 
-        // Identity preflight, before any mutation (mirrors the host's commit
-        // guard): an endpoint that still holds a live allocator association
-        // may not be re-leased to a different `Backend.workload_identity`, and one
-        // endpoint may not carry two allocations in one update.
-        let mut named: BTreeMap<SocketAddr, &SpiffeId> = BTreeMap::new();
+        // Preflight, before any mutation: one endpoint may not appear twice in
+        // one update, whichever workloads name it.
+        let mut named: std::collections::BTreeSet<SocketAddr> = std::collections::BTreeSet::new();
         for backend in &backends {
-            if let Some(held) = named.insert(backend.addr, &backend.workload_identity)
-                && *held != backend.workload_identity
-            {
+            if !named.insert(backend.addr) {
                 return Err(DataplaneError::LoadFailed(format!(
-                    "backend endpoint {} carries two allocations: {held} and {}",
-                    backend.addr, backend.workload_identity
+                    "backend endpoint {} is named twice in one update",
+                    backend.addr
                 )));
-            }
-            let Some(backend_id) = state.backend_memo.get(&(backend.addr, proto)) else {
-                continue;
-            };
-            let current = state.identities.get(backend_id);
-            if let Some(current) = current.filter(|current| **current != backend.workload_identity) {
-                return Err(DataplaneError::BackendIdentityConflict {
-                    backend_id: *backend_id,
-                    current: current.clone(),
-                    attempted: backend.workload_identity.clone(),
-                });
             }
         }
         // R-59: a reverse-NAT key another Service's VIP already owns is
@@ -443,7 +429,10 @@ impl Dataplane for SimDataplane {
             }
         }
         for backend in &backends {
-            if state.backend_memo.contains_key(&(backend.addr, proto)) {
+            // A memoised endpoint keeps its id; the id follows the workload now
+            // programmed there.
+            if let Some(held_id) = state.backend_memo.get(&(backend.addr, proto)).copied() {
+                state.identities.insert(held_id, backend.workload_identity.clone());
                 continue;
             }
             let backend_id = BackendId::new(state.next_backend_id).map_err(|error| {
@@ -498,7 +487,7 @@ impl Dataplane for SimDataplane {
 
         // Orphan release (mirrors the host's post-commit sweep): an endpoint no
         // service names any longer leaves the allocator memo, so a later update
-        // may bind it to another allocation under a fresh id. Applied identities
+        // may bind it to another workload under a fresh id. Applied identities
         // are retained.
         let live_endpoints: std::collections::BTreeSet<(SocketAddr, Proto)> = state
             .services

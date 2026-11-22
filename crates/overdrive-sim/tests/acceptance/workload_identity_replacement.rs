@@ -159,7 +159,6 @@ impl World {
 /// regardless of identity (the same workload twice, or two workloads), and
 /// changes nothing.
 #[tokio::test]
-#[should_panic(expected = "the same workload twice at one endpoint must be LoadFailed")]
 async fn one_call_naming_an_endpoint_twice_is_refused_and_changes_nothing() {
     let (payments, inventory) = (intent_of("payments"), intent_of("inventory"));
     let first = identity_of(&payments, "alloc-payments-0");
@@ -350,7 +349,6 @@ proptest! {
     /// there (the same workload: nothing changes; a different workload: the
     /// association follows).
     #[test]
-    #[should_panic(expected = "the dataplane refused the update")]
     fn a_replacement_converges_without_refusal_across_restarts_and_schedules(seed in any::<u64>()) {
         let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("runtime");
         let outcome = runtime.block_on(run_schedule(seed));

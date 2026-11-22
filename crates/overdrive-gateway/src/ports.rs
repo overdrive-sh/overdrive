@@ -99,6 +99,12 @@ pub trait GatewayConnectDataplane: GatewayConnectCleanup + Send + Sync {
         &self,
         intent: &GatewayConnectIntent,
     ) -> Result<GatewaySelectionReceipt, GatewayConnectDataplaneError>;
+    /// The workload identity currently associated with `backend_id`: the
+    /// `Backend.workload_identity` of the last committed `update_service` that
+    /// programmed the id's endpoint. A pure read that waits for an in-flight
+    /// commit and writes nothing. A receipt taken before a takeover and read
+    /// after the re-association resolves the new workload; an id never
+    /// published is [`GatewayConnectDataplaneError::BackendIdentityMissing`].
     fn selected_backend_identity(
         &self,
         backend_id: BackendId,

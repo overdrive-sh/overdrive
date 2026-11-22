@@ -1349,7 +1349,7 @@ fn service_vip(ip_host: u32) -> Result<overdrive_core::id::ServiceVip, Dataplane
 /// (ADR-0228, ADR-0232, ADR-0233, ADR-0241). Every method here runs under the
 /// `service_apply_commit` write guard `update_service` holds.
 impl EbpfDataplane {
-    /// Validate the input, reject an identity conflict before any mutation, then
+    /// Validate the input, reject a repeated endpoint before any mutation, then
     /// mint ids for the endpoints the allocator has not seen and reserve their
     /// identities (not yet readable).
     #[allow(
@@ -1376,36 +1376,13 @@ impl EbpfDataplane {
         for backend in backends {
             let pod = BackendEntryPod::from_backend(backend)?;
             let endpoint = (pod.ipv4_host, pod.port_host);
-            if let Some((_, held)) = by_endpoint.get(&endpoint)
-                && **held != backend.workload_identity
-            {
+            if by_endpoint.contains_key(&endpoint) {
                 return Err(DataplaneError::LoadFailed(format!(
-                    "backend endpoint {} carries two allocations: {held} and {}",
-                    backend.addr, backend.workload_identity
+                    "backend endpoint {} is named twice in one update",
+                    backend.addr
                 )));
             }
             by_endpoint.insert(endpoint, (pod, &backend.workload_identity));
-        }
-
-        // Planning order: the identity conflict is reported first, then R-59.
-        {
-            let allocator = self.backend_id_alloc.lock();
-            let identities = self.backend_identities.lock();
-            for ((ip_host, port_host), (_, attempted)) in &by_endpoint {
-                let Some(backend_id) = allocator.existing_id(*ip_host, *port_host, proto) else {
-                    continue;
-                };
-                let Some(state) = identities.get(&backend_id.get()) else {
-                    continue;
-                };
-                if state.spiffe_id() != *attempted {
-                    return Err(DataplaneError::BackendIdentityConflict {
-                        backend_id,
-                        current: state.spiffe_id().clone(),
-                        attempted: (*attempted).clone(),
-                    });
-                }
-            }
         }
 
         // R-59: a reverse-NAT key another Service's VIP already owns is
@@ -1441,8 +1418,7 @@ impl EbpfDataplane {
             let fresh = allocator.existing_id(ip_host, port_host, proto).is_none();
             let id = allocator.allocate(ip_host, port_host, proto);
             if fresh {
-                identities
-                    .insert(id.get(), BackendIdentityState::Reserved { spiffe_id: alloc.clone() });
+                identities.insert(id.get(), BackendIdentityState::Reserved);
             }
             planned.push(PlannedBackend { id, pod, alloc: alloc.clone(), fresh });
         }
@@ -1993,12 +1969,14 @@ impl Dataplane for EbpfDataplane {
     /// `selected_backend_identity` readers wait for it. A non-empty update:
     ///
     /// 1. Plan (`plan_service_apply`), before any mutation: validate and
-    ///    deduplicate the backends, reject one endpoint carrying two
-    ///    allocations, reject a reverse-NAT key another Service's VIP already
-    ///    owns ([`DataplaneError::ReverseNatConflict`], R-59) and an identity
-    ///    conflict ([`DataplaneError::BackendIdentityConflict`]); then mint ids
-    ///    for endpoints the allocator has not seen and reserve their identities
-    ///    (not yet readable).
+    ///    validate the backends, reject one endpoint named twice in the call
+    ///    ([`DataplaneError::LoadFailed`], whichever workloads name it) and a
+    ///    reverse-NAT key another Service's VIP already owns
+    ///    ([`DataplaneError::ReverseNatConflict`], R-59); then mint ids for
+    ///    endpoints the allocator has not seen and reserve their identities
+    ///    (not yet readable). An endpoint the allocator still memoises keeps
+    ///    its id, which follows the workload now programmed there: the
+    ///    association changes only at step 4.
     /// 2. Populate `BACKEND_MAP` (an identical entry is reused, a differing
     ///    `weight`/`healthy` is updated in place with the prior value saved),
     ///    build the fresh private inner map holding the Maglev permutation, and

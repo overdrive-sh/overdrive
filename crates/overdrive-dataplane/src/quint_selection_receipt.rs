@@ -66,10 +66,7 @@
 //!
 //! Every named run bound to this main is pinned with
 //! `#[quint_test(max_samples = 1)]`; `#[quint_run]` replays randomized traces
-//! from a pinned seed and sample count. Two tests are pending (RED until DELIVER
-//! removes the owner's refusal of a different workload at a memoised endpoint):
-//! the `different_workload_takeover` run and the randomized traces; each is marked
-//! `#[should_panic]` with the refusal it produces today. The lane runs as root through
+//! from a pinned seed and sample count. The lane runs as root through
 //! `cargo xtask metal run --` (bpffs, cgroup v2, a veth pair for the loader's
 //! XDP attach).
 
@@ -674,10 +671,6 @@ fn selection_receipt_serve_restart_replacement() -> impl Driver {
 /// and re-associates it: a receipt taken before the takeover and read after it
 /// resolves the new workload (ADR-0347, DR-1(b)).
 ///
-/// PENDING (RED today): the owner still refuses the takeover with
-/// `BackendIdentityConflict`, so the `update_apply` step fails with the refusal.
-/// DELIVER (ADR-0347) removes the refusal; this attribute is then removed and the
-/// run replays unchanged.
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/public-ingress-gateway/selection_receipt.qnt",
@@ -686,7 +679,6 @@ fn selection_receipt_serve_restart_replacement() -> impl Driver {
     max_samples = 1
 )]
 #[overdrive_test(guest = "cgroup-default", profile = "quint")]
-#[should_panic(expected = "update_service must be accepted: backend id")]
 fn selection_receipt_different_workload_takeover() -> impl Driver {
     ReceiptConfDriver::new()
 }
@@ -722,12 +714,6 @@ fn selection_receipt_restart_destroys_receipts() -> impl Driver {
 /// Randomized traces of the conformance main, from a pinned seed and sample
 /// count so the outcome is the same on every run (the seed is also printed on
 /// failure).
-///
-/// PENDING (RED today): the catalogue draws a different workload at a memoised
-/// endpoint, which the owner still refuses with `BackendIdentityConflict`
-/// ("backend id N is bound to <identity>"); the pinned seed reaches the takeover.
-/// DELIVER (ADR-0347) removes the
-/// refusal; this attribute is then removed and the traces replay unchanged.
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_run(
     spec = "../../specs/quint/public-ingress-gateway/selection_receipt.qnt",
@@ -736,7 +722,6 @@ fn selection_receipt_restart_destroys_receipts() -> impl Driver {
     seed = "1"
 )]
 #[overdrive_test(guest = "cgroup-default", profile = "quint")]
-#[should_panic(expected = "is bound to spiffe://overdrive.local/workload/conf-")]
 fn selection_receipt_receipt_conf_randomized_traces() -> impl Driver {
     ReceiptConfDriver::new()
 }

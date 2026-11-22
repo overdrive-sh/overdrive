@@ -491,7 +491,6 @@ fn takeover_script<O: Owner + Observe>(owner: &O, rt: &tokio::runtime::Runtime) 
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "mtls-relay")]
 #[test]
-#[should_panic(expected = "a different workload at a memoised endpoint must be accepted")]
 fn host_and_sim_agree_that_a_different_workload_at_a_memoised_endpoint_keeps_the_id() {
     let host = Host::new_tagged("h67b");
     let sim = Sim::new();
@@ -535,7 +534,6 @@ fn duplicate_endpoint_script<O: Owner + Observe>(
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "mtls-relay")]
 #[test]
-#[should_panic(expected = "the same workload twice at one endpoint must be LoadFailed")]
 fn host_and_sim_refuse_one_call_that_names_an_endpoint_twice() {
     let host = Host::new_tagged("h67c");
     let sim = Sim::new();
