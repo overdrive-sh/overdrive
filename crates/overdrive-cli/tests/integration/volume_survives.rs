@@ -722,7 +722,9 @@ fn assert_nothing_failed_or_charged(
 #[serial(cgroup)]
 // Pending until launch supersession (step 05-02): today the stopped launch waits out the claim
 // bound and writes a `Failed` row, which the first post-bound assertion names.
-#[should_panic(expected = "a superseded launch must neither fail nor start once the claim bound has elapsed")]
+#[should_panic(
+    expected = "a superseded launch must neither fail nor start once the claim bound has elapsed"
+)]
 async fn a_workload_stop_during_a_held_claim_returns_promptly_with_no_failed_row() {
     let journey = Journey::new();
     let handle = serve_at(&journey.data_dir(), &journey.config_dir()).await;
@@ -761,8 +763,7 @@ async fn a_workload_stop_during_a_held_claim_returns_promptly_with_no_failed_row
     tokio::time::sleep(Duration::from_secs(40)).await;
     let after_bound = describe_once(&journey.cfg(), &id).await;
     for row in &after_bound.snapshot.rows {
-        let superseded_failure =
-            row.alloc_id != first_alloc && row.state == AllocStateWire::Failed;
+        let superseded_failure = row.alloc_id != first_alloc && row.state == AllocStateWire::Failed;
         assert!(
             row.state != AllocStateWire::Running && !superseded_failure,
             "a superseded launch must neither fail nor start once the claim bound has elapsed; rows: {:?}",
@@ -923,6 +924,9 @@ impl ExclusiveOpen for std::fs::OpenOptions {
 /// that the holder's data survived the launch that lost the device.
 const HOLDER_MARK: &[u8] = b"HOLDER-DATA";
 
+/// The worker's claim wait bound (`VOLUME_CLAIM_BOUND`), the latest a claim-wait failure can land.
+const CLAIM_WAIT_BOUND: Duration = Duration::from_secs(30);
+
 /// A second opener that takes the volume's exclusive hold the moment a launch has finished its
 /// claim wait and begun its host setup, and keeps it until released.
 ///
@@ -932,14 +936,15 @@ const HOLDER_MARK: &[u8] = b"HOLDER-DATA";
 /// only observes that directory; it installs nothing production does not install.
 struct LateHolder {
     release: std::sync::mpsc::Sender<()>,
-    raced: tokio::sync::mpsc::UnboundedReceiver<String>,
+    raced: tokio::sync::mpsc::UnboundedReceiver<(String, std::time::Instant)>,
     thread: std::thread::JoinHandle<()>,
 }
 
 impl LateHolder {
     fn arm() -> Self {
         let (release, released) = std::sync::mpsc::channel::<()>();
-        let (raced_tx, raced) = tokio::sync::mpsc::unbounded_channel::<String>();
+        let (raced_tx, raced) =
+            tokio::sync::mpsc::unbounded_channel::<(String, std::time::Instant)>();
         let thread = std::thread::spawn(move || {
             let deadline = std::time::Instant::now() + Duration::from_secs(150);
             let launch = loop {
@@ -952,6 +957,11 @@ impl LateHolder {
                 if let Ok(names) = &listing
                     && let Some(name) = names.first()
                 {
+                    assert_eq!(
+                        names.len(),
+                        1,
+                        "the holder raced one launch; /run/overdrive/vm holds {names:?}"
+                    );
                     break name.clone();
                 }
                 assert!(
@@ -971,7 +981,7 @@ impl LateHolder {
             block[..HOLDER_MARK.len()].copy_from_slice(HOLDER_MARK);
             std::io::Write::write_all(&mut hold, &block).expect("the holder writes its block");
             hold.sync_all().expect("the holder flushes its block");
-            raced_tx.send(launch).expect("report the raced launch");
+            raced_tx.send((launch, std::time::Instant::now())).expect("report the raced launch");
             let _ = released.recv();
             drop(hold);
         });
@@ -980,11 +990,11 @@ impl LateHolder {
 
     /// The allocation whose launch the hold was taken against. Polls without blocking the
     /// runtime, which also runs `serve`.
-    async fn raced_launch(&mut self) -> String {
+    async fn raced_launch(&mut self) -> (String, std::time::Instant) {
         let deadline = tokio::time::Instant::now() + Duration::from_secs(150);
         loop {
             match self.raced.try_recv() {
-                Ok(launch) => return launch,
+                Ok(raced) => return raced,
                 Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {}
                 Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
                     panic!("the holder stopped before it took a hold against a launch")
@@ -1016,12 +1026,23 @@ impl LateHolder {
 async fn a_claim_taken_after_the_claim_wait_fails_the_launch_as_a_held_volume() {
     let journey = Journey::new();
     let handle = serve_at(&journey.data_dir(), &journey.config_dir()).await;
+    // A stale run directory from an earlier run would make the holder race the wrong launch and
+    // fire before the claim wait ended, so the precondition is an empty launch directory.
+    let stale: Vec<String> = std::fs::read_dir("/run/overdrive/vm")
+        .map(|entries| {
+            entries
+                .flatten()
+                .map(|entry| entry.file_name().to_string_lossy().into_owned())
+                .collect()
+        })
+        .unwrap_or_default();
+    assert!(stale.is_empty(), "no launch directory exists before the deploy; found {stale:?}");
     let mut holder = LateHolder::arm();
     let id = journey.deploy("vol-late-hold").await;
-    let raced = holder.raced_launch().await;
+    let (raced, held_at) = holder.raced_launch().await;
 
     let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
-    let failed = loop {
+    let (failed, failed_after_hold) = loop {
         let out = describe_once(&journey.cfg(), &id).await;
         if let Some(row) = out
             .snapshot
@@ -1029,7 +1050,7 @@ async fn a_claim_taken_after_the_claim_wait_fails_the_launch_as_a_held_volume() 
             .iter()
             .find(|row| row.alloc_id == raced && row.state == AllocStateWire::Failed)
         {
-            break row.clone();
+            break (row.clone(), held_at.elapsed());
         }
         assert!(
             tokio::time::Instant::now() < deadline,
@@ -1049,6 +1070,13 @@ async fn a_claim_taken_after_the_claim_wait_fails_the_launch_as_a_held_volume() 
             cause: overdrive_core::volume::VolumeUnavailableCause::Held
         }),
         "a claim taken after the claim wait must fail the launch as a held volume; row: {failed:?}"
+    );
+    // The claim wait is bounded at 30 s (`VOLUME_CLAIM_BOUND` in the worker) and fails with the same
+    // reason. A launch whose hold landed inside the claim wait would only fail at that bound; one
+    // failed by the VMM's own busy open (exit 111) fails long before it.
+    assert!(
+        failed_after_hold < CLAIM_WAIT_BOUND / 2,
+        "the launch failed {failed_after_hold:?} after the hold; that is the claim wait, not the VMM's busy open"
     );
     assert!(no_vmm_left, "no VMM is left running for the failed attempt ({raced})");
     assert!(block.starts_with(HOLDER_MARK), "the holder's data is intact after the failed launch");
