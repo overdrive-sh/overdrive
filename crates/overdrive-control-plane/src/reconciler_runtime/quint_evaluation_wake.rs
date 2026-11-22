@@ -1128,6 +1128,19 @@ fn quint_evaluation_wake_world_changes_between_drain_and_finish() -> impl Driver
     EvaluationWakeDriver::new()
 }
 
+/// A k3 world change rewrites an already published empty row as non-empty: the hydrator requeues itself.
+#[quint_test(
+    spec = "../../specs/quint/reconciler-evaluation-wake/evaluation_wake.qnt",
+    main = "wake_conf",
+    test = "empty_published_row_then_service_change_requeues_hydrator",
+    max_samples = 1
+)]
+/// CONTRACT_SHAPE: bounded-change.
+fn quint_evaluation_wake_empty_published_row_then_service_change_requeues_hydrator() -> impl Driver
+{
+    EvaluationWakeDriver::new()
+}
+
 /// Randomized `wake_conf` traces against the production owner (seed printed on failure).
 #[quint_run(
     spec = "../../specs/quint/reconciler-evaluation-wake/evaluation_wake.qnt",

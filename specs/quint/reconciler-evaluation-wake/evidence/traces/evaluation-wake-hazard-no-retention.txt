@@ -2,6 +2,7 @@
 
 State 1
   active = {}
+  published = FALSE
   v3 = FALSE
   passPos = 0
   drifts = 0
@@ -24,6 +25,7 @@ State 1
   inWin = {}
 
 State 2 [DivergeWake]
+  published = TRUE
   drifts = 1
   rowNE = TRUE
   rowD = TRUE

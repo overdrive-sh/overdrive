@@ -263,6 +263,7 @@ module evaluation_wake {
   var v3: bool            // service-lifecycle's next evaluation changes its View (an allocation it has not recorded yet: D9)
   var prog: bool          // the dataplane slot of the workload's service is programmed (set by a k2 tick that lands a non-empty set)
   var rowNE: bool         // the published service_backends row carries backends (written by k3's publish: allocations exist; by a k2 world change)
+  var published: bool     // a service_backends row has been published (empty or not; model-only: rowNE alone cannot tell "no row" from "an empty row"). Written by k3's landed publish and by a k2 world change; the row lives in the observation store, so a crash keeps it
   var r4: bool            // svid-lifecycle's stored View holds an IssueRetry entry (D9, D11)
   var stU: bool           // a Running allocation whose Stable is not committed (service-lifecycle emits FinalizeFailed{Stable}; a lifecycle write)
   var rowD: bool          // the observed backend row differs from the projection (service-lifecycle emits WriteServiceBackendRow + EnqueueEvaluation(k2)); implies vip
@@ -294,15 +295,20 @@ module evaluation_wake {
       need.exclude(Set("k3", "k4")).union(Set("k1")).union(if (vip) Set("k3") else Set()).union(if (held) Set("k4") else Set())
     else if (k == "k4") need.exclude(Set("k1")).union(Set("k3", "k4"))
     else need.union(if (k == "k2") Set("k2", "k3") else Set("k3")).union(if (has.contains("k1")) Set() else Set("k1"))
+             // a k3 change rewrites an already published row as prior backends plus one more (the driver's make_service_needy): the
+             // row is non-empty and differs from every programmed set (in_place), so the hydrator is needy
+             .union(if (k == "k3" and published) Set("k2") else Set())
 
   // what a world change of key k does to the two sources of need(k3): a k4 change adds a fresh Running allocation (its Stable is
   // uncommitted and the projection changed); a k1 change replaces the Running allocation by a Failed row (no Stable to commit; the
   // projection lost a backend); a k3 or k2 change assigns the VIP and leaves a row that differs
   def stUAfter(k: str): bool = if (k == "k4") true else if (k == "k1") false else stU
+  // the published row after a world change of key k: a k2 change writes a non-empty row; a k3 change makes an already published row non-empty
+  def rowNEAfter(k: str): bool = rowNE or k == "k2" or (k == "k3" and published)
   def rowDAfter(k: str): bool = if (k == "k1" or k == "k4") vip else true
 
   action init = all {
-    has' = Set(), need' = Set(), inWin' = Set(), vip' = false, held' = false, v3' = false, r4' = false, prog' = false, rowNE' = false, stU' = false, rowD' = false, active' = Set(),
+    has' = Set(), need' = Set(), inWin' = Set(), vip' = false, held' = false, v3' = false, r4' = false, prog' = false, rowNE' = false, published' = false, stU' = false, rowD' = false, active' = Set(),
     pending' = List(), elig' = ALLIMM, due' = true, passPos' = 0, faults' = 0, drifts' = 0,
     dispatched' = 0, cancelled' = 0, conf_step' = variant("init", ()),
   }
@@ -311,7 +317,7 @@ module evaluation_wake {
   action Tick = all {
     not(due),
     due' = true,
-    has' = has, need' = need, inWin' = inWin, vip' = vip, held' = held, v3' = v3, r4' = r4, prog' = prog, rowNE' = rowNE, stU' = stU, rowD' = rowD, active' = active, pending' = pending, elig' = elig,
+    has' = has, need' = need, inWin' = inWin, vip' = vip, held' = held, v3' = v3, r4' = r4, prog' = prog, rowNE' = rowNE, published' = published, stU' = stU, rowD' = rowD, active' = active, pending' = pending, elig' = elig,
     passPos' = passPos, faults' = faults, drifts' = drifts, dispatched' = dispatched, cancelled' = cancelled,
     conf_step' = if (REC) variant("Tick", ()) else conf_step,
   }
@@ -332,7 +338,7 @@ module evaluation_wake {
       faults' = if (enumOk) faults else faults + 1,
       passPos' = if (passPos + 1 == NREC) 0 else passPos + 1,
       due' = if (passPos == 0) false else due,
-      has' = has, need' = need, inWin' = inWin, vip' = vip, held' = held, v3' = v3, r4' = r4, prog' = prog, rowNE' = rowNE, stU' = stU, rowD' = rowD, active' = active, drifts' = drifts,
+      has' = has, need' = need, inWin' = inWin, vip' = vip, held' = held, v3' = v3, r4' = r4, prog' = prog, rowNE' = rowNE, published' = published, stU' = stU, rowD' = rowD, active' = active, drifts' = drifts,
       dispatched' = dispatched,
       conf_step' = if (REC) variant("PassStep", { enumOk: enumOk }) else conf_step,
     }
@@ -355,7 +361,7 @@ module evaluation_wake {
       elig' = KEYSET.mapBy(k => if (s.contains(k)) "imm" else elig.get(k)),
       active' = active.union(s),
       dispatched' = if (REC) dispatched + sel.length() else dispatched,
-      has' = has, need' = need, inWin' = inWin, vip' = vip, held' = held, v3' = v3, r4' = r4, prog' = prog, rowNE' = rowNE, stU' = stU, rowD' = rowD, due' = due, passPos' = passPos,
+      has' = has, need' = need, inWin' = inWin, vip' = vip, held' = held, v3' = v3, r4' = r4, prog' = prog, rowNE' = rowNE, published' = published, stU' = stU, rowD' = rowD, due' = due, passPos' = passPos,
       faults' = faults, drifts' = drifts, cancelled' = cancelled,
       conf_step' = if (REC) variant("Drain", ()) else conf_step,
     }
@@ -460,6 +466,7 @@ module evaluation_wake {
       // backends
       prog' = if (lands and k == "k2") rowNE else prog,
       rowNE' = if (landE2) not(need.contains("k1")) else rowNE,
+      published' = (published or landE2),
       stU' = stU2, rowD' = rowD2,
       active' = active.exclude(Set(k)),
       pending' = if (kind == "none") sub._1 else subP(sub._1, k),
@@ -484,7 +491,7 @@ module evaluation_wake {
     drifts' = drifts + 1,
     cancelled' = if (REC and inP(pending, k)) cancelled + 1 else cancelled,
     inWin' = if (k == "k1") inWin.exclude(Set("k4")) else inWin,
-    v3' = (v3 or newAllocFor(k)), r4' = r4, prog' = prog, rowNE' = (rowNE or k == "k2"), stU' = stUAfter(k), rowD' = rowDAfter(k),
+    v3' = (v3 or newAllocFor(k)), r4' = r4, prog' = prog, rowNE' = rowNEAfter(k), published' = (published or k == "k2"), stU' = stUAfter(k), rowD' = rowDAfter(k),
     held' = held, active' = active, due' = due, passPos' = passPos, faults' = faults,
     dispatched' = dispatched,
     conf_step' = if (REC) variant("DivergeWake", { k: k }) else conf_step,
@@ -501,7 +508,7 @@ module evaluation_wake {
     vip' = (vip or k == "k2" or k == "k3"),
     drifts' = drifts + 1,
     inWin' = if (k == "k1") inWin.exclude(Set("k4")) else inWin,
-    v3' = (v3 or newAllocFor(k)), r4' = r4, prog' = prog, rowNE' = (rowNE or k == "k2"), stU' = stUAfter(k), rowD' = rowDAfter(k),
+    v3' = (v3 or newAllocFor(k)), r4' = r4, prog' = prog, rowNE' = rowNEAfter(k), published' = (published or k == "k2"), stU' = stUAfter(k), rowD' = rowDAfter(k),
     held' = held, active' = active, pending' = pending, elig' = elig, due' = due,
     passPos' = passPos, faults' = faults, dispatched' = dispatched, cancelled' = cancelled,
     conf_step' = if (REC) variant("DivergeDrop", { k: k }) else conf_step,
@@ -512,7 +519,7 @@ module evaluation_wake {
     pending' = subP(pending, k),
     elig' = subE(pending, elig, k, "imm"),
     cancelled' = if (REC and inP(pending, k)) cancelled + 1 else cancelled,
-    has' = has, need' = need, inWin' = inWin, vip' = vip, held' = held, v3' = v3, r4' = r4, prog' = prog, rowNE' = rowNE, stU' = stU, rowD' = rowD, active' = active, due' = due,
+    has' = has, need' = need, inWin' = inWin, vip' = vip, held' = held, v3' = v3, r4' = r4, prog' = prog, rowNE' = rowNE, published' = published, stU' = stU, rowD' = rowD, active' = active, due' = due,
     passPos' = passPos, faults' = faults, drifts' = drifts, dispatched' = dispatched,
     conf_step' = if (REC) variant("EdgeWake", { k: k }) else conf_step,
   }
@@ -525,7 +532,7 @@ module evaluation_wake {
     inWin.contains(k),
     inWin' = Set(),
     elig' = KEYSET.mapBy(j => if (inP(pending, j) and elig.get(j) == "nb") "imm" else elig.get(j)),
-    has' = has, need' = need, vip' = vip, held' = held, v3' = v3, r4' = r4, prog' = prog, rowNE' = rowNE, stU' = stU, rowD' = rowD, active' = active, pending' = pending, due' = due,
+    has' = has, need' = need, vip' = vip, held' = held, v3' = v3, r4' = r4, prog' = prog, rowNE' = rowNE, published' = published, stU' = stU, rowD' = rowD, active' = active, pending' = pending, due' = due,
     passPos' = passPos, faults' = faults, drifts' = drifts, dispatched' = dispatched, cancelled' = cancelled,
     conf_step' = if (REC) variant("WindowEnds", { k: k }) else conf_step,
   }
@@ -536,7 +543,7 @@ module evaluation_wake {
     pending' = List(), elig' = ALLIMM, active' = Set(),
     passPos' = 0, due' = true, faults' = faults + 1,
     dispatched' = 0, cancelled' = 0,
-    has' = has, need' = need, inWin' = inWin, vip' = vip, held' = held, v3' = v3, r4' = r4, prog' = prog, rowNE' = rowNE, stU' = stU, rowD' = rowD, drifts' = drifts,
+    has' = has, need' = need, inWin' = inWin, vip' = vip, held' = held, v3' = v3, r4' = r4, prog' = prog, rowNE' = rowNE, published' = published, stU' = stU, rowD' = rowD, drifts' = drifts,
     conf_step' = if (REC) variant("Crash", ()) else conf_step,
   }
 
@@ -556,7 +563,7 @@ module evaluation_wake {
   }
   action step = any { Tick, Drain, Crash, stepPass, stepKey, stepFinish }
 
-  val allVars = (has, need, inWin, vip, held, v3, r4, prog, rowNE, stU, rowD, active, pending, elig, due, passPos, faults, drifts, dispatched,
+  val allVars = (has, need, inWin, vip, held, v3, r4, prog, rowNE, published, stU, rowD, active, pending, elig, due, passPos, faults, drifts, dispatched,
                  cancelled, conf_step)
 
   // ------------------------------------------------------------------ safety
@@ -746,6 +753,18 @@ module evaluation_wake {
     .then(Finish("k4", "ok")).then(Drain).then(Finish("k1", "ok"))
     .then(Drain).then(Finish("k3", "ok"))
     .expect(need == Set() and has == Set("k1", "k3", "k4") and pending == List() and Safety)
+
+  // an empty row is published, then a k3 world change makes it non-empty: k3 publishes while k1 is needy (no allocation), so the row
+  // is empty and in place (nothing programmed, need(k2) stays clear, the handoff queues k2); a later k3 world change rewrites the
+  // published row with one more backend (published, not rowNE, is what tells "an empty row" from "no row"), so the hydrator's
+  // evaluation sees a non-empty row with nothing programmed, lands the update and requeues itself
+  run empty_published_row_then_service_change_requeues_hydrator = init
+    .then(DivergeWake("k3")).then(Drain)
+    .then(Finish("k3", "ok"))
+    .expect(published and not(rowNE) and need == Set("k1") and inP(pending, "k2"))
+    .then(DivergeWake("k3")).expect(rowNE and need == Set("k1", "k2", "k3"))
+    .then(Drain).then(Finish("k2", "ok"))
+    .expect(prog and not(need.contains("k2")) and inP(pending, "k2") and Safety)
 }
 
 // Main: every decision on, every fault kind, dropped wakes. Safety and progress hold.

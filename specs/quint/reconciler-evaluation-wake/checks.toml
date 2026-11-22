@@ -139,3 +139,12 @@ run = "world_changes_between_drain_and_finish"
 backend = "evaluator"
 expect = "holds"
 ci = true
+
+[[check]]
+name = "evaluation-wake-run-empty-published-row-then-service-change-requeues-hydrator"
+spec = "evaluation_wake.qnt"
+main = "wake_conf"
+run = "empty_published_row_then_service_change_requeues_hydrator"
+backend = "evaluator"
+expect = "holds"
+ci = true

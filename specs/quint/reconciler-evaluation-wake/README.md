@@ -167,6 +167,7 @@ unscheduled). svid-lifecycle's retention is existing behaviour and is not switch
 | edge wake during a pass burst (also target exclusion between `k3` and `k1` on `t1`, and the handoffs, the `k3` publish to `k2` with a VIP) | `edge_wake_during_burst_is_admitted_after_burst` |
 | V-4: pass submit merges a retained NotBefore (discharged through admission: the next `Drain` admits the key) | `pass_submit_merges_retained_not_before_to_immediate` |
 | D-12 d: world changes between `Drain` and `Finish`; `Finish` acts on the world as read at `Finish` | `world_changes_between_drain_and_finish` |
+| an empty row is published (`k3` while `k1` is needy), then a `k3` world change makes it non-empty: the hydrator's `Finish` requeues itself | `empty_published_row_then_service_change_requeues_hydrator` |
 
 ## Conformance step record and projection
 
@@ -178,6 +179,12 @@ parameters); it changes only on `wake_conf` (`REC = true`), which also counts
 The pinned observable projections (accessors, signatures, model-only variables) and the action-to-driving-port mapping are
 in the feature-delta, "Formal protocol model", "Pinned observable projections for the conformance drivers"
 (`docs/feature/reconciler-convergence-guarantees/feature-delta.md`). Not copied here.
+
+`published` is a model-only variable: a `service_backends` row has been published, empty or not. `rowNE` alone cannot tell "no
+row" from "an empty row"; the driver's `k3` world change rewrites an already published row with one more backend (non-empty,
+never in place), so it makes `rowNE` true and `k2` needy only when `published`. Written by a landed `k3` publish and by a `k2` world
+change; a crash keeps it (the row lives in the observation store). The driver's `State` projects only `pending`, `dispatched` and
+`cancelled`, so `published` is not projected.
 
 ## Assumptions
 
@@ -197,11 +204,11 @@ carry TLC state counts.
 
 | Check | Main | Verdict | Time | Peak memory | `ci` |
 |---|---|---|---|---|---|
-| `evaluation-wake-progress-by-pass` | `wake_full` | holds | 168.8 s | 6.4 GiB (heap 16 GiB, 14 workers) | false |
-| `evaluation-wake-retention-schedules-backed-off-key` | `wake_retention` (faults `dpFail`, `dispatchErr`) | holds | 48.0 s | 2.4 GiB (heap 4 GiB, 8 workers) | true |
-| `evaluation-wake-hazard-no-pass` | `wake_noPass` | violation | 14.2 s | 1.5 GiB | true |
+| `evaluation-wake-progress-by-pass` | `wake_full` | holds | 192.2 s | 6.4 GiB (heap 16 GiB, 14 workers) | false |
+| `evaluation-wake-retention-schedules-backed-off-key` | `wake_retention` (faults `dpFail`, `dispatchErr`) | holds | 65.3 s | 2.6 GiB (heap 4 GiB, 8 workers) | true |
+| `evaluation-wake-hazard-no-pass` | `wake_noPass` | violation | 14.5 s | 1.5 GiB | true |
 | `evaluation-wake-hazard-no-retention` | `wake_noRetention` | violation | 11.9 s | 0.9 GiB | true |
-| 10 named runs | `wake_conf` | holds | 2.5 s to 3.3 s each | about 0.2 GiB | true |
+| 11 named runs | `wake_conf` | holds | 2.5 s to 3.8 s each | about 0.2 GiB | true |
 
 Each action in `step` quantifies only the parameters it takes. `ProgressByPass` states weak fairness as state-level
 `[]<>` conjuncts, each implied by the `WF` of its action (derivations in the `Fair` comment in `evaluation_wake.qnt`).

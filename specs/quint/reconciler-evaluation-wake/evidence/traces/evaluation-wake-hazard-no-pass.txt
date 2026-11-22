@@ -1,7 +1,8 @@
-# evaluation-wake-hazard-no-pass: counterexample, 10 state(s) (from the TLC trace)
+# evaluation-wake-hazard-no-pass: counterexample, 9 state(s) (from the TLC trace)
 
 State 1
   due = TRUE
+  published = FALSE
   dispatched = 0
   active = {}
   vip = FALSE
@@ -31,40 +32,36 @@ State 2 [DivergeWake]
   has = {"k1", "k2", "k3"}
   need = {"k1", "k3"}
 
-State 3 [Drain]
-  active = {"k3"}
-  pending = <<>>
-
-State 4 [DivergeWake]
-  pending = <<"k2">>
+State 3 [DivergeWake]
+  published = TRUE
+  pending = <<"k3", "k2">>
   drifts = 2
   rowNE = TRUE
   need = {"k1", "k2", "k3"}
 
-State 5 [Finish]
-  active = {}
-  pending = <<"k2", "k3">>
-  faults = 1
-
-State 6 [Drain]
+State 4 [Drain]
   active = {"k2", "k3"}
   pending = <<>>
 
-State 7 [Finish]
+State 5 [Finish]
   active = {"k3"}
-  pending = <<"k2">>
-  need = {"k1", "k3"}
-  prog = TRUE
+  faults = 1
 
-State 8 [Finish]
+State 6 [Finish]
   active = {}
-  faults = 2
+  pending = <<"k2", "k3">>
+  rowD = FALSE
+  rowNE = FALSE
+  need = {"k1"}
 
-State 9 [Drain]
-  active = {"k2"}
+State 7 [Drain]
+  active = {"k2", "k3"}
   pending = <<>>
 
-State 10 [EdgeWake]
-  pending = <<"k2">>
+State 8 [Finish]
+  active = {"k3"}
 
--> loops back to State 8
+State 9 [Finish]
+  active = {}
+
+-> stutters forever in State 9
