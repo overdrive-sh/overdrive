@@ -481,9 +481,11 @@ impl Launcher {
     /// Wait for the driver's per-allocation artifacts to be gone: run directory,
     /// cgroup scope, rootfs clone and its index link.
     async fn wait_for_artifact_absence(&self, alloc: &AllocationId) -> Option<String> {
+        let rootfs_len =
+            tokio::fs::metadata(&self.rootfs).await.map(|meta| meta.len()).unwrap_or_default();
         let plan = RootfsPlan::for_alloc(
             self.rootfs.clone(),
-            std::fs::metadata(&self.rootfs).map(|meta| meta.len()).unwrap_or_default(),
+            rootfs_len,
             alloc,
             &clone_staging_dir(&self.data_dir),
             &clone_index_dir(&self.data_dir),
