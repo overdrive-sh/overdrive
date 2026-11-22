@@ -36,6 +36,44 @@ conformance, stress, or soak test. If the purpose is latency, throughput,
 resource cost, or a distribution, it is a benchmark. Do not place either in
 `verification/expectations/` to avoid the test or benchmark discipline.
 
+**A test belongs with the behaviour it proves, not with the entry point it
+starts.** Starting `serve` in-process does not make a test part of
+`overdrive-cli`. Ask which production owners the asserted contract spans and
+where it is observed; place the test by that answer (§ "Root-level system
+conformance").
+
+**A mixed test is split, never moved whole.** A test that asserts a
+cross-owner correctness contract and also measures a latency or throughput
+distribution is two artifacts. The contract goes to `tests/conformance` with
+the smallest deterministic case set that proves it. The measurement goes to
+the benchmark family (`cargo xtask metal run --benchmark <family>`). Do not
+resolve the mix by adding a lane (a `stress` feature, a new profile, a new
+nextest group) to hold the slow combined test.
+
+**Size a conformance contract by its distinct paths, not by a cohort.** Repeat
+a case only to exercise a distinct path: sequential, concurrent, each profile.
+Enough cases to cover each path is enough. If the claim needs a distribution
+(a percentile, a rate, a drop fraction over many trials), it is a benchmark
+claim and has no place in a test assertion.
+
+**Symptoms during review:**
+
+- a per-crate integration test asserting percentile, latency or throughput
+  targets;
+- a test that runs hundreds or thousands of trials in a normal test lane;
+- a test whose docs call it a benchmark, or a benchmark-shaped assertion in a
+  test file;
+- a proposal to add a lane or feature to hold a slow test that mixes
+  correctness and measurement;
+- a test that lives in a crate only because it starts that crate's entry
+  point.
+
+**Precedent:** `native_lifecycle_profiles_meet_stage_targets_without_dropping_trials`
+in `overdrive-cli` ran 1,200 real VM launches and asserted P95/P99 stage
+targets together with zero dropped trials. The correct shape is two artifacts:
+a small fixed-case lifecycle conformance test, and a benchmark family for the
+stage latencies.
+
 Tier 4 names the repository's current gated verifier/performance checks; it
 does not turn every future benchmark into a per-PR test gate. A new benchmark
 needs its own approved methodology and baseline/promotion policy before it can
@@ -82,7 +120,9 @@ Do not put these in `tests/conformance`:
   § "Classify external execution before writing it");
 - EDD expectations — retain those under `verification/expectations/`; or
 - stress/capacity measurements and benchmarks — retain those in their declared
-  benchmark lane.
+  benchmark lane. A conformance test runs a small, fixed, deterministic case
+  set, not a statistical cohort (§ "Classify external execution before writing
+  it").
 
 The subtree's `CLAUDE.md` defines how conformance tests are composed and
 driven. This project-level rule owns only placement and classification.
