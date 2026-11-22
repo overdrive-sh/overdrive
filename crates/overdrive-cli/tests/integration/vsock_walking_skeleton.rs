@@ -281,7 +281,7 @@ async fn snapshot_with_exact_identity(
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "Service {service} allocation {alloc} did not publish its exact per-allocation identity {expected}; certificates={:#?}",
+            "Service {service} allocation {alloc} did not publish its exact workload identity {expected}; certificates={:#?}",
             snapshot.issued_certificates
         );
         tokio::time::sleep(Duration::from_millis(100)).await;

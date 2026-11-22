@@ -1670,7 +1670,7 @@ mod capability_registry_acceptance {
         AllocationId::new(name).expect("allocation id")
     }
 
-    fn identity(_name: &str) -> SpiffeId {
+    fn identity() -> SpiffeId {
         SpiffeId::new("spiffe://overdrive.local/workload/nd295").expect("SPIFFE ID")
     }
 
@@ -1695,7 +1695,7 @@ mod capability_registry_acceptance {
             .begin_registration(
                 alloc("generation-max"),
                 Ipv4Addr::new(100, 95, 0, 2),
-                identity("generation-max"),
+                identity(),
                 ports(),
             )
             .expect_err("u64::MAX is never minted");
@@ -1711,12 +1711,7 @@ mod capability_registry_acceptance {
             let first_alloc = alloc(&format!("owner-{lifecycle:?}"));
             let address = Ipv4Addr::new(100, 95, 0, 3);
             let pending = registry
-                .begin_registration(
-                    first_alloc.clone(),
-                    address,
-                    identity(first_alloc.as_str()),
-                    ports(),
-                )
+                .begin_registration(first_alloc.clone(), address, identity(), ports())
                 .expect("first reservation");
             let mut retirement = None;
             match lifecycle {
@@ -1739,7 +1734,7 @@ mod capability_registry_acceptance {
                 .begin_registration(
                     alloc(&format!("contender-{lifecycle:?}")),
                     address,
-                    identity(&format!("contender-{lifecycle:?}")),
+                    identity(),
                     ports(),
                 )
                 .expect_err("every live lifecycle reserves its address");
@@ -1763,12 +1758,7 @@ mod capability_registry_acceptance {
         let first_alloc = alloc("generation-max-minus-one");
         let first_addr = Ipv4Addr::new(100, 95, 0, 11);
         let pending = registry
-            .begin_registration(
-                first_alloc.clone(),
-                first_addr,
-                identity(first_alloc.as_str()),
-                ports(),
-            )
+            .begin_registration(first_alloc, first_addr, identity(), ports())
             .expect("max-minus-one is the last mintable generation");
         assert_eq!(pending.activate(), ActivationDisposition::Activated);
         let claim = registry.claim_source(first_addr).expect("last minted capability is active");
@@ -1777,12 +1767,7 @@ mod capability_registry_acceptance {
 
         let second_addr = Ipv4Addr::new(100, 95, 0, 12);
         let error = registry
-            .begin_registration(
-                alloc("generation-max-refused"),
-                second_addr,
-                identity("generation-max-refused"),
-                ports(),
-            )
+            .begin_registration(alloc("generation-max-refused"), second_addr, identity(), ports())
             .expect_err("u64::MAX is never minted");
         assert!(matches!(error, MtlsInterceptInstallError::GenerationExhausted { next: u64::MAX }));
         assert!(registry.claim_source(second_addr).is_none());
@@ -1807,7 +1792,7 @@ mod capability_registry_acceptance {
         let address = Ipv4Addr::new(100, 95, 0, 4);
         let drops = Arc::new(AtomicUsize::new(0));
         let mut pending = registry
-            .begin_registration(allocation.clone(), address, identity(allocation.as_str()), ports())
+            .begin_registration(allocation.clone(), address, identity(), ports())
             .expect("reserve Pending");
         pending.retain_inbound(Box::new(DropGuard(Arc::clone(&drops))));
         let retirement = registry.begin_retire(&allocation).expect("retire Pending");
@@ -1825,12 +1810,7 @@ mod capability_registry_acceptance {
         drain.complete();
         assert!(
             registry
-                .begin_registration(
-                    alloc("pending-successor"),
-                    address,
-                    identity("pending-successor"),
-                    ports(),
-                )
+                .begin_registration(alloc("pending-successor"), address, identity(), ports(),)
                 .is_ok(),
             "reuse is permitted only after retirement completion"
         );
@@ -1843,7 +1823,7 @@ mod capability_registry_acceptance {
         let allocation = alloc("claim-retirement");
         let address = Ipv4Addr::new(100, 95, 0, 5);
         let pending = registry
-            .begin_registration(allocation.clone(), address, identity(allocation.as_str()), ports())
+            .begin_registration(allocation.clone(), address, identity(), ports())
             .expect("reserve capability");
         assert_eq!(pending.activate(), ActivationDisposition::Activated);
         let claim_a = registry.claim_source(address).expect("source claim");
@@ -1888,12 +1868,7 @@ mod capability_registry_acceptance {
         let second_addr = Ipv4Addr::new(100, 95, 0, 9);
         for (allocation, address) in [(&first, first_addr), (&second, second_addr)] {
             let pending = registry
-                .begin_registration(
-                    allocation.clone(),
-                    address,
-                    identity(allocation.as_str()),
-                    ports(),
-                )
+                .begin_registration(allocation.clone(), address, identity(), ports())
                 .expect("reserve independent capability");
             assert_eq!(pending.activate(), ActivationDisposition::Activated);
         }
@@ -1938,12 +1913,7 @@ mod capability_registry_acceptance {
         let address = Ipv4Addr::new(100, 95, 0, 10);
         let predecessor = alloc("generation-a");
         let pending = registry
-            .begin_registration(
-                predecessor.clone(),
-                address,
-                identity(predecessor.as_str()),
-                ports(),
-            )
+            .begin_registration(predecessor.clone(), address, identity(), ports())
             .expect("reserve predecessor");
         assert_eq!(pending.activate(), ActivationDisposition::Activated);
         let stale = registry.claim_source(address).expect("claim generation A before removal");
@@ -1957,12 +1927,12 @@ mod capability_registry_acceptance {
 
         let successor = alloc("generation-b");
         let pending = registry
-            .begin_registration(successor.clone(), address, identity(successor.as_str()), ports())
+            .begin_registration(successor.clone(), address, identity(), ports())
             .expect("address becomes reusable only after generation A completion");
         assert_eq!(pending.activate(), ActivationDisposition::Activated);
         let current = registry.claim_source(address).expect("successor source is claimable");
         assert_eq!(current.capability().key.alloc, successor);
-        assert_eq!(current.capability().spiffe_id, identity("generation-b"));
+        assert_eq!(current.capability().spiffe_id, identity());
     }
 
     /// CONTRACT_SHAPE: bounded-change.
@@ -1974,12 +1944,7 @@ mod capability_registry_acceptance {
             let address = Ipv4Addr::new(100, 95, 0, u8::from(retire_first) + 6);
             let drops = Arc::new(AtomicUsize::new(0));
             let pending = registry
-                .begin_registration(
-                    allocation.clone(),
-                    address,
-                    identity(allocation.as_str()),
-                    ports(),
-                )
+                .begin_registration(allocation.clone(), address, identity(), ports())
                 .expect("reserve Pending");
             let retirement =
                 retire_first.then(|| registry.begin_retire(&allocation).expect("retire Pending"));
@@ -1992,7 +1957,7 @@ mod capability_registry_acceptance {
                     registry.begin_registration(
                         alloc("too-early-successor"),
                         address,
-                        identity("too-early-successor"),
+                        identity(),
                         ports(),
                     ),
                     Err(MtlsInterceptInstallError::RegistrationConflict { .. })
@@ -2006,7 +1971,7 @@ mod capability_registry_acceptance {
                     .begin_registration(
                         alloc("post-cancel-successor"),
                         address,
-                        identity("post-cancel-successor"),
+                        identity(),
                         ports(),
                     )
                     .is_ok()

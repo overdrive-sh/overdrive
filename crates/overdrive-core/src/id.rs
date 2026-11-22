@@ -332,8 +332,8 @@ impl SpiffeId {
     /// segments (ADR-0344).
     ///
     /// The label is validated by [`WorkloadId`]'s own grammar, which forbids
-    /// `/`, so an extra segment (such as the superseded `/alloc/<a>` shape)
-    /// fails the parse and no separate separator logic is needed.
+    /// `/`, so an extra path segment fails the parse and no separate separator
+    /// logic is needed.
     #[must_use]
     pub fn workload_id(&self) -> Option<WorkloadId> {
         self.path().strip_prefix("/workload/")?.parse().ok()

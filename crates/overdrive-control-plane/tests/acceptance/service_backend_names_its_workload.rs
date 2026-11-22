@@ -12,9 +12,6 @@
 //! (`allocation_spec_for_live_intent`, S-WSI-06 and the hydrator/dataplane tests in
 //! `overdrive-sim`); this test pins the publishing site.
 //!
-//! RED today: the published identity is the per-allocation
-//! `.../workload/<w>/alloc/<a>`.
-//!
 //! Tier 1 (seeded `overdrive-sim` composition). CONTRACT_SHAPE: bounded-change.
 
 use std::net::Ipv4Addr;
@@ -62,8 +59,8 @@ const fn published_identity(backend: &Backend) -> &SpiffeId {
 
 /// A Running allocation of workload `payments` is published behind
 /// `spiffe://overdrive.local/workload/payments`, the wire shape pinned by the
-/// `SpiffeId::for_workload` constructor tests (spelled out here so this RED is the
-/// per-allocation identity, not the constructor scaffold).
+/// `SpiffeId::for_workload` constructor tests (spelled out here so the assertion
+/// does not depend on the constructor under test).
 #[allow(clippy::too_many_lines)]
 #[tokio::test(flavor = "current_thread")]
 async fn a_running_allocation_is_published_behind_its_workloads_identity() {

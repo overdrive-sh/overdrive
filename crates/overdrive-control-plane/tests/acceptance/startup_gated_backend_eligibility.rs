@@ -72,6 +72,15 @@ async fn successor_of_a_startup_stopped_attempt_is_a_backend_only_after_its_own_
 
     stable_commits(&mut world).await;
     assert_eq!(world.resolver_routes_to(&successor).await, Some(true));
+    assert!(not_a_backend(&world, &first).await, "the stopped predecessor is never a backend");
+    let successor_addr = world.row(&successor).await.and_then(|row| row.workload_addr);
+    let published: Vec<_> =
+        world.published_backends().await.into_iter().map(|backend| backend.addr.ip()).collect();
+    assert_eq!(
+        published,
+        vec![std::net::IpAddr::V4(successor_addr.expect("the successor carries an address"))],
+        "exactly one backend, at the successor's address and not the predecessor's"
+    );
 }
 
 /// S-47 (e): after `Stable`, an extra startup `Fail` row lands (the startup role

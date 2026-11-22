@@ -4,16 +4,9 @@
 //! identity-keyed `ever_issued` cannot tell them apart; an `AllocationId`-keyed
 //! one can.
 //!
-//! HELD (the proptest of the workload identity every allocation is issued is not
-//! held: it compiles today and lives in `workload_spiffe_identity.rs`): this
-//! module compiles only after DELIVER's API change, because it names
-//! `SvidLifecycleState.ever_issued: BTreeSet<AllocationId>` (today
-//! `BTreeSet<SpiffeId>`) and `SpiffeId::for_workload`'s real body. It is gated
-//! with the marker below; DELIVER removes the gate in the step that re-keys
-//! `ever_issued` and lands every body here UNCHANGED. It supersedes the
-//! identity-keyed `ever_issued` fixtures of `svid_lifecycle_reconcile.rs` and
-//! `svid_lifecycle_rotation.rs` (S-OC-05), which DELIVER deletes in the same
-//! commit (their `BTreeSet<SpiffeId>` shape no longer exists).
+//! The sibling `svid_lifecycle_reconcile.rs` and `svid_lifecycle_rotation.rs`
+//! cover the single-allocation recovery and rotation scenarios over the same
+//! `ever_issued: BTreeSet<AllocationId>` shape.
 //!
 //! Layer: unit, pure `reconcile` over typed state (no I/O, no clock handle).
 //! CONTRACT_SHAPE: pure-function.

@@ -288,7 +288,7 @@ mod acceptance {
     // emits IssueSvid, stopped-with-held emits DropSvid, View is retry
     // memory only, rotation emit is gated, and lifecycle transitions enqueue
     // SvidLifecycle so the reconciler is reachable.
-    // workload-spiffe-identity (ADR-0345): HELD until DELIVER re-keys `ever_issued` on `AllocationId`.
+    // workload-spiffe-identity (ADR-0345): `ever_issued` is keyed on `AllocationId`.
     mod svid_lifecycle_allocation_keyed_recovery;
     mod svid_lifecycle_reconcile;
     // built-in-ca-operator-composition Slice ① (folds GH #40) — the

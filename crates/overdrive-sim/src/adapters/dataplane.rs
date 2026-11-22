@@ -428,21 +428,35 @@ impl Dataplane for SimDataplane {
                 });
             }
         }
+        // Resolve every endpoint's id into locals first: the fallible id
+        // allocation may fail part-way, and a failed update keeps the prior
+        // association (the host re-associates at commit only).
+        let mut reassociations: Vec<(BackendId, SpiffeId)> = Vec::new();
+        let mut fresh: Vec<((SocketAddr, Proto), BackendId, SpiffeId)> = Vec::new();
+        let mut next_backend_id = state.next_backend_id;
         for backend in &backends {
             // A memoised endpoint keeps its id; the id follows the workload now
             // programmed there.
             if let Some(held_id) = state.backend_memo.get(&(backend.addr, proto)).copied() {
-                state.identities.insert(held_id, backend.workload_identity.clone());
+                reassociations.push((held_id, backend.workload_identity.clone()));
                 continue;
             }
-            let backend_id = BackendId::new(state.next_backend_id).map_err(|error| {
+            let backend_id = BackendId::new(next_backend_id).map_err(|error| {
                 DataplaneError::LoadFailed(format!("backend id counter: {error}"))
             })?;
-            state.next_backend_id = state.next_backend_id.checked_add(1).ok_or_else(|| {
+            next_backend_id = next_backend_id.checked_add(1).ok_or_else(|| {
                 DataplaneError::LoadFailed("backend id counter exhausted".to_owned())
             })?;
-            state.backend_memo.insert((backend.addr, proto), backend_id);
-            state.identities.insert(backend_id, backend.workload_identity.clone());
+            fresh.push(((backend.addr, proto), backend_id, backend.workload_identity.clone()));
+        }
+        // Last fallible step passed: commit the associations and allocations.
+        state.next_backend_id = next_backend_id;
+        for (held_id, identity) in reassociations {
+            state.identities.insert(held_id, identity);
+        }
+        for (endpoint, backend_id, identity) in fresh {
+            state.backend_memo.insert(endpoint, backend_id);
+            state.identities.insert(backend_id, identity);
         }
 
         // Snapshot prior reverse-NAT keys for this `(vip, proto)`

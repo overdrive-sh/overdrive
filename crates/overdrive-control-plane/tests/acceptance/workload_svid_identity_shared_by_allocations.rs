@@ -10,10 +10,8 @@
 //! `IdentityMgr` over the same observation store: the in-memory held set is
 //! lost, the audit rows survive, and the boot convergence re-issues.
 //!
-//! RED today: an allocation's identity is the per-allocation
-//! `spiffe://overdrive.local/workload/<w>/alloc/<a>`; the per-allocation SVID
-//! (own serial) assertions already hold and are checked first, so the matched
-//! failure is the identity.
+//! Each allocation's SVID carries its own serial; the identity it carries is the
+//! workload's, `spiffe://overdrive.local/workload/<w>`.
 //! CONTRACT_SHAPE: bounded-change.
 
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::doc_markdown)]

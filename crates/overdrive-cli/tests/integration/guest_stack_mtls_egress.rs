@@ -1570,7 +1570,6 @@ fn frozen_pre_change_render_contract(out: &WorkloadDescribeOutput) -> String {
 pub(super) async fn poll_until_issued_identity(
     cfg: &Path,
     workload_id: &str,
-    alloc_id: &str,
     budget: Duration,
 ) -> IssuedCertSummary {
     let expected = SpiffeId::new(&format!("spiffe://overdrive.local/workload/{workload_id}"))
@@ -1788,14 +1787,8 @@ async fn the_operator_sees_the_microvm_workloads_own_mesh_address_not_its_transi
         .await
         .expect("deploy long-lived VM for describe");
     let running = poll_until_running(&cfg, &submit.workload_id, Duration::from_secs(60)).await;
-    let running_row = running.snapshot.rows.first().expect("one Running VM row");
-    let _ = poll_until_issued_identity(
-        &cfg,
-        &submit.workload_id,
-        &running_row.alloc_id,
-        Duration::from_secs(10),
-    )
-    .await;
+    let _ = running.snapshot.rows.first().expect("one Running VM row");
+    let _ = poll_until_issued_identity(&cfg, &submit.workload_id, Duration::from_secs(10)).await;
     let described =
         describe(DescribeArgs { id: submit.workload_id.clone(), config_path: cfg.clone() })
             .await

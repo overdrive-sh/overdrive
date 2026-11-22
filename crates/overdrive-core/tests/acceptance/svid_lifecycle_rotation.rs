@@ -56,7 +56,7 @@ fn make_tick(now_secs: u64) -> TickContext {
     }
 }
 
-fn held_facts(_alloc: &AllocationId, not_after_secs: u64) -> HeldSvidFacts {
+fn held_facts(not_after_secs: u64) -> HeldSvidFacts {
     HeldSvidFacts {
         spiffe_id: SpiffeId::for_workload(&workload()),
         not_after: UnixInstant::from_unix_duration(Duration::from_secs(not_after_secs)),
@@ -81,6 +81,15 @@ fn expected_rotate_correlation(alloc: &AllocationId, spiffe: &SpiffeId) -> Corre
     let target = format!("svid-lifecycle/{alloc}");
     let spec_hash = ContentHash::of(spiffe.as_str().as_bytes());
     CorrelationKey::derive(&target, &spec_hash, "rotate-svid")
+}
+
+/// The deterministic `"issue-svid"`-purpose correlation (restart-recovery /
+/// first-issue path), for the distinctness assertion in
+/// `rotate_is_distinct_from_restart_recovery_reissue`.
+fn expected_issue_correlation(alloc: &AllocationId, spiffe: &SpiffeId) -> CorrelationKey {
+    let target = format!("svid-lifecycle/{alloc}");
+    let spec_hash = ContentHash::of(spiffe.as_str().as_bytes());
+    CorrelationKey::derive(&target, &spec_hash, "issue-svid")
 }
 
 fn start_workflow_count(actions: &[Action]) -> usize {
@@ -117,7 +126,7 @@ proptest! {
         // half-TTL window of `now` (running ∧ held(near-expiry)).
         let not_after = now_secs + slack_secs;
         let mut actual: BTreeMap<AllocationId, HeldSvidFacts> = BTreeMap::new();
-        let held = held_facts(&alloc, not_after);
+        let held = held_facts(not_after);
         actual.insert(alloc.clone(), held.clone());
 
         let state = state_no_audit(desired, actual);
@@ -208,7 +217,7 @@ proptest! {
         // actual = held, not_after strictly beyond the half-TTL window.
         let not_after = now_secs + beyond_secs;
         let mut actual: BTreeMap<AllocationId, HeldSvidFacts> = BTreeMap::new();
-        actual.insert(alloc.clone(), held_facts(&alloc, not_after));
+        actual.insert(alloc, held_facts(not_after));
 
         let state = state_no_audit(desired, actual);
         let view = SvidLifecycleView::default();
@@ -249,7 +258,7 @@ fn near_expiry_boundary_is_inclusive_at_half_ttl() {
         let mut desired: BTreeMap<AllocationId, RunningAlloc> = BTreeMap::new();
         desired.insert(alloc.clone(), running_alloc());
         let mut actual: BTreeMap<AllocationId, HeldSvidFacts> = BTreeMap::new();
-        actual.insert(alloc.clone(), held_facts(&alloc, not_after_secs));
+        actual.insert(alloc, held_facts(not_after_secs));
         let state = state_no_audit(desired, actual);
         let (actions, _) = reconciler.reconcile(
             &state,
@@ -305,7 +314,7 @@ fn rotation_threshold_tracks_half_of_workload_svid_ttl_via_emitted_action() {
         let mut desired: BTreeMap<AllocationId, RunningAlloc> = BTreeMap::new();
         desired.insert(alloc.clone(), running_alloc());
         let mut actual: BTreeMap<AllocationId, HeldSvidFacts> = BTreeMap::new();
-        actual.insert(alloc.clone(), held_facts(&alloc, now_secs + half_ttl));
+        actual.insert(alloc, held_facts(now_secs + half_ttl));
         let state = state_no_audit(desired, actual);
         let (actions, _) = reconciler.reconcile(
             &state,
@@ -323,7 +332,7 @@ fn rotation_threshold_tracks_half_of_workload_svid_ttl_via_emitted_action() {
         let mut desired: BTreeMap<AllocationId, RunningAlloc> = BTreeMap::new();
         desired.insert(alloc.clone(), running_alloc());
         let mut actual: BTreeMap<AllocationId, HeldSvidFacts> = BTreeMap::new();
-        actual.insert(alloc.clone(), held_facts(&alloc, now_secs + half_ttl + 1));
+        actual.insert(alloc, held_facts(now_secs + half_ttl + 1));
         let state = state_no_audit(desired, actual);
         let (actions, _) = reconciler.reconcile(
             &state,
@@ -344,6 +353,101 @@ fn rotation_threshold_tracks_half_of_workload_svid_ttl_via_emitted_action() {
         0,
         "S-OC-04: not_after == now + WORKLOAD_SVID_TTL/2 + 1s does not rotate; got {beyond_boundary:?}"
     );
+}
+
+// `@dst @property @error @driving_port` — rotate is DISTINCT from restart-recovery
+// re-issue. A `running ∧ held(near-expiry)` alloc emits a `"rotate-svid"`-correlation
+// IssueSvid; a separate `running ∧ ¬held ∧ ever_issued` alloc (keyed on its
+// `AllocationId`) emits an `"issue-svid"`-correlation IssueSvid carrying the
+// workload identity; neither emits any `StartWorkflow`, and the two correlations
+// are distinct. Universe: the emitted action list partitioned by correlation
+// purpose. Property over arbitrary near-expiry slack.
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(100))]
+    #[test]
+    fn rotate_is_distinct_from_restart_recovery_reissue(
+        now_secs in 1_000_000u64..2_000_000_000u64,
+        rotate_slack in 0u64..HALF_TTL_SECS,
+    ) {
+        let reconciler = SvidLifecycle::canonical();
+
+        // alloc R: running ∧ held ∧ near-expiry → rotate ("rotate-svid").
+        let rotate_alloc = AllocationId::new("payments-rotate").expect("valid AllocationId");
+        // alloc I: running ∧ ¬held ∧ ever_issued → restart recovery ("issue-svid").
+        let recover_alloc = AllocationId::new("payments-recover").expect("valid AllocationId");
+
+        let mut desired: BTreeMap<AllocationId, RunningAlloc> = BTreeMap::new();
+        desired.insert(rotate_alloc.clone(), running_alloc());
+        desired.insert(recover_alloc.clone(), running_alloc());
+
+        // R is held & near-expiry; I is NOT held.
+        let rotate_held = held_facts(now_secs + rotate_slack);
+        let mut actual: BTreeMap<AllocationId, HeldSvidFacts> = BTreeMap::new();
+        actual.insert(rotate_alloc.clone(), rotate_held.clone());
+
+        // I's allocation is in the audit set (ever_issued) — the restart marker
+        // that drives the recovery re-issue.
+        let recover_spiffe = SpiffeId::for_workload(&workload());
+        let ever_issued: BTreeSet<AllocationId> = BTreeSet::from([recover_alloc.clone()]);
+
+        let state = SvidLifecycleState { desired, actual, ever_issued };
+        let view = SvidLifecycleView::default();
+        let tick = make_tick(now_secs);
+
+        let (actions, _next_view) = reconciler.reconcile(&state, &state, &view, &tick);
+
+        // Neither branch emits a StartWorkflow.
+        prop_assert_eq!(
+            start_workflow_count(&actions),
+            0,
+            "neither rotate nor restart-recovery emits StartWorkflow; got {:?}",
+            actions
+        );
+
+        // Partition the emitted IssueSvid actions by alloc.
+        let mut rotate_corr: Option<CorrelationKey> = None;
+        let mut recover_corr: Option<CorrelationKey> = None;
+        let mut recover_identity: Option<SpiffeId> = None;
+        for action in &actions {
+            if let Action::IssueSvid { alloc_id, spiffe_id, correlation, .. } = action {
+                if alloc_id == &rotate_alloc {
+                    rotate_corr = Some(correlation.clone());
+                } else if alloc_id == &recover_alloc {
+                    recover_corr = Some(correlation.clone());
+                    recover_identity = Some(spiffe_id.clone());
+                }
+            }
+        }
+
+        let rotate_corr = rotate_corr.expect("the near-expiry held alloc emits a rotate IssueSvid");
+        let recover_corr =
+            recover_corr.expect("the unheld ever_issued alloc emits a restart-recovery IssueSvid");
+
+        // The restart-recovery action carries the workload identity.
+        prop_assert_eq!(
+            recover_identity.as_ref(),
+            Some(&recover_spiffe),
+            "the recovery re-issue carries the workload identity"
+        );
+        // The rotate alloc carries the "rotate-svid" correlation.
+        prop_assert_eq!(
+            &rotate_corr,
+            &expected_rotate_correlation(&rotate_alloc, &rotate_held.spiffe_id),
+            "the rotate alloc carries the rotate-svid correlation"
+        );
+        // The restart-recovery alloc carries the "issue-svid" correlation.
+        prop_assert_eq!(
+            &recover_corr,
+            &expected_issue_correlation(&recover_alloc, &recover_spiffe),
+            "the restart-recovery alloc carries the issue-svid correlation"
+        );
+        // The two correlations are distinct (different purpose AND different alloc).
+        prop_assert_ne!(
+            &rotate_corr,
+            &recover_corr,
+            "rotate and restart-recovery correlations are distinct"
+        );
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -381,7 +485,7 @@ fn failed_rotate_inside_backoff_window_is_suppressed() {
     let mut desired: BTreeMap<AllocationId, RunningAlloc> = BTreeMap::new();
     desired.insert(alloc.clone(), running_alloc());
     let mut actual: BTreeMap<AllocationId, HeldSvidFacts> = BTreeMap::new();
-    actual.insert(alloc.clone(), held_facts(&alloc, not_after));
+    actual.insert(alloc.clone(), held_facts(not_after));
     let state = state_no_audit(desired, actual);
 
     // Seed a retry entry whose last failure was JUST now ⇒ the backoff-spacing
@@ -438,7 +542,7 @@ fn rotate_re_emits_once_backoff_window_elapses() {
     let mut desired: BTreeMap<AllocationId, RunningAlloc> = BTreeMap::new();
     desired.insert(alloc.clone(), running_alloc());
     let mut actual: BTreeMap<AllocationId, HeldSvidFacts> = BTreeMap::new();
-    actual.insert(alloc.clone(), held_facts(&alloc, not_after));
+    actual.insert(alloc.clone(), held_facts(not_after));
     let state = state_no_audit(desired, actual);
 
     let mut view = SvidLifecycleView::default();
@@ -501,7 +605,7 @@ fn rotate_deadline_clamp_emits_in_panic_zone_despite_backoff() {
     let mut desired: BTreeMap<AllocationId, RunningAlloc> = BTreeMap::new();
     desired.insert(alloc.clone(), running_alloc());
     let mut actual: BTreeMap<AllocationId, HeldSvidFacts> = BTreeMap::new();
-    actual.insert(alloc.clone(), held_facts(&alloc, not_after));
+    actual.insert(alloc.clone(), held_facts(not_after));
     let state = state_no_audit(desired, actual);
 
     // Seed a retry whose last failure is NOW ⇒ the backoff-spacing term alone
@@ -545,7 +649,7 @@ fn rotation_suppression_boundaries_are_strict() {
         let mut desired: BTreeMap<AllocationId, RunningAlloc> = BTreeMap::new();
         desired.insert(alloc.clone(), running_alloc());
         let mut actual: BTreeMap<AllocationId, HeldSvidFacts> = BTreeMap::new();
-        actual.insert(alloc.clone(), held_facts(&alloc, not_after));
+        actual.insert(alloc.clone(), held_facts(not_after));
         let state = state_no_audit(desired, actual);
         let mut view = SvidLifecycleView::default();
         view.retry.insert(

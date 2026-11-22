@@ -6,10 +6,7 @@
 //! one inverse and the parse SSOT (the three private parsers route through it).
 //!
 //! Layer: unit, port-to-port at domain scope (both are pure functions of their
-//! public signature). The pending tests below are RED today because the two
-//! pinned constructors are scaffolds that name their own absence; each is
-//! marked `#[should_panic]` with that message, so DELIVER removes the marker
-//! when it lands the body and the pre-authored assertion runs unchanged.
+//! public signature).
 //!
 //! CONTRACT_SHAPE: pure-function.
 
@@ -88,7 +85,7 @@ fn the_payments_workload_has_the_documented_identity() {
 #[test]
 fn identities_that_are_not_exactly_a_workload_path_name_no_workload() {
     // Build every identity first: a rejection by `SpiffeId::new` fails here, on
-    // the input, never masked by the pending `workload_id` scaffold.
+    // the input, not inside the `workload_id` assertion.
     let identities: Vec<(&str, SpiffeId)> = [
         "spiffe://overdrive.local/gateway/node-1",
         "spiffe://overdrive.local/workload",

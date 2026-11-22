@@ -53,6 +53,7 @@ use overdrive_core::id::{AllocationId, NodeId, ServiceId, ServiceVip, SpiffeId, 
 use overdrive_core::observation::{ProbeIdx, ProbeResultRow, ProbeRole};
 use overdrive_core::reconcilers::{ReconcilerName, TargetResource};
 use overdrive_core::traits::clock::Clock;
+use overdrive_core::traits::dataplane::Backend;
 use overdrive_core::traits::driver::{Driver, DriverType, ExitEvent, ExitKind, OomFacts};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
@@ -463,17 +464,35 @@ impl RestartWorld {
             .find(|row| row.role == ProbeRole::Startup && row.probe_idx == ProbeIdx::new(0))
     }
 
-    /// Whether the readiness projection publishes `alloc` as a backend
-    /// (`None`: no backend row lists it).
-    pub async fn backend_healthy(&self, _alloc: &AllocationId) -> Option<bool> {
-        let spiffe = SpiffeId::for_workload(&self.workload);
+    /// The workload address the shim assigned to `alloc`: the address its
+    /// backend is published at (a backend's identity names the workload, so
+    /// the address is what tells one allocation's backend from another's).
+    async fn workload_addr_of(&self, alloc: &AllocationId) -> Option<Ipv4Addr> {
+        self.row(alloc).await.and_then(|row| row.workload_addr)
+    }
+
+    /// Every backend the readiness projection publishes for the Service.
+    pub async fn published_backends(&self) -> Vec<Backend> {
         self.obs
             .service_backends_rows(&self.service_id)
             .await
             .expect("backend rows")
             .into_iter()
             .flat_map(|row| row.backends)
-            .find(|backend| backend.workload_identity == spiffe)
+            .collect()
+    }
+
+    /// Whether the readiness projection publishes `alloc` as a backend, found
+    /// by the address the shim assigned it (`None`: no backend row lists it).
+    pub async fn backend_healthy(&self, alloc: &AllocationId) -> Option<bool> {
+        let spiffe = SpiffeId::for_workload(&self.workload);
+        let ip = self.workload_addr_of(alloc).await?;
+        self.published_backends()
+            .await
+            .into_iter()
+            .find(|backend| {
+                backend.workload_identity == spiffe && backend.addr.ip() == std::net::IpAddr::V4(ip)
+            })
             .map(|backend| backend.healthy)
     }
 
@@ -481,7 +500,7 @@ impl RestartWorld {
     /// address, after applying every written `ServiceBackendRow`: `Some(true)`
     /// when it resolves to the backend (`Mesh`), `Some(false)` for the
     /// fail-closed `MeshUnreachable`, `None` when no row lists the allocation.
-    pub async fn resolver_routes_to(&self, _alloc: &AllocationId) -> Option<bool> {
+    pub async fn resolver_routes_to(&self, alloc: &AllocationId) -> Option<bool> {
         use overdrive_control_plane::mtls_resolve_adapter::BackendIndex;
         use overdrive_core::traits::mtls_resolve::MtlsResolution;
         let rows = self.obs.service_backends_rows(&self.service_id).await.expect("backend rows");
@@ -490,10 +509,11 @@ impl RestartWorld {
             index.apply_row(row.service_id, &row.backends);
         }
         let spiffe = SpiffeId::for_workload(&self.workload);
+        let ip = self.workload_addr_of(alloc).await?;
         let backend = rows
             .iter()
             .flat_map(|row| row.backends.iter())
-            .find(|b| b.workload_identity == spiffe)?;
+            .find(|b| b.workload_identity == spiffe && b.addr.ip() == std::net::IpAddr::V4(ip))?;
         let std::net::SocketAddr::V4(addr) = backend.addr else { return None };
         Some(matches!(index.classify(addr, Proto::Tcp), MtlsResolution::Mesh(_)))
     }

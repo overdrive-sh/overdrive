@@ -1304,11 +1304,11 @@ fn cgroup_load_error(hook: &'static str, error: &aya::programs::ProgramError) ->
 }
 
 /// One backend of a planned `update_service` generation: the id it will carry,
-/// its `BACKEND_MAP` value and the allocation whose identity the id denotes.
+/// its `BACKEND_MAP` value and the workload identity the id denotes.
 struct PlannedBackend {
     id: overdrive_core::id::BackendId,
     pod: crate::maps::BackendEntryPod,
-    alloc: overdrive_core::id::SpiffeId,
+    workload_identity: overdrive_core::id::SpiffeId,
     /// The id was minted by this update (no allocator memo entry before it).
     fresh: bool,
 }
@@ -1414,13 +1414,18 @@ impl EbpfDataplane {
         let mut identities = self.backend_identities.lock();
 
         let mut planned = Vec::with_capacity(by_endpoint.len());
-        for ((ip_host, port_host), (pod, alloc)) in by_endpoint {
+        for ((ip_host, port_host), (pod, workload_identity)) in by_endpoint {
             let fresh = allocator.existing_id(ip_host, port_host, proto).is_none();
             let id = allocator.allocate(ip_host, port_host, proto);
             if fresh {
                 identities.insert(id.get(), BackendIdentityState::Reserved);
             }
-            planned.push(PlannedBackend { id, pod, alloc: alloc.clone(), fresh });
+            planned.push(PlannedBackend {
+                id,
+                pod,
+                workload_identity: workload_identity.clone(),
+                fresh,
+            });
         }
         Ok(planned)
     }
@@ -1697,7 +1702,7 @@ impl EbpfDataplane {
             for backend in &planned {
                 identities.insert(
                     backend.id.get(),
-                    BackendIdentityState::Applied { spiffe_id: backend.alloc.clone() },
+                    BackendIdentityState::Applied { spiffe_id: backend.workload_identity.clone() },
                 );
             }
         }
@@ -1968,8 +1973,7 @@ impl Dataplane for EbpfDataplane {
     /// Everything below runs under the `service_apply_commit` write guard, so
     /// `selected_backend_identity` readers wait for it. A non-empty update:
     ///
-    /// 1. Plan (`plan_service_apply`), before any mutation: validate and
-    ///    validate the backends, reject one endpoint named twice in the call
+    /// 1. Plan (`plan_service_apply`), before any mutation: validate the backends, refuse one endpoint named twice in the call
     ///    ([`DataplaneError::LoadFailed`], whichever workloads name it) and a
     ///    reverse-NAT key another Service's VIP already owns
     ///    ([`DataplaneError::ReverseNatConflict`], R-59); then mint ids for

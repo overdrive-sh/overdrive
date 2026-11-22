@@ -875,7 +875,7 @@ outcomes:
   superseded_by: null
 - id: OUT-PIG-BPF-SELECTION-IDENTITY
   kind: invariant
-  summary: A gateway socket prepared and registered by the dataplane adapter is selected by the registered arm of the existing cgroup-BPF Maglev path over the ServiceMapHydrator-programmed Service maps, yielding Selected BackendId or NoBackend (including an unhealthy backend); the Service-map outer swap is the guarded commit point after which Selected resolves through the immutable Dataplane-owned association to the exact applied Backend.alloc identity
+  summary: A gateway socket prepared and registered by the dataplane adapter is selected by the registered arm of the existing cgroup-BPF Maglev path over the ServiceMapHydrator-programmed Service maps, yielding Selected BackendId or NoBackend (including an unhealthy backend); the Service-map outer swap is the guarded commit point after which Selected resolves through the immutable Dataplane-owned association to the exact applied Backend.workload_identity
   feature: public-ingress-gateway
   inputs:
   - shape: GatewayConnectIntent(SocketCookie, ServiceKey), the Service-map generation the hydrator applied for the VM backend, and exact applied Backend values

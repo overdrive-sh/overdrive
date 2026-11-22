@@ -538,12 +538,9 @@ fn allocator_issues_final_u32_identity_once_then_stops_without_wrap() {
 /// workload-spiffe-identity D1 (ADR-0344) — the identity a replacement
 /// allocation presents names its WORKLOAD, not the allocation: predecessor and
 /// successor are different allocations of one workload and present the same
-/// identity, `spiffe://overdrive.local/workload/<w>`. Supersedes the per-alloc
-/// identity assertions this file carried (a recreation no longer changes the
-/// identity; only the `AllocationId` is fresh).
+/// identity, `spiffe://overdrive.local/workload/<w>`. A recreation does not
+/// change the identity; only the `AllocationId` is fresh.
 ///
-/// RED today: the successor's `AllocationSpec.identity` is the per-allocation
-/// `.../workload/<w>/alloc/<a>`.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
 fn a_replacement_allocation_presents_the_identity_of_its_workload() {

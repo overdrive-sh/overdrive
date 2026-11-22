@@ -175,6 +175,8 @@ impl VersionedEnvelope for IssuedCertificateRowEnvelope {
     /// data directory. Observation reads log and skip it.
     fn into_latest(self) -> Result<Self::Latest, EnvelopeError> {
         match self {
+            // `UnknownVersion { observed: 0, supported_max: 1 }` is the deliberate
+            // refusal of a discarded V1 row (no dedicated variant).
             Self::V1(_) => Err(EnvelopeError::UnknownVersion {
                 observed: 0,
                 type_name: Self::type_name(),

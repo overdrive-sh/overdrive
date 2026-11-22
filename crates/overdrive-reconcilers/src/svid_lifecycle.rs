@@ -260,8 +260,10 @@ impl SvidLifecycle {
 /// allocation: `target = "svid-lifecycle/<alloc>"`, `spec_hash =
 /// ContentHash::of(<spiffe-uri bytes>)`, `purpose ∈ {"issue-svid",
 /// "rotate-svid", "drop-svid"}` (ADR-0067 D2 — the ADR-0035 reconciler-I/O correlation
-/// discipline; the content identity is the SVID's own SPIFFE URI, stable across
-/// ticks for the same allocation, NOT a per-attempt request id).
+/// discipline; the content identity is the SVID's own SPIFFE URI, which names the
+/// workload and so is stable across ticks and across all allocations of the
+/// workload, NOT a per-attempt request id; the per-allocation `target` keeps the
+/// keys unique).
 fn identity_correlation(
     alloc: &AllocationId,
     spiffe_id: &SpiffeId,
