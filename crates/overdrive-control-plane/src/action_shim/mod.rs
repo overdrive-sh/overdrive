@@ -189,6 +189,16 @@ const fn guest_command_release_permitted(
     running_committed && (!intercept_required || stable_exact_rule_baseline)
 }
 
+/// Record that a launch ended superseded: no allocation row was written.
+fn emit_launch_superseded(alloc: &AllocationId, workload: &WorkloadId) {
+    tracing::info!(
+        name: "launch.superseded",
+        alloc = %alloc,
+        workload = %workload,
+        "launch superseded before it started; no allocation row written"
+    );
+}
+
 fn is_duplicate_vm_owner(failure: &DriverStartFailure, alloc: &AllocationId) -> bool {
     matches!(
         &failure.class,
@@ -1884,7 +1894,6 @@ async fn dispatch_single(
                 return Err(issue_error);
             }
             let supersession = broker.lane_supersession(&workload_id);
-            // RED scaffold (ADR-0334, N-SUP): DELIVER maps StartSuperseded to no row
             let start_outcome: Result<AllocationHandle, DriverError> =
                 match drivers.get(driver_kind) {
                     Some(driver) => driver.start(&spec, &*supersession).await,
@@ -1922,6 +1931,19 @@ async fn dispatch_single(
                 Err(DriverError::StartRejected { failure })
                     if is_duplicate_vm_owner(failure, &alloc_id)
             ) {
+                return Ok(());
+            }
+            // ADR-0334: a superseded launch is a clean no-row outcome. The
+            // driver already tore down what it created; the shim releases what
+            // it owns (supervision claim, SVID, guest lease and network).
+            if matches!(&start_outcome, Err(DriverError::StartSuperseded)) {
+                if let Some(driver) = drivers.get(driver_kind) {
+                    driver.release_supervision(&alloc_id);
+                }
+                identity.drop_svid(&alloc_id);
+                emit_launch_superseded(&alloc_id, &workload_id);
+                retire_guest_network_lease(&alloc_id, guest_network);
+                teardown_for_dispatch(&alloc_id, guest_network).await?;
                 return Ok(());
             }
             let (start_outcome, rejected_network_cleanup) = match start_outcome {
@@ -2346,7 +2368,6 @@ async fn dispatch_single(
 
                     // Route the supplied successor payload to its composed driver.
                     let supersession = broker.lane_supersession(&prior_row.workload_id);
-                    // RED scaffold (ADR-0334, N-SUP): DELIVER maps StartSuperseded to no row
                     let start_outcome = match drivers.get(driver_kind) {
                         Some(driver) => driver.start(&spec, &*supersession).await,
                         None => Err(DriverError::StartRejected {
@@ -2433,6 +2454,24 @@ async fn dispatch_single(
                                 Some(failure.detail.clone()),
                                 TransitionSource::Driver(failure.class.driver_type()),
                             )
+                        }
+                        Err(DriverError::StartSuperseded) => {
+                            // ADR-0334: no row; the successor's lease, network
+                            // and mTLS ownership are already unwound above.
+                            if let Some(driver) = drivers.get(driver_kind) {
+                                driver.release_supervision(&successor_alloc_id);
+                            }
+                            identity.drop_svid(&successor_alloc_id);
+                            emit_launch_superseded(&successor_alloc_id, &prior_row.workload_id);
+                            return finish_restart(
+                                successor_abort_cleanup.map_or(Ok(()), Err),
+                                &prior_drivers,
+                                &predecessor_handle,
+                                alloc_drivers,
+                                mtls_lifecycle,
+                                guest_network,
+                            )
+                            .await;
                         }
                         Err(other) => {
                             if let Some(cleanup_error) = &successor_abort_cleanup {

@@ -871,9 +871,6 @@ fn is_admission_refusal(result: &Result<(), ConvergenceError>) -> bool {
 /// supervision claim, emits `launch.superseded`, and returns `Ok(())`.
 /// Today the arm falls to the `Err(other)` arm: `Err(ShimError::Driver(..))`.
 #[tokio::test]
-#[should_panic(
-    expected = "a superseded launch is a clean no-row outcome: the start dispatch returns Ok(()), got Err("
-)]
 async fn start_arm_superseded_launch_writes_no_row_and_releases_lease_svid_and_claim() {
     let driver = Arc::new(ScriptedStartDriver::new());
     let rig = Rig::build(Arc::clone(&driver) as Arc<dyn Driver>).await;
@@ -926,9 +923,6 @@ async fn start_arm_superseded_launch_writes_no_row_and_releases_lease_svid_and_c
 /// cleanup (`finish_restart`) once: the predecessor's one stop, its one
 /// teardown, its lease released.
 #[tokio::test]
-#[should_panic(
-    expected = "a superseded launch is a clean no-row outcome: the restart dispatch returns Ok(()), got Err("
-)]
 async fn restart_arm_superseded_successor_runs_exact_old_predecessor_cleanup() {
     let driver = Arc::new(ScriptedStartDriver::new());
     let rig = Rig::build(Arc::clone(&driver) as Arc<dyn Driver>).await;

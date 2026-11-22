@@ -35,8 +35,8 @@ use overdrive_core::traits::cgroup_accounting::CgroupAccounting;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverPayload,
-    DriverStartClass, DriverStartFailure, DriverType, ExitEvent, ExitKind, OomFacts, Resources,
-    STDERR_TAIL_LINES, VmStartFailure, VolumePayload,
+    DriverStartClass, DriverStartFailure, DriverType, ExitEvent, ExitKind, LaunchSupersession, OomFacts,
+    Resources, STDERR_TAIL_LINES, VmStartFailure, VolumePayload,
 };
 use overdrive_core::traits::vmm::{
     VMM_CONSOLE_TAIL_MAX_BYTES, VmControl, VmExitWatch, Vmm, VmmDiagnostics, VmmError, VmmExit,
@@ -1382,6 +1382,7 @@ impl VmDriver {
     async fn attach_volume(
         &self,
         declared: Option<&VolumePayload>,
+        supersession: &dyn LaunchSupersession,
     ) -> Result<Option<VolumeAttachment>, DriverError> {
         let Some(declared) = declared else {
             return Ok(None);
@@ -1391,11 +1392,24 @@ impl VmDriver {
         };
         let device = pool
             .ensure(&declared.workload, declared.size)
-            .await
-            .map_err(|error| volume_unavailable(ensure_cause(&error), Some(&error)))?;
+            .await;
+        // Observation point 2: `ensure` ran to its end; the signal wins over
+        // either of its outcomes, and an ensured volume stays.
+        if supersession.is_superseded() {
+            return Err(DriverError::StartSuperseded);
+        }
+        let device =
+            device.map_err(|error| volume_unavailable(ensure_cause(&error), Some(&error)))?;
         let deadline = self.clock.now() + VOLUME_CLAIM_BOUND;
         loop {
-            match pool.claim_state(&declared.workload).await {
+            let claim = pool.claim_state(&declared.workload).await;
+            // Observation point 3: a claim poll in flight is never
+            // interrupted; the signal wins over every outcome of it and over
+            // the bound.
+            if supersession.is_superseded() {
+                return Err(DriverError::StartSuperseded);
+            }
+            match claim {
                 Ok(ClaimState::Free) => return Ok(Some(VolumeAttachment { device })),
                 Ok(ClaimState::Held) => {}
                 Err(error) => {
@@ -1408,7 +1422,11 @@ impl VmDriver {
             if self.clock.now() >= deadline {
                 return Err(volume_unavailable(VolumeUnavailableCause::Held, None));
             }
-            self.clock.sleep(VOLUME_CLAIM_POLL_INTERVAL).await;
+            tokio::select! {
+                biased;
+                () = supersession.superseded() => return Err(DriverError::StartSuperseded),
+                () = self.clock.sleep(VOLUME_CLAIM_POLL_INTERVAL) => {}
+            }
         }
     }
 
@@ -1424,7 +1442,11 @@ impl VmDriver {
         clippy::too_many_lines,
         reason = "linear VM boot sequence (steps 0..Vmm::create, ADR-0082 §D3); rustfmt 1.95.0 wrapping the cleanup_after_start_failure calls tips it past 100"
     )]
-    async fn provision_vmm(&self, spec: &AllocationSpec) -> Result<ProvisionedVmm, DriverError> {
+    async fn provision_vmm(
+        &self,
+        spec: &AllocationSpec,
+        supersession: &dyn LaunchSupersession,
+    ) -> Result<ProvisionedVmm, DriverError> {
         // ADR-0083 §D3a: the kernel and rootfs are THIS allocation's own,
         // read from the `[vm]` block the operator wrote. There is no
         // node-level artifact anywhere to fall back to, which is exactly
@@ -1440,6 +1462,12 @@ impl VmDriver {
             return Err(DriverError::GuestTransportMissing { alloc: spec.alloc.clone() });
         };
         let cmdline = compose_vm_transport(self.layout.arch, transport, self.beacon.bound_port())?;
+
+        // Observation point 1: a launch superseded before it began creates
+        // nothing, and never touches the volume pool.
+        if supersession.is_superseded() {
+            return Err(DriverError::StartSuperseded);
+        }
 
         // Step 0 (brief §105a.3, transition 1): take the supervision
         // claim BEFORE the run directory exists. The ordinal is
@@ -1467,7 +1495,13 @@ impl VmDriver {
         // supervision claim and before the first host artifact, so a launch
         // that fails here has created nothing the shim must clean up beyond
         // the claim it releases.
-        let volume = self.attach_volume(payload.volume.as_ref()).await?;
+        let volume = self.attach_volume(payload.volume.as_ref(), supersession).await?;
+
+        // Observation point 4: the claim wait ended (or there was none) and
+        // no host artifact exists yet.
+        if supersession.is_superseded() {
+            return Err(DriverError::StartSuperseded);
+        }
 
         let run_dir = VmRunDir::for_alloc(&self.layout.run_dir_root, &spec.alloc);
         let scope = CgroupPath::for_alloc(&spec.alloc);
@@ -1719,6 +1753,8 @@ enum BootRaceOutcome {
     /// (ADR-0082 §D3). `None` means the watch closed without reporting.
     VmmExited(Option<VmmExit>),
     Deadline,
+    /// The lane's supersession signal ended the wait (ADR-0334 point 5).
+    Superseded,
 }
 
 /// What [`VmDriver::provision_vmm`] hands to `start`'s three-way race:
@@ -1760,11 +1796,16 @@ impl Driver for VmDriver {
         DriverType::Vm
     }
 
-    // RED scaffold (ADR-0334): DELIVER reads the signal at observation points 1-6
+    /// Reads the lane's supersession signal at ADR-0334's six observation
+    /// points: entry, after `ensure`, each claim poll and its sleep, after the
+    /// claim wait, the guest-boot race, and the second boot wait. A superseded
+    /// launch tears down through the start-failure path and returns
+    /// [`DriverError::StartSuperseded`]; the volume is kept. `ensure` and
+    /// `Vmm::create` always run to their end.
     async fn start(
         &self,
         spec: &AllocationSpec,
-        _supersession: &dyn overdrive_core::traits::LaunchSupersession,
+        supersession: &dyn LaunchSupersession,
     ) -> Result<AllocationHandle, DriverError> {
         let ProvisionedVmm {
             run_dir,
@@ -1775,7 +1816,7 @@ impl Driver for VmDriver {
             rootfs,
             memory,
             volume_attached,
-        } = self.provision_vmm(spec).await?;
+        } = self.provision_vmm(spec, supersession).await?;
 
         // Transition Starting -> Live (still §103 step 0's Held phase;
         // brief §105a.3's transition table treats Starting|Live as one
@@ -1830,6 +1871,7 @@ impl Driver for VmDriver {
             accepted = accept_ready(&self.beacon, spec) => {
                 BootRaceOutcome::Beacon(accepted)
             },
+            () = supersession.superseded() => BootRaceOutcome::Superseded,
             ended = exit.recv() => BootRaceOutcome::VmmExited(ended),
             () = self.clock.sleep(VM_BOOT_DEADLINE) => BootRaceOutcome::Deadline,
         };
@@ -1909,19 +1951,21 @@ impl Driver for VmDriver {
                 // its exact code/signal in the existing typed class. Bound the
                 // wait so an arbitrary peer cannot hold `start` forever merely
                 // by connecting and closing while the guest keeps running.
-                let ended = tokio::select! {
-                    ended = exit.recv() => Some(ended),
-                    () = self.clock.sleep(VM_BOOT_DEADLINE) => None,
-                };
-                let guest_console = self.guest_console_tail(&run_dir).await;
-                let primary = ended.map_or_else(
-                    || {
+                // Observation point 6: the signal ends this wait too, and wins
+                // over the boot deadline and the VMM's own ending.
+                let primary = tokio::select! {
+                    biased;
+                    () = supersession.superseded() => DriverError::StartSuperseded,
+                    ended = exit.recv() => {
+                        let guest_console = self.guest_console_tail(&run_dir).await;
+                        guest_exit_unreported_failure(ended, guest_console.as_deref())
+                    },
+                    () = self.clock.sleep(VM_BOOT_DEADLINE) => {
                         start_rejected_unclassified(format!(
                             "beacon accept failed and VMM did not exit before the boot deadline: {err}"
                         ))
                     },
-                    |ended| guest_exit_unreported_failure(ended, guest_console.as_deref()),
-                );
+                };
                 Err(self
                     .cleanup_after_start_failure(
                         &spec.alloc,
@@ -1960,6 +2004,19 @@ impl Driver for VmDriver {
             // The live capture is snapshotted HERE, while the process is
             // still up — `VmmExit` does not exist yet on this arm, so the
             // tail can come from nowhere else.
+            BootRaceOutcome::Superseded => {
+                clear_beacon_launch(&mut self.beacon_state.lock(), &spec.alloc);
+                Err(self
+                    .cleanup_after_start_failure(
+                        &spec.alloc,
+                        &run_dir,
+                        Some(&scope),
+                        Some(&control),
+                        Some(&rootfs),
+                        DriverError::StartSuperseded,
+                    )
+                    .await)
+            }
             BootRaceOutcome::Deadline => {
                 clear_beacon_launch(&mut self.beacon_state.lock(), &spec.alloc);
                 let console_tail = diagnostics.console_tail();
