@@ -279,7 +279,6 @@ impl overdrive_core::traits::vmm::Vmm for VolumeRecordingVmm {
 #[cfg(feature = "kvm-tests")]
 #[overdrive_test(guest = "cgroup-default", profile = "nested-launch")]
 #[tokio::test(flavor = "current_thread")]
-#[should_panic(expected = "the attachment is the ensured volume's device node")]
 async fn a_deployed_volume_workload_launches_through_the_composed_volume_pool() {
     let fixture = VmFixture::provision(&overdrive_testing::vm_fixture::default_staging_root())
         .expect("provision the shared VM fixture");
@@ -339,7 +338,11 @@ async fn a_deployed_volume_workload_launches_through_the_composed_volume_pool() 
         .and_then(Option::as_ref)
         .expect("the VMM must be created with the volume attachment the pool ensured");
     assert!(
-        volume.device.starts_with("/dev/mapper/overdrive-ovd--"),
+        volume.device.parent() == Some(std::path::Path::new("/dev/mapper"))
+            && volume
+                .device
+                .file_name()
+                .is_some_and(|name| name.to_string_lossy().starts_with("overdrive-ovd--")),
         "the attachment is the ensured volume's device node, got {}",
         volume.device.display()
     );
