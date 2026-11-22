@@ -31,6 +31,7 @@
 )]
 
 pub mod gateway;
+pub mod vm_lifecycle;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;

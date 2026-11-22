@@ -534,15 +534,6 @@ test-group = 'host-kernel-shared'
 filter = 'package(overdrive-cli) & binary(integration) & test(vm_walking_skeleton)'
 test-group = 'host-kernel-shared'
 
-# vm-lifecycle-latency S-VLL-11 (step 01-03) — one persistent in-process
-# server drives 1,200 fresh native Cloud Hypervisor trials.  The complete
-# population is intentionally long-running; keep the timeout scoped to this
-# one test so its finite nextest liveness guard does not truncate the ledger.
-[[profile.default.overrides]]
-filter = 'package(overdrive-cli) & binary(integration) & test(native_lifecycle_profiles_meet_stage_targets_without_dropping_trials)'
-slow-timeout = { period = "60s", terminate-after = 180 }
-success-output = "immediate"
-
 # guest-stack-transparent-mtls-intercept (GH #222) — `overdrive-cli`'s
 # guest_stack_mtls_egress.rs → `host-kernel-shared`, by MODULE (rename-proof).
 # SAME two reasons as vm_walking_skeleton.rs immediately above: every S-GTI
@@ -885,6 +876,18 @@ test-group = 'host-kernel-shared'
 [[profile.default.overrides]]
 filter = 'package(overdrive-system-conformance) & binary(shared_guest_network_fail_stop_recovery)'
 test-group = 'host-kernel-shared'
+
+# vm_lifecycle_completion boots `run_server` with the real adapters and launches
+# real VMs, so it mutates the node-global nft, cgroup and bpffs state the other
+# kernel-touching binaries mutate. The WHOLE binary joins the single-writer
+# group. Its timeout is derived, not measured: 39 launches, each bounded by its
+# 90 s Running (or finite-run) bound, 30 s stop bound and 10 s artifact bound,
+# run as 3 profiles x (3 sequential + 1 cohort); the expected wall-clock is a
+# few minutes, so 15 x 60 s covers the guest stage and one slow cohort.
+[[profile.default.overrides]]
+filter = 'package(overdrive-system-conformance) & binary(vm_lifecycle_completion)'
+test-group = 'host-kernel-shared'
+slow-timeout = { period = "60s", terminate-after = 15 }
 
 # public-ingress-gateway (AT-PIG-E2E-1 and the native arms of S-PIG-56, 60, 69,
 # 70 (408), 71, 105, 109, 113, 115) - the end-to-end binary boots
