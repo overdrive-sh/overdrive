@@ -5,11 +5,14 @@ declares `[vm.volume] size = "1GiB"`; the volume belongs to the workload, so it
 is still there, with its data, after a restart, a stop and resume, and a node
 reboot.
 
-**Status.** This example deploys successfully only once the volume launch path
-is delivered. Until then `overdrive deploy` rejects `[vm.volume]` or the
-workload fails to start, and nothing here has been run. What it demonstrates is
-the intended operator journey: declare a volume, see it in `describe`, restart
-the workload, and read back the data the guest wrote earlier.
+**Status.** This runs end to end through `overdrive serve` and `overdrive deploy`
+on a node with the volume pool. The Tier-3 journeys in
+`crates/overdrive-cli/tests/integration/volume_survives.rs` exercise the same
+path on the real pool: data survives a workload restart and a killed VMM, and a
+stop keeps the volume so a resume reattaches it with its data. The volume node
+is `root:<VMM group>` mode `0660`, so the uid-dropped VMM can claim it. What the
+example demonstrates: declare a volume, see it in `describe`, restart the
+workload, and read back the data the guest wrote earlier.
 
 ## What is here
 

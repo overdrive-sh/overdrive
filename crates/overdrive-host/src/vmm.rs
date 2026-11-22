@@ -508,12 +508,14 @@ impl Vmm for CloudHypervisorVmm {
         let prep_kernel_master = config.kernel.path().to_path_buf();
         let prep_kernel_copy = config.run_dir.kernel_copy();
         let prep_run_dir = config.run_dir.path().to_path_buf();
+        let prep_volume = config.volume.as_ref().map(|volume| volume.device.clone());
         let prep = tokio::task::spawn_blocking(move || {
             prepare_confined_paths(
                 &prep_clone,
                 &prep_kernel_master,
                 &prep_kernel_copy,
                 &prep_run_dir,
+                prep_volume.as_deref(),
                 uid,
                 gid,
             )
@@ -764,11 +766,16 @@ fn ficlone_rootfs(master: &Path, clone_dest: &Path) -> Result<()> {
 ///    copy just written — `chown` to `uid:gid`, so CH can bind its own
 ///    vsock/api sockets, write the console log, connect to the beacon, and
 ///    read its kernel copy under the dropped uid.
+/// 4. **Volume node** — when the launch attaches a volume, the symlink-resolved
+///    device node is set to `root:gid` mode `0660`, so the dropped identity can
+///    open it `O_EXCL` for the claim. The node is platform-owned; no operator
+///    artifact is widened.
 fn prepare_confined_paths(
     clone_dest: &Path,
     kernel_master: &Path,
     kernel_copy: &Path,
     run_dir: &Path,
+    volume_device: Option<&Path>,
     uid: u32,
     gid: u32,
 ) -> io::Result<()> {
@@ -783,6 +790,12 @@ fn prepare_confined_paths(
     for entry in std::fs::read_dir(run_dir)? {
         let entry = entry?;
         std::os::unix::fs::chown(entry.path(), Some(uid), Some(gid))?;
+    }
+
+    if let Some(device) = volume_device {
+        let node = std::fs::canonicalize(device)?;
+        std::os::unix::fs::chown(&node, Some(0), Some(gid))?;
+        std::fs::set_permissions(&node, std::os::unix::fs::PermissionsExt::from_mode(0o660))?;
     }
     Ok(())
 }
