@@ -383,7 +383,7 @@ exactly what the existing start-failure path tears down, and returns `StartSuper
 | 3 | each claim-poll iteration: before `claim_state`, and while sleeping the poll interval (`select!` of `supersession.superseded()` against `Clock::sleep`, `biased`, superseded first) | return at once; the interval's remainder is not waited |
 | 4 | after the claim wait, before the first host artifact | return, nothing created |
 | – | `create_run_dir` ... `Vmm::create`, then `place_pid_in_scope` | **no observation point**: a bounded effect that runs to its end (the rootfs clone and the VMM spawn are not interruptible), so the VMM is always inside its scope when an abandonment finds it |
-| 5 | the guest-boot race: `select!` over `biased; supersession.superseded(), exit.recv(), accept_ready, clock.sleep(VM_BOOT_DEADLINE)` | `cleanup_after_start_failure` (terminate the VMM with zero grace, remove clone and link, kill and remove the scope, remove the run directory, clear the beacon record), then return |
+| 5 | the guest-boot race: `select!` over `biased; accept_ready, supersession.superseded(), exit.recv(), clock.sleep(VM_BOOT_DEADLINE)`; READY is polled first because a launch that won its boot race is an ordinary running allocation | `cleanup_after_start_failure` (terminate the VMM with zero grace, remove clone and link, kill and remove the scope, remove the run directory, clear the beacon record), then return |
 | 6 | the second `VM_BOOT_DEADLINE` wait on the beacon-error arm | same as 5 |
 
 Rules that follow, each closing a reachable defect:
