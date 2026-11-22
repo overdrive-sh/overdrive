@@ -186,10 +186,18 @@ module node_volume {
   // `down`: it stands for an evaluation admitted before admission closed whose tick had not opened its lane, bounded to
   // one such evaluation by `dstart`.
   def canWlStart(s: S, a: int): bool = canStart(s, a) and (not(s.down) or s.dstart < 1)
+  // The launch's first step is ensure: when the volume cannot be provided (no store composed, or no free extent for a
+  // missing volume) it fails typed inside that step, so the placement and the failure are one step and the PENDING
+  // state is never observable. A lane born raised (`down`) is not failed here: the launch observes the signal first.
+  def unavailAtStart(s: S): bool =
+    or { not(s.storeUp), and { not(s.lv), not(s.spaceFree), not(OFF.contains("recreate")) } }
   action WlStart(a: int): bool = all {
     canWlStart(cur, a),
-    commit({ ...cur, as: cur.as.set(a, PENDING), ph: cur.ph.set(a, LP_SUP), sup: cur.sup.set(a, cur.down),
-             dstart: cur.dstart + (if (cur.down) 1 else 0) }, variant("WlStart", { a: a })),
+    if (unavailAtStart(cur) and not(cur.down))
+      commit(failLaunch({ ...cur, as: cur.as.set(a, PENDING) }, a, W_UNAVAIL, false), variant("WlStart", { a: a }))
+    else
+      commit({ ...cur, as: cur.as.set(a, PENDING), ph: cur.ph.set(a, LP_SUP), sup: cur.sup.set(a, cur.down),
+               dstart: cur.dstart + (if (cur.down) 1 else 0) }, variant("WlStart", { a: a })),
   }
   // operator stop ends a Running allocation (production emits StopAllocation only for Running rows); the VMM dies, the
   // claim lingers until Drain. The volume stays (VD-2). A Pending allocation (a launch holds the lane) is ended by its
@@ -251,14 +259,11 @@ module node_volume {
     cur.ph.get(a) == LP_CREATED, cur.lv,
     commit({ ...cur, active: true, ph: cur.ph.set(a, LP_ENSURED) }, variant("LaunchEnsureActivate", { a: a })),
   }
-  // typed VolumeUnavailable: no store composed, no free space for a missing volume, or the volume vanished (NotFound
-  // maps to a command failure). Nothing is created.
+  // typed VolumeUnavailable after ensure began: the volume vanished (NotFound maps to a command failure). A launch
+  // that cannot provide the volume at all fails inside WlStart.
   action LaunchUnavailable(a: int): bool = all {
     sg(cur, a),
-    or {
-      and { cur.ph.get(a) == LP_SUP, or { not(cur.storeUp), and { not(cur.lv), not(cur.spaceFree), not(OFF.contains("recreate")) } } },
-      and { cur.ph.get(a) == LP_CREATED or cur.ph.get(a) == LP_ENSURED, not(cur.lv) },
-    },
+    cur.ph.get(a) == LP_CREATED or cur.ph.get(a) == LP_ENSURED, not(cur.lv),
     commit({ ...failLaunch(cur, a, W_UNAVAIL, false), afterSup: bump(cur, a) }, variant("LaunchUnavailable", { a: a })),
   }
   // environment: an `lvm` command fails mid-ensure (typed VolumeUnavailable); an already created volume stays
@@ -563,16 +568,16 @@ module node_volume {
 
   // no free extent: each launch fails typed and charges the budget until BackoffExhausted; nothing is created or attached
   run no_space_fails_typed_and_never_attaches = init.then(Declare).then(PoolFull)
-    .then(WlStart(1)).then(LaunchUnavailable(1))
+    .then(WlStart(1))
     .expect(st.as.get(1) == FAILED and st.why.get(1) == W_UNAVAIL and st.charged == 1 and not(st.lv)
             and st.nCreated == 0 and st.claim == 0 and not(st.ran.get(1)) and Safety)
-    .then(WlStart(2)).then(LaunchUnavailable(2)).then(WlStart(3)).then(LaunchUnavailable(3))
+    .then(WlStart(2)).then(WlStart(3))
     .expect(st.charged == LIMIT and exhausted(st) and AL.forall(a => not(canStart(st, a)))
             and AL.forall(a => not(st.ran.get(a))) and not(st.lv) and st.nCreated == 0 and Safety)
 
   // no volume store composed: typed failure, no volume, no VMM
   run store_absent_fails_typed_and_never_attaches = init.then(Declare).then(StoreAbsentBoot)
-    .then(WlStart(1)).then(LaunchUnavailable(1))
+    .then(WlStart(1))
     .expect(st.as.get(1) == FAILED and st.why.get(1) == W_UNAVAIL and not(st.lv) and st.nCreated == 0
             and st.charged == 1 and st.claim == 0 and not(st.ran.get(1)) and Safety)
 

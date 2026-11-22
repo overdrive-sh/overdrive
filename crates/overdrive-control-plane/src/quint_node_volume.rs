@@ -912,6 +912,16 @@ impl NodeVolumeDriver {
             .fresh_alloc()
             .ok_or_else(|| not_enabled("WlStart", "the tick minted no allocation"))?;
         self.alloc_of.insert(fresh, a);
+        // A launch that cannot provide the volume (no pool, no free extent) fails typed inside
+        // its first step: the placement and the failure are one model step. Either the launch
+        // parks after `ensure`'s create effect, or its `Failed` row lands.
+        self.settle("the launch parks after its create effect or fails typed", |driver| {
+            driver.node.as_ref().is_some_and(|node| node.backing.ensure_parked(&workload_id()))
+                || driver.state_of(a) == Some(AllocState::Failed)
+        })?;
+        if self.state_of(a) == Some(AllocState::Failed) {
+            self.volume_launch_fails("WlStart", a)?;
+        }
         Ok(())
     }
 
@@ -1656,10 +1666,10 @@ fn quint_vol_launch_bound_exceeded_fails_typed_and_charges_budget() -> impl Driv
     test = "no_space_fails_typed_and_never_attaches",
     max_samples = 1
 )]
-// PENDING: the launch fails typed inside its first tick, so the spec's intermediate state after
-// `WlStart` (allocation PENDING, `ph` = LP_SUP) is never observable: the driver compares
-// `alloc[1]` = FAILED against the model's PENDING. No seam holds a launch that fails before
-// its `ensure` parks.
+// PENDING: the spec's `LIMIT` is 3 and the production restart ceiling (`RESTART_BACKOFF_CEILING`)
+// is 5, so after the third typed failure the model's `exhausted` holds and production has not
+// written `BackoffExhausted` (a further tick still restarts). The mismatch is `exhausted`
+// (spec true, implementation false) at the third `WlStart`; the launch itself conforms.
 #[should_panic(expected = "State invariant failed")]
 fn quint_vol_no_space_fails_typed_and_never_attaches() -> impl Driver {
     NodeVolumeDriver::new()
@@ -1673,8 +1683,6 @@ fn quint_vol_no_space_fails_typed_and_never_attaches() -> impl Driver {
     test = "store_absent_fails_typed_and_never_attaches",
     max_samples = 1
 )]
-// PENDING: for the same reason as `quint_vol_no_space_fails_typed_and_never_attaches`.
-#[should_panic(expected = "State invariant failed")]
 fn quint_vol_store_absent_fails_typed_and_never_attaches() -> impl Driver {
     NodeVolumeDriver::new()
 }
@@ -1751,6 +1759,10 @@ fn quint_vol_shutdown_abandons_every_launch_including_one_admitted_late() -> imp
     main = "vol_conf",
     seed = "1"
 )]
+// PENDING: the spec's `LIMIT` is 3 and the production restart ceiling (`RESTART_BACKOFF_CEILING`)
+// is 5, so after the third typed failure the model's `exhausted` holds and production has not
+// written `BackoffExhausted` (a further tick still restarts). The mismatch is `exhausted`
+// (spec true, implementation false) at the third `WlStart`; the launch itself conforms.
 #[should_panic(expected = "State invariant failed")]
 fn quint_vol_randomized() -> impl Driver {
     NodeVolumeDriver::new()
