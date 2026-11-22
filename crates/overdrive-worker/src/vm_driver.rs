@@ -165,6 +165,11 @@ fn start_rejected(class: VmStartFailure, detail: impl Into<String>) -> DriverErr
 /// (ADR-0317). A policy constant, not persisted.
 const VOLUME_CLAIM_BOUND: Duration = Duration::from_secs(30);
 
+/// The exit status the Cloud Hypervisor fork returns when the volume disk's
+/// exclusive open returns `EBUSY` (ADR-0319; `EXIT_DISK_BUSY` in the fork's
+/// `cloud-hypervisor/src/main.rs`). Every other start failure exits 1.
+const VMM_EXIT_DISK_BUSY: i32 = 111;
+
 /// The claim poll interval of the launch's claim wait.
 const VOLUME_CLAIM_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
@@ -1639,7 +1644,16 @@ impl VmDriver {
             "VMM created"
         );
 
-        Ok(ProvisionedVmm { run_dir, scope, control, exit, diagnostics, rootfs, memory })
+        Ok(ProvisionedVmm {
+            run_dir,
+            scope,
+            control,
+            exit,
+            diagnostics,
+            rootfs,
+            memory,
+            volume_attached: config.volume.is_some(),
+        })
     }
 
     /// Clone every handle [`run_exit_watcher`] needs off `self` and spawn
@@ -1720,6 +1734,9 @@ struct ProvisionedVmm {
     /// guest printed, since `VmmExit` exists only after termination.
     diagnostics: VmmDiagnostics,
     rootfs: RootfsPlan,
+    /// Whether this launch attached a volume disk; a VMM exit with
+    /// [`VMM_EXIT_DISK_BUSY`] is a held volume only then.
+    volume_attached: bool,
     /// Carried through to the exit watcher so its post-mortem
     /// `CgroupAccounting::oom_kill_count` read (ADR-0082 §D8) can report
     /// `OomFacts::limit_bytes` at zero extra I/O —
@@ -1749,8 +1766,16 @@ impl Driver for VmDriver {
         spec: &AllocationSpec,
         _supersession: &dyn overdrive_core::traits::LaunchSupersession,
     ) -> Result<AllocationHandle, DriverError> {
-        let ProvisionedVmm { run_dir, scope, control, mut exit, diagnostics, rootfs, memory } =
-            self.provision_vmm(spec).await?;
+        let ProvisionedVmm {
+            run_dir,
+            scope,
+            control,
+            mut exit,
+            diagnostics,
+            rootfs,
+            memory,
+            volume_attached,
+        } = self.provision_vmm(spec).await?;
 
         // Transition Starting -> Live (still §103 step 0's Held phase;
         // brief §105a.3's transition table treats Starting|Live as one
@@ -1914,7 +1939,13 @@ impl Driver for VmDriver {
             BootRaceOutcome::VmmExited(ended) => {
                 clear_beacon_launch(&mut self.beacon_state.lock(), &spec.alloc);
                 let guest_console = self.guest_console_tail(&run_dir).await;
-                let primary = guest_exit_unreported_failure(ended, guest_console.as_deref());
+                let primary = if volume_attached
+                    && ended.as_ref().is_some_and(|exit| exit.exit_code == Some(VMM_EXIT_DISK_BUSY))
+                {
+                    volume_unavailable(VolumeUnavailableCause::Held, None)
+                } else {
+                    guest_exit_unreported_failure(ended, guest_console.as_deref())
+                };
                 Err(self
                     .cleanup_after_start_failure(
                         &spec.alloc,

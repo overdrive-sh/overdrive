@@ -40,6 +40,7 @@ use overdrive_cli::commands::workload::{
     DescribeArgs, RestartArgs, WorkloadDescribeOutput, describe, restart,
 };
 use overdrive_control_plane::api::AllocStateWire;
+use overdrive_core::TransitionReason;
 use overdrive_testing::overdrive_test;
 use overdrive_testing::vm_fixture::VmFixture;
 use serial_test::serial;
@@ -583,7 +584,6 @@ fn flakey_table(current: &str, down_seconds: u32) -> String {
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[tokio::test]
 #[serial(cgroup)]
-#[should_panic(expected = "the guest's fsync on the failing volume must return an error (the guest ends with exit 7)")]
 async fn a_failed_host_flush_reaches_the_guests_fsync_as_an_error() {
     let journey = Journey::new();
     let handle = serve_at(&journey.data_dir(), &journey.config_dir()).await;
@@ -639,7 +639,7 @@ async fn a_failed_host_flush_reaches_the_guests_fsync_as_an_error() {
     // The guest's fsync returns an error: its loop ends with exit code 7 (its control fsyncs
     // succeeded, so any other ending is not this).
     let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
-    let exit_code = loop {
+    let reason = loop {
         let out = describe_once(&journey.cfg(), &id).await;
         if let Some(row) = out
             .snapshot
@@ -647,7 +647,7 @@ async fn a_failed_host_flush_reaches_the_guests_fsync_as_an_error() {
             .iter()
             .find(|row| row.alloc_id == first_alloc && row.state != AllocStateWire::Running)
         {
-            break row.exit_code;
+            break row.reason.clone();
         }
         assert!(
             tokio::time::Instant::now() < deadline,
@@ -656,10 +656,16 @@ async fn a_failed_host_flush_reaches_the_guests_fsync_as_an_error() {
         );
         tokio::time::sleep(Duration::from_millis(500)).await;
     };
+    // The exit status rides on the transition reason: the row-level `exit_code` is not populated
+    // in Phase 1.
+    let exit_code = match &reason {
+        Some(TransitionReason::WorkloadCrashedImmediately { exit_code, .. }) => *exit_code,
+        _ => None,
+    };
     assert_eq!(
         exit_code,
         Some(7),
-        "the guest's fsync on the failing volume must return an error (the guest ends with exit 7)"
+        "the guest's fsync on the failing volume must return an error (the guest ends with exit 7); reason: {reason:?}"
     );
     handle.shutdown().await.expect("shutdown");
 }
@@ -714,10 +720,9 @@ fn assert_nothing_failed_or_charged(
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[tokio::test]
 #[serial(cgroup)]
-// Supersession RED (step 05-02 turns it GREEN). Without supersession the failure point varies
-// between runs (a Running row after the stop, or an extra reattached record), so no single
-// `expected` substring names it stably; the acceptance designer rules on the marker.
-#[ignore = "launch supersession (step 05-02) is not delivered; the RED failure point is unstable"]
+// Pending until launch supersession (step 05-02): today the stopped launch waits out the claim
+// bound and writes a `Failed` row, which the first post-bound assertion names.
+#[should_panic(expected = "a superseded launch must neither fail nor start once the claim bound has elapsed")]
 async fn a_workload_stop_during_a_held_claim_returns_promptly_with_no_failed_row() {
     let journey = Journey::new();
     let handle = serve_at(&journey.data_dir(), &journey.config_dir()).await;
@@ -749,7 +754,21 @@ async fn a_workload_stop_during_a_held_claim_returns_promptly_with_no_failed_row
         took < Duration::from_secs(10),
         "workload stop during a held claim must return promptly, not wait out the 30 s claim bound; took {took:?}"
     );
-    tokio::time::sleep(Duration::from_secs(5)).await;
+    // Supersession: the stop ends the waiting launch, so even once the 30 s claim bound has
+    // elapsed with the claim still held, nothing runs and the replacement has not failed. Without
+    // supersession the stop leaves the workload unsettled: either the launch waits out the bound
+    // and writes a `Failed` row for the held volume, or an allocation is still `Running`.
+    tokio::time::sleep(Duration::from_secs(40)).await;
+    let after_bound = describe_once(&journey.cfg(), &id).await;
+    for row in &after_bound.snapshot.rows {
+        let superseded_failure =
+            row.alloc_id != first_alloc && row.state == AllocStateWire::Failed;
+        assert!(
+            row.state != AllocStateWire::Running && !superseded_failure,
+            "a superseded launch must neither fail nor start once the claim bound has elapsed; rows: {:?}",
+            after_bound.snapshot.rows
+        );
+    }
     let after_stop = describe_once(&journey.cfg(), &id).await;
     assert_nothing_failed_or_charged(
         &after_stop,
@@ -994,9 +1013,6 @@ impl LateHolder {
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[tokio::test]
 #[serial(cgroup)]
-#[should_panic(
-    expected = "a claim taken after the claim wait must fail the launch as a held volume"
-)]
 async fn a_claim_taken_after_the_claim_wait_fails_the_launch_as_a_held_volume() {
     let journey = Journey::new();
     let handle = serve_at(&journey.data_dir(), &journey.config_dir()).await;
