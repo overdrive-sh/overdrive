@@ -1,0 +1,141 @@
+commit b32282ee2de6b1507446b3b4ba254105e850713d
+Author: Marcus Schack Abildskov <work@marcus-sa.dev>
+Date:   Sat Nov 21 00:34:26 2026 +0100
+
+    feat(node-local-persistent-volume): map volume-unavailable start failures to the typed VmVolumeUnavailable reason
+    
+    Every VolumeUnavailable class now maps to VmVolumeUnavailable instead of
+    DriverInternalError, and the operator wording names the volume, the cause and
+    the remedy, with both figures for insufficient space.
+    
+    Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+    Step-Id: 02-03
+    Task-Id: node-local-persistent-volume
+
+diff --git a/crates/overdrive-core/src/transition_reason.rs b/crates/overdrive-core/src/transition_reason.rs
+index 3428234a1..61dbb0b18 100644
+--- a/crates/overdrive-core/src/transition_reason.rs
++++ b/crates/overdrive-core/src/transition_reason.rs
+@@ -33,6 +33,7 @@ use crate::traits::driver::{
+     ConfinementControl, DriverStartClass, DriverStartFailure, VmStartFailure,
+ };
+ use crate::traits::observation_store::{AllocState, AllocStatusRow};
++use crate::volume::VolumeUnavailableCause;
+ 
+ /// Structured reason for a lifecycle transition.
+ ///
+@@ -260,7 +261,7 @@ pub enum TransitionReason {
+     /// the allocation reached Running.
+     VmGuestCommandDispatchFailed { detail: String },
+     /// The workload's volume could not be attached (ADR-0317, ADR-0318).
+-    VmVolumeUnavailable { cause: crate::volume::VolumeUnavailableCause },
++    VmVolumeUnavailable { cause: VolumeUnavailableCause },
+ }
+ 
+ /// The total, pure driver-start conversion (ADR-0032 §4, ADR-0083 §D5).
+@@ -320,9 +321,8 @@ impl From<&DriverStartFailure> for TransitionReason {
+                 VmStartFailure::GuestCommandDispatchFailed { detail } => {
+                     Self::VmGuestCommandDispatchFailed { detail: detail.clone() }
+                 }
+-                // RED scaffold: the typed mapping lands in DELIVER (ADR-0318).
+-                VmStartFailure::VolumeUnavailable { .. } => {
+-                    Self::DriverInternalError { detail: failure.detail.clone() }
++                VmStartFailure::VolumeUnavailable { cause } => {
++                    Self::VmVolumeUnavailable { cause: cause.clone() }
+                 }
+             },
+             // The ONLY unknown fallback, for both an unmapped driver and
+@@ -334,6 +334,31 @@ impl From<&DriverStartFailure> for TransitionReason {
+     }
+ }
+ 
++/// Operator wording for a volume-unavailable cause: the volume, the cause and the remedy.
++fn volume_unavailable_wording(cause: &VolumeUnavailableCause) -> String {
++    match cause {
++        VolumeUnavailableCause::PoolAbsent => {
++            "VM volume unavailable: no volume pool is composed on this node; \
++             create the volume pool on the node, then redeploy"
++                .to_owned()
++        }
++        VolumeUnavailableCause::InsufficientSpace { needed, free } => format!(
++            "VM volume unavailable: the volume needs {needed} but the pool has only {free} free; \
++             free pool space or declare a smaller volume size, then redeploy",
++        ),
++        VolumeUnavailableCause::PoolCommandFailed { operation } => format!(
++            "VM volume unavailable: the volume pool {} operation failed; \
++             check the pool's health on the node, then redeploy",
++            operation.as_str(),
++        ),
++        VolumeUnavailableCause::Held => {
++            "VM volume unavailable: the volume is still held by another launch past the wait bound; \
++             stop the workload holding the volume, then redeploy"
++                .to_owned()
++        }
++    }
++}
++
+ /// Initiator of a `Stopped` transition.
+ #[derive(
+     Debug,
+@@ -975,8 +1000,7 @@ impl TransitionReason {
+             Self::VmGuestCommandDispatchFailed { detail } => {
+                 format!("VM guest command dispatch failed: {detail}")
+             }
+-            // RED scaffold: the operator wording (volume, cause, remedy) lands in DELIVER.
+-            Self::VmVolumeUnavailable { .. } => "VM volume unavailable".to_owned(),
++            Self::VmVolumeUnavailable { cause } => volume_unavailable_wording(cause),
+         }
+     }
+ 
+diff --git a/crates/overdrive-core/tests/acceptance/volume_unavailable_reason.rs b/crates/overdrive-core/tests/acceptance/volume_unavailable_reason.rs
+index 74a59878f..43ccfe7df 100644
+--- a/crates/overdrive-core/tests/acceptance/volume_unavailable_reason.rs
++++ b/crates/overdrive-core/tests/acceptance/volume_unavailable_reason.rs
+@@ -25,7 +25,6 @@ fn failure(cause: VolumeUnavailableCause) -> DriverStartFailure {
+ /// No volume pool on the node is recorded as the typed volume reason.
+ /// CONTRACT_SHAPE: pure-function.
+ #[test]
+-#[should_panic(expected = "a pool-absent start failure must map to VmVolumeUnavailable")]
+ fn pool_absent_maps_to_the_typed_volume_reason() {
+     let reason = TransitionReason::from(&failure(VolumeUnavailableCause::PoolAbsent));
+     assert!(
+@@ -40,7 +39,6 @@ fn pool_absent_maps_to_the_typed_volume_reason() {
+ /// A claim held past the bound maps to the typed volume reason.
+ /// CONTRACT_SHAPE: pure-function.
+ #[test]
+-#[should_panic(expected = "a held-claim start failure must map to VmVolumeUnavailable")]
+ fn held_maps_to_the_typed_volume_reason() {
+     let reason = TransitionReason::from(&failure(VolumeUnavailableCause::Held));
+     assert!(
+@@ -55,7 +53,6 @@ fn held_maps_to_the_typed_volume_reason() {
+ /// The operator reads the volume, the cause and the remedy.
+ /// CONTRACT_SHAPE: pure-function.
+ #[test]
+-#[should_panic(expected = "the volume wording must name the cause")]
+ fn the_operator_wording_names_the_volume_the_cause_and_the_remedy() {
+     let held = TransitionReason::VmVolumeUnavailable { cause: VolumeUnavailableCause::Held };
+     let absent =
+@@ -83,7 +80,6 @@ fn guard_a_volume_failure_is_a_failure() {
+ /// declared size and the free space the operator needs to compare.
+ /// CONTRACT_SHAPE: pure-function.
+ #[test]
+-#[should_panic(expected = "an insufficient-space start failure must map to VmVolumeUnavailable")]
+ fn insufficient_space_maps_to_the_typed_volume_reason_keeping_both_figures() {
+     let needed = volume_size_gib(40);
+     let free = ByteCount::new(4 * 1024 * 1024);
+@@ -108,7 +104,6 @@ proptest! {
+     /// S-VOL-26: a command failure keeps the operation that was in progress, whichever it was.
+     /// CONTRACT_SHAPE: pure-function.
+     #[test]
+-    #[should_panic(expected = "a command-failure start failure must map to VmVolumeUnavailable")]
+     fn a_command_failure_maps_to_the_typed_volume_reason_keeping_the_operation(
+         operation in prop_oneof![
+             Just(VolumeOperation::Report),
+@@ -132,7 +127,6 @@ proptest! {
+ /// causes name the figures or the operation the operator acts on.
+ /// CONTRACT_SHAPE: pure-function.
+ #[test]
+-#[should_panic(expected = "the space cause wording must name the declared size and the free bytes")]
+ fn the_space_and_command_causes_name_their_figures_and_operation() {
+     let space = TransitionReason::VmVolumeUnavailable {
+         cause: VolumeUnavailableCause::InsufficientSpace {

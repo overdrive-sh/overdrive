@@ -1,0 +1,701 @@
+commit 2b6b7259dab1e18f490f2ae7d3abc058feb5e737
+Author: Marcus Schack Abildskov <work@marcus-sa.dev>
+Date:   Sun Nov 22 16:08:35 2026 +0100
+
+    feat(node-local-persistent-volume): give the confined VMM identity the volume node
+    
+    The symlink-resolved volume node is set to root:<VMM gid> mode 0660 when a launch attaches a volume, so the uid-dropped VMM can open it exclusively. Restart, killed-VMM, stop/resume and drain journeys run GREEN on the real pool; the README now describes the working journey.
+    
+    Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+    Step-Id: 04-03
+    Task-Id: node-local-persistent-volume
+
+diff --git a/crates/overdrive-cli/tests/integration/volume_boot_probe.rs b/crates/overdrive-cli/tests/integration/volume_boot_probe.rs
+index 0332a718e..7dd2f096d 100644
+--- a/crates/overdrive-cli/tests/integration/volume_boot_probe.rs
++++ b/crates/overdrive-cli/tests/integration/volume_boot_probe.rs
+@@ -279,7 +279,7 @@ impl overdrive_core::traits::vmm::Vmm for VolumeRecordingVmm {
+ #[cfg(feature = "kvm-tests")]
+ #[overdrive_test(guest = "cgroup-default", profile = "nested-launch")]
+ #[tokio::test(flavor = "current_thread")]
+-#[should_panic(expected = "one workload, one volume")]
++#[should_panic(expected = "the attachment is the ensured volume's device node")]
+ async fn a_deployed_volume_workload_launches_through_the_composed_volume_pool() {
+     let fixture = VmFixture::provision(&overdrive_testing::vm_fixture::default_staging_root())
+         .expect("provision the shared VM fixture");
+diff --git a/crates/overdrive-cli/tests/integration/volume_survives.rs b/crates/overdrive-cli/tests/integration/volume_survives.rs
+index d1d3d0e2a..3df21d094 100644
+--- a/crates/overdrive-cli/tests/integration/volume_survives.rs
++++ b/crates/overdrive-cli/tests/integration/volume_survives.rs
+@@ -373,7 +373,6 @@ impl Journey {
+ #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
+ #[tokio::test]
+ #[serial(cgroup)]
+-#[should_panic(expected = "exactly one volume node")]
+ async fn data_written_by_the_guest_survives_a_workload_restart() {
+     let journey = Journey::new();
+     let handle = serve_at(&journey.data_dir(), &journey.config_dir()).await;
+@@ -435,7 +434,6 @@ async fn data_written_by_the_guest_survives_a_workload_restart() {
+ #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
+ #[tokio::test]
+ #[serial(cgroup)]
+-#[should_panic(expected = "exactly one volume node")]
+ async fn a_record_the_guest_flushed_survives_a_killed_vmm() {
+     let journey = Journey::new();
+     let handle = serve_at(&journey.data_dir(), &journey.config_dir()).await;
+@@ -456,7 +454,6 @@ async fn a_record_the_guest_flushed_survives_a_killed_vmm() {
+ #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
+ #[tokio::test]
+ #[serial(cgroup)]
+-#[should_panic(expected = "exactly one volume node")]
+ async fn an_operator_stop_keeps_the_volume_and_a_resume_reattaches_it() {
+     let journey = Journey::new();
+     let handle = serve_at(&journey.data_dir(), &journey.config_dir()).await;
+@@ -495,7 +492,6 @@ async fn an_operator_stop_keeps_the_volume_and_a_resume_reattaches_it() {
+ #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
+ #[tokio::test]
+ #[serial(cgroup)]
+-#[should_panic(expected = "exactly one volume node")]
+ async fn a_replacement_waits_for_the_claim_while_the_old_writers_io_drains() {
+     let journey = Journey::new();
+     let handle = serve_at(&journey.data_dir(), &journey.config_dir()).await;
+@@ -587,7 +583,7 @@ fn flakey_table(current: &str, down_seconds: u32) -> String {
+ #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
+ #[tokio::test]
+ #[serial(cgroup)]
+-#[should_panic(expected = "exactly one volume node")]
++#[should_panic(expected = "the guest's fsync on the failing volume must return an error (the guest ends with exit 7)")]
+ async fn a_failed_host_flush_reaches_the_guests_fsync_as_an_error() {
+     let journey = Journey::new();
+     let handle = serve_at(&journey.data_dir(), &journey.config_dir()).await;
+@@ -718,7 +714,10 @@ fn assert_nothing_failed_or_charged(
+ #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
+ #[tokio::test]
+ #[serial(cgroup)]
+-#[should_panic(expected = "exactly one volume node")]
++// Supersession RED (step 05-02 turns it GREEN). Without supersession the failure point varies
++// between runs (a Running row after the stop, or an extra reattached record), so no single
++// `expected` substring names it stably; the acceptance designer rules on the marker.
++#[ignore = "launch supersession (step 05-02) is not delivered; the RED failure point is unstable"]
+ async fn a_workload_stop_during_a_held_claim_returns_promptly_with_no_failed_row() {
+     let journey = Journey::new();
+     let handle = serve_at(&journey.data_dir(), &journey.config_dir()).await;
+@@ -813,7 +812,6 @@ async fn a_workload_stop_during_a_held_claim_returns_promptly_with_no_failed_row
+ #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
+ #[tokio::test]
+ #[serial(cgroup)]
+-#[should_panic(expected = "exactly one volume node")]
+ async fn a_workload_stop_during_guest_boot_terminates_the_vmm_and_keeps_the_volume() {
+     let journey = Journey::new();
+     let handle = serve_at(&journey.data_dir(), &journey.config_dir()).await;
+diff --git a/crates/overdrive-host/src/vmm.rs b/crates/overdrive-host/src/vmm.rs
+index a277c6629..d82fee8ec 100644
+--- a/crates/overdrive-host/src/vmm.rs
++++ b/crates/overdrive-host/src/vmm.rs
+@@ -508,12 +508,14 @@ impl Vmm for CloudHypervisorVmm {
+         let prep_kernel_master = config.kernel.path().to_path_buf();
+         let prep_kernel_copy = config.run_dir.kernel_copy();
+         let prep_run_dir = config.run_dir.path().to_path_buf();
++        let prep_volume = config.volume.as_ref().map(|volume| volume.device.clone());
+         let prep = tokio::task::spawn_blocking(move || {
+             prepare_confined_paths(
+                 &prep_clone,
+                 &prep_kernel_master,
+                 &prep_kernel_copy,
+                 &prep_run_dir,
++                prep_volume.as_deref(),
+                 uid,
+                 gid,
+             )
+@@ -764,11 +766,16 @@ fn ficlone_rootfs(master: &Path, clone_dest: &Path) -> Result<()> {
+ ///    copy just written — `chown` to `uid:gid`, so CH can bind its own
+ ///    vsock/api sockets, write the console log, connect to the beacon, and
+ ///    read its kernel copy under the dropped uid.
++/// 4. **Volume node** — when the launch attaches a volume, the symlink-resolved
++///    device node is set to `root:gid` mode `0660`, so the dropped identity can
++///    open it `O_EXCL` for the claim. The node is platform-owned; no operator
++///    artifact is widened.
+ fn prepare_confined_paths(
+     clone_dest: &Path,
+     kernel_master: &Path,
+     kernel_copy: &Path,
+     run_dir: &Path,
++    volume_device: Option<&Path>,
+     uid: u32,
+     gid: u32,
+ ) -> io::Result<()> {
+@@ -784,6 +791,12 @@ fn prepare_confined_paths(
+         let entry = entry?;
+         std::os::unix::fs::chown(entry.path(), Some(uid), Some(gid))?;
+     }
++
++    if let Some(device) = volume_device {
++        let node = std::fs::canonicalize(device)?;
++        std::os::unix::fs::chown(&node, Some(0), Some(gid))?;
++        std::fs::set_permissions(&node, std::os::unix::fs::PermissionsExt::from_mode(0o660))?;
++    }
+     Ok(())
+ }
+ 
+diff --git a/examples/node-local-volume/README.md b/examples/node-local-volume/README.md
+index 4d9947281..37b1a231d 100644
+--- a/examples/node-local-volume/README.md
++++ b/examples/node-local-volume/README.md
+@@ -5,11 +5,14 @@ declares `[vm.volume] size = "1GiB"`; the volume belongs to the workload, so it
+ is still there, with its data, after a restart, a stop and resume, and a node
+ reboot.
+ 
+-**Status.** This example deploys successfully only once the volume launch path
+-is delivered. Until then `overdrive deploy` rejects `[vm.volume]` or the
+-workload fails to start, and nothing here has been run. What it demonstrates is
+-the intended operator journey: declare a volume, see it in `describe`, restart
+-the workload, and read back the data the guest wrote earlier.
++**Status.** This runs end to end through `overdrive serve` and `overdrive deploy`
++on a node with the volume pool. The Tier-3 journeys in
++`crates/overdrive-cli/tests/integration/volume_survives.rs` exercise the same
++path on the real pool: data survives a workload restart and a killed VMM, and a
++stop keeps the volume so a resume reattaches it with its data. The volume node
++is `root:<VMM group>` mode `0660`, so the uid-dropped VMM can claim it. What the
++example demonstrates: declare a volume, see it in `describe`, restart the
++workload, and read back the data the guest wrote earlier.
+ 
+ ## What is here
+ 
+
+commit ee7df50bb4cae12388a0618a2053ba506ca8b92d
+Author: Marcus Schack Abildskov <work@marcus-sa.dev>
+Date:   Sun Nov 22 16:44:20 2026 +0100
+
+    feat(node-local-persistent-volume): report a busy volume disk at VMM start as a held volume
+    
+    The forked Cloud Hypervisor exits 111 when the volume disk's exclusive
+    open returns EBUSY (ADR-0319). A launch that attached a volume and whose
+    VMM ends with that status fails as VolumeUnavailable { Held }, charged
+    like a claim still held after the wait. Mapped from the typed exit
+    status only, never stderr.
+    
+    Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+    Step-Id: 04-03
+    Task-Id: node-local-persistent-volume
+
+diff --git a/crates/overdrive-cli/tests/integration/volume_survives.rs b/crates/overdrive-cli/tests/integration/volume_survives.rs
+index 3df21d094..63fc26939 100644
+--- a/crates/overdrive-cli/tests/integration/volume_survives.rs
++++ b/crates/overdrive-cli/tests/integration/volume_survives.rs
+@@ -40,6 +40,7 @@ use overdrive_cli::commands::workload::{
+     DescribeArgs, RestartArgs, WorkloadDescribeOutput, describe, restart,
+ };
+ use overdrive_control_plane::api::AllocStateWire;
++use overdrive_core::TransitionReason;
+ use overdrive_testing::overdrive_test;
+ use overdrive_testing::vm_fixture::VmFixture;
+ use serial_test::serial;
+@@ -583,7 +584,6 @@ fn flakey_table(current: &str, down_seconds: u32) -> String {
+ #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
+ #[tokio::test]
+ #[serial(cgroup)]
+-#[should_panic(expected = "the guest's fsync on the failing volume must return an error (the guest ends with exit 7)")]
+ async fn a_failed_host_flush_reaches_the_guests_fsync_as_an_error() {
+     let journey = Journey::new();
+     let handle = serve_at(&journey.data_dir(), &journey.config_dir()).await;
+@@ -639,7 +639,7 @@ async fn a_failed_host_flush_reaches_the_guests_fsync_as_an_error() {
+     // The guest's fsync returns an error: its loop ends with exit code 7 (its control fsyncs
+     // succeeded, so any other ending is not this).
+     let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+-    let exit_code = loop {
++    let reason = loop {
+         let out = describe_once(&journey.cfg(), &id).await;
+         if let Some(row) = out
+             .snapshot
+@@ -647,7 +647,7 @@ async fn a_failed_host_flush_reaches_the_guests_fsync_as_an_error() {
+             .iter()
+             .find(|row| row.alloc_id == first_alloc && row.state != AllocStateWire::Running)
+         {
+-            break row.exit_code;
++            break row.reason.clone();
+         }
+         assert!(
+             tokio::time::Instant::now() < deadline,
+@@ -656,10 +656,16 @@ async fn a_failed_host_flush_reaches_the_guests_fsync_as_an_error() {
+         );
+         tokio::time::sleep(Duration::from_millis(500)).await;
+     };
++    // The exit status rides on the transition reason: the row-level `exit_code` is not populated
++    // in Phase 1.
++    let exit_code = match &reason {
++        Some(TransitionReason::WorkloadCrashedImmediately { exit_code, .. }) => *exit_code,
++        _ => None,
++    };
+     assert_eq!(
+         exit_code,
+         Some(7),
+-        "the guest's fsync on the failing volume must return an error (the guest ends with exit 7)"
++        "the guest's fsync on the failing volume must return an error (the guest ends with exit 7); reason: {reason:?}"
+     );
+     handle.shutdown().await.expect("shutdown");
+ }
+@@ -714,10 +720,9 @@ fn assert_nothing_failed_or_charged(
+ #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
+ #[tokio::test]
+ #[serial(cgroup)]
+-// Supersession RED (step 05-02 turns it GREEN). Without supersession the failure point varies
+-// between runs (a Running row after the stop, or an extra reattached record), so no single
+-// `expected` substring names it stably; the acceptance designer rules on the marker.
+-#[ignore = "launch supersession (step 05-02) is not delivered; the RED failure point is unstable"]
++// Pending until launch supersession (step 05-02): today the stopped launch waits out the claim
++// bound and writes a `Failed` row, which the first post-bound assertion names.
++#[should_panic(expected = "a superseded launch must neither fail nor start once the claim bound has elapsed")]
+ async fn a_workload_stop_during_a_held_claim_returns_promptly_with_no_failed_row() {
+     let journey = Journey::new();
+     let handle = serve_at(&journey.data_dir(), &journey.config_dir()).await;
+@@ -749,7 +754,21 @@ async fn a_workload_stop_during_a_held_claim_returns_promptly_with_no_failed_row
+         took < Duration::from_secs(10),
+         "workload stop during a held claim must return promptly, not wait out the 30 s claim bound; took {took:?}"
+     );
+-    tokio::time::sleep(Duration::from_secs(5)).await;
++    // Supersession: the stop ends the waiting launch, so even once the 30 s claim bound has
++    // elapsed with the claim still held, nothing runs and the replacement has not failed. Without
++    // supersession the stop leaves the workload unsettled: either the launch waits out the bound
++    // and writes a `Failed` row for the held volume, or an allocation is still `Running`.
++    tokio::time::sleep(Duration::from_secs(40)).await;
++    let after_bound = describe_once(&journey.cfg(), &id).await;
++    for row in &after_bound.snapshot.rows {
++        let superseded_failure =
++            row.alloc_id != first_alloc && row.state == AllocStateWire::Failed;
++        assert!(
++            row.state != AllocStateWire::Running && !superseded_failure,
++            "a superseded launch must neither fail nor start once the claim bound has elapsed; rows: {:?}",
++            after_bound.snapshot.rows
++        );
++    }
+     let after_stop = describe_once(&journey.cfg(), &id).await;
+     assert_nothing_failed_or_charged(
+         &after_stop,
+@@ -994,9 +1013,6 @@ impl LateHolder {
+ #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
+ #[tokio::test]
+ #[serial(cgroup)]
+-#[should_panic(
+-    expected = "a claim taken after the claim wait must fail the launch as a held volume"
+-)]
+ async fn a_claim_taken_after_the_claim_wait_fails_the_launch_as_a_held_volume() {
+     let journey = Journey::new();
+     let handle = serve_at(&journey.data_dir(), &journey.config_dir()).await;
+diff --git a/crates/overdrive-worker/src/vm_driver.rs b/crates/overdrive-worker/src/vm_driver.rs
+index c9374ce52..5cf4e6080 100644
+--- a/crates/overdrive-worker/src/vm_driver.rs
++++ b/crates/overdrive-worker/src/vm_driver.rs
+@@ -165,6 +165,11 @@ fn start_rejected(class: VmStartFailure, detail: impl Into<String>) -> DriverErr
+ /// (ADR-0317). A policy constant, not persisted.
+ const VOLUME_CLAIM_BOUND: Duration = Duration::from_secs(30);
+ 
++/// The exit status the Cloud Hypervisor fork returns when the volume disk's
++/// exclusive open returns `EBUSY` (ADR-0319; `EXIT_DISK_BUSY` in the fork's
++/// `cloud-hypervisor/src/main.rs`). Every other start failure exits 1.
++const VMM_EXIT_DISK_BUSY: i32 = 111;
++
+ /// The claim poll interval of the launch's claim wait.
+ const VOLUME_CLAIM_POLL_INTERVAL: Duration = Duration::from_millis(250);
+ 
+@@ -1639,7 +1644,16 @@ impl VmDriver {
+             "VMM created"
+         );
+ 
+-        Ok(ProvisionedVmm { run_dir, scope, control, exit, diagnostics, rootfs, memory })
++        Ok(ProvisionedVmm {
++            run_dir,
++            scope,
++            control,
++            exit,
++            diagnostics,
++            rootfs,
++            memory,
++            volume_attached: config.volume.is_some(),
++        })
+     }
+ 
+     /// Clone every handle [`run_exit_watcher`] needs off `self` and spawn
+@@ -1720,6 +1734,9 @@ struct ProvisionedVmm {
+     /// guest printed, since `VmmExit` exists only after termination.
+     diagnostics: VmmDiagnostics,
+     rootfs: RootfsPlan,
++    /// Whether this launch attached a volume disk; a VMM exit with
++    /// [`VMM_EXIT_DISK_BUSY`] is a held volume only then.
++    volume_attached: bool,
+     /// Carried through to the exit watcher so its post-mortem
+     /// `CgroupAccounting::oom_kill_count` read (ADR-0082 §D8) can report
+     /// `OomFacts::limit_bytes` at zero extra I/O —
+@@ -1749,8 +1766,16 @@ impl Driver for VmDriver {
+         spec: &AllocationSpec,
+         _supersession: &dyn overdrive_core::traits::LaunchSupersession,
+     ) -> Result<AllocationHandle, DriverError> {
+-        let ProvisionedVmm { run_dir, scope, control, mut exit, diagnostics, rootfs, memory } =
+-            self.provision_vmm(spec).await?;
++        let ProvisionedVmm {
++            run_dir,
++            scope,
++            control,
++            mut exit,
++            diagnostics,
++            rootfs,
++            memory,
++            volume_attached,
++        } = self.provision_vmm(spec).await?;
+ 
+         // Transition Starting -> Live (still §103 step 0's Held phase;
+         // brief §105a.3's transition table treats Starting|Live as one
+@@ -1914,7 +1939,13 @@ impl Driver for VmDriver {
+             BootRaceOutcome::VmmExited(ended) => {
+                 clear_beacon_launch(&mut self.beacon_state.lock(), &spec.alloc);
+                 let guest_console = self.guest_console_tail(&run_dir).await;
+-                let primary = guest_exit_unreported_failure(ended, guest_console.as_deref());
++                let primary = if volume_attached
++                    && ended.as_ref().is_some_and(|exit| exit.exit_code == Some(VMM_EXIT_DISK_BUSY))
++                {
++                    volume_unavailable(VolumeUnavailableCause::Held, None)
++                } else {
++                    guest_exit_unreported_failure(ended, guest_console.as_deref())
++                };
+                 Err(self
+                     .cleanup_after_start_failure(
+                         &spec.alloc,
+
+commit 33f64e3f3343f53fed3b0d2a8a6eda966b7672ad
+Author: Marcus Schack Abildskov <work@marcus-sa.dev>
+Date:   Sun Nov 22 16:48:24 2026 +0100
+
+    test(node-local-persistent-volume): match the volume device node by name prefix
+    
+    Path::starts_with compares whole components and could never match
+    /dev/mapper/overdrive-ovd--<hash>; assert the parent directory and the file
+    name prefix, and drop the pending marker now the oracle is correct.
+    
+    Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+diff --git a/crates/overdrive-cli/tests/integration/volume_boot_probe.rs b/crates/overdrive-cli/tests/integration/volume_boot_probe.rs
+index 7dd2f096d..5554b3cf4 100644
+--- a/crates/overdrive-cli/tests/integration/volume_boot_probe.rs
++++ b/crates/overdrive-cli/tests/integration/volume_boot_probe.rs
+@@ -279,7 +279,6 @@ impl overdrive_core::traits::vmm::Vmm for VolumeRecordingVmm {
+ #[cfg(feature = "kvm-tests")]
+ #[overdrive_test(guest = "cgroup-default", profile = "nested-launch")]
+ #[tokio::test(flavor = "current_thread")]
+-#[should_panic(expected = "the attachment is the ensured volume's device node")]
+ async fn a_deployed_volume_workload_launches_through_the_composed_volume_pool() {
+     let fixture = VmFixture::provision(&overdrive_testing::vm_fixture::default_staging_root())
+         .expect("provision the shared VM fixture");
+@@ -339,7 +338,11 @@ async fn a_deployed_volume_workload_launches_through_the_composed_volume_pool()
+         .and_then(Option::as_ref)
+         .expect("the VMM must be created with the volume attachment the pool ensured");
+     assert!(
+-        volume.device.starts_with("/dev/mapper/overdrive-ovd--"),
++        volume.device.parent() == Some(std::path::Path::new("/dev/mapper"))
++            && volume
++                .device
++                .file_name()
++                .is_some_and(|name| name.to_string_lossy().starts_with("overdrive-ovd--")),
+         "the attachment is the ensured volume's device node, got {}",
+         volume.device.display()
+     );
+
+commit 39682669cc8a582406fe4a6c0d0214b15291db42
+Author: Marcus Schack Abildskov <work@marcus-sa.dev>
+Date:   Sun Nov 22 16:17:27 2026 +0100
+
+    build(cloud-hypervisor): pin the fork that exits 111 when a volume disk is held
+    
+    The fork exits 111 when a disk's exclusive open fails with EBUSY (ADR-0319), so the
+    driver can report a held volume as a typed failure. Pin the fork revision and the
+    metal checksum, record the exit status as a wire contract, and keep the metal probe
+    that shows 111 for a held device, 1 for a missing disk, and a normal open for a free one.
+    
+    Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+
+diff --git a/docs/feature/node-local-persistent-volume/feature-delta.md b/docs/feature/node-local-persistent-volume/feature-delta.md
+index cbbfa9091..ddb75042f 100644
+--- a/docs/feature/node-local-persistent-volume/feature-delta.md
++++ b/docs/feature/node-local-persistent-volume/feature-delta.md
+@@ -289,6 +289,13 @@ and mode are not restored at teardown; no other VMM can open another workload's
+ own launch arguments (ADR-0315). `rlimit_fsize` is unchanged. Fork: only F2 (ADR-0319, the `O_EXCL` open) is a fork change; F1 (ADR-0316) and F3 (ADR-0320) are upstream Cloud Hypervisor's own behaviour
+ since the fork moved to upstream `main` (2026-11-20, ADR-0161 § Amendment); the pinned revision and checksums follow that move.
+ 
++**Wire contract: the VMM's exit status.** The launcher (`build_confined_command`, `overdrive-host/src/vmm.rs`) runs the fork, and the fork
++exits with status **111** when the volume disk's exclusive open returns `EBUSY` (ADR-0319): the typed signal that another holder has the
++device. The fork reads it from the typed error (a `BlockError` of kind `Io`, operation `Open`, with an `EBUSY` source) and never from stderr
++text. Every other start failure exits 1, and a successful run exits 0. The constant is `EXIT_DISK_BUSY` in the fork's
++`cloud-hypervisor/src/main.rs`. The driver's mapping of 111 to a held-volume failure is the consumer of this contract. Evidence:
++`spike-scratch/node-local-persistent-volume-ch-exit/` (held device exits 111, nonexistent disk exits 1, free device opens).
++
+ ### Launch path and driver failures (VD-8, VD-9)
+ 
+ `VmDriver::provision_vmm`, for a `VolumePayload`, after claiming supervision and before `Vmm::create`: `ensure` (awaited to its return; the 30 s
+diff --git a/docs/product/architecture/adr-0319-a-writable-block-device-is-opened-exclusively-by-the-vmm.md b/docs/product/architecture/adr-0319-a-writable-block-device-is-opened-exclusively-by-the-vmm.md
+index 61ee4028e..2de045d42 100644
+--- a/docs/product/architecture/adr-0319-a-writable-block-device-is-opened-exclusively-by-the-vmm.md
++++ b/docs/product/architecture/adr-0319-a-writable-block-device-is-opened-exclusively-by-the-vmm.md
+@@ -16,8 +16,16 @@ Overdrive runs no stock VMM. The fix is on branch `spike/node-local-persistent-v
+ 
+ ## Decision
+ 
+-**The fork opens a writable block device with `O_EXCL`. The pinned fork revision and its checksums change
+-(ADR-0161).**
++**The fork opens a writable block device with `O_EXCL`, and exits with status 111 when that open fails with
++`EBUSY`. The pinned fork revision and its checksums change (ADR-0161).**
++
++The exit status is the typed signal for "another holder has the device". Cloud Hypervisor reads it from the
++error chain: a `BlockError` of kind `Io`, operation `Open`, whose source is an `io::Error` with
++`raw_os_error() == Some(EBUSY)` (`cloud-hypervisor/src/main.rs`, `is_disk_busy`; `EXIT_DISK_BUSY`). It
++does not match text. Every other start failure keeps exit status 1. 111 is not used by Cloud Hypervisor
++(it exits 0 or 1; clap usage errors exit 2) and is below the shell's 126/127 and the 128+signal range.
++Metal evidence: a loop device held by an `O_EXCL` opener makes the fork exit 111; a nonexistent disk exits
++1; a free device opens (spike `spike-scratch/node-local-persistent-volume-ch-exit/`, kernel 7.0.0-38).
+ 
+ ## Alternatives considered
+ 
+@@ -34,7 +42,9 @@ Overdrive runs no stock VMM. The fix is on branch `spike/node-local-persistent-v
+ - Positive: single writer holds across any device node. For a block device the refusal is `EBUSY` from
+   `open`, raised before the lock; it also means any other claimant of the device, and the message does
+   not say which.
+-- Negative: one patch to carry across fork rebases.
++- Positive: the driver tells a held volume from every other start failure by the VMM's exit status, not by
++  its stderr text.
++- Negative: two small patches to carry across fork rebases (the open, and the exit status).
+ 
+ ## Links
+ 
+diff --git a/infra/provision/versions.env b/infra/provision/versions.env
+index 8f1589342..41b4c80e4 100644
+--- a/infra/provision/versions.env
++++ b/infra/provision/versions.env
+@@ -15,9 +15,9 @@
+ # The repository is a source location only; provisioning never downloads a
+ # release binary. The revision must match vendors/cloud-hypervisor.
+ CLOUD_HYPERVISOR_FORK_REPO="overdrive-sh/cloud-hypervisor"
+-CLOUD_HYPERVISOR_FORK_REV="ab4ac3a3104b3d536ee8c81495ea852aa6ce76fb"
++CLOUD_HYPERVISOR_FORK_REV="7396ef7ac6178161250950491d471b1c569ad9ad"
+ CLOUD_HYPERVISOR_BUILD_TOOLCHAIN="1.89.0"
+-CLOUD_HYPERVISOR_SHA256_X86_64="0da283767c825a8246534f57b87d3be9d6152f90a14058754d3885045d815b66"
++CLOUD_HYPERVISOR_SHA256_X86_64="6f08c8c665f7fc9b7bcafd0c251d66ab90055033a6cb576f96a8f177f7ef7d2c"
+ CLOUD_HYPERVISOR_SHA256_AARCH64="74195594db430695d4fbd9a8ecbc1d6d4b196f17c52afa6a3e96c967d86a91cc"
+ 
+ # virtiofsd comes from apt (Ubuntu ships 1.13.2), NOT a pinned download.
+diff --git a/spike-scratch/node-local-persistent-volume-ch-exit/hold.py b/spike-scratch/node-local-persistent-volume-ch-exit/hold.py
+new file mode 100644
+index 000000000..5a2102dc4
+--- /dev/null
++++ b/spike-scratch/node-local-persistent-volume-ch-exit/hold.py
+@@ -0,0 +1,5 @@
++import os, signal, sys
++path, marker = sys.argv[1], sys.argv[2]
++fd = os.open(path, os.O_RDWR | os.O_EXCL)
++open(marker, "w").close()
++signal.pause()
+diff --git a/spike-scratch/node-local-persistent-volume-ch-exit/probe.sh b/spike-scratch/node-local-persistent-volume-ch-exit/probe.sh
+new file mode 100755
+index 000000000..93889f94f
+--- /dev/null
++++ b/spike-scratch/node-local-persistent-volume-ch-exit/probe.sh
+@@ -0,0 +1,52 @@
++#!/usr/bin/env bash
++# Probe: Cloud Hypervisor's exit status when a block device's exclusive (O_EXCL)
++# open returns EBUSY. Run as root on the metal host:
++#   cargo xtask metal run --exclusive -- spike-scratch/node-local-persistent-volume-ch-exit/probe.sh
++# Prediction: held device -> exit 111; nonexistent disk -> exit 1; free device
++# (control) -> opens, the VMM keeps running until `timeout` kills it (124).
++set -u
++CH=/usr/local/bin/cloud-hypervisor
++KERNEL="${OVERDRIVE_METAL_KERNEL:?OVERDRIVE_METAL_KERNEL not set}"
++HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
++WORK="$(mktemp -d /var/tmp/ch-exit-probe.XXXXXX)"
++LOOP=""
++HOLDER=""
++cleanup() {
++  [ -z "${HOLDER}" ] || kill "${HOLDER}" 2>/dev/null
++  [ -z "${LOOP}" ] || losetup -d "${LOOP}" 2>/dev/null
++  rm -rf "${WORK}"
++}
++trap cleanup EXIT
++
++echo "uname -r: $(uname -r)"
++echo "cloud-hypervisor sha256: $(sha256sum "${CH}" | cut -d' ' -f1)"
++echo "kernel: ${KERNEL}"
++
++truncate -s 64M "${WORK}/vol.img"
++LOOP="$(losetup --find --show "${WORK}/vol.img")" || { echo "losetup failed"; exit 2; }
++echo "volume device: ${LOOP}"
++
++launch() { # $1 = disk path ; extra env TIMEOUT
++  timeout "${TIMEOUT:-20}" "${CH}" --cpus boot=1 --memory size=128M \
++    --kernel "${KERNEL}" --cmdline "console=ttyS0" \
++    --disk "path=$1,image_type=raw,direct=on" \
++    --guest-reset-action exit-vmm --api-socket "${WORK}/api.sock" 2>"${WORK}/stderr.txt"
++  echo "exit status: $?"
++  echo "--- stderr ---"; cat "${WORK}/stderr.txt"; echo "--------------"
++  rm -f "${WORK}/api.sock"
++}
++
++echo; echo "== case 1: device held by an O_EXCL opener =="
++python3 -I "${HERE}/hold.py" "${LOOP}" "${WORK}/held" &
++HOLDER=$!
++for _ in $(seq 50); do [ -e "${WORK}/held" ] && break; sleep 0.1; done
++[ -e "${WORK}/held" ] || { echo "holder did not take the device"; exit 2; }
++echo "holder pid ${HOLDER} holds ${LOOP}"
++launch "${LOOP}"
++kill "${HOLDER}"; wait "${HOLDER}" 2>/dev/null; HOLDER=""
++
++echo; echo "== case 2: nonexistent disk =="
++launch /dev/does-not-exist-ch-probe
++
++echo; echo "== case 3 (control): device free =="
++TIMEOUT=5 launch "${LOOP}"
+diff --git a/vendors/cloud-hypervisor b/vendors/cloud-hypervisor
+index ab4ac3a31..7396ef7ac 160000
+--- a/vendors/cloud-hypervisor
++++ b/vendors/cloud-hypervisor
+@@ -1 +1 @@
+-Subproject commit ab4ac3a3104b3d536ee8c81495ea852aa6ce76fb
++Subproject commit 7396ef7ac6178161250950491d471b1c569ad9ad
+commit 7396ef7ac6178161250950491d471b1c569ad9ad
+Author: Marcus Schack Abildskov <work@marcus-sa.dev>
+Date:   Sun Nov 22 15:10:09 2026 +0100
+
+    main: exit 111 when a disk's exclusive open fails with EBUSY
+    
+    A raw disk is opened with O_EXCL; when another holder has the device the open
+    fails with EBUSY, which exited 1 like every other start failure. Walk the error
+    chain for the typed BlockError (kind Io, op Open, source io::Error EBUSY) and
+    exit 111 for exactly that case. Every other failure still exits 1.
+    
+    Signed-off-by: Marcus Schack Abildskov <work@marcus-sa.dev>
+
+diff --git a/cloud-hypervisor/Cargo.toml b/cloud-hypervisor/Cargo.toml
+index 3bc74d27c..33d9462cb 100644
+--- a/cloud-hypervisor/Cargo.toml
++++ b/cloud-hypervisor/Cargo.toml
+@@ -12,6 +12,7 @@ version = "56.0.0"
+ 
+ [dependencies]
+ api_client = { path = "../api_client" }
++block = { path = "../block" }
+ clap = { workspace = true, features = [
+   "color",
+   "derive",
+@@ -43,7 +44,6 @@ zbus = { workspace = true, features = [
+ ], optional = true }
+ 
+ [dev-dependencies]
+-block = { path = "../block" }
+ dirs = { workspace = true }
+ net_util = { path = "../net_util" }
+ test_infra = { path = "../test_infra" }
+diff --git a/cloud-hypervisor/src/main.rs b/cloud-hypervisor/src/main.rs
+index b12ecd977..644e98fd3 100644
+--- a/cloud-hypervisor/src/main.rs
++++ b/cloud-hypervisor/src/main.rs
+@@ -7,6 +7,7 @@
+ #[cfg(test)]
+ mod test_util;
+ 
++use std::error::Error as StdError;
+ use std::fs::{self, File};
+ use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
+ use std::path::Path;
+@@ -14,8 +15,9 @@
+ use std::path::PathBuf;
+ use std::ptr::from_ref;
+ use std::sync::mpsc::channel;
+-use std::{any, cmp, env, io, num, process};
++use std::{any, cmp, env, io, iter, num, process};
+ 
++use block::error::{BlockError, BlockErrorKind, ErrorOp};
+ use clap::{ArgAction, ArgGroup, Parser, ValueEnum};
+ use event_monitor::event;
+ use libc::EFD_NONBLOCK;
+@@ -1127,6 +1129,27 @@ fn expand_fdtable() -> Result<(), FdTableError> {
+     Ok(())
+ }
+ 
++/// Exit status when a disk could not be opened because another holder has the
++/// block device: its exclusive (`O_EXCL`) open failed with `EBUSY`. Every other
++/// failure exits 1.
++const EXIT_DISK_BUSY: i32 = 111;
++
++/// Whether the error chain holds a disk open that failed with `EBUSY`, read from
++/// the typed [`BlockError`] (kind, operation and OS error), not from its text.
++fn is_disk_busy(top_error: &(dyn StdError + 'static)) -> bool {
++    iter::successors(Some(top_error), |e| (*e).source()).any(|e| {
++        e.downcast_ref::<BlockError>().is_some_and(|block_error| {
++            block_error.kind() == BlockErrorKind::Io
++                && block_error
++                    .context()
++                    .is_some_and(|ctx| ctx.op == Some(ErrorOp::Open))
++                && block_error
++                    .downcast_ref::<io::Error>()
++                    .is_some_and(|io_error| io_error.raw_os_error() == Some(libc::EBUSY))
++        })
++    })
++}
++
+ fn main() {
+     #[cfg(all(feature = "sev_snp", not(target_arch = "x86_64")))]
+     compile_error!("Feature 'sev_snp' needs target 'x86_64'");
+@@ -1171,7 +1194,11 @@ fn main() {
+         }
+         Err(top_error) => {
+             cloud_hypervisor::cli_print_error_chain(&top_error, "Cloud Hypervisor", |_, _, _| None);
+-            1
++            if is_disk_busy(&top_error) {
++                EXIT_DISK_BUSY
++            } else {
++                1
++            }
+         }
+     };
+ 
+@@ -1198,7 +1225,45 @@ mod tests {
+     };
+ 
+     use crate::test_util::assert_args_sorted;
+-    use crate::{Cli, GuestResetAction, GuestShutdownAction, SeccompSiginfo};
++    use crate::{Cli, GuestResetAction, GuestShutdownAction, SeccompSiginfo, is_disk_busy};
++
++    #[derive(Debug, thiserror::Error)]
++    #[error("boot failed")]
++    struct Wrapper(#[source] block::error::BlockError);
++
++    fn open_error(os_error: i32, op: block::error::ErrorOp) -> Wrapper {
++        Wrapper(
++            block::error::BlockError::new(
++                block::error::BlockErrorKind::Io,
++                std::io::Error::from_raw_os_error(os_error),
++            )
++            .with_op(op)
++            .with_path("/dev/mapper/vol"),
++        )
++    }
++
++    #[test]
++    fn disk_busy_is_an_ebusy_disk_open() {
++        assert!(is_disk_busy(&open_error(
++            libc::EBUSY,
++            block::error::ErrorOp::Open
++        )));
++    }
++
++    #[test]
++    fn other_failures_are_not_disk_busy() {
++        assert!(!is_disk_busy(&open_error(
++            libc::ENOENT,
++            block::error::ErrorOp::Open
++        )));
++        assert!(!is_disk_busy(&open_error(
++            libc::EBUSY,
++            block::error::ErrorOp::Resize
++        )));
++        assert!(!is_disk_busy(&std::io::Error::from_raw_os_error(
++            libc::EBUSY
++        )));
++    }
+ 
+     #[test]
+     fn clap_cli_definition_is_valid() {

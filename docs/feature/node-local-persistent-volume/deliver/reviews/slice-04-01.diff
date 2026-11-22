@@ -1,0 +1,115 @@
+commit 32fe7de335095484303dbabc42b507d4f7500e1b
+Author: Marcus Schack Abildskov <work@marcus-sa.dev>
+Date:   Sat Nov 21 23:51:45 2026 +0100
+
+    feat(node-local-persistent-volume): refuse startup on a broken volume pool, log not_composed when absent
+    
+    compose_volume_backing now separates the three probe outcomes: a backing passes
+    through, no pool logs volume_backing.not_composed, and a failed probe logs
+    health.startup.refused (reason volume_backing.probe) and returns the dedicated
+    ControlPlaneError::VolumeBackingBoot. Adds VolumeProbeScenario::as_str.
+    
+    Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+    Step-Id: 04-01
+    Task-Id: node-local-persistent-volume
+
+diff --git a/crates/overdrive-cli/tests/integration/volume_boot_probe.rs b/crates/overdrive-cli/tests/integration/volume_boot_probe.rs
+index 96015c3dd..7bb124cff 100644
+--- a/crates/overdrive-cli/tests/integration/volume_boot_probe.rs
++++ b/crates/overdrive-cli/tests/integration/volume_boot_probe.rs
+@@ -148,9 +148,6 @@ async fn assert_refused(row: &str, scenario: VolumeProbeScenario, typed_detail:
+ /// CONTRACT_SHAPE: bounded-change.
+ #[overdrive_test(guest = "cgroup-default")]
+ #[tokio::test(flavor = "current_thread")]
+-#[should_panic(
+-    expected = "a present but broken volume pool must refuse startup (tools_or_device_mapper_unusable)"
+-)]
+ async fn sad_a_broken_volume_pool_refuses_startup() {
+     let rows = [
+         (
+@@ -195,7 +192,6 @@ async fn sad_a_broken_volume_pool_refuses_startup() {
+ /// CONTRACT_SHAPE: bounded-change.
+ #[overdrive_test(guest = "cgroup-default")]
+ #[tokio::test(flavor = "current_thread")]
+-#[should_panic(expected = "the boot must log volume_backing.not_composed")]
+ async fn a_node_with_no_labelled_partition_boots_and_logs_not_composed() {
+     let (result, events, _tmp) = boot(Arc::new(SimVolumePoolProbe::absent())).await;
+     let handle = result.expect("an absent pool is the soft case, not a refusal");
+diff --git a/crates/overdrive-control-plane/src/lib.rs b/crates/overdrive-control-plane/src/lib.rs
+index 281227254..2861c9b46 100644
+--- a/crates/overdrive-control-plane/src/lib.rs
++++ b/crates/overdrive-control-plane/src/lib.rs
+@@ -3579,18 +3579,38 @@ const OVERDRIVE_VMM_RLIMIT_NOFILE: u64 = 256;
+ 
+ /// Boot step: probe the node's volume pool (GH #348, ADR-0314). `None` logs
+ /// `volume_backing.not_composed`; a present but broken pool refuses startup with
+-/// `health.startup.refused`, reason `volume_backing.probe`.
+-///
+-/// RED scaffold (DISTILL): passes the probed backing through and treats every other
+-/// outcome as "no pool", so existing boots are unchanged until DELIVER lands the
+-/// event and the refusal.
++/// `health.startup.refused`, reason `volume_backing.probe`. The decision does not
++/// depend on the node's VM capability.
+ async fn compose_volume_backing(
+     probe: &dyn overdrive_core::traits::volume_backing::VolumePoolProbe,
+ ) -> std::result::Result<
+     Option<Arc<dyn overdrive_core::traits::volume_backing::VolumeBacking>>,
+     error::ControlPlaneError,
+ > {
+-    Ok(probe.probe().await.ok().flatten())
++    match probe.probe().await {
++        Ok(Some(backing)) => Ok(Some(backing)),
++        Ok(None) => {
++            tracing::info!(
++                name: "volume_backing.not_composed",
++                "no labelled volume partition; volumes are refused at launch"
++            );
++            Ok(None)
++        }
++        Err(source) => {
++            // Recorded as a string value (not `%source`) so the event carries the
++            // probe error's words verbatim, including a quoted device path.
++            let cause = source.to_string();
++            tracing::error!(
++                name: "health.startup.refused",
++                target: "overdrive::health",
++                reason = "volume_backing.probe",
++                scenario = source.scenario.as_str(),
++                cause = cause.as_str(),
++                "volume pool startup refused; composition root will not start"
++            );
++            Err(error::ControlPlaneError::VolumeBackingBoot(source))
++        }
++    }
+ }
+ 
+ #[allow(
+diff --git a/crates/overdrive-core/src/traits/volume_backing.rs b/crates/overdrive-core/src/traits/volume_backing.rs
+index 8c7e2994c..106c02808 100644
+--- a/crates/overdrive-core/src/traits/volume_backing.rs
++++ b/crates/overdrive-core/src/traits/volume_backing.rs
+@@ -164,9 +164,23 @@ pub enum VolumeProbeScenario {
+     ScratchRemoveFailed,
+ }
+ 
++impl VolumeProbeScenario {
++    /// The snake_case label naming this stage in the startup-refusal event and error.
++    #[must_use]
++    pub const fn as_str(self) -> &'static str {
++        match self {
++            Self::SysfsUnreadable => "sysfs_unreadable",
++            Self::ToolsOrDeviceMapperUnusable => "tools_or_device_mapper_unusable",
++            Self::VolumeGroupMissing => "volume_group_missing",
++            Self::ScratchCreateOrNodeFailed => "scratch_create_or_node_failed",
++            Self::ScratchRemoveFailed => "scratch_remove_failed",
++        }
++    }
++}
++
+ /// A present-but-broken volume pool: refuses startup (`volume_backing.probe`).
+ #[derive(Debug, thiserror::Error)]
+-#[error("volume pool probe failed ({scenario:?}): {detail}")]
++#[error("volume pool probe failed ({}): {detail}", scenario.as_str())]
+ pub struct VolumeProbeError {
+     /// The failing stage.
+     pub scenario: VolumeProbeScenario,

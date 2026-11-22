@@ -1,0 +1,226 @@
+commit 752360aacf48a1b57f5f778d45c9a758144a7663
+Author: Marcus Schack Abildskov <work@marcus-sa.dev>
+Date:   Sat Nov 21 03:13:15 2026 +0100
+
+    feat(node-local-persistent-volume): report the declared volume in alloc status and describe
+    
+    The alloc_status handler projects the workload's declared [vm.volume] onto
+    AllocStatusResponse.volume at read time, and render::workload_describe
+    prints a presence-guarded Volume line with the size and the static guest
+    disk serial. The OpenAPI spec is regenerated, and the README's quoted
+    describe line matches the real output.
+    
+    Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+    Step-Id: 02-04
+    Task-Id: node-local-persistent-volume
+
+diff --git a/api/openapi.yaml b/api/openapi.yaml
+index 637ef2849..6b57730cd 100644
+--- a/api/openapi.yaml
++++ b/api/openapi.yaml
+@@ -643,6 +643,14 @@ components:
+             Per the Q1.A resolution 2026-05-15: per-listener lines do
+             NOT carry a per-listener VIP — listeners are `(port, protocol)`
+             only; the Service-level VIP lives at this top-level field.
++        volume:
++          oneOf:
++          - type: 'null'
++          - $ref: '#/components/schemas/VolumeBody'
++            description: |-
++              The node-local persistent volume the workload declares (GH #348,
++              ADR-0310), projected at read time from the workload intent; never
++              persisted. Additive: absent when the workload declares no volume.
+         workload_id:
+           type:
+           - string
+@@ -3879,6 +3887,7 @@ components:
+         | `VmConfinementUnavailable { control, detail }` | cause | `VmDriver` — `VmmError::ConfinementUnavailable` join | NO — Slice 03 |
+         | `VmGuestExitUnreported { vmm_exit_code, vmm_signal }` | cause | `VmDriver` — boot-race VMM-exit arm | yes |
+         | `VmGuestCommandDispatchFailed { detail }` | cause | `VmDriver` — post-READY `EXEC` write failure | yes |
++        | `VmVolumeUnavailable { cause }` | cause | `TransitionReason::from(&DriverStartFailure)` maps a `VmStartFailure::VolumeUnavailable` start failure | NO — no driver constructs that failure yet |
+ 
+         **Phase 2 emit-deferred variants**: `NoCapacity` is deferred until
+         capacity accounting exists, and until 2026-08-11
+@@ -4047,6 +4056,17 @@ components:
+           type: string
+           description: The declared size, `<uint>GiB` or `<uint>TiB`.
+       additionalProperties: false
++    VolumeBody:
++      type: object
++      description: The declared volume of a workload, as the operator wrote it.
++      required:
++      - size
++      properties:
++        size:
++          type: string
++          description: |-
++            The declared size in its canonical `Display` spelling (for example
++            `40GiB`).
+     VolumeOperation:
+       type: string
+       description: |-
+diff --git a/crates/overdrive-cli/src/render.rs b/crates/overdrive-cli/src/render.rs
+index 92f79459e..d3f11df00 100644
+--- a/crates/overdrive-cli/src/render.rs
++++ b/crates/overdrive-cli/src/render.rs
+@@ -267,6 +267,7 @@ pub fn workload_describe(out: &WorkloadDescribeOutput) -> String {
+     // Service, `None` for Job/Schedule per ADR-0049 / #183); the line is
+     // omitted entirely when absent.
+     render_vip_section(&mut s, out.snapshot.vip.as_deref());
++    render_volume_section(&mut s, out.snapshot.volume.as_ref());
+     // Listeners are an INTENT property carried on the snapshot envelope,
+     // independent of allocations/convergence — render them at ANY
+     // allocation count (including 0) so a pre-convergence UDP Service
+@@ -629,6 +630,20 @@ fn render_vip_section(out: &mut String, vip: Option<&str>) {
+     let _ = writeln!(out, "VIP:           {vip}");
+ }
+ 
++/// Append the operator-facing `Volume` line IFF the workload declares a
++/// node-local persistent volume. The guest disk serial is static text: the
++/// guest finds its volume by that fixed virtio serial.
++fn render_volume_section(
++    out: &mut String,
++    volume: Option<&overdrive_control_plane::api::VolumeBody>,
++) {
++    use std::fmt::Write as _;
++    let Some(volume) = volume else {
++        return;
++    };
++    let _ = writeln!(out, "Volume:        {} (guest disk: virtio serial ovd-volume)", volume.size);
++}
++
+ /// Append the operator-facing `Listeners:` section to `out` IFF the
+ /// intent declared at least one listener. Each listener renders as
+ /// `<port>/<protocol>` using the protocol enum's canonical lowercase
+diff --git a/crates/overdrive-cli/tests/acceptance/render_pure_fns.rs b/crates/overdrive-cli/tests/acceptance/render_pure_fns.rs
+index 03f956659..dea4b0bda 100644
+--- a/crates/overdrive-cli/tests/acceptance/render_pure_fns.rs
++++ b/crates/overdrive-cli/tests/acceptance/render_pure_fns.rs
+@@ -149,6 +149,7 @@ fn status_fixture(kind: WorkloadKind, spec_digest: &str) -> WorkloadDescribeOutp
+         probes: vec![],
+         probe_results: vec![],
+         capacity_wait: None,
++        volume: None,
+     };
+     WorkloadDescribeOutput {
+         workload_id: "test-wl".to_string(),
+diff --git a/crates/overdrive-cli/tests/acceptance/workload_describe_volume.rs b/crates/overdrive-cli/tests/acceptance/workload_describe_volume.rs
+index 6c38c37c7..3e7261d6e 100644
+--- a/crates/overdrive-cli/tests/acceptance/workload_describe_volume.rs
++++ b/crates/overdrive-cli/tests/acceptance/workload_describe_volume.rs
+@@ -37,7 +37,6 @@ fn describe(volume: Option<Value>) -> String {
+ /// A workload with a volume shows its size and the static guest-disk serial.
+ /// CONTRACT_SHAPE: pure-function.
+ #[test]
+-#[should_panic(expected = "the describe output must show the declared volume")]
+ fn describe_shows_the_volume_size_and_guest_serial() {
+     let text = describe(Some(json!({"size": "40GiB"})));
+     assert!(
+@@ -49,7 +48,6 @@ fn describe_shows_the_volume_size_and_guest_serial() {
+ /// A larger size is shown in its canonical spelling, as the server sent it.
+ /// CONTRACT_SHAPE: pure-function.
+ #[test]
+-#[should_panic(expected = "the describe output must show the declared volume")]
+ fn describe_shows_a_terabyte_volume_verbatim() {
+     let text = describe(Some(json!({"size": "2TiB"})));
+     assert!(
+diff --git a/crates/overdrive-cli/tests/integration/workload_describe.rs b/crates/overdrive-cli/tests/integration/workload_describe.rs
+index 37bd771f7..93afecd25 100644
+--- a/crates/overdrive-cli/tests/integration/workload_describe.rs
++++ b/crates/overdrive-cli/tests/integration/workload_describe.rs
+@@ -99,6 +99,7 @@ fn fixture_response(
+         probes: vec![],
+         probe_results: vec![],
+         capacity_wait: None,
++        volume: None,
+     }
+ }
+ 
+diff --git a/crates/overdrive-control-plane/src/api.rs b/crates/overdrive-control-plane/src/api.rs
+index 07b295d05..fc6504440 100644
+--- a/crates/overdrive-control-plane/src/api.rs
++++ b/crates/overdrive-control-plane/src/api.rs
+@@ -367,6 +367,19 @@ pub struct AllocStatusResponse {
+     /// the workload is not waiting.
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub capacity_wait: Option<CapacityWait>,
++    /// The node-local persistent volume the workload declares (GH #348,
++    /// ADR-0310), projected at read time from the workload intent; never
++    /// persisted. Additive: absent when the workload declares no volume.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub volume: Option<VolumeBody>,
++}
++
++/// The declared volume of a workload, as the operator wrote it.
++#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
++pub struct VolumeBody {
++    /// The declared size in its canonical `Display` spelling (for example
++    /// `40GiB`).
++    pub size: String,
+ }
+ 
+ /// The capacity limit a workload's start is waiting on (ADR-0336).
+diff --git a/crates/overdrive-control-plane/src/handlers.rs b/crates/overdrive-control-plane/src/handlers.rs
+index c4838001a..6673eb06a 100644
+--- a/crates/overdrive-control-plane/src/handlers.rs
++++ b/crates/overdrive-control-plane/src/handlers.rs
+@@ -1287,9 +1287,22 @@ pub async fn alloc_status(
+         probes,
+         probe_results,
+         capacity_wait: None,
++        volume: declared_volume(&intent),
+     }))
+ }
+ 
++/// Project the workload's declared `[vm.volume]` from its persisted intent
++/// onto the wire, in the `Display` spelling the operator wrote.
++fn declared_volume(intent: &WorkloadIntent) -> Option<api::VolumeBody> {
++    let driver = match intent {
++        WorkloadIntent::Job(job) => &job.driver,
++        WorkloadIntent::Service(svc) => &svc.driver,
++        WorkloadIntent::Schedule(sched) => &sched.job.driver,
++    };
++    let overdrive_core::aggregate::WorkloadDriver::Vm(vm) = driver;
++    vm.volume.as_ref().map(|volume| api::VolumeBody { size: volume.size.to_string() })
++}
++
+ /// Flatten a Service aggregate's three per-role probe arrays into one
+ /// `(role, idx)`-ascending vector for the wire.
+ ///
+diff --git a/crates/overdrive-control-plane/tests/acceptance/alloc_status_volume.rs b/crates/overdrive-control-plane/tests/acceptance/alloc_status_volume.rs
+index d56d84de0..e8157a181 100644
+--- a/crates/overdrive-control-plane/tests/acceptance/alloc_status_volume.rs
++++ b/crates/overdrive-control-plane/tests/acceptance/alloc_status_volume.rs
+@@ -113,7 +113,6 @@ async fn install_volume_service(state: &AppState) {
+ /// in the `Display` form the operator wrote.
+ /// CONTRACT_SHAPE: bounded-change.
+ #[tokio::test]
+-#[should_panic(expected = "the response must carry the declared volume size")]
+ async fn alloc_status_reports_the_declared_volume_size() {
+     let tmp = TempDir::new().expect("tmpdir");
+     let state = build_app_state(&tmp);
+diff --git a/crates/overdrive-control-plane/tests/acceptance/api_type_shapes.rs b/crates/overdrive-control-plane/tests/acceptance/api_type_shapes.rs
+index 16a05f9dc..1d8a0011a 100644
+--- a/crates/overdrive-control-plane/tests/acceptance/api_type_shapes.rs
++++ b/crates/overdrive-control-plane/tests/acceptance/api_type_shapes.rs
+@@ -279,6 +279,7 @@ fn alloc_status_response_round_trips_with_empty_and_populated_rows() {
+         probes: vec![],
+         probe_results: vec![],
+         capacity_wait: None,
++        volume: None,
+     };
+     let wire = serde_json::to_string(&populated).expect("serialise populated AllocStatusResponse");
+     let round_tripped: AllocStatusResponse =
+diff --git a/examples/node-local-volume/README.md b/examples/node-local-volume/README.md
+index 4d9947281..13dc029df 100644
+--- a/examples/node-local-volume/README.md
++++ b/examples/node-local-volume/README.md
+@@ -66,7 +66,7 @@ cargo xtask metal run -- examples/node-local-volume/run-example.sh run oversized
+ 
+ ```bash
+ overdrive deploy --detach examples/node-local-volume/volume-service.toml
+-overdrive workload describe volume-notes     # Volume  1GiB (guest disk: virtio serial ovd-volume)
++overdrive workload describe volume-notes     # Volume:        1GiB (guest disk: virtio serial ovd-volume)
+ overdrive workload restart volume-notes      # a replacement attaches the same volume
+ overdrive job stop volume-notes              # the volume stays
+ overdrive workload restart volume-notes      # resume: the same volume is attached again

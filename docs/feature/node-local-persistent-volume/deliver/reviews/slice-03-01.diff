@@ -1,0 +1,667 @@
+commit dc2eeef3b3799ef5de4a74616df9b4ea5ea7b786
+Author: Marcus Schack Abildskov <work@marcus-sa.dev>
+Date:   Sat Nov 21 12:58:19 2026 +0100
+
+    feat(node-local-persistent-volume): SimVolumeBacking honours the VolumeBacking port contract
+    
+    The sim adapter now enforces the ensure preconditions, derives the
+    canonical volume name, and reports claim_state (NotFound, Held, Free)
+    with a claim released when its VMM dies. The port docstrings pin the
+    ensure bound, owner and deadline properties and the claim_state
+    contract. The sim keeps no timer: the adapter owns the 30 s deadline.
+    
+    Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+    Step-Id: 03-01
+    Task-Id: node-local-persistent-volume
+
+diff --git a/Cargo.lock b/Cargo.lock
+index 1bbdc606b..6d464ec0c 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -2700,6 +2700,7 @@ dependencies = [
+  "rustls",
+  "serde",
+  "serde_json",
++ "sha2",
+  "tempfile",
+  "thiserror 2.0.18",
+  "tokio",
+diff --git a/crates/overdrive-control-plane/src/node_volume_boundaries.rs b/crates/overdrive-control-plane/src/node_volume_boundaries.rs
+index e1f05cb46..f876be607 100644
+--- a/crates/overdrive-control-plane/src/node_volume_boundaries.rs
++++ b/crates/overdrive-control-plane/src/node_volume_boundaries.rs
+@@ -232,7 +232,7 @@ impl Rig {
+ /// so the body stops at `declare`; the assertions after it are the contract the launch path must
+ /// meet once the parser and the lane table land.
+ #[test]
+-#[should_panic(expected = "the volume exists before the claim is held")]
++#[should_panic(expected = "a stop recorded during a launch's claim wait must end the launch at once with StartSuperseded")]
+ fn a_stop_interrupts_the_start_and_its_result_is_never_used() {
+     let mut rig = Rig::new();
+     rig.declare();
+@@ -288,7 +288,7 @@ fn a_stop_interrupts_the_start_and_its_result_is_never_used() {
+ /// charged to the restart budget: the restart authority's view carries the charge once the
+ /// next evaluation issues the replacement.
+ #[test]
+-#[should_panic(expected = "the volume exists before the claim is held")]
++#[should_panic(expected = "the held claim must fail the launch typed")]
+ fn a_launch_held_past_its_bound_writes_the_typed_failed_row_and_charges_the_restart_budget() {
+     let mut rig = Rig::new();
+     rig.declare();
+diff --git a/crates/overdrive-core/src/traits/volume_backing.rs b/crates/overdrive-core/src/traits/volume_backing.rs
+index ccef8231c..aaab9d1f4 100644
+--- a/crates/overdrive-core/src/traits/volume_backing.rs
++++ b/crates/overdrive-core/src/traits/volume_backing.rs
+@@ -1,9 +1,9 @@
+ //! `VolumeBacking` — the node-local volume pool port (GH #348, ADR-0312,
+ //! ADR-0317, ADR-0318).
+ //!
+-//! RED scaffold (DISTILL): the trait and its errors are the shapes the feature
+-//! delta § Port pins. The behavioural contract is the feature delta § Port;
+-//! DELIVER writes it into these docstrings.
++//! The trait and its errors are the shapes the feature delta § Port pins; the
++//! method docstrings below are the behavioural contract every adapter
++//! (`LvmVolumeBacking`, `SimVolumeBacking`) implements.
+ 
+ use std::path::PathBuf;
+ use std::sync::Arc;
+@@ -51,11 +51,59 @@ pub enum VolumeBackingError {
+     },
+ }
+ 
+-/// The volume pool port. See the feature delta § Port for the behavioural
+-/// contract (idempotent `ensure`, `claim_state` projection rule).
++/// The volume pool port: one volume per workload, named `ovd-<hash>` where
++/// `<hash>` is the first 32 lowercase hexadecimal characters of the SHA-256 of
++/// the workload id (ADR-0312). The device path every method uses is the
++/// device-mapper node `/dev/mapper/overdrive-ovd--<hash>`.
+ #[async_trait]
+ pub trait VolumeBacking: Send + Sync {
+     /// Create-if-absent and activate the workload's volume; return its device path.
++    ///
++    /// Preconditions: none beyond a backing that exists (a node with no pool has
++    /// no backing, so "no pool" is never an `ensure` outcome).
++    ///
++    /// Postconditions on `Ok(path)`: the volume exists and is active, `path` is
++    /// its device node, and `claim_state` no longer reports `NotFound` for it.
++    /// A missing volume is created with exactly `size` reserved and is never
++    /// formatted; a volume that exists but is inactive (the state after every
++    /// node reboot) is activated. Creation and activation are separate effects,
++    /// never assumed from each other.
++    ///
++    /// Edge cases:
++    /// - An existing volume is returned as it is: its size is never compared or
++    ///   changed, so `ensure` with another `size` returns the same path.
++    /// - Not enough free extents is `Err(InsufficientSpace { needed, free })`,
++    ///   `needed` the declared `size` and `free` the free space observed before
++    ///   the create; nothing is created.
++    /// - A failing `lvm` command is `Err(PoolCommand { operation, source })`,
++    ///   `operation` the command that failed; nothing it did not complete is
++    ///   left behind, and a volume it did create stays.
++    ///
++    /// Invariants: idempotent and safe to repeat after a crash, so a retry finds
++    /// the volume an earlier attempt created and never creates a second one;
++    /// a volume is created at most once per workload.
++    ///
++    /// Bound: `ensure` returns, `Ok` or `Err`, within 30 s of the call, whatever
++    /// the pool does. The 30 s is one deadline for the whole call, covering
++    /// every command it spawns, and is a private policy value of the adapter,
++    /// not a parameter of the port. The adapter owns it: it starts the deadline
++    /// when `ensure` is entered, on its own timer. The caller passes no deadline,
++    /// holds no timer on `ensure`, and awaits it to its return; it never drops
++    /// the call mid-effect.
++    ///
++    /// At the deadline: `ensure` returns at that instant
++    /// `Err(PoolCommand { operation, source })`, `operation` the command in
++    /// flight (or, between two commands, the next one it would have run) and
++    /// `source.kind() == io::ErrorKind::TimedOut`. It spawns no further command
++    /// after the deadline. A command in flight is not killed or aborted; it runs
++    /// to its own end and its result is discarded. A deadline return is neither
++    /// `NotFound` nor `InsufficientSpace`: the caller learns nothing about
++    /// whether the volume was created or activated.
++    ///
++    /// After the deadline: the abandoned command may still create or activate
++    /// the volume, and nothing the call returned depends on it. The next
++    /// `ensure` observes the volume afresh and may spend its own deadline
++    /// waiting for a lock the abandoned command still holds.
+     async fn ensure(
+         &self,
+         workload: &WorkloadId,
+@@ -79,6 +127,10 @@ pub trait VolumeBacking: Send + Sync {
+     /// `Claim` names the `open(2)` of the device node, not an `lvm` command (no
+     /// `lvm` is spawned by `claim_state`).
+     ///
++    /// Preconditions: none; the volume need not exist. `claim_state` has no
++    /// persistent effect and never blocks, so repeated calls observe the claim
++    /// without releasing it.
++    ///
+     /// The launch path treats any `Err` as the end of the launch; only
+     /// `Ok(Held)` is polled again.
+     async fn claim_state(&self, workload: &WorkloadId) -> Result<ClaimState, VolumeBackingError>;
+diff --git a/crates/overdrive-sim/Cargo.toml b/crates/overdrive-sim/Cargo.toml
+index 7c4ed8ad9..2ea9e566c 100644
+--- a/crates/overdrive-sim/Cargo.toml
++++ b/crates/overdrive-sim/Cargo.toml
+@@ -57,6 +57,8 @@ tokio-stream.workspace   = true
+ # `CAP_NET_ADMIN`, `ENOPROTOOPT` = kernel without `IP_TRANSPARENT`).
+ libc.workspace           = true
+ rand.workspace           = true
++# `SimVolumeBacking` derives the volume's device name from the workload id (ADR-0312).
++sha2.workspace           = true
+ thiserror.workspace      = true
+ tempfile.workspace       = true
+ overdrive-store-local    = { path = "../overdrive-store-local" }
+diff --git a/crates/overdrive-sim/src/adapters/volume_backing.rs b/crates/overdrive-sim/src/adapters/volume_backing.rs
+index c456ccabf..192dba747 100644
+--- a/crates/overdrive-sim/src/adapters/volume_backing.rs
++++ b/crates/overdrive-sim/src/adapters/volume_backing.rs
+@@ -1,23 +1,15 @@
+ //! `SimVolumeBacking` — the simulation twin of the volume pool port.
+ //!
+-//! GH #348. RED scaffold (DISTILL): the twin holds no state and scripts nothing until DELIVER
+-//! implements it. Its fault-injection methods are accepted and ignored; `ensure` fails with a
+-//! typed `PoolCommand` naming the scaffold and `claim_state` reports `NotFound`, so a test or a
+-//! conformance step that drives it reaches its own assertion and fails there. The inspection
+-//! and fault-injection methods are test-support surface, which DISTILL shapes
+-//! (`.claude/rules/design.md` scope note); the design pins only that the sim offers "claim held
+-//! until a `drain` step, free-space exhaustion, command failure" and reports `NotFound` while a
+-//! volume is inactive. A backing has no "pool absent" route: it exists only after a probe found a
+-//! pool; a node without one composes `SimVolumePoolProbe::absent()` and the driver holds no backing.
+-
+-#![allow(
+-    clippy::missing_const_for_fn,
+-    clippy::needless_pass_by_value,
+-    clippy::unused_async,
+-    clippy::unused_self,
+-    reason = "DISTILL RED scaffold"
+-)]
+-
++//! GH #348. It models the observable behaviour of `LvmVolumeBacking` exactly: an idempotent
++//! `ensure` that creates then activates, a `claim_state` that reports `NotFound` for an absent or
++//! inactive volume, and the same device-node name. It holds no timer and models no `ensure`
++//! deadline: the adapter owns that bound, and the sim returns by itself. The inspection and
++//! fault-injection methods are test-support surface (`.claude/rules/design.md` scope note). A
++//! backing has no "pool absent" route: it exists only after a probe found a pool; a node without
++//! one composes `SimVolumePoolProbe::absent()` and the driver holds no backing.
++
++use std::collections::BTreeMap;
++use std::fmt::{self, Write as _};
+ use std::path::PathBuf;
+ use std::sync::Arc;
+ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+@@ -28,13 +20,60 @@ use overdrive_core::traits::volume_backing::{
+     ClaimState, VolumeBacking, VolumeBackingError, VolumePoolProbe, VolumeProbeDetail,
+     VolumeProbeError,
+ };
+-use overdrive_core::volume::{VolumeOperation, VolumeSize};
++use overdrive_core::volume::{ByteCount, VolumeOperation, VolumeSize};
++use parking_lot::Mutex;
++use sha2::{Digest, Sha256};
++
++/// Hex characters of the workload id's SHA-256 that name its volume (ADR-0312).
++const NAME_HEX_CHARS: usize = 32;
++
++/// Who holds a volume's exclusive claim.
++#[derive(Clone, Default)]
++enum Holder {
++    /// Nobody has the device open.
++    #[default]
++    None,
++    /// A holder whose claim outlives it until a `drain`.
++    Held,
++    /// A holder whose claim lasts while `live()` is true.
++    WhileLive(Arc<dyn Fn() -> bool + Send + Sync>),
++}
++
++impl fmt::Debug for Holder {
++    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
++        match self {
++            Self::None => f.write_str("None"),
++            Self::Held => f.write_str("Held"),
++            Self::WhileLive(_) => f.write_str("WhileLive"),
++        }
++    }
++}
+ 
+-const RED: &str = "SimVolumeBacking contract not implemented (GH #348, ADR-0312)";
++/// One logical volume: created once, active while it has a device node.
++#[derive(Debug, Default)]
++struct Volume {
++    active: bool,
++    holder: Holder,
++}
++
++/// The modelled pool.
++#[derive(Debug)]
++struct Pool {
++    free: u64,
++    volumes: BTreeMap<WorkloadId, Volume>,
++    volumes_created: usize,
++    /// Workloads whose next `ensure` parks before activation.
++    pause_armed: Vec<WorkloadId>,
++    /// Workloads with an `ensure` parked before activation.
++    parked: Vec<WorkloadId>,
++    fail_next_command: bool,
++    fail_next_claim_state: bool,
++}
+ 
+ /// In-memory volume pool with scripted faults. Cheap to clone; clones share state.
+ #[derive(Clone, Debug)]
+ pub struct SimVolumeBacking {
++    pool: Arc<Mutex<Pool>>,
+     support: Arc<CallSupport>,
+ }
+ 
+@@ -48,13 +87,42 @@ struct CallSupport {
+     claim_state_parked: AtomicBool,
+     claim_state_release: tokio::sync::Notify,
+     claim_state_released: AtomicBool,
++    ensure_resume: tokio::sync::Notify,
++}
++
++/// The device-mapper node of the workload's volume: `/dev/mapper/overdrive-ovd--<hex>`, the dm
++/// name `<vg>-<lv>` with the `-` of the `ovd-` prefix doubled (the hex has none).
++fn device_node(workload: &WorkloadId) -> PathBuf {
++    let digest = Sha256::digest(workload.as_str().as_bytes());
++    let mut hex = String::with_capacity(digest.len() * 2);
++    for byte in digest {
++        // Writing into a `String` cannot fail.
++        let _ = write!(hex, "{byte:02x}");
++    }
++    PathBuf::from(format!("/dev/mapper/overdrive-ovd--{}", &hex[..NAME_HEX_CHARS]))
++}
++
++fn command_failure(operation: VolumeOperation) -> VolumeBackingError {
++    VolumeBackingError::PoolCommand {
++        operation,
++        source: std::io::Error::other("scripted lvm command failure"),
++    }
+ }
+ 
+ impl SimVolumeBacking {
+     /// A composed pool with `capacity` of free extents.
+     #[must_use]
+-    pub fn with_capacity(_capacity: VolumeSize) -> Self {
+-        Self { support: Arc::new(CallSupport::default()) }
++    pub fn with_capacity(capacity: VolumeSize) -> Self {
++        let pool = Pool {
++            free: capacity.bytes(),
++            volumes: BTreeMap::new(),
++            volumes_created: 0,
++            pause_armed: Vec::new(),
++            parked: Vec::new(),
++            fail_next_command: false,
++            fail_next_claim_state: false,
++        };
++        Self { pool: Arc::new(Mutex::new(pool)), support: Arc::new(CallSupport::default()) }
+     }
+ 
+     /// Test support: how many times the driver called `ensure` (every call counts, whatever its
+@@ -93,11 +161,14 @@ impl SimVolumeBacking {
+     /// Volumes created so far (a repeat `ensure` does not add one).
+     #[must_use]
+     pub fn volumes_created(&self) -> usize {
+-        0
++        self.pool.lock().volumes_created
+     }
+ 
+-    /// A VMM opens the workload's device exclusively (the claim becomes `Held`).
+-    pub fn hold_claim(&self, _workload: &WorkloadId) {}
++    /// A VMM opens the workload's device exclusively (the claim becomes `Held`). A volume with no
++    /// device node (absent or inactive) cannot be opened: the call changes nothing.
++    pub fn hold_claim(&self, workload: &WorkloadId) {
++        self.set_holder(workload, Holder::Held);
++    }
+ 
+     /// A VMM process opens the workload's device and holds its claim for as long as that process
+     /// is live: the claim reads `Held` while `live()` is true and `Free` once it is false (the
+@@ -107,42 +178,119 @@ impl SimVolumeBacking {
+     /// models a claim that outlives its holder. Test support: no port method carries it.
+     pub fn hold_claim_while_live(
+         &self,
+-        _workload: &WorkloadId,
+-        _live: impl Fn() -> bool + Send + Sync + 'static,
++        workload: &WorkloadId,
++        live: impl Fn() -> bool + Send + Sync + 'static,
+     ) {
++        self.set_holder(workload, Holder::WhileLive(Arc::new(live)));
+     }
+ 
+     /// The holder's in-flight I/O drained: the claim is released.
+-    pub fn drain(&self, _workload: &WorkloadId) {}
++    pub fn drain(&self, workload: &WorkloadId) {
++        if let Some(volume) = self.pool.lock().volumes.get_mut(workload) {
++            volume.holder = Holder::None;
++        }
++    }
+ 
+     /// The next `ensure` for the workload completes only its create effect and parks before
+     /// activation (the conformance driver steps `LaunchEnsureCreate` / `LaunchEnsureActivate`).
+-    pub fn pause_ensure_after_create(&self, _workload: &WorkloadId) {}
++    pub fn pause_ensure_after_create(&self, workload: &WorkloadId) {
++        self.pool.lock().pause_armed.push(workload.clone());
++    }
+ 
+-    /// Release a parked `ensure` so it activates the volume.
+-    pub fn resume_ensure(&self, _workload: &WorkloadId) {}
++    /// Release a parked `ensure` so it activates the volume. A pause armed but not yet reached is
++    /// disarmed.
++    pub fn resume_ensure(&self, workload: &WorkloadId) {
++        {
++            let mut pool = self.pool.lock();
++            pool.pause_armed.retain(|armed| armed != workload);
++            pool.parked.retain(|parked| parked != workload);
++        }
++        self.support.ensure_resume.notify_waiters();
++    }
+ 
+     /// The pool has no free extent (the model's `PoolFull`).
+-    pub fn exhaust_space(&self) {}
++    pub fn exhaust_space(&self) {
++        self.pool.lock().free = 0;
++    }
+ 
+     /// The next `lvm` command fails (the model's `LaunchCmdFail`).
+-    pub fn fail_next_command(&self) {}
++    pub fn fail_next_command(&self) {
++        self.pool.lock().fail_next_command = true;
++    }
+ 
+     /// The next `claim_state` fails with `PoolCommand { operation: Claim }`, an `open(2)` failure
+     /// other than `EBUSY` and `ENOENT` (one-shot: the call after it answers normally).
+-    pub fn fail_next_claim_state(&self) {}
++    pub fn fail_next_claim_state(&self) {
++        self.pool.lock().fail_next_claim_state = true;
++    }
+ 
+     /// Node reboot: every volume is inactive (no device node) and every claim released.
+-    pub fn node_reboot(&self) {}
+-
+-    // ----- conformance-driver inspection (test support, RED scaffold) -----
++    pub fn node_reboot(&self) {
++        for volume in self.pool.lock().volumes.values_mut() {
++            volume.active = false;
++            volume.holder = Holder::None;
++        }
++    }
+ 
+     /// A launch's `ensure` for `workload` is parked after its create effect
+     /// (set by `pause_ensure_after_create`, cleared by `resume_ensure`). The
+     /// conformance driver waits on it to step `LaunchEnsureCreate`.
+     #[must_use]
+-    pub fn ensure_parked(&self, _workload: &WorkloadId) -> bool {
+-        false
++    pub fn ensure_parked(&self, workload: &WorkloadId) -> bool {
++        self.pool.lock().parked.contains(workload)
++    }
++
++    fn set_holder(&self, workload: &WorkloadId, holder: Holder) {
++        if let Some(volume) = self.pool.lock().volumes.get_mut(workload).filter(|v| v.active) {
++            volume.holder = holder;
++        }
++    }
++
++    /// The report and create steps of `ensure`; the volume exists (inactive or active) on `Ok`.
++    fn report_and_create(
++        &self,
++        workload: &WorkloadId,
++        size: VolumeSize,
++    ) -> Result<(), VolumeBackingError> {
++        let mut pool = self.pool.lock();
++        if std::mem::take(&mut pool.fail_next_command) {
++            return Err(command_failure(VolumeOperation::Report));
++        }
++        if pool.volumes.contains_key(workload) {
++            return Ok(());
++        }
++        if size.bytes() > pool.free {
++            return Err(VolumeBackingError::InsufficientSpace {
++                needed: size,
++                free: ByteCount::new(pool.free),
++            });
++        }
++        pool.free -= size.bytes();
++        pool.volumes.insert(workload.clone(), Volume::default());
++        pool.volumes_created += 1;
++        drop(pool);
++        Ok(())
++    }
++
++    /// Park before activation when a pause is armed for `workload`, until `resume_ensure`.
++    async fn park_if_armed(&self, workload: &WorkloadId) {
++        {
++            let mut pool = self.pool.lock();
++            let Some(position) = pool.pause_armed.iter().position(|armed| armed == workload) else {
++                return;
++            };
++            pool.pause_armed.remove(position);
++            pool.parked.push(workload.clone());
++        }
++        loop {
++            let resumed = self.support.ensure_resume.notified();
++            tokio::pin!(resumed);
++            resumed.as_mut().enable();
++            if !self.ensure_parked(workload) {
++                return;
++            }
++            resumed.await;
++        }
+     }
+ }
+ 
+@@ -150,14 +298,16 @@ impl SimVolumeBacking {
+ impl VolumeBacking for SimVolumeBacking {
+     async fn ensure(
+         &self,
+-        _workload: &WorkloadId,
+-        _size: VolumeSize,
++        workload: &WorkloadId,
++        size: VolumeSize,
+     ) -> Result<PathBuf, VolumeBackingError> {
+         self.support.ensure_calls.fetch_add(1, Ordering::SeqCst);
+-        Err(VolumeBackingError::PoolCommand {
+-            operation: VolumeOperation::Create,
+-            source: std::io::Error::other(RED),
+-        })
++        self.report_and_create(workload, size)?;
++        self.park_if_armed(workload).await;
++        if let Some(volume) = self.pool.lock().volumes.get_mut(workload) {
++            volume.active = true;
++        }
++        Ok(device_node(workload))
+     }
+ 
+     async fn claim_state(&self, workload: &WorkloadId) -> Result<ClaimState, VolumeBackingError> {
+@@ -175,7 +325,22 @@ impl VolumeBacking for SimVolumeBacking {
+             }
+             self.support.claim_state_parked.store(false, Ordering::SeqCst);
+         }
+-        Err(VolumeBackingError::NotFound { workload: workload.clone() })
++        let holder = {
++            let mut pool = self.pool.lock();
++            if std::mem::take(&mut pool.fail_next_claim_state) {
++                return Err(command_failure(VolumeOperation::Claim));
++            }
++            match pool.volumes.get(workload) {
++                Some(volume) if volume.active => volume.holder.clone(),
++                _ => return Err(VolumeBackingError::NotFound { workload: workload.clone() }),
++            }
++        };
++        let held = match holder {
++            Holder::None => false,
++            Holder::Held => true,
++            Holder::WhileLive(live) => live(),
++        };
++        Ok(if held { ClaimState::Held } else { ClaimState::Free })
+     }
+ }
+ 
+diff --git a/crates/overdrive-sim/tests/acceptance/sim_volume_backing_contract.rs b/crates/overdrive-sim/tests/acceptance/sim_volume_backing_contract.rs
+index 0cb6625a6..4daf19216 100644
+--- a/crates/overdrive-sim/tests/acceptance/sim_volume_backing_contract.rs
++++ b/crates/overdrive-sim/tests/acceptance/sim_volume_backing_contract.rs
+@@ -49,7 +49,6 @@ fn run<F: std::future::Future>(f: F) -> F::Output {
+ /// Gate available (boundary 1): a new volume is created, activated, returned, and unclaimed.
+ /// CONTRACT_SHAPE: bounded-change.
+ #[test]
+-#[should_panic(expected = "ensure on a pool with space must create the volume")]
+ fn ensure_creates_the_volume_and_leaves_the_claim_free() {
+     let sim = pool(1024);
+     let w = workload("dev-box");
+@@ -68,7 +67,6 @@ fn ensure_creates_the_volume_and_leaves_the_claim_free() {
+ /// returns the same device and creates nothing new; the existing size is not compared.
+ /// CONTRACT_SHAPE: bounded-change.
+ #[test]
+-#[should_panic(expected = "the first ensure must create the volume")]
+ fn ensure_is_idempotent_and_does_not_compare_the_existing_size() {
+     let sim = pool(1024);
+     let w = workload("dev-box");
+@@ -83,7 +81,6 @@ fn ensure_is_idempotent_and_does_not_compare_the_existing_size() {
+ /// Two workloads get two distinct volumes.
+ /// CONTRACT_SHAPE: bounded-change.
+ #[test]
+-#[should_panic(expected = "each workload's ensure must create its own volume")]
+ fn each_workload_gets_its_own_volume() {
+     let sim = pool(1024);
+     let a = run(sim.ensure(&workload("alpha"), gib(10)))
+@@ -98,9 +95,6 @@ fn each_workload_gets_its_own_volume() {
+ /// size, and creates nothing.
+ /// CONTRACT_SHAPE: bounded-change.
+ #[test]
+-#[should_panic(
+-    expected = "an ensure that does not fit must fail InsufficientSpace naming both figures"
+-)]
+ fn sad_insufficient_space_fails_typed_and_creates_nothing() {
+     let sim = pool(10);
+     let err = run(sim.ensure(&workload("dev-box"), gib(40))).expect_err("40GiB does not fit 10GiB");
+@@ -117,7 +111,6 @@ fn sad_insufficient_space_fails_typed_and_creates_nothing() {
+ /// the volume's claim reads `Free` on the very next call.
+ /// CONTRACT_SHAPE: bounded-change.
+ #[test]
+-#[should_panic(expected = "ensure must create the volume whose claim_state fault is armed")]
+ fn sad_a_claim_state_open_failure_is_a_claim_pool_command_error_and_the_next_call_recovers() {
+     let sim = pool(1024);
+     let w = workload("dev-box");
+@@ -140,9 +133,6 @@ fn sad_a_claim_state_open_failure_is_a_claim_pool_command_error_and_the_next_cal
+ /// Sad: asking for the claim of a volume nobody created is `NotFound`.
+ /// CONTRACT_SHAPE: pure-function.
+ #[test]
+-#[should_panic(
+-    expected = "a created volume's claim must be Free while an uncreated one's is NotFound"
+-)]
+ fn sad_claim_state_of_an_absent_volume_is_not_found() {
+     let sim = pool(1024);
+     // The control: a sim that reports NotFound for everything also reports it for the ghost.
+@@ -161,7 +151,6 @@ fn sad_claim_state_of_an_absent_volume_is_not_found() {
+ /// in-flight I/O drained (spike B2b: the claim outlives the process).
+ /// CONTRACT_SHAPE: bounded-change.
+ #[test]
+-#[should_panic(expected = "ensure must create the volume whose claim is read")]
+ fn the_claim_is_held_until_the_old_writer_drains() {
+     let sim = pool(1024);
+     let w = workload("dev-box");
+@@ -189,7 +178,6 @@ fn the_claim_is_held_until_the_old_writer_drains() {
+ /// `Held` while the process is live and `Free` once it is gone, with no `drain` step.
+ /// CONTRACT_SHAPE: bounded-change.
+ #[test]
+-#[should_panic(expected = "ensure must create the volume whose claim is linked to a VMM")]
+ fn a_claim_linked_to_a_vmm_is_released_when_the_vmm_dies() {
+     let sim = pool(1024);
+     let w = workload("dev-box");
+@@ -216,7 +204,6 @@ fn a_claim_linked_to_a_vmm_is_released_when_the_vmm_dies() {
+ /// volume without creating another.
+ /// CONTRACT_SHAPE: bounded-change.
+ #[test]
+-#[should_panic(expected = "ensure must create the volume the reboot deactivates")]
+ fn after_a_node_reboot_the_volume_is_inactive_until_ensure_reactivates_it() {
+     let sim = pool(1024);
+     let w = workload("dev-box");
+@@ -263,8 +250,7 @@ proptest! {
+     /// claimable volume.
+     /// CONTRACT_SHAPE: bounded-change.
+     #[test]
+-    #[should_panic(expected = "1TiB holds three 10GiB volumes")]
+-    fn model_volumes_are_created_once_and_claims_follow_activity(ops in prop::collection::vec(op_strategy(), 0..24)) {
++        fn model_volumes_are_created_once_and_claims_follow_activity(ops in prop::collection::vec(op_strategy(), 0..24)) {
+         let sim = pool(1024);
+         let ids = [workload("alpha"), workload("beta"), workload("gamma")];
+         // The model: a volume is `ensured` once created, `active` while it has a device node (every
+@@ -322,7 +308,6 @@ proptest! {
+ /// nothing, and leaves the claim state untouched; the very next `ensure` (no fault armed) succeeds.
+ /// CONTRACT_SHAPE: bounded-change.
+ #[test]
+-#[should_panic(expected = "the fault was one-shot")]
+ fn sad_a_failing_command_is_a_pool_command_error_and_the_next_ensure_recovers() {
+     let sim = pool(1024);
+     let w = workload("dev-box");
+@@ -342,7 +327,6 @@ fn sad_a_failing_command_is_a_pool_command_error_and_the_next_ensure_recovers()
+ /// rather than creating a second one (`I_ENSURE_IDEMPOTENT_UNDER_CRASH`).
+ /// CONTRACT_SHAPE: bounded-change.
+ #[test]
+-#[should_panic(expected = "the first ensure is parked after its create")]
+ fn an_ensure_that_failed_after_the_create_is_reused_by_the_retry() {
+     let sim = pool(1024);
+     let w = workload("dev-box");
+@@ -373,7 +357,6 @@ fn an_ensure_that_failed_after_the_create_is_reused_by_the_retry() {
+ /// `/dev/mapper/overdrive-ovd--<hex>` (dm name `<vg>-<lv>` with every `-` doubled; the hex has none).
+ /// CONTRACT_SHAPE: pure-function.
+ #[test]
+-#[should_panic(expected = "ensure must return the volume's device")]
+ fn the_volume_name_is_ovd_and_the_sha256_prefix_of_the_workload_id() {
+     let sim = pool(1024);
+     for (id, hex) in [
+diff --git a/crates/overdrive-worker/tests/acceptance/node_volume_launch.rs b/crates/overdrive-worker/tests/acceptance/node_volume_launch.rs
+index 07dad2f95..776d51583 100644
+--- a/crates/overdrive-worker/tests/acceptance/node_volume_launch.rs
++++ b/crates/overdrive-worker/tests/acceptance/node_volume_launch.rs
+@@ -616,7 +616,7 @@ async fn sad_a_claim_state_error_ends_the_launch_at_once_as_a_claim_command_fail
+ /// it carries no wait duration), attaches nothing, and the volume keeps its holder.
+ /// CONTRACT_SHAPE: bounded-change.
+ #[tokio::test]
+-#[should_panic(expected = "the volume whose claim is held must exist")]
++#[should_panic(expected = "a declared volume whose claim stays held must fail VolumeUnavailable")]
+ async fn sad_a_claim_held_past_the_bound_fails_held_and_attaches_nothing() {
+     let sim = pool(1024);
+     sim.ensure(&workload(), gib(40)).await.expect("the volume whose claim is held must exist");
+diff --git a/docs/feature/node-local-persistent-volume/distill/red-classification.md b/docs/feature/node-local-persistent-volume/distill/red-classification.md
+index 4fea8c60f..925cc44e4 100644
+--- a/docs/feature/node-local-persistent-volume/distill/red-classification.md
++++ b/docs/feature/node-local-persistent-volume/distill/red-classification.md
+@@ -105,8 +105,8 @@ stop earlier and the marker text they stop on; "Moves" names the activation row.
+ - Moves: row 7 (GREEN, with row 5's sim bodies).
+ 
+ ### `overdrive-worker/tests/acceptance/node_volume_launch.rs`
+-- Fails today: `VmDriver::start` does not read `VmPayload.volume`, so a launch is never inside `ensure` or `claim_state`. Headline stops: `a_declared_volume_is_ensured_and_attached_as_the_second_disk`, the four typed `VolumeUnavailable` sad tests, the claim-state-error test, `a_replacement_waits_for_the_claim_not_for_the_process_exit`.
+-- Precondition stops: `sad_a_claim_held_past_the_bound_fails_held_and_attaches_nothing` ("the volume whose claim is held must exist"), `pool_faults_after_the_launch_do_not_reach_the_running_allocation_or_its_stop` ("the launch must have created the volume the pool faults then leave in place"), `after_a_node_reboot_the_next_launch_reactivates_the_same_volume` ("the first launch must attach a volume disk"), `a_control_plane_restart_between_create_and_attach_reuses_the_volume` ("the launch must park after the create effect of its ensure").
++- Fails today: `VmDriver::start` does not read `VmPayload.volume`, so a launch is never inside `ensure` or `claim_state`. Headline stops: `a_declared_volume_is_ensured_and_attached_as_the_second_disk`, the four typed `VolumeUnavailable` sad tests, the claim-state-error test, `a_replacement_waits_for_the_claim_not_for_the_process_exit`, and `sad_a_claim_held_past_the_bound_fails_held_and_attaches_nothing` ("a declared volume whose claim stays held must fail VolumeUnavailable": the sim now holds the claim, and the launch, which ignores `VmPayload.volume`, ends `BootDeadlineExceeded` instead).
++- Precondition stops: `pool_faults_after_the_launch_do_not_reach_the_running_allocation_or_its_stop` ("the launch must have created the volume the pool faults then leave in place"), `after_a_node_reboot_the_next_launch_reactivates_the_same_volume` ("the first launch must attach a volume disk"), `a_control_plane_restart_between_create_and_attach_reuses_the_volume` ("the launch must park after the create effect of its ensure").
+ - Moves: row 7 (GREEN; the sim hooks they use land in row 5).
+ 
+ ### `overdrive-worker/tests/acceptance/launch_supersession.rs`
+@@ -144,8 +144,8 @@ stop earlier and the marker text they stop on; "Moves" names the activation row.
+ - Moves: row 8 (GREEN), except `a_restart_the_evaluation_already_hydrated_sees_its_own_start_superseded_once`, which needs rows 8 and 9 (see "Tests that need two activation rows").
+ 
+ ### `overdrive-control-plane/src/node_volume_boundaries.rs`
+-- Fails today: `node_shutdown_ends_a_waiting_launch_with_no_row_and_the_loop_exits` stops at "shutdown must raise the signal of the lane a waiting launch is dispatching under" (the headline). The two tests that deploy a volume workload stop at a precondition, "a [vm.volume] workload must be accepted by the production spec parser".
+-- Moves: row 2 moves `a_launch_held_past_its_bound_writes_the_typed_failed_row_and_charges_the_restart_budget` to "the held claim must fail the launch typed" (GREEN at row 7, with row 3's mapping) and `a_stop_interrupts_the_start_and_its_result_is_never_used` to "a launch on a held claim must keep waiting inside its evaluation" (row 7 moves it to "a stop recorded during a launch's claim wait must end the launch at once with StartSuperseded"; row 8 turns it GREEN). The loop-shutdown test is GREEN at row 8.
++- Fails today: `node_shutdown_ends_a_waiting_launch_with_no_row_and_the_loop_exits` stops at "shutdown must raise the signal of the lane a waiting launch is dispatching under" (the headline). The two tests that deploy a volume workload stop at a precondition, "a [vm.volume] workload must be accepted by the production spec parser"; with the sim bodies of row 5 in place, `a_launch_held_past_its_bound_writes_the_typed_failed_row_and_charges_the_restart_budget` stops at "the held claim must fail the launch typed" (the launch ignores the volume and ends `VmBootDeadlineExceeded`) and `a_stop_interrupts_the_start_and_its_result_is_never_used` at "a stop recorded during a launch's claim wait must end the launch at once with StartSuperseded" (the "must keep waiting" assertion holds today because the launch waits on its boot beacon, not a claim).
++- Moves: both markers already name their post-row-5 stops (see above). `a_launch_held_past_its_bound_writes_the_typed_failed_row_and_charges_the_restart_budget` turns GREEN at row 7 (with row 3's mapping); `a_stop_interrupts_the_start_and_its_result_is_never_used` needs row 7 (the launch waits on the claim) and row 8 (the stop raises the lane signal) and turns GREEN at row 8. The loop-shutdown test is GREEN at row 8.
+ 
+ ### `overdrive-control-plane/src/vm_reclamation_boot.rs` (module `mid_boot_volume_reclamation`)
+ - Fails today: precondition, "a workload declaring a volume must be accepted" (the parser refuses `[vm.volume]`); the reclamation assertions (orphan not live before any launch and at the one create, the claim drains, the successor attaches the volume with nothing charged) are first exercised once the spec surface, the launch path and the sim bodies land.
+@@ -216,12 +216,12 @@ marker it carries before the real LVM adapters are written. "Turns GREEN" means
+ | Row | Capability | Turns GREEN | Markers that move (precondition now -> next RED) |
+ |---|---|---|---|
+ | 1 | Guest-kit volume pool for the `volume-pool` profile (`guest_kit_prepare.rs`, `guest_kit.rs`): labelled partition, PV and `overdrive` group, `lvm`, `sfdisk`, `flock`, `dmsetup`, `losetup` with loop-device support, `dm-flakey` and its loader, a static busybox with `dd`/`head`/`printf` (`upstream-issues.md` N-5) | none | none: the `#[ignore]` comes off every `volume-pool` test and each is proven RED on the marker it already carries |
+-| 2 | `VolumeSize`, `ByteCount` grammars, `Vm.volume` spec surface and validation, envelope V2 with its fixtures (S-VOL-21), `Vm::to_payload` | `vm_volume_size`, `vm_volume_spec` (every pending test), the `volume_value_types` byte-count, size-bytes and cause tests | `workload_volume_projection` ("must be admitted by the production wire spec" -> "<site> must carry the declared volume in its VmPayload", GREEN in this row once `Vm::to_payload` lands); `alloc_status_volume` ("must be part of the service wire spec" -> "the response must carry the declared volume size", GREEN at row 4); the two volume tests of `node_volume_boundaries` ("must be accepted by the production spec parser" -> "the volume exists before the claim is held", the `SimVolumeBacking` scaffold's `ensure` failing typed inside `hold_volume_claim`; it moves again at row 5 to "the held claim must fail the launch typed" and "a launch on a held claim must keep waiting inside its evaluation"); M7 ("a workload declaring a volume must be accepted" -> "the launch must attach the declared volume to its VMM", the first launch's attach assertion, since the launch path does not yet wire `VmConfig.volume`; confirmed at activation); all `quint_vol_*` ("Declare ... unknown field `volume`" -> "LaunchEnsureCreate: the step did not settle within the settle bound: the launch's ensure parks after its create effect" for the nine runs that reach `LaunchEnsureCreate`; "LaunchUnavailable: the step did not settle within the settle bound: the allocation row reaches the state" for `no_space` and `store_absent`; `quint_vol_randomized` -> "the step did not settle within the settle bound", the one stem both share; confirmed at activation); the seven `volume_survives` tests ("must deploy (...)" -> "exactly one volume node", the first read of the volume's device node, confirmed at activation) and `a_deployed_volume_workload_launches_through_the_composed_volume_pool` ("must deploy (vol-compose)" -> "one workload, one volume", the launch creates its VMM with no volume attached so the composed backing created none; confirmed at activation) |
++| 2 | `VolumeSize`, `ByteCount` grammars, `Vm.volume` spec surface and validation, envelope V2 with its fixtures (S-VOL-21), `Vm::to_payload` | `vm_volume_size`, `vm_volume_spec` (every pending test), the `volume_value_types` byte-count, size-bytes and cause tests | `workload_volume_projection` ("must be admitted by the production wire spec" -> "<site> must carry the declared volume in its VmPayload", GREEN in this row once `Vm::to_payload` lands); `alloc_status_volume` ("must be part of the service wire spec" -> "the response must carry the declared volume size", GREEN at row 4); the two volume tests of `node_volume_boundaries` ("must be accepted by the production spec parser" -> "the volume exists before the claim is held", the `SimVolumeBacking` scaffold's `ensure` failing typed inside `hold_volume_claim`; row 5 (the sim bodies, landed with step 03-01) moves them to "the held claim must fail the launch typed" and "a stop recorded during a launch's claim wait must end the launch at once with StartSuperseded"); M7 ("a workload declaring a volume must be accepted" -> "the launch must attach the declared volume to its VMM", the first launch's attach assertion, since the launch path does not yet wire `VmConfig.volume`; confirmed at activation); all `quint_vol_*` ("Declare ... unknown field `volume`" -> "LaunchEnsureCreate: the step did not settle within the settle bound: the launch's ensure parks after its create effect" for the nine runs that reach `LaunchEnsureCreate`; "LaunchUnavailable: the step did not settle within the settle bound: the allocation row reaches the state" for `no_space` and `store_absent`; `quint_vol_randomized` -> "the step did not settle within the settle bound", the one stem both share; confirmed at activation); the seven `volume_survives` tests ("must deploy (...)" -> "exactly one volume node", the first read of the volume's device node, confirmed at activation) and `a_deployed_volume_workload_launches_through_the_composed_volume_pool` ("must deploy (vol-compose)" -> "one workload, one volume", the launch creates its VMM with no volume attached so the composed backing created none; confirmed at activation) |
+ | 3 | `VolumeUnavailable` mapping and wording (incl. `InsufficientSpace`, `PoolCommandFailed`, unit `Held`) | `volume_unavailable_reason` | none |
+ | 4 | `AllocStatusResponse.volume` and the describe section | `workload_describe_volume`, `alloc_status_volume` | none |
+-| 5 | `SimVolumeBacking` (all bodies and the scripted-deadline, park, call-count and `hold_claim_while_live` hooks), port docstrings, `DiskAttachment::volume` rendering | `sim_volume_backing_contract` (every pending test, including the precondition stops on "ensure ... must create the volume ..."), `the_volume_disk_renders_the_golden_argument` | none: the launch-path tests keep their launch-path markers until row 7 |
++| 5 | `SimVolumeBacking` (all bodies and the scripted-deadline, park, call-count and `hold_claim_while_live` hooks), port docstrings, `DiskAttachment::volume` rendering | `sim_volume_backing_contract` (every pending test, including the precondition stops on "ensure ... must create the volume ..."), `the_volume_disk_renders_the_golden_argument` | `sad_a_claim_held_past_the_bound_fails_held_and_attaches_nothing` ("the volume whose claim is held must exist" -> "a declared volume whose claim stays held must fail VolumeUnavailable"); the two `node_volume_boundaries` tests above (as row 2 states). The other launch-path tests keep their launch-path markers until row 7 |
+ | 6 | `LvmVolumePoolProbe` and `LvmVolumeBacking` | `volume_pool_backing`, `volume_pool_probe_pool` (S-VOL-T3-02..05; T3-01 stays a guard) | none |
+-| 7 | Launch-path `ensure` plus claim wait, `compose_volume_backing` (event and refusal), the `VmConfig.volume` and `--disk` wiring, node chown | `node_volume_launch`, `volume_launch_invariants`, `a_volume_launch_whose_signal_is_never_raised_is_the_ordinary_volume_launch` (GREEN here, before the supersession points exist), `pool_faults_after_the_launch...`, `volume_boot_probe`, `a_launch_held_past_its_bound_writes_the_typed_failed_row_and_charges_the_restart_budget`, `the_driver_holds_no_ensure_timer_a_parked_ensure_outlives_the_deadline`, M7, `volume_survives` T3-07, T3-09, T3-11, T3-13 ("must deploy (vol-stop-boot)" -> the VMM-terminated assertion; over rows 2 and 6); the activation also adds the three DST invariants to `Invariant::ALL` and updates the catalogue count | the five volume tests of `launch_supersession` at points 2, 3 and 4 ("the launch must be inside ensure/claim_state ..." (for the ensure test the `ensure` parked by `SimVolumeBacking::pause_ensure_after_create`) -> "<what> must end StartSuperseded, got ..."); `a_stop_interrupts_the_start_and_its_result_is_never_used` ("a launch on a held claim must keep waiting inside its evaluation" -> "a stop recorded during a launch's claim wait must end the launch at once with StartSuperseded") |
++| 7 | Launch-path `ensure` plus claim wait, `compose_volume_backing` (event and refusal), the `VmConfig.volume` and `--disk` wiring, node chown | `node_volume_launch`, `volume_launch_invariants`, `a_volume_launch_whose_signal_is_never_raised_is_the_ordinary_volume_launch` (GREEN here, before the supersession points exist), `pool_faults_after_the_launch...`, `volume_boot_probe`, `a_launch_held_past_its_bound_writes_the_typed_failed_row_and_charges_the_restart_budget`, `the_driver_holds_no_ensure_timer_a_parked_ensure_outlives_the_deadline`, M7, `volume_survives` T3-07, T3-09, T3-11, T3-13 ("must deploy (vol-stop-boot)" -> the VMM-terminated assertion; over rows 2 and 6); the activation also adds the three DST invariants to `Invariant::ALL` and updates the catalogue count | the five volume tests of `launch_supersession` at points 2, 3 and 4 ("the launch must be inside ensure/claim_state ..." (for the ensure test the `ensure` parked by `SimVolumeBacking::pause_ensure_after_create`) -> "<what> must end StartSuperseded, got ...") |
+ | 8 | Launch supersession: the lane table in `ReconcilerRuntime` (`supersede_lane`, `supersede_all_lanes`, `lane_supersession`, the lane guard, lanes as children of the shutdown token), the producers (`stop_workload` on `Inserted` and `KeyExists`, `restart_workload`, the loop's shutdown arm), `VmDriver::start` observation points 1 to 6 with `StartSuperseded`, and the shim's no-row `StartSuperseded` arm in both launch arms (release lease, SVID and supervision claim, `launch.superseded`, `finish_restart` in the restart arm) | `launch_supersession` (all remaining), `launch_lane_supersession` (all but the hydrated-restart test), `node_volume_boundaries` (loop shutdown, `a_stop_interrupts...`), the two superseded-launch tests of `prelaunch_outcome_acceptance`, the stop, second-restart and crash-restart-shutdown cells of the invariant, `a_workload_stop_during_a_held_claim_returns_promptly_with_no_failed_row`, `quint_rg_second_restart_loses_launch_then_one_placement` (expected; confirmed at activation) | the two shutdown cells of the invariant and `a_restart_the_evaluation_already_hydrated_sees_its_own_start_superseded_once` move to their generation-rule stops (table above) |
+ | 9 | Restart generation: `generation_replacement_pending` adopted at the four reconciler sites and in `restart_status_for_alloc` (the compat rule and its inline restatement deleted); the shim's pre-driver `Failed` rows (S5, R7, R3: `MtlsInterceptInstallFailed { stage: "identity_issue" }` and the `DriverInternalError` successor row) | `generation_replacement_pending`, `restart_generation_reconcile`, the identity, R3 and charge tests of `prelaunch_outcome_acceptance`, every remaining cell of the invariant (crash, shutdown, persistent, transient, Job), the hydrated-restart test, `quint_rg_control_plane_crash_during_restart_launch_relaunches_once`, the four pre-driver `quint_rg_*` runs, `quint_rg_resume_of_stopped_job_does_nothing_and_issues_no_id` | none after row 8 |
+ | 10 | Capacity wait: `start_blocked_only_by_capacity` implemented and used by the reconciler's rules, the `alloc_status` handler fills `capacity_wait`, the render prints the `Waiting` line and suppresses the empty-state hint | `start_blocked_only_by_capacity` (the table, the three properties and the verdict-reach test; their markers already name the verdict assertions, so none moves), the two wait-predicate tests of `prelaunch_outcome_acceptance`, the integration handler and composition tests, `workload_describe_capacity_wait`, the integration `capacity_wait_empty_state` test | none |
