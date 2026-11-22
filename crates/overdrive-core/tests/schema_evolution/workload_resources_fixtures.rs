@@ -58,12 +58,12 @@ fn the_workload_intent_fixture_decodes_unchanged_and_reads_back_canonically() {
         "{name}: the archived resources must read back as canonical strings"
     );
 }
-/// AC-1.6 / AC-2.6: the pinned V2 workload-intent fixture of a service with guest listeners decodes
+/// AC-1.6 / AC-2.6: the pinned frozen-V1 workload-intent fixture of a Service without listeners decodes
 /// through the current envelope and its `[resources]` read back canonically (`500m` / `128MiB`).
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-fn the_v2_service_intent_fixture_decodes_unchanged_and_reads_back_canonically() {
-    let name = "FIXTURE_V2_SERVICE_GUEST_LISTENERS";
+fn the_service_intent_fixture_without_listeners_decodes_unchanged_and_reads_back_canonically() {
+    let name = "FIXTURE_V1_SERVICE";
     let hex = literal(WORKLOAD_INTENT_FIXTURES, name);
     let latest = decode_envelope_v_latest::<WorkloadIntentEnvelope>(&hex);
     assert!(
