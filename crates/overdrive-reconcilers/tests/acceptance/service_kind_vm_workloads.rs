@@ -60,7 +60,7 @@ fn running_fact(
         alloc_id,
         phase: overdrive_reconcilers::service_lifecycle::ServiceAllocPhase::Running(
             overdrive_reconcilers::service_lifecycle::ServiceBackendIdentity {
-                spiffe: SpiffeId::new("spiffe://overdrive.local/workload/service-vm-e08/alloc/0")
+                spiffe: SpiffeId::new("spiffe://overdrive.local/workload/service-vm-e08")
                     .expect("static backend SPIFFE ID is valid"),
                 ip: Ipv4Addr::LOCALHOST,
             },
@@ -362,7 +362,10 @@ fn vm_readiness_flaps_only_backend_eligibility_and_recovers() {
 
     let withdrawn_row = service_backend_row(&withdraw_actions);
     assert!(!withdrawn_row.backends[0].healthy, "readiness Fail withdraws eligibility");
-    assert_eq!(withdrawn_row.backends[0].workload_identity, initial_row.backends[0].workload_identity);
+    assert_eq!(
+        withdrawn_row.backends[0].workload_identity,
+        initial_row.backends[0].workload_identity
+    );
     assert_eq!(actual.allocs[&alloc_id].state(), AllocState::Running);
     assert!(actual.allocs[&alloc_id].stable_committed);
     assert!(unready_view.liveness_last_acted_run.is_empty());
@@ -379,7 +382,10 @@ fn vm_readiness_flaps_only_backend_eligibility_and_recovers() {
 
     let restored_row = service_backend_row(&restore_actions);
     assert!(restored_row.backends[0].healthy, "readiness Pass restores eligibility");
-    assert_eq!(restored_row.backends[0].workload_identity, initial_row.backends[0].workload_identity);
+    assert_eq!(
+        restored_row.backends[0].workload_identity,
+        initial_row.backends[0].workload_identity
+    );
     assert_eq!(actual.allocs[&alloc_id].state(), AllocState::Running);
     assert!(actual.allocs[&alloc_id].stable_committed);
     assert!(ready_view.liveness_last_acted_run.is_empty());

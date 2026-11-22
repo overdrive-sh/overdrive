@@ -25,7 +25,7 @@ use overdrive_bench::{HostClock, HostInstant, Replicate, ReplicateFailure};
 use overdrive_control_plane::dns_responder::frontend_addr_allocator::FrontendAddrAllocator;
 use overdrive_control_plane::dns_responder::responder::DnsResponder;
 use overdrive_control_plane::dns_responder::{QueryObserver, QueryOutcome};
-use overdrive_core::id::{AllocationId, MeshServiceName, NodeId, ServiceId, SpiffeId, WorkloadId};
+use overdrive_core::id::{MeshServiceName, NodeId, ServiceId, SpiffeId, WorkloadId};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::dataplane::Backend;
 use overdrive_core::traits::observation_store::{
@@ -344,7 +344,6 @@ async fn build_responder(names: u32, observer: Arc<Recorder>) -> Result<Arc<DnsR
     let node = NodeId::new("local").map_err(|error| format!("node id: {error}"))?;
     let store = Arc::new(SimObservationStore::single_peer(node.clone(), 0));
     let frontend = FrontendAddrAllocator::new();
-    let alloc = AllocationId::new("alloc-1").map_err(|error| format!("allocation id: {error}"))?;
     for index in 0..names {
         let label = workload_label(index);
         let mesh_name = MeshServiceName::new(&format!("{label}.{SERVICE_SUFFIX}"))
@@ -355,7 +354,7 @@ async fn build_responder(names: u32, observer: Arc<Recorder>) -> Result<Arc<DnsR
         let service_id = ServiceId::new(u64::from(index) + 1)
             .map_err(|error| format!("service id {index}: {error}"))?;
         let backend = Backend {
-            workload_identity: SpiffeId::for_allocation(&workload, &alloc),
+            workload_identity: SpiffeId::for_workload(&workload),
             addr: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(10, 99, 0, 6), 8080)),
             weight: 1,
             healthy: true,

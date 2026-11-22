@@ -71,7 +71,7 @@ fn spec(alloc: &AllocationId, declared: Vec<Listener>) -> AllocationSpec {
     AllocationSpec {
         declared_listeners: declared,
         alloc: alloc.clone(),
-        identity: SpiffeId::for_allocation(&WorkloadId::new("listening").expect("workload"), alloc),
+        identity: SpiffeId::for_workload(&WorkloadId::new("listening").expect("workload")),
         driver: DriverPayload::Vm(VmPayload {
             volume: None,
             command: "/bin/serve".to_owned(),

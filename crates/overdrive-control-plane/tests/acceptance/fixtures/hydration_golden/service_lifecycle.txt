@@ -26,7 +26,7 @@ ServiceLifecycle(
                 phase: Running(
                     ServiceBackendIdentity {
                         spiffe: SpiffeId {
-                            canonical: "spiffe://overdrive.local/workload/svc-app/alloc/svc-app-0",
+                            canonical: "spiffe://overdrive.local/workload/svc-app",
                             path_start: 24,
                         },
                         ip: 100.95.0.2,

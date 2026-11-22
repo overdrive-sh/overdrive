@@ -2711,10 +2711,8 @@ mod tests {
         let spec = AllocationSpec {
             declared_listeners: Vec::new(),
             alloc,
-            identity: SpiffeId::new(
-                "spiffe://overdrive.local/workload/diagnostic-totality/alloc/x",
-            )
-            .expect("valid identity"),
+            identity: SpiffeId::new("spiffe://overdrive.local/workload/diagnostic-totality")
+                .expect("valid identity"),
             driver: DriverPayload::Vm(VmPayload {
                 volume: None,
                 command: "/sbin/init".to_owned(),

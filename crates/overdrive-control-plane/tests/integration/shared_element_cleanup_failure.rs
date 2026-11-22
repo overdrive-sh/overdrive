@@ -739,10 +739,8 @@ fn declared_listeners() -> Vec<overdrive_core::aggregate::Listener> {
 fn spec(name: &str, transport: Option<GuestTransportAssignment>) -> AllocationSpec {
     AllocationSpec {
         alloc: AllocationId::new(name).expect("allocation id"),
-        identity: SpiffeId::new(&format!(
-            "spiffe://overdrive.local/workload/svc-element-cleanup/alloc/{name}"
-        ))
-        .expect("SPIFFE ID"),
+        identity: SpiffeId::new("spiffe://overdrive.local/workload/svc-element-cleanup")
+            .expect("SPIFFE ID"),
         driver: DriverPayload::Vm(VmPayload {
             volume: None,
             command: "/bin/true".to_owned(),

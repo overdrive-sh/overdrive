@@ -1007,7 +1007,7 @@ pub(crate) mod sim_vm_host {
         AllocationSpec {
             declared_listeners: Vec::new(),
             alloc: plan.alloc().clone(),
-            identity: SpiffeId::new("spiffe://overdrive.local/workload/cid-lease/alloc/x")
+            identity: SpiffeId::new("spiffe://overdrive.local/workload/cid-lease")
                 .expect("valid spiffe id"),
             driver: DriverPayload::Vm(VmPayload {
                 volume: None,

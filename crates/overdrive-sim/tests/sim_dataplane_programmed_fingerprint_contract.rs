@@ -40,7 +40,7 @@ fn frontend(octet: u8, port: u16, proto: Proto) -> ServiceFrontend {
 
 fn backend(tag: usize, ip: IpAddr, weight: u16, healthy: bool) -> Backend {
     Backend {
-        workload_identity: SpiffeId::new(&format!("spiffe://overdrive.local/workload/svc/alloc/b-{tag}"))
+        workload_identity: SpiffeId::new(&format!("spiffe://overdrive.local/workload/svc-{tag}"))
             .expect("SPIFFE id"),
         addr: SocketAddr::new(ip, 8080),
         weight,

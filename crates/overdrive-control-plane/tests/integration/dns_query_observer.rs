@@ -29,7 +29,7 @@ use hickory_proto::serialize::binary::BinEncodable;
 use overdrive_control_plane::dns_responder::frontend_addr_allocator::FrontendAddrAllocator;
 use overdrive_control_plane::dns_responder::responder::DnsResponder;
 use overdrive_control_plane::dns_responder::{NoQueryObserver, QueryObserver, QueryOutcome};
-use overdrive_core::id::{AllocationId, MeshServiceName, NodeId, ServiceId, SpiffeId, WorkloadId};
+use overdrive_core::id::{MeshServiceName, NodeId, ServiceId, SpiffeId, WorkloadId};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::dataplane::Backend;
 use overdrive_core::traits::observation_store::{
@@ -113,10 +113,7 @@ async fn exchange(
         .assign(&MeshServiceName::new("server.svc.overdrive.local").expect("mesh name"))
         .expect("assign F");
     let backend = Backend {
-        workload_identity: SpiffeId::for_allocation(
-            &WorkloadId::new("server").expect("workload id"),
-            &AllocationId::new("alloc-1").expect("alloc id"),
-        ),
+        workload_identity: SpiffeId::for_workload(&WorkloadId::new("server").expect("workload id")),
         addr: std::net::SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(10, 99, 0, 6), 8080)),
         weight: 1,
         healthy: true,

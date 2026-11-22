@@ -179,8 +179,8 @@ impl WorkflowLiveSet for SimWorkflowLiveSet {
 /// Serves the **GLOBAL** node-held SVID set from a preloaded
 /// `BTreeMap<AllocationId, HeldSvidFacts>` — every workload's held leaf, keyed by
 /// [`AllocationId`]. The map is the unfiltered global set **by contract**
-/// (ADR-0067 D5b): filtering to a target workload (by `SpiffeId::for_allocation`
-/// equality) is the HYDRATOR's job, not this port's, so the double over-returns
+/// (ADR-0067 D5b): filtering to a target workload (by identity equality with
+/// `SpiffeId::for_workload`) is the HYDRATOR's job, not this port's, so the double over-returns
 /// deliberately.
 #[derive(Debug, Clone, Default)]
 pub struct SimHeldSvidView {

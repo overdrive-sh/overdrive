@@ -217,7 +217,7 @@ async fn alloc_status_projects_current_cert_by_ordinal_not_issued_at() {
     let alloc = AllocationId::from_str(ALLOC_ID).expect("valid alloc id");
 
     // The SPIFFE identity the projection matches audit rows on.
-    let spiffe = SpiffeId::for_allocation(&job.id, &alloc);
+    let spiffe = SpiffeId::for_workload(&job.id);
 
     write_running_row(&state, &alloc, &job.id).await;
 

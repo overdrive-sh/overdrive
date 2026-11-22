@@ -209,7 +209,7 @@ fn service_spec(root: &Path, alloc: &AllocationId) -> AllocationSpec {
         .collect();
     AllocationSpec {
         alloc: alloc.clone(),
-        identity: SpiffeId::new("spiffe://overdrive.local/workload/gr-host/alloc/gr-host-alloc")
+        identity: SpiffeId::new("spiffe://overdrive.local/workload/gr-host")
             .expect("valid SPIFFE ID"),
         driver: DriverPayload::Vm(VmPayload {
             volume: None,

@@ -61,8 +61,7 @@ fn issuing_alloc() -> AllocationId {
 
 /// The workload identity the reconciler derives (pure) and the executor mints.
 fn workload_spiffe() -> SpiffeId {
-    SpiffeId::new("spiffe://overdrive.local/workload/payments/alloc/payments-0")
-        .expect("valid SpiffeId")
+    SpiffeId::new("spiffe://overdrive.local/workload/payments").expect("valid SpiffeId")
 }
 
 /// Cause-to-response linkage (kind-derived, not per-attempt).

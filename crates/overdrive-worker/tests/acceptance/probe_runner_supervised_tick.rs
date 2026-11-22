@@ -60,7 +60,7 @@ fn vm_spec(alloc: &AllocationId, probe_descriptors: Vec<ProbeDescriptor>) -> All
     AllocationSpec {
         declared_listeners: Vec::new(),
         alloc: alloc.clone(),
-        identity: SpiffeId::new("spiffe://overdrive.local/workload/probe-runner/alloc/test")
+        identity: SpiffeId::new("spiffe://overdrive.local/workload/probe-runner")
             .expect("valid SPIFFE ID"),
         driver: DriverPayload::Vm(VmPayload {
             volume: None,

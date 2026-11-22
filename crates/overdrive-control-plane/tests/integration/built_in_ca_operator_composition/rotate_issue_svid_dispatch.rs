@@ -151,7 +151,7 @@ async fn rotate_correlation_issue_svid_mints_replaces_hold_and_audits() {
     let workload = WorkloadId::new(WORKLOAD_NAME).expect("valid WorkloadId");
     let alloc = AllocationId::new(ALLOC_NAME).expect("valid AllocationId");
     let node = NodeId::new(NODE_NAME).expect("valid NodeId");
-    let identity = SpiffeId::for_allocation(&workload, &alloc);
+    let identity = SpiffeId::for_workload(&workload);
 
     // Seed the pre-rotation hold via a first-issue dispatch (the `"issue-svid"`
     // branch) so rotation has a PRIOR entry to replace. Capture its serial.

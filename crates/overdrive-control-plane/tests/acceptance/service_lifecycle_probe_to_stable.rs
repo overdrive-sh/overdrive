@@ -98,7 +98,7 @@ fn vm_spec(alloc: &AllocationId, probe_descriptors: Vec<ProbeDescriptor>) -> All
     AllocationSpec {
         declared_listeners: Vec::new(),
         alloc: alloc.clone(),
-        identity: SpiffeId::new("spiffe://overdrive.local/workload/probe-to-stable/alloc/test")
+        identity: SpiffeId::new("spiffe://overdrive.local/workload/probe-to-stable")
             .expect("valid SPIFFE ID"),
         driver: DriverPayload::Vm(VmPayload {
             volume: None,
@@ -156,10 +156,8 @@ fn fact_from_row_and_intent(
         alloc_id: row.alloc_id.clone(),
         phase: overdrive_reconcilers::service_lifecycle::ServiceAllocPhase::Running(
             overdrive_reconcilers::service_lifecycle::ServiceBackendIdentity {
-                spiffe: overdrive_core::SpiffeId::new(
-                    "spiffe://overdrive.local/workload/svc/alloc/x",
-                )
-                .expect("valid spiffe"),
+                spiffe: overdrive_core::SpiffeId::new("spiffe://overdrive.local/workload/svc")
+                    .expect("valid spiffe"),
                 ip: std::net::Ipv4Addr::LOCALHOST,
             },
         ),

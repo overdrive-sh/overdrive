@@ -98,13 +98,13 @@ mod tests {
     fn sample_backends() -> Vec<Backend> {
         vec![
             backend(
-                "spiffe://overdrive.local/workload/payments/alloc/aaa",
+                "spiffe://overdrive.local/workload/payments",
                 SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 10)), 8080),
                 100,
                 true,
             ),
             backend(
-                "spiffe://overdrive.local/workload/payments/alloc/bbb",
+                "spiffe://overdrive.local/workload/payments",
                 SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 11)), 8080),
                 100,
                 true,
@@ -185,7 +185,7 @@ mod tests {
                 .map(|i| {
                     let last = u8::try_from(10 + i).unwrap_or(u8::MAX);
                     backend(
-                        &format!("spiffe://overdrive.local/workload/svc/alloc/a{i}"),
+                        "spiffe://overdrive.local/workload/svc",
                         SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, last)), 8080),
                         1,
                         true,

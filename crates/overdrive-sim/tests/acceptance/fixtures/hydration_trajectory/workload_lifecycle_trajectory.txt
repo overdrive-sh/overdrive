@@ -24,7 +24,7 @@ emitted_actions:
                 "alloc-traj-job-0",
             ),
             identity: SpiffeId {
-                canonical: "spiffe://overdrive.local/workload/traj-job/alloc/alloc-traj-job-0",
+                canonical: "spiffe://overdrive.local/workload/traj-job",
                 path_start: 24,
             },
             driver: Vm(

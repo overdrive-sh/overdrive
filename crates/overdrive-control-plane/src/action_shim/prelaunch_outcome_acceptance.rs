@@ -500,7 +500,7 @@ fn target() -> TargetResource {
 fn spec(name: &str) -> AllocationSpec {
     let alloc_id = alloc(name);
     AllocationSpec {
-        identity: SpiffeId::for_allocation(&workload_id(), &alloc_id),
+        identity: SpiffeId::for_workload(&workload_id()),
         alloc: alloc_id,
         driver: DriverPayload::Vm(VmPayload {
             volume: None,

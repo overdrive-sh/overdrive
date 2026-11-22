@@ -383,10 +383,8 @@ fn opt_out_fact(alloc_id: AllocationId, started_at_unix_ms: u64) -> ServiceAlloc
         alloc_id,
         phase: overdrive_reconcilers::service_lifecycle::ServiceAllocPhase::Running(
             overdrive_reconcilers::service_lifecycle::ServiceBackendIdentity {
-                spiffe: overdrive_core::SpiffeId::new(
-                    "spiffe://overdrive.local/workload/svc/alloc/x",
-                )
-                .expect("valid spiffe"),
+                spiffe: overdrive_core::SpiffeId::new("spiffe://overdrive.local/workload/svc")
+                    .expect("valid spiffe"),
                 ip: std::net::Ipv4Addr::LOCALHOST,
             },
         ),
@@ -415,10 +413,8 @@ fn fact_with_probes(alloc_id: AllocationId, started_at_unix_ms: u64) -> ServiceA
         alloc_id,
         phase: overdrive_reconcilers::service_lifecycle::ServiceAllocPhase::Running(
             overdrive_reconcilers::service_lifecycle::ServiceBackendIdentity {
-                spiffe: overdrive_core::SpiffeId::new(
-                    "spiffe://overdrive.local/workload/svc/alloc/x",
-                )
-                .expect("valid spiffe"),
+                spiffe: overdrive_core::SpiffeId::new("spiffe://overdrive.local/workload/svc")
+                    .expect("valid spiffe"),
                 ip: std::net::Ipv4Addr::LOCALHOST,
             },
         ),

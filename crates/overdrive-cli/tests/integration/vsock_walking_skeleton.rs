@@ -265,7 +265,7 @@ async fn snapshot_with_exact_identity(
         assert_eq!(row.alloc_id, alloc.to_string(), "the snapshot row names the requested alloc");
         let workload =
             WorkloadId::new(&row.workload_id).expect("the public row carries a valid workload id");
-        let expected = SpiffeId::for_allocation(&workload, alloc);
+        let expected = SpiffeId::for_workload(&workload);
         let exact = snapshot
             .issued_certificates
             .iter()

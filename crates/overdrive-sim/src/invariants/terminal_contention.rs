@@ -332,7 +332,7 @@ fn vm_spec(alloc: &AllocationId, workload: &WorkloadId) -> AllocationSpec {
     AllocationSpec {
         declared_listeners: Vec::new(),
         alloc: alloc.clone(),
-        identity: SpiffeId::for_allocation(workload, alloc),
+        identity: SpiffeId::for_workload(workload),
         driver: DriverPayload::Vm(VmPayload {
             volume: None,
             command: "/bin/true".to_owned(),

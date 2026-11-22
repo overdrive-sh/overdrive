@@ -149,7 +149,7 @@ fn liveness_descriptor() -> ProbeDescriptor {
 fn vm_spec(alloc: &AllocationId) -> AllocationSpec {
     AllocationSpec {
         alloc: alloc.clone(),
-        identity: SpiffeId::for_allocation(&WorkloadId::new("probed").expect("workload"), alloc),
+        identity: SpiffeId::for_workload(&WorkloadId::new("probed").expect("workload")),
         driver: DriverPayload::Vm(VmPayload {
             volume: None,
             command: "/bin/serve".to_owned(),

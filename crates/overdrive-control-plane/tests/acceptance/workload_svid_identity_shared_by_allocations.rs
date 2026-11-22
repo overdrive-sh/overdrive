@@ -209,7 +209,6 @@ async fn serials(state: &AppState) -> std::collections::BTreeSet<String> {
 /// its own (distinct serial, one audit row per issuance), and the identity each
 /// holds is the workload's.
 #[tokio::test]
-#[should_panic(expected = "an allocation's SVID names its workload")]
 async fn two_allocations_of_one_workload_each_hold_their_own_svid_naming_the_workload() {
     let tmp = TempDir::new().expect("tmpdir");
     let clock = Arc::new(SimClock::new());
@@ -236,7 +235,6 @@ async fn two_allocations_of_one_workload_each_hold_their_own_svid_naming_the_wor
 /// boot convergence re-issues an SVID to BOTH allocations, again under the one
 /// workload identity.
 #[tokio::test]
-#[should_panic(expected = "after a restart an allocation's SVID names its workload")]
 async fn after_a_serve_restart_both_allocations_recover_their_own_svid_for_the_workload() {
     let tmp = TempDir::new().expect("tmpdir");
     let clock = Arc::new(SimClock::new());

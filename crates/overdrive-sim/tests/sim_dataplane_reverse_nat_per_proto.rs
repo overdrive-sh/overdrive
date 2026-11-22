@@ -40,7 +40,7 @@ use overdrive_testing::overdrive_test_default;
 overdrive_test_default!(host_pure);
 
 fn spiffe(tag: usize) -> SpiffeId {
-    SpiffeId::new(&format!("spiffe://overdrive.local/workload/svc/alloc/b-{tag}"))
+    SpiffeId::new(&format!("spiffe://overdrive.local/workload/svc-{tag}"))
         .expect("valid SPIFFE URI")
 }
 

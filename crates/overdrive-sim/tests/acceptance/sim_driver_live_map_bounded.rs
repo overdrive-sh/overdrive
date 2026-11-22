@@ -56,8 +56,7 @@ async fn sim_driver_live_map_returns_to_zero_after_eight_start_stop_cycles() {
         let alloc =
             AllocationId::from_str(&format!("alloc-sim-live-map-{cycle}")).expect("valid alloc id");
         let identity =
-            SpiffeId::new(&format!("spiffe://overdrive.local/workload/livemap/alloc/sim{cycle}"))
-                .expect("valid spiffe id");
+            SpiffeId::new("spiffe://overdrive.local/workload/livemap").expect("valid spiffe id");
         let spec = AllocationSpec {
             declared_listeners: Vec::new(),
             alloc: alloc.clone(),

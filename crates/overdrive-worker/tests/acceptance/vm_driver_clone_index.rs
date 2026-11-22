@@ -142,7 +142,7 @@ fn build_spec(alloc: &AllocationId, tmp: &TempDir, cid_offset: u32) -> Allocatio
     AllocationSpec {
         declared_listeners: Vec::new(),
         alloc: alloc.clone(),
-        identity: SpiffeId::new("spiffe://overdrive.local/workload/clone-index-test/alloc/x")
+        identity: SpiffeId::new("spiffe://overdrive.local/workload/clone-index-test")
             .expect("valid spiffe id"),
         driver: DriverPayload::Vm(VmPayload {
             volume: None,

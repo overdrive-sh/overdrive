@@ -61,7 +61,7 @@ fn allocation_spec(
     AllocationSpec {
         declared_listeners: Vec::new(),
         alloc: AllocationId::new(alloc).expect("valid allocation ID"),
-        identity: SpiffeId::new("spiffe://overdrive.local/workload/vm-service/alloc/composition")
+        identity: SpiffeId::new("spiffe://overdrive.local/workload/vm-service")
             .expect("valid SPIFFE ID"),
         driver,
         resources: Resources {

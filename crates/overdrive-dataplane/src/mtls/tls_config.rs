@@ -436,8 +436,8 @@ mod tests {
     /// CONTRACT_SHAPE: pure-function.
     #[test]
     fn spiffe_server_verifier_enforces_trust_and_exactly_one_uri_san() {
-        const SERVER_ID: &str = "spiffe://overdrive.local/workload/server/alloc/server-0";
-        const OTHER_ID: &str = "spiffe://overdrive.local/workload/other/alloc/other-0";
+        const SERVER_ID: &str = "spiffe://overdrive.local/workload/server";
+        const OTHER_ID: &str = "spiffe://overdrive.local/workload/other";
 
         let trusted_one_uri = mint_chain("trusted-one", &[SERVER_ID]);
         let trusted_zero_uri = mint_chain("trusted-zero", &[]);

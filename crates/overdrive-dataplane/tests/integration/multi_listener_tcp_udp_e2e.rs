@@ -507,14 +507,19 @@ fn build_multi_listener_service(
 
     let runtime =
         tokio::runtime::Builder::new_current_thread().enable_all().build().expect("tokio rt");
-    for (idx, (frontend, _proto, backend_port)) in listeners.iter().enumerate() {
-        let alloc = SpiffeId::new(&format!("spiffe://overdrive.local/workload/edge/alloc/L{idx}"))
-            .expect("backend SpiffeId");
+    for (frontend, _proto, backend_port) in listeners {
+        let alloc =
+            SpiffeId::new("spiffe://overdrive.local/workload/edge").expect("backend SpiffeId");
         let backend_addr = SocketAddr::new(IpAddr::V4(BACKEND_IP), *backend_port);
         runtime
             .block_on(dataplane.update_service(
                 *frontend,
-                vec![Backend { workload_identity: alloc, addr: backend_addr, weight: 1, healthy: true }],
+                vec![Backend {
+                    workload_identity: alloc,
+                    addr: backend_addr,
+                    weight: 1,
+                    healthy: true,
+                }],
             ))
             .expect("update_service (per-listener)");
     }
@@ -800,7 +805,7 @@ fn adding_listener_on_resubmit_converges_without_breaking_existing() {
         let _ns_guard = enter_netns(&fixture.topo.lb_ns.name).expect("setns lb-ns for add");
         let runtime =
             tokio::runtime::Builder::new_current_thread().enable_all().build().expect("tokio rt");
-        let alloc = SpiffeId::new("spiffe://overdrive.local/workload/edge/alloc/L2-added")
+        let alloc = SpiffeId::new("spiffe://overdrive.local/workload/edge")
             .expect("added backend SpiffeId");
         runtime
             .block_on(fixture.dataplane.update_service(

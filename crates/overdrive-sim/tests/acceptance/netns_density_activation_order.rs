@@ -709,10 +709,8 @@ impl Fixture {
     fn start_action(workload: &str, alloc: &AllocationId) -> Action {
         let spec = AllocationSpec {
             alloc: alloc.clone(),
-            identity: SpiffeId::new(&format!(
-                "spiffe://overdrive.local/workload/{workload}/alloc/{alloc}"
-            ))
-            .expect("SPIFFE ID"),
+            identity: SpiffeId::new(&format!("spiffe://overdrive.local/workload/{workload}"))
+                .expect("SPIFFE ID"),
             driver: DriverPayload::Vm(VmPayload {
                 volume: None,
                 command: "/bin/sleep".to_owned(),

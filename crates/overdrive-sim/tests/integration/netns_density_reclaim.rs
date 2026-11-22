@@ -1005,10 +1005,8 @@ fn filler_action(tag: &str, index: usize) -> Action {
         spec: AllocationSpec {
             declared_listeners: Vec::new(),
             alloc,
-            identity: SpiffeId::new(&format!(
-                "spiffe://overdrive.local/workload/{workload}/alloc/{workload}-0"
-            ))
-            .expect("SPIFFE ID"),
+            identity: SpiffeId::new(&format!("spiffe://overdrive.local/workload/{workload}"))
+                .expect("SPIFFE ID"),
             driver: DriverPayload::Vm(VmPayload {
                 volume: None,
                 command: "/bin/sleep".to_owned(),

@@ -181,7 +181,7 @@ fn spec() -> AllocationSpec {
     AllocationSpec {
         declared_listeners: Vec::new(),
         alloc: alloc_id(),
-        identity: SpiffeId::new("spiffe://overdrive.local/workload/crashobs/alloc/0")
+        identity: SpiffeId::new("spiffe://overdrive.local/workload/crashobs")
             .expect("valid spiffe id"),
         driver: overdrive_core::traits::driver::DriverPayload::Vm(VmPayload {
             volume: None,

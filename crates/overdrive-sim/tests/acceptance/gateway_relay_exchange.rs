@@ -50,7 +50,7 @@ use overdrive_core::ca::root_key_envelope::KekId;
 use overdrive_core::dataplane::{Proto, ServiceFrontend};
 use overdrive_core::eval_broker::{Evaluation, EvaluationBroker};
 use overdrive_core::gateway_identity::{GatewayIdentityDesired, GatewayIdentityEpoch};
-use overdrive_core::id::{AllocationId, ContentHash, NodeId, ServiceVip, WorkloadId};
+use overdrive_core::id::{ContentHash, NodeId, ServiceVip, WorkloadId};
 use overdrive_core::public_ingress::{
     GatewayListenerStatus, PublicCertifiedKeyId, PublicHostname, PublicRouteInput, Route,
     ServiceListenerReferenceInput,
@@ -148,10 +148,7 @@ impl Rig {
         )
         .expect("frontend");
         let workload = WorkloadId::new("api").expect("workload");
-        let backend_identity = SpiffeId::for_allocation(
-            &workload,
-            &AllocationId::new("a1b2c3d4").expect("allocation"),
-        );
+        let backend_identity = SpiffeId::for_workload(&workload);
         let dataplane = Arc::new(SimDataplane::new());
         dataplane
             .update_service(

@@ -74,8 +74,7 @@ fn spec(tmp: &TempDir, alloc: &AllocationId, argument_bytes: usize) -> Allocatio
     AllocationSpec {
         declared_listeners: Vec::new(),
         alloc: alloc.clone(),
-        identity: SpiffeId::new("spiffe://overdrive.local/workload/nd295/alloc/exec")
-            .expect("SPIFFE ID"),
+        identity: SpiffeId::new("spiffe://overdrive.local/workload/nd295").expect("SPIFFE ID"),
         driver: DriverPayload::Vm(VmPayload {
             volume: None,
             command: "/bin/true".to_owned(),

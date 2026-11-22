@@ -1160,10 +1160,8 @@ fn allocation_spec_at(name: &str, address: Ipv4Addr) -> AllocationSpec {
     let launch = LaunchToken::from_bytes([0x5a; 16]).expect("a non-zero launch token");
     AllocationSpec {
         alloc: AllocationId::new(name).expect("allocation id"),
-        identity: SpiffeId::new(&format!(
-            "spiffe://overdrive.local/workload/shared-owner/alloc/{name}"
-        ))
-        .expect("SPIFFE ID"),
+        identity: SpiffeId::new("spiffe://overdrive.local/workload/shared-owner")
+            .expect("SPIFFE ID"),
         driver: DriverPayload::Vm(VmPayload {
             volume: None,
             command: "/bin/true".to_owned(),

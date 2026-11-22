@@ -419,9 +419,8 @@ impl Composition {
         self.mtls.start_shared_owner().await.expect("the shared mTLS owner starts");
         let spec = AllocationSpec {
             declared_listeners: Vec::new(),
-            identity: SpiffeId::for_allocation(
+            identity: SpiffeId::for_workload(
                 &WorkloadId::new("guest-flow-owner").expect("valid workload id"),
-                &lease.alloc,
             ),
             alloc: lease.alloc.clone(),
             driver: DriverPayload::Vm(VmPayload {

@@ -649,10 +649,8 @@ fn gap_1_at_08_reconciler_unreachable_when_running_alloc_has_no_started_at() {
         alloc_id: aid.clone(),
         phase: overdrive_reconcilers::service_lifecycle::ServiceAllocPhase::Running(
             overdrive_reconcilers::service_lifecycle::ServiceBackendIdentity {
-                spiffe: overdrive_core::SpiffeId::new(
-                    "spiffe://overdrive.local/workload/svc/alloc/x",
-                )
-                .expect("valid spiffe"),
+                spiffe: overdrive_core::SpiffeId::new("spiffe://overdrive.local/workload/svc")
+                    .expect("valid spiffe"),
                 ip: std::net::Ipv4Addr::LOCALHOST,
             },
         ), // load-bearing: triggers the unreachable

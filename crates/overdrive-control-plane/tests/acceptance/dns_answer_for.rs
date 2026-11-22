@@ -67,13 +67,12 @@ fn fresh_store() -> Arc<SimObservationStore> {
     Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("valid node id"), 0))
 }
 
-/// A `Backend` whose `alloc` SVID carries `/workload/<workload>/alloc/...`, at a
+/// A `Backend` whose workload identity is `/workload/<workload>`, at a
 /// per-instance backend addr in `10.99.0.0/16` (deliberately a DIFFERENT block
 /// from the frontend `F` the answer must return).
 fn backend_for(job: &str, instance: u8, healthy: bool) -> Backend {
-    let spiffe =
-        SpiffeId::new(&format!("spiffe://overdrive.local/workload/{job}/alloc/a{instance}"))
-            .expect("valid spiffe id");
+    let spiffe = SpiffeId::new(&format!("spiffe://overdrive.local/workload/{job}"))
+        .expect("valid spiffe id");
     Backend {
         workload_identity: spiffe,
         addr: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(10, 99, 0, instance), 8080)),
@@ -94,8 +93,8 @@ fn backends_row(service_id: u64, backends: Vec<Backend>) -> ServiceBackendRow {
     }
 }
 
-/// The `<workload>` mesh name a `Backend`'s `alloc` SVID
-/// (`spiffe://overdrive.local/workload/<workload>/alloc/...`) dials as — mirrors the
+/// The `<workload>` mesh name a `Backend`'s workload identity
+/// (`spiffe://overdrive.local/workload/<workload>`) dials as — mirrors the
 /// production `name_index::workload_of` extraction so the fixture can model the
 /// 01-05 deploy-time assigner binding `<workload> → F` on declaration.
 fn workload_of_backend(backend: &Backend) -> MeshServiceName {

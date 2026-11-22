@@ -624,7 +624,7 @@ fn issued_cert_summary(
 fn render_workload_describe_surfaces_issued_certificate_summary_on_live_path() {
     let summary = issued_cert_summary(
         "0a1b2c3d4e5f",
-        "spiffe://overdrive.local/workload/dns-resolver/alloc/alloc-0",
+        "spiffe://overdrive.local/workload/dns-resolver",
         "ffeeddccbbaa",
         1_700_000_000,
     );

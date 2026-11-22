@@ -66,7 +66,6 @@ const fn published_identity(backend: &Backend) -> &SpiffeId {
 /// per-allocation identity, not the constructor scaffold).
 #[allow(clippy::too_many_lines)]
 #[tokio::test(flavor = "current_thread")]
-#[should_panic(expected = "a Running allocation is published behind its workload's identity")]
 async fn a_running_allocation_is_published_behind_its_workloads_identity() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
     let mut runtime =

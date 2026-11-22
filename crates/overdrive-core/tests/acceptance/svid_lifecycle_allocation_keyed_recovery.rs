@@ -18,9 +18,6 @@
 //! Layer: unit, pure `reconcile` over typed state (no I/O, no clock handle).
 //! CONTRACT_SHAPE: pure-function.
 
-// distill-pending-owner-api: SvidLifecycleState.ever_issued: BTreeSet<AllocationId> (DD-3) and
-// SpiffeId::for_workload (ADR-0344); activated by DELIVER's SvidLifecycle re-key step.
-#![cfg(any())]
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::doc_markdown)]
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -113,7 +110,7 @@ fn held_attribution_is_per_allocation_when_two_allocations_share_the_identity() 
             not_after: UnixInstant::from_unix_duration(Duration::from_secs(NOW_SECS + 3_600)),
         },
     )]);
-    let state = SvidLifecycleState { desired, actual, ever_issued: BTreeSet::from([a.clone()]) };
+    let state = SvidLifecycleState { desired, actual, ever_issued: BTreeSet::from([a]) };
 
     let (actions, _) = SvidLifecycle::canonical().reconcile(
         &state,

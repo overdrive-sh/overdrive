@@ -229,7 +229,7 @@ mod tests {
     #[test]
     fn hold_then_snapshot_projects_identity_and_validity_end() {
         let mgr = IdentityMgr::new(None);
-        let spiffe = "spiffe://overdrive.local/workload/payments/alloc/a1b2c3";
+        let spiffe = "spiffe://overdrive.local/workload/payments";
         let not_after = 1_700_003_600;
 
         mgr.hold(alloc("alloc-a1b2c3-0"), svid(spiffe, not_after));
@@ -254,10 +254,7 @@ mod tests {
     fn drop_svid_removes_the_alloc_from_the_snapshot() {
         let mgr = IdentityMgr::new(None);
         let a = alloc("alloc-a1b2c3-0");
-        mgr.hold(
-            a.clone(),
-            svid("spiffe://overdrive.local/workload/payments/alloc/a1b2c3", 1_700_003_600),
-        );
+        mgr.hold(a.clone(), svid("spiffe://overdrive.local/workload/payments", 1_700_003_600));
         assert!(mgr.held_snapshot().contains_key(&a), "alloc is held after hold()");
 
         mgr.drop_svid(&a);
@@ -275,18 +272,9 @@ mod tests {
     fn held_snapshot_iterates_in_sorted_allocation_order() {
         let mgr = IdentityMgr::new(None);
         // Insert out of sorted order.
-        mgr.hold(
-            alloc("alloc-zzz-0"),
-            svid("spiffe://overdrive.local/workload/z/alloc/zzz", 1_700_000_001),
-        );
-        mgr.hold(
-            alloc("alloc-aaa-0"),
-            svid("spiffe://overdrive.local/workload/a/alloc/aaa", 1_700_000_002),
-        );
-        mgr.hold(
-            alloc("alloc-mmm-0"),
-            svid("spiffe://overdrive.local/workload/m/alloc/mmm", 1_700_000_003),
-        );
+        mgr.hold(alloc("alloc-zzz-0"), svid("spiffe://overdrive.local/workload/z", 1_700_000_001));
+        mgr.hold(alloc("alloc-aaa-0"), svid("spiffe://overdrive.local/workload/a", 1_700_000_002));
+        mgr.hold(alloc("alloc-mmm-0"), svid("spiffe://overdrive.local/workload/m", 1_700_000_003));
 
         let keys: Vec<AllocationId> = mgr.held_snapshot().into_keys().collect();
         let mut sorted = keys.clone();
@@ -306,10 +294,7 @@ mod tests {
     fn set_bundle_does_not_disturb_the_held_svid_set() {
         let mgr = IdentityMgr::new(None);
         let a = alloc("alloc-a1b2c3-0");
-        mgr.hold(
-            a.clone(),
-            svid("spiffe://overdrive.local/workload/payments/alloc/a1b2c3", 1_700_003_600),
-        );
+        mgr.hold(a.clone(), svid("spiffe://overdrive.local/workload/payments", 1_700_003_600));
 
         mgr.set_bundle(bundle());
 

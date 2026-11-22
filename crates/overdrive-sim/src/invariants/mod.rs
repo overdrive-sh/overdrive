@@ -613,7 +613,7 @@ pub enum Invariant {
     /// `SimObservationStore` + `IdentityMgr`) through allocations churning
     /// Running↔Stopped, and asserts the held `BTreeMap` converges against the
     /// running-allocation set: eventually every Running alloc holds a valid
-    /// SVID (held `spiffe_id == SpiffeId::for_allocation` AND an
+    /// SVID (held `spiffe_id == SpiffeId::for_workload` AND an
     /// `issued_certificates` audit row exists — K1/O1) AND no Stopped alloc
     /// holds one (the drop executor removed the held leaf key — K2/O2). The
     /// held-vs-running relation is the steady-state target reached within a

@@ -1482,7 +1482,7 @@ async fn genuine_pre_change_contract(
         last_svid_issue_failure: None,
     };
 
-    let expected_spiffe = SpiffeId::for_allocation(&raw.workload_id, &raw.alloc_id);
+    let expected_spiffe = SpiffeId::for_workload(&raw.workload_id);
     let issued_rows =
         observations.issued_certificate_rows().await.expect("read durable certificate audit rows");
     let issued = issued_rows
@@ -1573,9 +1573,8 @@ pub(super) async fn poll_until_issued_identity(
     alloc_id: &str,
     budget: Duration,
 ) -> IssuedCertSummary {
-    let expected =
-        SpiffeId::new(&format!("spiffe://overdrive.local/workload/{workload_id}/alloc/{alloc_id}"))
-            .expect("allocation-shaped SPIFFE ID");
+    let expected = SpiffeId::new(&format!("spiffe://overdrive.local/workload/{workload_id}"))
+        .expect("allocation-shaped SPIFFE ID");
     let deadline = tokio::time::Instant::now() + budget;
     loop {
         let described =

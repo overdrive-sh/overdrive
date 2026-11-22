@@ -104,7 +104,7 @@ async fn fixture(world: &World) -> Fixture {
         let state = if alloc_world.running { AllocState::Running } else { AllocState::Terminated };
         node.write_alloc_row(WORKLOAD, alloc, state, WorkloadKind::Job, None).await;
         let alloc_id = AllocationId::new(alloc).expect("alloc id");
-        let spiffe = SpiffeId::for_allocation(&workload_id(WORKLOAD), &alloc_id);
+        let spiffe = SpiffeId::for_workload(&workload_id(WORKLOAD));
         if alloc_world.hold != Hold::Never {
             let material = crate::ca_issuance::issue_and_audit(
                 node.state.ca.as_ref(),
@@ -131,7 +131,7 @@ async fn fixture(world: &World) -> Fixture {
     }
     if world.orphan_hold {
         let alloc_id = AllocationId::new(ORPHAN_ALLOC).expect("alloc id");
-        let spiffe = SpiffeId::for_allocation(&workload_id(ORPHAN_WORKLOAD), &alloc_id);
+        let spiffe = SpiffeId::for_workload(&workload_id(ORPHAN_WORKLOAD));
         let material = crate::ca_issuance::issue_and_audit(
             node.state.ca.as_ref(),
             node.obs.as_ref(),

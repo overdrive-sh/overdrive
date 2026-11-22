@@ -407,7 +407,7 @@ impl FlowsBeaconDriver {
         let spec = AllocationSpec {
             declared_listeners: Vec::new(),
             alloc: lease.alloc.clone(),
-            identity: SpiffeId::new("spiffe://overdrive.local/workload/flows-beacon/alloc/x")
+            identity: SpiffeId::new("spiffe://overdrive.local/workload/flows-beacon")
                 .expect("valid spiffe id"),
             driver: DriverPayload::Vm(VmPayload {
                 volume: None,

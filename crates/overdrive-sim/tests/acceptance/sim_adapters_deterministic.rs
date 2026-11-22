@@ -282,7 +282,7 @@ async fn sim_dataplane_stores_policy_and_service_state() {
     )
     .expect("IPv4 ServiceFrontend constructs");
     let backend = Backend {
-        workload_identity: spiffe("workload/payments/alloc/a1b2c3"),
+        workload_identity: spiffe("workload/payments"),
         addr: "127.0.0.1:8080".parse().expect("valid addr"),
         weight: 100,
         healthy: true,
@@ -324,7 +324,7 @@ fn sample_spec() -> AllocationSpec {
     AllocationSpec {
         declared_listeners: Vec::new(),
         alloc: alloc("alloc-a1b2c3"),
-        identity: spiffe("workload/payments/alloc/a1b2c3"),
+        identity: spiffe("workload/payments"),
         driver: DriverPayload::Vm(VmPayload {
             volume: None,
             command: "registry/payments:1.0".to_owned(),

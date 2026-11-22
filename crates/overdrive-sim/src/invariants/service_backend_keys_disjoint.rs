@@ -132,7 +132,7 @@ fn backends(service: u8) -> Vec<Backend> {
     (0..BACKENDS_PER_SERVICE)
         .map(|index| Backend {
             workload_identity: SpiffeId::new(&format!(
-                "spiffe://overdrive.local/workload/svc-{service}/alloc/a-{index}"
+                "spiffe://overdrive.local/workload/svc-{service}"
             ))
             .expect("valid SPIFFE ID"),
             addr: SocketAddr::new(

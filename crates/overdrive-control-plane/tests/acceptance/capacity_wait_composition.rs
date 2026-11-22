@@ -349,10 +349,8 @@ impl Node {
             node_id: NodeId::new(NODE).expect("node id"),
             spec: AllocationSpec {
                 alloc: AllocationId::new(&name).expect("alloc id"),
-                identity: SpiffeId::new(&format!(
-                    "spiffe://overdrive.local/workload/filler/alloc/{name}"
-                ))
-                .expect("spiffe id"),
+                identity: SpiffeId::new("spiffe://overdrive.local/workload/filler")
+                    .expect("spiffe id"),
                 driver: DriverPayload::Vm(VmPayload {
                     volume: None,
                     command: "/sbin/init".to_owned(),

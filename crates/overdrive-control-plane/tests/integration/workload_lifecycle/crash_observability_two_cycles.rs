@@ -58,10 +58,7 @@ fn crashing_spec(alloc: &AllocationId) -> AllocationSpec {
     AllocationSpec {
         declared_listeners: Vec::new(),
         alloc: alloc.clone(),
-        identity: SpiffeId::for_allocation(
-            &WorkloadId::new("crashobs2").expect("valid workload id"),
-            alloc,
-        ),
+        identity: SpiffeId::for_workload(&WorkloadId::new("crashobs2").expect("valid workload id")),
         driver: DriverPayload::Vm(VmPayload {
             volume: None,
             command: "/sbin/init".to_owned(),

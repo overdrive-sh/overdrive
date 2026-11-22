@@ -169,7 +169,7 @@ fn fact_for(
             || {
                 overdrive_reconcilers::service_lifecycle::ServiceAllocPhase::Running(
                     overdrive_reconcilers::service_lifecycle::ServiceBackendIdentity {
-                        spiffe: SpiffeId::for_allocation(&workload, alloc_id),
+                        spiffe: SpiffeId::for_workload(&workload),
                         ip: Ipv4Addr::new(192, 0, 2, 17),
                     },
                 )
@@ -303,9 +303,8 @@ async fn terminal_state_wins_and_dead_vm_backend_never_returns_to_eligibility() 
     // terminal veto remains scoped to the predecessor. The dead predecessor
     // never returns to eligibility; the successor owns its own projection.
     let successor = successor_alloc_id();
-    let successor_identity = SpiffeId::for_allocation(
+    let successor_identity = SpiffeId::for_workload(
         &WorkloadId::new("service-vm-terminal-25717").expect("static workload ID"),
-        &successor,
     );
     in_flight.allocs.insert(
         successor.clone(),

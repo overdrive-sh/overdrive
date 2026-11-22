@@ -45,17 +45,12 @@ const fn v4(a: u8, b: u8, c: u8, d: u8, port: u16) -> SocketAddrV4 {
     SocketAddrV4::new(Ipv4Addr::new(a, b, c, d), port)
 }
 
-/// A `Backend` at the given V4 addr with the given readiness. The `alloc`
-/// SVID is derived from the addr so distinct backends carry distinct
-/// identities (the value is irrelevant to `classify`, which keys on `addr` +
-/// `healthy`).
+/// A `Backend` at the given V4 addr with the given readiness. The workload
+/// identity is irrelevant to `classify`, which keys on `addr` + `healthy`.
 fn backend(addr: SocketAddrV4, healthy: bool) -> Backend {
     Backend {
-        workload_identity: SpiffeId::new(&format!(
-            "spiffe://overdrive.local/workload/svc/alloc/{}",
-            addr.port()
-        ))
-        .expect("valid spiffe id"),
+        workload_identity: SpiffeId::new("spiffe://overdrive.local/workload/svc")
+            .expect("valid spiffe id"),
         addr: SocketAddr::V4(addr),
         weight: 1,
         healthy,

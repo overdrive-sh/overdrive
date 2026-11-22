@@ -118,7 +118,6 @@ proptest! {
     ///
     /// CONTRACT_SHAPE: pure-function.
     #[test]
-    #[should_panic(expected = "every allocation is issued its workload's identity")]
     fn every_allocation_of_a_workload_is_issued_the_workload_identity(
         suffixes in proptest::collection::btree_set("[a-f0-9]{4,8}", 1..6),
     ) {

@@ -216,12 +216,7 @@ async fn boot_fixture(
 }
 
 fn build_spec(alloc_id: &AllocationId, workload_id: &WorkloadId) -> AllocationSpec {
-    let identity = SpiffeId::new(&format!(
-        "spiffe://overdrive.local/workload/{}/alloc/{}",
-        workload_id.as_str(),
-        alloc_id.as_str(),
-    ))
-    .expect("spiffe id");
+    let identity = SpiffeId::for_workload(workload_id);
     AllocationSpec {
         declared_listeners: Vec::new(),
         alloc: alloc_id.clone(),

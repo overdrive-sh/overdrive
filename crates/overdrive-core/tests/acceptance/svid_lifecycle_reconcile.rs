@@ -77,9 +77,9 @@ fn issue_count(actions: &[Action]) -> usize {
     actions.iter().filter(|a| matches!(a, Action::IssueSvid { .. })).count()
 }
 
-fn held_facts(alloc: &AllocationId, not_after_secs: u64) -> HeldSvidFacts {
+fn held_facts(_alloc: &AllocationId, not_after_secs: u64) -> HeldSvidFacts {
     HeldSvidFacts {
-        spiffe_id: SpiffeId::for_allocation(&workload(), alloc),
+        spiffe_id: SpiffeId::for_workload(&workload()),
         not_after: UnixInstant::from_unix_duration(Duration::from_secs(not_after_secs)),
     }
 }
@@ -115,7 +115,7 @@ fn expected_drop_correlation(alloc: &AllocationId, spiffe: &SpiffeId) -> Correla
 // `@in-memory` `@property` `@S-WIM-01` — for an arbitrary running-set / held-set
 // population, EVERY allocation that is Running but NOT held yields exactly one
 // `Action::IssueSvid` carrying the four pinned fields (`alloc_id`, the
-// `SpiffeId::for_allocation` identity, `node_id`, the derived correlation), and
+// `SpiffeId::for_workload` identity, `node_id`, the derived correlation), and
 // the reconcile body performs no CA / ObservationStore I/O (it is a pure
 // function over its arguments — there is no handle to call). The observable
 // universe is the emitted action list + the returned `next_view`.
@@ -169,7 +169,7 @@ proptest! {
         );
 
         for alloc in desired.keys() {
-            let expected_spiffe = SpiffeId::for_allocation(&workload(), alloc);
+            let expected_spiffe = SpiffeId::for_workload(&workload());
             let action = issues.get(alloc).expect("running ∧ ¬held alloc emits an IssueSvid");
             match action {
                 Action::IssueSvid { alloc_id, spiffe_id, node_id, correlation } => {
@@ -177,7 +177,7 @@ proptest! {
                     prop_assert_eq!(
                         spiffe_id,
                         &expected_spiffe,
-                        "IssueSvid carries SpiffeId::for_allocation"
+                        "IssueSvid carries SpiffeId::for_workload"
                     );
                     prop_assert_eq!(node_id, &node(), "IssueSvid carries the issuing node");
                     prop_assert_eq!(
@@ -246,7 +246,7 @@ fn stopped_alloc_with_held_svid_emits_drop_svid() {
         actions.iter().filter(|a| matches!(a, Action::DropSvid { .. })).collect();
     assert_eq!(drops.len(), 1, "exactly one DropSvid for the ¬running ∧ held alloc");
 
-    let stopped_spiffe = SpiffeId::for_allocation(&workload(), &stopped);
+    let stopped_spiffe = SpiffeId::for_workload(&workload());
     match drops[0] {
         Action::DropSvid { alloc_id, correlation } => {
             assert_eq!(alloc_id, &stopped, "DropSvid names the stopped alloc");
@@ -287,8 +287,7 @@ fn stopped_alloc_with_held_svid_emits_drop_svid() {
 /// `last_failure_seen_at == tick.now_unix`) so an issue that then FAILS backs off
 /// rather than hammering every tick (D8 — the `bump_if_dispatched` shape). The
 /// IMMEDIATE restart-recovery path (`¬held ∧ ever_issued`, which bypasses the gate
-/// and records NO attempt) is covered by
-/// `ever_issued_unheld_alloc_reissues_immediately_bypassing_backoff_and_clears_retry`.
+/// and records NO attempt) is covered by `svid_lifecycle_allocation_keyed_recovery.rs`.
 #[test]
 fn first_issue_unheld_never_issued_alloc_issues_and_records_one_attempt() {
     let reconciler = SvidLifecycle::canonical();
@@ -334,80 +333,6 @@ fn first_issue_unheld_never_issued_alloc_issues_and_records_one_attempt() {
             "re-issue stamps last_failure_seen_at with tick.now_unix (the input, not a deadline)"
         );
     }
-}
-
-/// `@in-memory` `@D10` (restart recovery — the rev-5 fix) -- a running alloc
-/// that is `¬held` but `ever_issued` (a durable `issued_certificates` audit row
-/// for its derived identity survived a restart that lost the held set) re-issues
-/// `Action::IssueSvid` IMMEDIATELY, BYPASSING the backoff gate, EVEN WHEN a stale
-/// `IssueRetry` entry (a record-on-emit artifact from the prior successful issue)
-/// would otherwise suppress it inside the backoff window. The stale entry is
-/// CLEARED in the same tick (D10 invariants 1 + 2). This is the regression anchor
-/// for the characterized
-/// `restart_after_successful_issue_before_clear_stalls_reissue` defect at the
-/// pure-reconciler layer.
-#[test]
-fn ever_issued_unheld_alloc_reissues_immediately_bypassing_backoff_and_clears_retry() {
-    let reconciler = SvidLifecycle::canonical();
-    let alloc = AllocationId::new("payments-d10").expect("valid AllocationId");
-    let identity = SpiffeId::for_allocation(&workload(), &alloc);
-
-    // desired = the alloc is Running; actual = ¬held but ever_issued (audit row
-    // survives the restart).
-    let mut desired: BTreeMap<AllocationId, RunningAlloc> = BTreeMap::new();
-    desired.insert(alloc.clone(), running_alloc());
-    let state = SvidLifecycleState {
-        desired,
-        actual: BTreeMap::new(),
-        ever_issued: BTreeSet::from([identity.clone()]),
-    };
-
-    // A STALE retry entry from the prior SUCCESSFUL issue (record-on-emit), with
-    // a deadline strictly in the FUTURE relative to `now` — a backoff gate WOULD
-    // suppress the re-issue here. The ever_issued branch must NOT consult it.
-    let seen_at_secs = 1_000;
-    let mut retry: BTreeMap<AllocationId, IssueRetry> = BTreeMap::new();
-    retry.insert(
-        alloc.clone(),
-        IssueRetry {
-            attempts: 1,
-            last_failure_seen_at: UnixInstant::from_unix_duration(Duration::from_secs(
-                seen_at_secs,
-            )),
-        },
-    );
-    let view = SvidLifecycleView { retry };
-
-    // Tick AT logical `seen_at_secs` — STRICTLY INSIDE the backoff window
-    // (`now < last_failure_seen_at + backoff_for_attempt(1)`). A `¬ever_issued`
-    // alloc would be suppressed; this `ever_issued` one must re-issue NOW.
-    let now = seen_at_secs; // < seen_at_secs + 1s backoff
-    let (actions, next_view) = reconciler.reconcile(&state, &state, &view, &make_tick(now));
-
-    // IMMEDIATE re-issue despite the in-window stale entry.
-    assert_eq!(
-        issue_count(&actions),
-        1,
-        "¬held ∧ ever_issued re-issues IMMEDIATELY even inside the backoff window; got {actions:?}"
-    );
-    let issued_id = actions.iter().find_map(|a| match a {
-        Action::IssueSvid { spiffe_id, .. } => Some(spiffe_id.clone()),
-        _ => None,
-    });
-    assert_eq!(
-        issued_id.as_ref(),
-        Some(&identity),
-        "the recovery re-issue carries the alloc's pure-derived identity"
-    );
-
-    // The stale retry entry is CLEARED — a durable success is proven, no failure
-    // is pending (D10 invariant 2; this is what stops a stale entry persisting as
-    // a live failure across a restart).
-    assert!(
-        !next_view.retry.contains_key(&alloc),
-        "the stale retry entry is cleared by the ever_issued recovery branch; got {:?}",
-        next_view.retry
-    );
 }
 
 /// `@in-memory` `@D10` (the gate is NOT bypassed for the never-succeeded case) --
@@ -457,150 +382,6 @@ fn unheld_never_issued_alloc_stays_backoff_gated_inside_window() {
     assert_eq!(
         preserved.attempts, 1,
         "a suppressed never-issued tick neither bumps nor clears the retry entry"
-    );
-}
-
-/// Run one `reconcile` tick against `(running, held, ever_issued, view)` at
-/// `now_secs`, returning the emitted actions + the next view. A free helper so
-/// the Tier-1 DST restart scenario can drive a multi-tick trajectory
-/// deterministically. `ever_issued` is the durable audit-row identity set
-/// (rev 5 D10): the set of `SpiffeId`s for which an `issued_certificates` row
-/// exists.
-fn tick_once(
-    reconciler: &SvidLifecycle,
-    running: &BTreeMap<AllocationId, RunningAlloc>,
-    held: &BTreeMap<AllocationId, HeldSvidFacts>,
-    ever_issued: &BTreeSet<SpiffeId>,
-    view: &SvidLifecycleView,
-    now_secs: u64,
-) -> (Vec<Action>, SvidLifecycleView) {
-    let state = SvidLifecycleState {
-        desired: running.clone(),
-        actual: held.clone(),
-        ever_issued: ever_issued.clone(),
-    };
-    reconciler.reconcile(&state, &state, view, &make_tick(now_secs))
-}
-
-/// `@in-memory` `@property` `@S-WIM-08` `@D10` (Tier-1 DST restart
-/// scenario) -- the full restart-mid-run trajectory the reconciler must
-/// converge under the rev-5 D10 model, asserted as a SEED-DETERMINISTIC twin
-/// run (criterion 3):
-///
-/// 1. **Steady state** — N Running allocs, all held with a FAR-FUTURE `not_after`
-///    (not near-expiry) AND `ever_issued` (an audit row exists per alloc). The
-///    tick is a clean no-op (`[Noop]`): no IssueSvid, no DropSvid.
-/// 2. **Restart (D10 — IMMEDIATE recovery)** — the in-memory held set is emptied
-///    (`held = ∅`; the leaf key was never persisted, ADR-0063 D9) but the DURABLE
-///    `ever_issued` audit-row set SURVIVES. Retick → every still-Running alloc
-///    matches `¬held ∧ ever_issued → IssueSvid IMMEDIATELY` (bounded recovery,
-///    one per alloc, BYPASSING the backoff gate). The retry View stays EMPTY —
-///    the recovery branch clears any entry; recovery does not record a failure
-///    (D10 invariant 1).
-/// 3. **No backoff stall on restart** — even immediately after the restart tick
-///    (logical time UNCHANGED from the restart tick), the still-`¬held ∧
-///    ever_issued` allocs re-issue AGAIN immediately, with NO backoff window
-///    elapsing and NO retry entry ever accumulating (D10 invariant 2 — a stale
-///    retry entry cannot suppress recovery).
-///
-/// `reconcile` is a pure function → identical inputs yield identical
-/// `(actions, next_view)`. The scenario runs TWICE (a "twin run" — the
-/// seed-deterministic reproduction K3 demands) and asserts the two trajectories
-/// are bit-identical at every step.
-#[test]
-fn dst_restart_scenario_reissues_immediately_via_ever_issued_and_is_twin_run_deterministic() {
-    // The trajectory, as a pure function of nothing (deterministic inputs) →
-    // returns the full per-step observable trace so a twin run can be diffed.
-    fn trajectory() -> Vec<(Vec<Action>, SvidLifecycleView)> {
-        let reconciler = SvidLifecycle::canonical();
-        let mut trace: Vec<(Vec<Action>, SvidLifecycleView)> = Vec::new();
-
-        // N Running allocs.
-        let allocs: Vec<AllocationId> = (0..4)
-            .map(|i| AllocationId::new(&format!("payments-dst-{i}")).expect("valid AllocationId"))
-            .collect();
-        let mut running: BTreeMap<AllocationId, RunningAlloc> = BTreeMap::new();
-        for a in &allocs {
-            running.insert(a.clone(), running_alloc());
-        }
-
-        // ever_issued — an audit row exists for every alloc's derived identity
-        // (each was successfully issued before; audit rows are durable and
-        // survive the restart, ADR-0063 D6 audit-before-hold).
-        let ever_issued: BTreeSet<SpiffeId> =
-            allocs.iter().map(|a| SpiffeId::for_allocation(&workload(), a)).collect();
-
-        // Step 1 — steady state: all held, far-future not_after (not near-expiry).
-        let far_future = 4_000_000_000;
-        let mut held: BTreeMap<AllocationId, HeldSvidFacts> = BTreeMap::new();
-        for a in &allocs {
-            held.insert(a.clone(), held_facts(a, far_future));
-        }
-        let view0 = SvidLifecycleView::default();
-        let step1 = tick_once(&reconciler, &running, &held, &ever_issued, &view0, 1_000);
-        trace.push(step1.clone());
-
-        // Step 2 — RESTART: held set emptied, ever_issued SURVIVES. Retick → every
-        // alloc is `¬held ∧ ever_issued → IssueSvid IMMEDIATELY` (bypass backoff).
-        let empty_held: BTreeMap<AllocationId, HeldSvidFacts> = BTreeMap::new();
-        let restart_now = 2_000;
-        let step2 =
-            tick_once(&reconciler, &running, &empty_held, &ever_issued, &step1.1, restart_now);
-        trace.push(step2.clone());
-
-        // Step 3 — STILL ¬held (the recovery re-issue has not yet been observed as
-        // held) at the SAME logical time. A backoff gate WOULD suppress here; the
-        // ever_issued branch does NOT — it re-issues again immediately, no retry
-        // entry accrues.
-        let step3 =
-            tick_once(&reconciler, &running, &empty_held, &ever_issued, &step2.1, restart_now);
-        trace.push(step3);
-
-        trace
-    }
-
-    let run_a = trajectory();
-    let run_b = trajectory();
-
-    // Twin-run determinism (K3): the pure reconcile produces a bit-identical
-    // trajectory for identical inputs.
-    assert_eq!(
-        run_a, run_b,
-        "the restart trajectory is seed-deterministic (twin runs are identical)"
-    );
-
-    // Step 1 (steady state, all held far-future): clean no-op.
-    assert_eq!(
-        run_a[0].0.as_slice(),
-        [Action::Noop].as_slice(),
-        "steady-state held tick is [Noop]"
-    );
-
-    // Step 2 (restart, D10 immediate recovery): one IssueSvid per alloc, and the
-    // retry View stays EMPTY (recovery does not record a failure — D10 inv 1).
-    assert_eq!(
-        issue_count(&run_a[1].0),
-        4,
-        "restart re-issues every still-Running ever-issued alloc once, immediately"
-    );
-    assert!(
-        run_a[1].1.retry.is_empty(),
-        "restart recovery via ever_issued records NO retry entry; got {:?}",
-        run_a[1].1.retry
-    );
-
-    // Step 3 (same logical time, still ¬held): the ever_issued branch re-issues
-    // AGAIN immediately — the backoff gate is NEVER reached, so no stale entry
-    // can ever stall recovery (D10 inv 2).
-    assert_eq!(
-        issue_count(&run_a[2].0),
-        4,
-        "at the SAME logical time, ever_issued recovery re-issues again with no backoff wait"
-    );
-    assert!(
-        run_a[2].1.retry.is_empty(),
-        "ever_issued recovery never accumulates a retry entry; got {:?}",
-        run_a[2].1.retry
     );
 }
 

@@ -299,7 +299,7 @@ impl Rig {
         AllocationSpec {
             declared_listeners: Vec::new(),
             alloc: AllocationId::new(&format!("vol-alloc-{index}")).expect("valid alloc id"),
-            identity: SpiffeId::new("spiffe://overdrive.local/workload/dev-box/alloc/x")
+            identity: SpiffeId::new("spiffe://overdrive.local/workload/dev-box")
                 .expect("valid spiffe id"),
             driver: DriverPayload::Vm(VmPayload {
                 volume: Some(VolumePayload { workload: workload(), size: volume_size_gib(40) }),

@@ -297,7 +297,7 @@ pub(super) fn vm_spec(
 ) -> AllocationSpec {
     AllocationSpec {
         alloc: alloc.clone(),
-        identity: SpiffeId::for_allocation(workload, alloc),
+        identity: SpiffeId::for_workload(workload),
         driver: DriverPayload::Vm(VmPayload {
             volume: None,
             command: "/bin/serve".to_owned(),
@@ -662,7 +662,7 @@ impl ProbeWorld {
     /// healthy backend (`None`: no backend row lists it).
     pub(super) async fn backend_healthy(&self) -> Option<bool> {
         let service_id = self.service_id?;
-        let spiffe = SpiffeId::for_allocation(&self.workload, &self.alloc);
+        let spiffe = SpiffeId::for_workload(&self.workload);
         self.obs
             .service_backends_rows(&service_id)
             .await

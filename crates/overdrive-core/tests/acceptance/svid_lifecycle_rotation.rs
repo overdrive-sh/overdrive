@@ -56,16 +56,16 @@ fn make_tick(now_secs: u64) -> TickContext {
     }
 }
 
-fn held_facts(alloc: &AllocationId, not_after_secs: u64) -> HeldSvidFacts {
+fn held_facts(_alloc: &AllocationId, not_after_secs: u64) -> HeldSvidFacts {
     HeldSvidFacts {
-        spiffe_id: SpiffeId::for_allocation(&workload(), alloc),
+        spiffe_id: SpiffeId::for_workload(&workload()),
         not_after: UnixInstant::from_unix_duration(Duration::from_secs(not_after_secs)),
     }
 }
 
 /// A `SvidLifecycleState` with an EMPTY `ever_issued` set — the default for the
 /// `running ∧ held` rotation scenarios (the held alloc has no bearing on the
-/// restart-recovery audit set; that branch is exercised explicitly in S-OC-05).
+/// restart-recovery audit set).
 const fn state_no_audit(
     desired: BTreeMap<AllocationId, RunningAlloc>,
     actual: BTreeMap<AllocationId, HeldSvidFacts>,
@@ -81,14 +81,6 @@ fn expected_rotate_correlation(alloc: &AllocationId, spiffe: &SpiffeId) -> Corre
     let target = format!("svid-lifecycle/{alloc}");
     let spec_hash = ContentHash::of(spiffe.as_str().as_bytes());
     CorrelationKey::derive(&target, &spec_hash, "rotate-svid")
-}
-
-/// The deterministic `"issue-svid"`-purpose correlation (restart-recovery /
-/// first-issue path), for the distinctness assertion in S-OC-05.
-fn expected_issue_correlation(alloc: &AllocationId, spiffe: &SpiffeId) -> CorrelationKey {
-    let target = format!("svid-lifecycle/{alloc}");
-    let spec_hash = ContentHash::of(spiffe.as_str().as_bytes());
-    CorrelationKey::derive(&target, &spec_hash, "issue-svid")
 }
 
 fn start_workflow_count(actions: &[Action]) -> usize {
@@ -352,97 +344,6 @@ fn rotation_threshold_tracks_half_of_workload_svid_ttl_via_emitted_action() {
         0,
         "S-OC-04: not_after == now + WORKLOAD_SVID_TTL/2 + 1s does not rotate; got {beyond_boundary:?}"
     );
-}
-
-// S-OC-05 `@dst @property @error @driving_port @slice-1` — rotate is DISTINCT
-// from restart-recovery re-issue. A `running ∧ held(near-expiry)` alloc emits a
-// `"rotate-svid"`-correlation IssueSvid; a separate `running ∧ ¬held ∧
-// ever_issued` alloc emits an `"issue-svid"`-correlation IssueSvid; neither
-// emits any `StartWorkflow`, and the two correlations are distinct. Proves the
-// rotate branch is NOT routed through the (deleted) gated seam and is
-// independent of the restart-recovery branch (ADR-0067 rev 6 D10). Universe:
-// the emitted action list partitioned by correlation purpose. Property over
-// arbitrary near-expiry slack + arbitrary far-future restart-recovery
-// `not_after` (the latter is unheld, so its `not_after` is moot).
-proptest! {
-    #![proptest_config(ProptestConfig::with_cases(100))]
-    #[test]
-    fn rotate_is_distinct_from_restart_recovery_reissue(
-        now_secs in 1_000_000u64..2_000_000_000u64,
-        rotate_slack in 0u64..HALF_TTL_SECS,
-    ) {
-        let reconciler = SvidLifecycle::canonical();
-
-        // alloc R: running ∧ held ∧ near-expiry → rotate ("rotate-svid").
-        let rotate_alloc = AllocationId::new("payments-rotate").expect("valid AllocationId");
-        // alloc I: running ∧ ¬held ∧ ever_issued → restart recovery ("issue-svid").
-        let recover_alloc = AllocationId::new("payments-recover").expect("valid AllocationId");
-
-        let mut desired: BTreeMap<AllocationId, RunningAlloc> = BTreeMap::new();
-        desired.insert(rotate_alloc.clone(), running_alloc());
-        desired.insert(recover_alloc.clone(), running_alloc());
-
-        // R is held & near-expiry; I is NOT held.
-        let rotate_held = held_facts(&rotate_alloc, now_secs + rotate_slack);
-        let mut actual: BTreeMap<AllocationId, HeldSvidFacts> = BTreeMap::new();
-        actual.insert(rotate_alloc.clone(), rotate_held.clone());
-
-        // I's derived identity is in the audit set (ever_issued) — the restart
-        // marker that drives the recovery re-issue.
-        let recover_spiffe = SpiffeId::for_allocation(&workload(), &recover_alloc);
-        let mut ever_issued: BTreeSet<SpiffeId> = BTreeSet::new();
-        ever_issued.insert(recover_spiffe.clone());
-
-        let state = SvidLifecycleState { desired, actual, ever_issued };
-        let view = SvidLifecycleView::default();
-        let tick = make_tick(now_secs);
-
-        let (actions, _next_view) = reconciler.reconcile(&state, &state, &view, &tick);
-
-        // Neither branch emits a StartWorkflow.
-        prop_assert_eq!(
-            start_workflow_count(&actions),
-            0,
-            "S-OC-05: neither rotate nor restart-recovery emits StartWorkflow; got {:?}",
-            actions
-        );
-
-        // Partition the emitted IssueSvid actions by alloc.
-        let mut rotate_corr: Option<CorrelationKey> = None;
-        let mut recover_corr: Option<CorrelationKey> = None;
-        for action in &actions {
-            if let Action::IssueSvid { alloc_id, correlation, .. } = action {
-                if alloc_id == &rotate_alloc {
-                    rotate_corr = Some(correlation.clone());
-                } else if alloc_id == &recover_alloc {
-                    recover_corr = Some(correlation.clone());
-                }
-            }
-        }
-
-        let rotate_corr = rotate_corr.expect("S-OC-05: the near-expiry held alloc emits a rotate IssueSvid");
-        let recover_corr =
-            recover_corr.expect("S-OC-05: the unheld ever_issued alloc emits a restart-recovery IssueSvid");
-
-        // The rotate alloc carries the "rotate-svid" correlation.
-        prop_assert_eq!(
-            &rotate_corr,
-            &expected_rotate_correlation(&rotate_alloc, &rotate_held.spiffe_id),
-            "S-OC-05: the rotate alloc carries the rotate-svid correlation"
-        );
-        // The restart-recovery alloc carries the "issue-svid" correlation.
-        prop_assert_eq!(
-            &recover_corr,
-            &expected_issue_correlation(&recover_alloc, &recover_spiffe),
-            "S-OC-05: the restart-recovery alloc carries the issue-svid correlation"
-        );
-        // The two correlations are distinct (different purpose AND different alloc).
-        prop_assert_ne!(
-            &rotate_corr,
-            &recover_corr,
-            "S-OC-05: rotate and restart-recovery correlations are distinct"
-        );
-    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

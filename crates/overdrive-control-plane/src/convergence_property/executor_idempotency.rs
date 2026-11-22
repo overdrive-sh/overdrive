@@ -171,7 +171,7 @@ fn applying_the_hydrators_dataplane_update_twice_equals_applying_it_once() {
                 vip: vip.try_as_ipv4().expect("v4"),
                 backends: vec![Backend {
                     workload_identity: SpiffeId::from_str(
-                        "spiffe://overdrive.local/workload/payments/alloc/a0",
+                        "spiffe://overdrive.local/workload/payments",
                     )
                     .expect("spiffe"),
                     addr: SocketAddr::new(Ipv4Addr::new(10, 1, 2, 3).into(), 8080),
@@ -238,7 +238,7 @@ fn applying_the_svid_drop_twice_equals_applying_it_once() {
             )
             .await;
         let alloc = AllocationId::new("payments-0").expect("alloc");
-        let spiffe = SpiffeId::for_allocation(&workload_id("payments"), &alloc);
+        let spiffe = SpiffeId::for_workload(&workload_id("payments"));
         let material = crate::ca_issuance::issue_and_audit(
             world.state.ca.as_ref(),
             world.obs.as_ref(),

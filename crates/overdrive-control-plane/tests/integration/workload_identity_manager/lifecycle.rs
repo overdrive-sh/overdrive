@@ -30,6 +30,7 @@ use overdrive_control_plane::identity_mgr::IdentityMgr;
 use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
 use overdrive_control_plane::{AppState, noop_heartbeat, svid_lifecycle};
 use overdrive_core::SpiffeId;
+use overdrive_core::ca::issued_certificate_row::IssuedFor;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::reconcilers::{Reconciler, ReconcilerName, TargetResource};
 use overdrive_core::traits::IdentityRead;
@@ -68,7 +69,7 @@ fn trust_domain_subject() -> SpiffeId {
 /// **When 1** — an alloc reaching Running → `IssueSvid` is dispatched through
 /// the REAL action-shim executor (`ca_issuance::issue_and_audit` over a real
 /// `RcgenCa` + a real `LocalObservationStore`) → `IdentityMgr` holds the minted
-/// SVID for the pure-derived `SpiffeId::for_allocation` identity, an
+/// SVID for the pure-derived `SpiffeId::for_workload` identity, an
 /// `issued_certificates` row is observable via the `ObservationStore`, AND
 /// `openssl verify -CAfile <root> -untrusted <intermediate> <svid.pem>` exits 0
 /// (assert on the tool EXIT CODE, not internal reachability — Tier 3).
@@ -94,7 +95,7 @@ fn trust_domain_subject() -> SpiffeId {
 /// the verify proves the CA WIRED INTO the convergence loop (`state.ca`)
 /// produces chains that `openssl verify` accepts for the held identity: root +
 /// intermediate from `state.ca`, leaf minted by `state.ca.issue_svid` for the
-/// SAME `SpiffeId::for_allocation` the executor held. This is the
+/// SAME `SpiffeId::for_workload` the executor held. This is the
 /// `ca_boot_and_audit` shape (mint-then-verify the chain the live CA produces).
 #[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
@@ -107,7 +108,7 @@ async fn walking_skeleton_running_alloc_issues_holds_audits_and_verifies_svid() 
 
     let workload = WorkloadId::new(WORKLOAD_NAME).expect("valid WorkloadId");
     let alloc = AllocationId::new(ALLOC_NAME).expect("valid AllocationId");
-    let identity = SpiffeId::for_allocation(&workload, &alloc);
+    let identity = SpiffeId::for_workload(&workload);
 
     // WHEN 1 — the alloc reaches Running (its alloc_status row goes Running).
     write_alloc_state(&h, ALLOC_NAME, AllocState::Running, 1).await;
@@ -131,7 +132,7 @@ async fn walking_skeleton_running_alloc_issues_holds_audits_and_verifies_svid() 
     });
     assert_eq!(
         facts.spiffe_id, identity,
-        "the held SVID identity must be the pure-derived SpiffeId::for_allocation"
+        "the held SVID identity must be the pure-derived SpiffeId::for_workload"
     );
 
     // AND an issued_certificates audit row is observable through the
@@ -151,7 +152,7 @@ async fn walking_skeleton_running_alloc_issues_holds_audits_and_verifies_svid() 
     // and swapped into the holder, NOT a fresh leaf re-minted here: the held
     // cert chains root → intermediate → leaf under a relying party, and the held
     // material's structured identity matches the pure-derived
-    // SpiffeId::for_allocation. Root + intermediate come from the SAME CA the
+    // SpiffeId::for_workload. Root + intermediate come from the SAME CA the
     // executor used (`state.ca`).
     let node = NodeId::new(NODE_NAME).expect("valid NodeId");
     let root = h.state.ca.root().expect("RcgenCa::root self-signs a real P-256 root");
@@ -164,7 +165,7 @@ async fn walking_skeleton_running_alloc_issues_holds_audits_and_verifies_svid() 
     assert_eq!(
         held_material.spiffe_id(),
         &identity,
-        "the HELD SVID material's identity must be the pure-derived SpiffeId::for_allocation"
+        "the HELD SVID material's identity must be the pure-derived SpiffeId::for_workload"
     );
 
     let pem_dir = TempDir::new().expect("pem tempdir");
@@ -255,8 +256,7 @@ async fn restart_reissues_each_still_running_alloc_with_audit_row() {
     let workload = WorkloadId::new(WORKLOAD_NAME).expect("valid WorkloadId");
     let alloc0 = AllocationId::new("alloc-ws-r0").expect("valid AllocationId");
     let alloc1 = AllocationId::new("alloc-ws-r1").expect("valid AllocationId");
-    let id0 = SpiffeId::for_allocation(&workload, &alloc0);
-    let id1 = SpiffeId::for_allocation(&workload, &alloc1);
+    let identity = SpiffeId::for_workload(&workload);
 
     write_alloc_state(&h1, "alloc-ws-r0", AllocState::Running, 1).await;
     write_alloc_state(&h1, "alloc-ws-r1", AllocState::Running, 1).await;
@@ -274,9 +274,18 @@ async fn restart_reissues_each_still_running_alloc_with_audit_row() {
     // The pre-restart audit-row count for each identity (the recovery re-issue
     // must STRICTLY increase this — a fresh audited row, not a re-read).
     let audit_before = h1.state.obs.issued_certificate_rows().await.expect("read audit rows");
-    let count0_before = audit_before.iter().filter(|r| r.spiffe_id == id0).count();
-    let count1_before = audit_before.iter().filter(|r| r.spiffe_id == id1).count();
-    assert!(count0_before >= 1 && count1_before >= 1, "each identity has a pre-restart audit row");
+    let count0_before = audit_before
+        .iter()
+        .filter(|r| r.issued_for == IssuedFor::Allocation(alloc0.clone()))
+        .count();
+    let count1_before = audit_before
+        .iter()
+        .filter(|r| r.issued_for == IssuedFor::Allocation(alloc1.clone()))
+        .count();
+    assert!(
+        count0_before >= 1 && count1_before >= 1,
+        "each allocation has a pre-restart audit row"
+    );
 
     // WHEN the control plane restarts: the OLD process exits (releasing its
     // exclusive redb locks on intent/obs/memory) — modelled by dropping `h1` and
@@ -318,14 +327,20 @@ async fn restart_reissues_each_still_running_alloc_with_audit_row() {
     let f1 = held_after.get(&alloc1).unwrap_or_else(|| {
         panic!("alloc1 re-issued; held: {:?}", held_after.keys().collect::<Vec<_>>())
     });
-    assert_eq!(f0.spiffe_id, id0, "re-issued alloc0 holds its pure-derived identity");
-    assert_eq!(f1.spiffe_id, id1, "re-issued alloc1 holds its pure-derived identity");
+    assert_eq!(f0.spiffe_id, identity, "re-issued alloc0 holds its pure-derived identity");
+    assert_eq!(f1.spiffe_id, identity, "re-issued alloc1 holds its pure-derived identity");
 
     // AND each re-issue leaves a FRESH issued_certificates audit row — the
     // per-identity audit count strictly increases after recovery.
     let audit_after = h2.state.obs.issued_certificate_rows().await.expect("read audit rows");
-    let count0_after = audit_after.iter().filter(|r| r.spiffe_id == id0).count();
-    let count1_after = audit_after.iter().filter(|r| r.spiffe_id == id1).count();
+    let count0_after = audit_after
+        .iter()
+        .filter(|r| r.issued_for == IssuedFor::Allocation(alloc0.clone()))
+        .count();
+    let count1_after = audit_after
+        .iter()
+        .filter(|r| r.issued_for == IssuedFor::Allocation(alloc1.clone()))
+        .count();
     assert!(
         count0_after > count0_before,
         "recovery re-issue of alloc0 writes a FRESH audit row ({count0_before} → {count0_after})"
@@ -351,8 +366,8 @@ async fn restart_reissues_each_still_running_alloc_with_audit_row() {
     });
     assert_eq!(
         held0.spiffe_id(),
-        &id0,
-        "the re-HELD SVID material's identity must be the recovered SpiffeId::for_allocation"
+        &identity,
+        "the re-HELD SVID material's identity must be the recovered SpiffeId::for_workload"
     );
 
     let pem_dir = TempDir::new().expect("pem tempdir");
@@ -445,7 +460,7 @@ async fn restart_after_successful_issue_reissues_immediately_via_ever_issued_aud
 
     let workload = WorkloadId::new(WORKLOAD_NAME).expect("valid WorkloadId");
     let alloc = AllocationId::new("alloc-ws-c0").expect("valid AllocationId");
-    let identity = SpiffeId::for_allocation(&workload, &alloc);
+    let identity = SpiffeId::for_workload(&workload);
     let svid_name = ReconcilerName::new(<SvidLifecycle as Reconciler>::NAME).expect("valid name");
 
     // The alloc reaches Running; tick EXACTLY ONCE — the issue succeeds (held),
@@ -467,8 +482,10 @@ async fn restart_after_successful_issue_reissues_immediately_via_ever_issued_aud
     // the identity (this is what `ever_issued` will project post-restart).
     let audit_before = h1.state.obs.issued_certificate_rows().await.expect("read audit rows");
     assert!(
-        audit_before.iter().any(|r| r.spiffe_id == identity),
-        "a durable audit row exists for the identity pre-crash (the ever_issued signal)",
+        audit_before.iter().any(|r| {
+            r.spiffe_id == identity && r.issued_for == IssuedFor::Allocation(alloc.clone())
+        }),
+        "a durable audit row exists for the allocation pre-crash (the ever_issued signal)",
     );
     // And — the defect's precondition (now harmless under D10) — a STALE retry
     // entry was persisted for the SUCCESSFUL issue (record-on-emit), not yet

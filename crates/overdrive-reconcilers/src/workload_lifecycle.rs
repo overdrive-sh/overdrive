@@ -1374,7 +1374,7 @@ impl WorkloadLifecycle {
                             return (Vec::new(), view.clone());
                         };
                         let alloc_id = mint_alloc_id(&job.id, attempt);
-                        let identity = SpiffeId::for_allocation(&job.id, &alloc_id);
+                        let identity = SpiffeId::for_workload(&job.id);
                         // Per ADR-0031 §5 + Amendment 1 + ADR-0083 § D3
                         // (GH #42, step 01-08): the Start action carries
                         // the operator-declared driver payload projected
@@ -1677,7 +1677,7 @@ fn restart_allocation_action(
     predecessor: &AllocStatusRow,
     successor_alloc_id: AllocationId,
 ) -> Action {
-    let identity = SpiffeId::for_allocation(&job.id, &successor_alloc_id);
+    let identity = SpiffeId::for_workload(&job.id);
     let driver = match &job.driver {
         WorkloadDriver::Vm(vm) => DriverPayload::Vm(vm.to_payload(&job.id)),
     };
@@ -2189,7 +2189,7 @@ pub fn allocation_spec_for_live_intent(
     };
     Some(AllocationSpec {
         alloc: alloc.clone(),
-        identity: SpiffeId::for_allocation(workload_id, alloc),
+        identity: SpiffeId::for_workload(workload_id),
         driver,
         resources,
         probe_descriptors: project_probe_descriptors(intent),

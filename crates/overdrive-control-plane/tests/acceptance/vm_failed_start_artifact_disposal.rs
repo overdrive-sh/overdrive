@@ -122,10 +122,8 @@ fn spec(
     AllocationSpec {
         declared_listeners: Vec::new(),
         alloc: alloc.clone(),
-        identity: SpiffeId::new(&format!(
-            "spiffe://overdrive.local/workload/{workload}/alloc/{alloc}"
-        ))
-        .expect("valid identity"),
+        identity: SpiffeId::new(&format!("spiffe://overdrive.local/workload/{workload}"))
+            .expect("valid identity"),
         driver: DriverPayload::Vm(VmPayload {
             volume: None,
             command: "/sbin/init".to_owned(),

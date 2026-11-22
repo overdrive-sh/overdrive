@@ -68,7 +68,7 @@ fn fact(state: AllocState, started: bool, startup_probes_empty: bool) -> Service
                 overdrive_reconcilers::service_lifecycle::ServiceAllocPhase::Running(
                     overdrive_reconcilers::service_lifecycle::ServiceBackendIdentity {
                         spiffe: overdrive_core::SpiffeId::new(
-                            "spiffe://overdrive.local/workload/svc/alloc/svc-0",
+                            "spiffe://overdrive.local/workload/svc",
                         )
                         .expect("valid spiffe"),
                         ip: Ipv4Addr::new(192, 168, 1, 10),

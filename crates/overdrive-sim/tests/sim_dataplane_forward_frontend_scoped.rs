@@ -45,7 +45,7 @@ fn frontend(port: u16, proto: Proto) -> ServiceFrontend {
 
 fn backend(port: u16) -> Backend {
     Backend {
-        workload_identity: SpiffeId::new("spiffe://overdrive.local/workload/svc/alloc/b-0")
+        workload_identity: SpiffeId::new("spiffe://overdrive.local/workload/svc")
             .expect("valid SPIFFE"),
         addr: SocketAddr::new(IpAddr::V4(BACKEND_IP), port),
         weight: 1,

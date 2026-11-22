@@ -604,7 +604,7 @@ fn successor_spec(
     AllocationSpec {
         declared_listeners: Vec::new(),
         alloc: successor.clone(),
-        identity: SpiffeId::for_allocation(workload, successor),
+        identity: SpiffeId::for_workload(workload),
         driver: payload(driver_type),
         resources: Resources {
             cpu: CpuQuantity::from_millis(100),

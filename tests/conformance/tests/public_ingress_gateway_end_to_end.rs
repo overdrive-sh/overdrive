@@ -210,7 +210,7 @@ async fn native_metal_kvm_public_ingress_gateway_streams_a_workload_response_ove
     );
 
     // And: the receipt occurrence names a Selected backend whose applied
-    // identity is the api allocation.
+    // identity is the api workload.
     let events = trace.since(mark);
     let occurrences = receipt_occurrences(&events);
     assert_eq!(occurrences.len(), 1, "exactly one receipt occurrence for the request");
@@ -218,12 +218,10 @@ async fn native_metal_kvm_public_ingress_gateway_streams_a_workload_response_ove
     assert_eq!(receipt.fields.get("receipt_outcome").map(String::as_str), Some("selected"));
     assert!(receipt.fields.contains_key("backend_id"), "a Selected receipt names its backend");
     let allocation = world.allocation_id().await.expect("the api allocation exists");
-    assert!(
-        receipt
-            .fields
-            .get("expected_peer_spiffe_id")
-            .is_some_and(|identity| identity.contains(&allocation)),
-        "the applied identity is the api allocation {allocation}: {:?}",
+    assert_eq!(
+        receipt.fields.get("expected_peer_spiffe_id").map(String::as_str),
+        Some("spiffe://overdrive.local/workload/api"),
+        "the applied identity is the api workload's (allocation {allocation}): {:?}",
         receipt.fields
     );
 

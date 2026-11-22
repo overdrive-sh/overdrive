@@ -864,8 +864,7 @@ fn alloc_id(name: &str) -> AllocationId {
 fn spec(name: &str) -> AllocationSpec {
     AllocationSpec {
         alloc: alloc_id(name),
-        identity: SpiffeId::new(&format!("spiffe://overdrive.local/workload/nd295/alloc/{name}"))
-            .expect("SPIFFE ID"),
+        identity: SpiffeId::new("spiffe://overdrive.local/workload/nd295").expect("SPIFFE ID"),
         driver: DriverPayload::Vm(VmPayload {
             volume: None,
             command: "/bin/true".to_owned(),

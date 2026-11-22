@@ -58,10 +58,8 @@ fn liveness_fact(
         alloc_id: aid(alloc_id),
         phase: overdrive_reconcilers::service_lifecycle::ServiceAllocPhase::Running(
             overdrive_reconcilers::service_lifecycle::ServiceBackendIdentity {
-                spiffe: overdrive_core::SpiffeId::new(
-                    "spiffe://overdrive.local/workload/svc/alloc/x",
-                )
-                .expect("valid spiffe"),
+                spiffe: overdrive_core::SpiffeId::new("spiffe://overdrive.local/workload/svc")
+                    .expect("valid spiffe"),
                 ip: std::net::Ipv4Addr::LOCALHOST,
             },
         ),

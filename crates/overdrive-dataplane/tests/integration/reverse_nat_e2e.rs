@@ -405,7 +405,7 @@ fn real_tcp_connection_completes_through_vip_with_payload_echo() {
     .expect("EbpfDataplane::new_with_pin_dir on lb_veth_a + lb_veth_b");
 
     let backend_alloc =
-        SpiffeId::new("spiffe://overdrive.local/workload/e2e/alloc/B1").expect("backend SpiffeId");
+        SpiffeId::new("spiffe://overdrive.local/workload/e2e").expect("backend SpiffeId");
     let backend_addr = SocketAddr::new(IpAddr::V4(A_BACKEND_IP), BACKEND_PORT);
     let runtime =
         tokio::runtime::Builder::new_current_thread().enable_all().build().expect("tokio rt");
@@ -658,7 +658,7 @@ fn removing_backend_purges_reverse_nat_entry_no_stale_rewrite() {
 
     // Step 1: install backend B1 — REVERSE_NAT_MAP gets B1's entry.
     let alloc_b1 =
-        SpiffeId::new("spiffe://overdrive.local/workload/e2e/alloc/B1").expect("alloc B1 SpiffeId");
+        SpiffeId::new("spiffe://overdrive.local/workload/e2e").expect("alloc B1 SpiffeId");
     runtime
         .block_on(dataplane.update_service(
             tcp_frontend(VIP, VIP_PORT),
@@ -720,8 +720,8 @@ fn removing_backend_purges_reverse_nat_entry_no_stale_rewrite() {
     // and the latter is determined by production hashing — no
     // single hardcoded `Ok(vec![...])` constant covers it.
     let backend_b1b_ip = Ipv4Addr::new(10, 1, 0, 7);
-    let alloc_b1b = SpiffeId::new("spiffe://overdrive.local/workload/e2e/alloc/B1b")
-        .expect("alloc B1b SpiffeId");
+    let alloc_b1b =
+        SpiffeId::new("spiffe://overdrive.local/workload/e2e").expect("alloc B1b SpiffeId");
     runtime
         .block_on(dataplane.update_service(
             tcp_frontend(VIP, VIP_PORT),
@@ -776,7 +776,7 @@ fn removing_backend_purges_reverse_nat_entry_no_stale_rewrite() {
     // about reachability; the kernel-side TC program looks up by
     // the packet's source IP. So B2 ≠ B1 is sufficient.
     let alloc_b2 =
-        SpiffeId::new("spiffe://overdrive.local/workload/e2e/alloc/B2").expect("alloc B2 SpiffeId");
+        SpiffeId::new("spiffe://overdrive.local/workload/e2e").expect("alloc B2 SpiffeId");
     runtime
         .block_on(dataplane.update_service(
             tcp_frontend(VIP, VIP_PORT),
@@ -889,8 +889,7 @@ fn empty_backend_update_removes_service_map_and_reverse_nat_entries() {
     let runtime =
         tokio::runtime::Builder::new_current_thread().enable_all().build().expect("tokio rt");
 
-    let alloc_b1 =
-        SpiffeId::new("spiffe://overdrive.local/workload/e2e/alloc/empty-B1").expect("SpiffeId");
+    let alloc_b1 = SpiffeId::new("spiffe://overdrive.local/workload/e2e").expect("SpiffeId");
 
     // Step 1: install a backend.
     runtime
@@ -1010,10 +1009,8 @@ fn empty_backend_purge_scoped_to_frontend_leaves_other_ports_alive() {
     let runtime =
         tokio::runtime::Builder::new_current_thread().enable_all().build().expect("tokio rt");
 
-    let alloc_port80 =
-        SpiffeId::new("spiffe://overdrive.local/workload/e2e/alloc/mp-port80").expect("SpiffeId");
-    let alloc_port443 =
-        SpiffeId::new("spiffe://overdrive.local/workload/e2e/alloc/mp-port443").expect("SpiffeId");
+    let alloc_port80 = SpiffeId::new("spiffe://overdrive.local/workload/e2e").expect("SpiffeId");
+    let alloc_port443 = SpiffeId::new("spiffe://overdrive.local/workload/e2e").expect("SpiffeId");
 
     let port_80: u16 = 80;
     let port_443: u16 = 443;
@@ -1165,8 +1162,7 @@ fn empty_backend_deregistration_releases_allocator_memo_entries() {
     let runtime =
         tokio::runtime::Builder::new_current_thread().enable_all().build().expect("tokio rt");
 
-    let alloc_b1 =
-        SpiffeId::new("spiffe://overdrive.local/workload/e2e/alloc/ar-B1").expect("SpiffeId");
+    let alloc_b1 = SpiffeId::new("spiffe://overdrive.local/workload/e2e").expect("SpiffeId");
 
     assert_eq!(dataplane.allocator_memo_len(), 0, "memo must start empty");
 

@@ -727,7 +727,7 @@ fn issued_cert_summary(
 /// rendered serial faithfully matches the summary's serial.
 ///
 /// Kind is `Job` — the DISTILL AC verb is `overdrive workload describe <id>`
-/// and the SVID `spiffe_id` is a `/workload/` path (`SpiffeId::for_allocation`),
+/// and the SVID `spiffe_id` is a `/workload/` path (`SpiffeId::for_workload`),
 /// so the kind under test MUST match the namespace. The server projects
 /// `issued_certificates` per running alloc with NO `WorkloadKind` filter,
 /// so a Job legitimately carries this summary; the render must surface it.
@@ -736,7 +736,7 @@ fn issued_cert_summary(
 fn alloc_status_surfaces_current_issued_certificate_summary() {
     let summary = issued_cert_summary(
         "0a1b2c3d4e5f",
-        "spiffe://overdrive.local/workload/dns-resolver/alloc/alloc-0",
+        "spiffe://overdrive.local/workload/dns-resolver",
         "ffeeddccbbaa",
         1_700_000_000,
     );
@@ -790,7 +790,7 @@ fn issued_certificate_summary_omits_cert_bytes_and_key_max_issuance_ordinal() {
     let current = issued_cert_summary(
         // A post-restart serial change — this is the CURRENT cert.
         "deadbeefcafe",
-        "spiffe://overdrive.local/workload/dns-resolver/alloc/alloc-0",
+        "spiffe://overdrive.local/workload/dns-resolver",
         "ffeeddccbbaa",
         1_700_000_500,
     );
@@ -881,7 +881,7 @@ fn alloc_status_omits_issued_certificate_section_when_empty() {
 fn job_alloc_status_surfaces_issued_certificate_summary() {
     let summary = issued_cert_summary(
         "0a1b2c3d4e5f",
-        "spiffe://overdrive.local/workload/coinflip/alloc/alloc-coinflip-0",
+        "spiffe://overdrive.local/workload/coinflip",
         "ffeeddccbbaa",
         1_700_000_000,
     );

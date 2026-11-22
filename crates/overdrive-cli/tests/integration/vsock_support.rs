@@ -221,7 +221,7 @@ async fn prepare_remote_identity(data_dir: &Path) -> RemoteIdentity {
     let now =
         SystemTime::now().duration_since(UNIX_EPOCH).expect("wall clock after epoch").as_secs();
     let request = SvidRequest::new(
-        SpiffeId::new("spiffe://overdrive.local/workload/v6-remote/alloc/external")
+        SpiffeId::new("spiffe://overdrive.local/workload/v6-remote")
             .expect("valid external V-6 SPIFFE id"),
         UnixInstant::from_unix_duration(Duration::from_secs(now.saturating_sub(60))),
         UnixInstant::from_unix_duration(Duration::from_secs(now + 3_600)),

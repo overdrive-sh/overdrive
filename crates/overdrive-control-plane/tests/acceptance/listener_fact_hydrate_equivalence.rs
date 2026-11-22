@@ -231,7 +231,7 @@ async fn persist_and_allocate(
 fn one_backend(workload: &str) -> Backend {
     Backend {
         workload_identity: SpiffeId::from_str(&format!(
-            "spiffe://overdrive.local/workload/{workload}/alloc/a1"
+            "spiffe://overdrive.local/workload/{workload}"
         ))
         .expect("spiffe"),
         addr: SocketAddr::from_str("10.9.9.9:8080").expect("addr"),
@@ -708,7 +708,7 @@ async fn service_vip_view_memo_absent_defers_tick_and_logs() {
 /// `HeldSvidView::held_snapshot()` returns the GLOBAL node-held SVID map (every
 /// workload's held leaves), keyed by `AllocationId`; presence == "held". The
 /// trait returns the UNFILTERED global set by contract; filtering to the target
-/// workload by `SpiffeId::for_allocation` equality is the HYDRATOR's job
+/// workload by `SpiffeId::for_workload` equality is the HYDRATOR's job
 /// (ADR-0067 D5b).
 ///
 /// ```text
@@ -716,7 +716,7 @@ async fn service_vip_view_memo_absent_defers_tick_and_logs() {
 ///       (several workloads present)
 /// WHEN the svid-lifecycle reconciler hydrates its State
 /// THEN the hydrator filters the global set to the TARGET workload by
-///      SpiffeId::for_allocation equality
+///      SpiffeId::for_workload equality
 ///   AND presence in the (filtered) set means "held"
 /// ```
 #[tokio::test]
@@ -736,11 +736,11 @@ async fn held_svid_view_global_set_is_filtered_to_target_workload() {
     let mut global = BTreeMap::new();
     global.insert(
         alloc_a.clone(),
-        HeldSvidFacts { spiffe_id: SpiffeId::for_allocation(&target_wl, &alloc_a), not_after },
+        HeldSvidFacts { spiffe_id: SpiffeId::for_workload(&target_wl), not_after },
     );
     global.insert(
         alloc_b.clone(),
-        HeldSvidFacts { spiffe_id: SpiffeId::for_allocation(&other_wl, &alloc_b), not_after },
+        HeldSvidFacts { spiffe_id: SpiffeId::for_workload(&other_wl), not_after },
     );
     let held = SimHeldSvidView::new(global);
 
@@ -759,7 +759,7 @@ async fn held_svid_view_global_set_is_filtered_to_target_workload() {
         svid.actual.len(),
         1,
         "the hydrator filters the GLOBAL held set to the target workload by \
-         SpiffeId::for_allocation equality (ADR-0067 D5b)"
+         SpiffeId::for_workload equality (ADR-0067 D5b)"
     );
     assert!(svid.actual.contains_key(&alloc_a), "the target workload's held alloc is present");
     assert!(

@@ -470,14 +470,19 @@ fn build_udp_service(
     .expect("EbpfDataplane::new_with_pin_dir on lb_veth_a + lb_veth_b");
 
     let backend_alloc =
-        SpiffeId::new("spiffe://overdrive.local/workload/dns/alloc/B1").expect("backend SpiffeId");
+        SpiffeId::new("spiffe://overdrive.local/workload/dns").expect("backend SpiffeId");
     let backend_addr = SocketAddr::new(IpAddr::V4(BACKEND_IP), UDP_PORT);
     let runtime =
         tokio::runtime::Builder::new_current_thread().enable_all().build().expect("tokio rt");
     runtime
         .block_on(dataplane.update_service(
             udp_frontend(VIP, UDP_PORT),
-            vec![Backend { workload_identity: backend_alloc, addr: backend_addr, weight: 1, healthy: true }],
+            vec![Backend {
+                workload_identity: backend_alloc,
+                addr: backend_addr,
+                weight: 1,
+                healthy: true,
+            }],
         ))
         .expect("update_service (udp)");
     drop(_ns_guard);

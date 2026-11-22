@@ -124,10 +124,9 @@ fn backends_of(world: &World) -> Vec<Backend> {
     world
         .backends
         .iter()
-        .enumerate()
-        .map(|(i, (b, c, d))| Backend {
+        .map(|(b, c, d)| Backend {
             workload_identity: SpiffeId::from_str(&format!(
-                "spiffe://overdrive.local/workload/{SERVICE}/alloc/a{i}"
+                "spiffe://overdrive.local/workload/{SERVICE}"
             ))
             .expect("spiffe"),
             addr: SocketAddr::new(Ipv4Addr::new(10, *b, *c, *d).into(), 8080),

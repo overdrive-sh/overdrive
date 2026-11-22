@@ -661,7 +661,7 @@ impl WakeWorld {
         if let Some(prior) = published {
             let mut backends = prior.backends.clone();
             backends.push(Backend {
-                workload_identity: SpiffeId::from_str("spiffe://overdrive.local/workload/orders/alloc/extra")
+                workload_identity: SpiffeId::from_str("spiffe://overdrive.local/workload/orders")
                     .expect("spiffe"),
                 addr: SocketAddr::new(Ipv4Addr::new(10, 9, 9, 9).into(), LISTENER_PORT),
                 weight: 1,
@@ -704,8 +704,7 @@ impl WakeWorld {
         let vip = self.ensure_orders_listener().await;
         let backends = vec![Backend {
             workload_identity: SpiffeId::from_str(&format!(
-                "spiffe://overdrive.local/workload/{ORDERS}/alloc/a{}",
-                self.backend_generation
+                "spiffe://overdrive.local/workload/{ORDERS}"
             ))
             .expect("spiffe"),
             addr: SocketAddr::new(Ipv4Addr::new(10, 9, self.backend_generation, 1).into(), 8080),

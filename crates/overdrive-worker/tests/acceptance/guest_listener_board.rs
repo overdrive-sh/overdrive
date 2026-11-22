@@ -195,7 +195,7 @@ impl Harness {
         AllocationSpec {
             declared_listeners: declared(),
             alloc: alloc.clone(),
-            identity: SpiffeId::new("spiffe://overdrive.local/workload/board/alloc/x")
+            identity: SpiffeId::new("spiffe://overdrive.local/workload/board")
                 .expect("valid spiffe id"),
             driver: DriverPayload::Vm(VmPayload {
                 volume: None,

@@ -82,7 +82,7 @@ fn start_action() -> Action {
         spec: AllocationSpec {
             declared_listeners: Vec::new(),
             alloc: alloc_id(),
-            identity: SpiffeId::new("spiffe://overdrive.local/workload/writefail/alloc/0")
+            identity: SpiffeId::new("spiffe://overdrive.local/workload/writefail")
                 .expect("valid spiffe id"),
             driver: DriverPayload::Vm(VmPayload {
                 volume: None,

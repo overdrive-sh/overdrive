@@ -148,7 +148,7 @@ fn build_spec(alloc: &AllocationId, tmp: &TempDir) -> AllocationSpec {
     AllocationSpec {
         declared_listeners: Vec::new(),
         alloc: alloc.clone(),
-        identity: SpiffeId::new("spiffe://overdrive.local/workload/vm-driver-test/alloc/x")
+        identity: SpiffeId::new("spiffe://overdrive.local/workload/vm-driver-test")
             .expect("valid spiffe id"),
         driver: overdrive_core::traits::driver::DriverPayload::Vm(
             overdrive_core::traits::driver::VmPayload {

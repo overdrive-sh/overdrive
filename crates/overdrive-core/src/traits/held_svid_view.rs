@@ -46,7 +46,7 @@ pub trait HeldSvidView: Send + Sync {
     /// # Edge cases
     /// The map is the **unfiltered global set by contract** — it carries EVERY
     /// workload's held facts, not just one target's. Filtering to the target
-    /// workload (by `SpiffeId::for_allocation` equality) is the HYDRATOR's job,
+    /// workload (by identity equality with `SpiffeId::for_workload`) is the HYDRATOR's job,
     /// NOT this port's (ADR-0067 D5b): the port over-returns deliberately so the
     /// filter policy lives in one place. An empty map means nothing is held
     /// (legitimate after a fresh restart), not an error.

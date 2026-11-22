@@ -34,8 +34,7 @@ fn workload_addr() -> impl Strategy<Value = Option<Ipv4Addr>> {
 }
 
 fn spiffe() -> SpiffeId {
-    SpiffeId::new("spiffe://overdrive.local/workload/payments/alloc/payments-0")
-        .expect("static SPIFFE ID is valid")
+    SpiffeId::new("spiffe://overdrive.local/workload/payments").expect("static SPIFFE ID is valid")
 }
 
 fn row(state: AllocState, workload_addr: Option<Ipv4Addr>) -> AllocStatusRow {

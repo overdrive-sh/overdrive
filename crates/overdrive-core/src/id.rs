@@ -244,7 +244,7 @@ define_label_newtype!(
 // -----------------------------------------------------------------------------
 
 /// SPIFFE ID for a workload, e.g.
-/// `spiffe://overdrive.local/workload/payments/alloc/a1b2c3`.
+/// `spiffe://overdrive.local/workload/payments`.
 ///
 /// Construction validates the `spiffe://<trust-domain>/<path>` shape and
 /// lowercases the canonical form. The stored value is always lowercased.
@@ -305,42 +305,6 @@ impl SpiffeId {
     #[must_use]
     pub fn path(&self) -> &str {
         &self.canonical[self.path_start..]
-    }
-
-    /// Derive the SVID identity for a workload allocation:
-    /// `spiffe://overdrive.local/workload/<workload>/alloc/<alloc>`.
-    ///
-    /// The canonical allocation-shaped constructor (ADR-0067 D5) — the single
-    /// derivation the reconcilers route through, replacing the formerly
-    /// duplicated private `mint_alloc_identity` / `mint_identity` helpers.
-    ///
-    /// Infallible by construction: [`WorkloadId`] and [`AllocationId`] are
-    /// already-validated DNS-1123-label-like newtypes whose canonical form is
-    /// lowercase ASCII alphanumerics plus `-` / `_` / `.`, leading and trailing
-    /// alphanumeric. Interpolated into the fixed `spiffe://overdrive.local/workload/
-    /// .../alloc/...` shape, the result always has the `spiffe://` scheme, the
-    /// non-empty trust domain `overdrive.local`, and a non-empty path — so
-    /// [`SpiffeId::new`] cannot reject it. The logically-unreachable
-    /// [`unreachable!`] idiom (per `.claude/rules/development.md` § "Logically
-    /// unreachable `None` / `Err`") states that invariant; `?` would imply a
-    /// valid early-return path and `.expect()` is banned in production library
-    /// code.
-    #[must_use]
-    pub fn for_allocation(workload: &WorkloadId, alloc: &AllocationId) -> Self {
-        let raw = format!(
-            "spiffe://overdrive.local/workload/{}/alloc/{}",
-            workload.as_str(),
-            alloc.as_str()
-        );
-        Self::new(&raw).unwrap_or_else(|_| {
-            unreachable!(
-                "for_allocation derives a SpiffeId from already-validated \
-                 WorkloadId/AllocationId newtypes interpolated into the fixed \
-                 spiffe://overdrive.local/workload/.../alloc/... shape; SpiffeId::new \
-                 cannot reject a valid scheme + non-empty trust domain + \
-                 non-empty path"
-            )
-        })
     }
 
     /// Derive the SVID identity of a workload:
@@ -1440,9 +1404,9 @@ mod tests {
 
     #[test]
     fn spiffe_parses_canonical_form() {
-        let id = SpiffeId::new("spiffe://overdrive.local/workload/payments/alloc/a1b2c3").unwrap();
+        let id = SpiffeId::new("spiffe://overdrive.local/workload/payments").unwrap();
         assert_eq!(id.trust_domain(), "overdrive.local");
-        assert_eq!(id.path(), "/workload/payments/alloc/a1b2c3");
+        assert_eq!(id.path(), "/workload/payments");
     }
 
     #[test]

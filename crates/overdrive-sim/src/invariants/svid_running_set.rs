@@ -12,7 +12,7 @@
 //! - **K1/O1** — eventually every Running alloc holds a valid SVID (the
 //!   `issue_svid` executor minted + held it, an `issued_certificates` audit
 //!   row exists, the held `spiffe_id` is the pure-derived
-//!   `SpiffeId::for_allocation` identity);
+//!   `SpiffeId::for_workload` identity);
 //! - **K2/O2** — no Stopped alloc holds an SVID (the `drop_svid` executor
 //!   removed the held leaf key — leak resistance on stop).
 //!
@@ -65,6 +65,7 @@ use overdrive_control_plane::identity_mgr::IdentityMgr;
 use overdrive_control_plane::reconciler_runtime::{ReconcilerRuntime, run_convergence_tick};
 use overdrive_control_plane::{AppState, noop_heartbeat, svid_lifecycle};
 use overdrive_core::SpiffeId;
+use overdrive_core::ca::issued_certificate_row::IssuedFor;
 use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::reconcilers::{ReconcilerName, TargetResource};
 use overdrive_core::traits::ca::{SvidMaterial, TrustBundle};
@@ -124,7 +125,7 @@ pub enum ExecutorDefect {
 ///
 /// Returns `Pass` iff, after churning allocs Running↔Stopped and ticking the
 /// real svid-lifecycle convergence loop, EVERY Running alloc holds a valid
-/// SVID (held `spiffe_id == SpiffeId::for_allocation(workload, alloc)` AND an
+/// SVID (held `spiffe_id == SpiffeId::for_workload(workload)` AND an
 /// `issued_certificates` audit row exists for it) AND NO Stopped alloc holds
 /// one. `Fail` with a triage cause otherwise.
 pub async fn evaluate_running_set_holds_valid_svid() -> InvariantResult {
@@ -261,7 +262,7 @@ fn apply_executor_defect(h: &Harness, defect: Option<ExecutorDefect>, expected_r
                     continue;
                 }
                 if let Ok(alloc) = AllocationId::new(raw) {
-                    h.state.identity.hold(alloc, defect_svid(raw));
+                    h.state.identity.hold(alloc, defect_svid());
                 }
             }
         }
@@ -291,8 +292,8 @@ async fn check_held_vs_running(h: &Harness, expected_running: &[&str]) -> Result
                 held.keys().collect::<Vec<_>>()
             ));
         };
-        // The held identity is the pure-derived SpiffeId::for_allocation.
-        let expected_id = SpiffeId::for_allocation(&workload, &alloc);
+        // The held identity is the pure-derived SpiffeId::for_workload identity.
+        let expected_id = SpiffeId::for_workload(&workload);
         if facts.spiffe_id != expected_id {
             return Err(format!(
                 "held identity mismatch for `{raw}`: held {:?}, expected {:?}",
@@ -312,8 +313,10 @@ async fn check_held_vs_running(h: &Harness, expected_running: &[&str]) -> Result
         .map_err(|e| format!("read audit rows: {e:?}"))?;
     for raw in expected_running {
         let alloc = AllocationId::new(raw).map_err(|e| format!("alloc id {raw:?}: {e:?}"))?;
-        let expected_id = SpiffeId::for_allocation(&workload, &alloc);
-        if !audit_rows.iter().any(|r| r.spiffe_id == expected_id) {
+        let expected_id = SpiffeId::for_workload(&workload);
+        if !audit_rows.iter().any(|r| {
+            r.spiffe_id == expected_id && r.issued_for == IssuedFor::Allocation(alloc.clone())
+        }) {
             return Err(format!(
                 "no audit row for Running alloc `{raw}` (identity {expected_id}): the issue \
                  executor must write an issued_certificates row before holding"
@@ -385,20 +388,18 @@ async fn yield_a_few() {
 /// Build a placeholder `SvidMaterial` for the `FailsToDropOnStop` teeth
 /// variant — the held-set assertion reads only the `held_snapshot`
 /// projection (presence + identity), so the cert/key bytes are placeholders.
-fn defect_svid(alloc_raw: &str) -> SvidMaterial {
+fn defect_svid() -> SvidMaterial {
     use overdrive_core::CertSerial;
     use overdrive_core::traits::ca::{CaCertDer, CaCertPem, CaKeyPem};
     use overdrive_core::wall_clock::UnixInstant;
 
     let workload =
         WorkloadId::new(WORKLOAD_NAME).unwrap_or_else(|_| unreachable!("WORKLOAD_NAME is valid"));
-    let alloc =
-        AllocationId::new(alloc_raw).unwrap_or_else(|_| unreachable!("scenario alloc id is valid"));
     SvidMaterial::new(
         CaCertPem::new("-----BEGIN CERTIFICATE-----\nLEAKED\n-----END CERTIFICATE-----\n".into()),
         CaCertDer::new(vec![0xDE, 0xAD]),
         CertSerial::new("0badc0de").unwrap_or_else(|_| unreachable!("serial is valid hex")),
-        SpiffeId::for_allocation(&workload, &alloc),
+        SpiffeId::for_workload(&workload),
         CaKeyPem::new("-----BEGIN PRIVATE KEY-----\nLEAKED\n-----END PRIVATE KEY-----\n".into()),
         UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000)),
     )

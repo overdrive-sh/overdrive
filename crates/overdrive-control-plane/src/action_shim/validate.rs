@@ -148,10 +148,8 @@ mod tests {
         overdrive_core::traits::driver::AllocationSpec {
             declared_listeners: Vec::new(),
             alloc: alloc(name),
-            identity: overdrive_core::SpiffeId::new(&format!(
-                "spiffe://overdrive.local/workload/nd295/alloc/{name}"
-            ))
-            .expect("SPIFFE ID"),
+            identity: overdrive_core::SpiffeId::new("spiffe://overdrive.local/workload/nd295")
+                .expect("SPIFFE ID"),
             driver: DriverPayload::Vm(VmPayload {
                 volume: None,
                 command: "/bin/true".to_owned(),

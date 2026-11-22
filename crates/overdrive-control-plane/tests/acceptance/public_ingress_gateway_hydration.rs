@@ -286,7 +286,7 @@ async fn ever_issued_is_derived_only_from_audit_rows_of_the_gateway_subject() {
 
     assert!(!ever_issued().await, "no audit rows: never issued");
 
-    let workload = SpiffeId::from_str("spiffe://overdrive.local/workload/payments/alloc/a1")
+    let workload = SpiffeId::from_str("spiffe://overdrive.local/workload/payments")
         .expect("fixture workload SPIFFE id");
     world
         .audit_issuance(

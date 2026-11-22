@@ -112,10 +112,10 @@ fn advertise_port_set(svc: &Service) -> BTreeSet<NonZeroU16> {
         alloc.clone(),
         ServiceAllocFact {
             stable_committed: false,
-            alloc_id: alloc.clone(),
+            alloc_id: alloc,
             phase: overdrive_reconcilers::service_lifecycle::ServiceAllocPhase::Running(
                 overdrive_reconcilers::service_lifecycle::ServiceBackendIdentity {
-                    spiffe: overdrive_core::SpiffeId::for_allocation(&svc.id, &alloc),
+                    spiffe: overdrive_core::SpiffeId::for_workload(&svc.id),
                     ip: MESH_WORKLOAD_ADDR,
                 },
             ),

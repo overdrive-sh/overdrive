@@ -72,7 +72,7 @@ const fn v4_addr(ip: Ipv4Addr) -> SocketAddr {
 
 fn backend_at(addr: SocketAddr, weight: u16, healthy: bool) -> Backend {
     Backend {
-        workload_identity: SpiffeId::new("spiffe://overdrive.local/workload/web/alloc/web-0")
+        workload_identity: SpiffeId::new("spiffe://overdrive.local/workload/web")
             .expect("valid SpiffeId"),
         addr,
         weight,

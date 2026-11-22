@@ -571,7 +571,11 @@ impl World {
                 self.seed
             );
             assert_eq!(
-                row.backends.iter().map(|backend| &backend.workload_identity).collect::<BTreeSet<_>>().len(),
+                row.backends
+                    .iter()
+                    .map(|backend| &backend.workload_identity)
+                    .collect::<BTreeSet<_>>()
+                    .len(),
                 replicas
             );
         }
@@ -1030,13 +1034,14 @@ async fn complete_listener_projection_is_idempotent() {
         allocs.sort_by(|left, right| left.alloc_id.cmp(&right.alloc_id));
         let identities: Vec<_> = allocs
             .iter()
-            .map(|alloc| {
-                overdrive_core::SpiffeId::for_allocation(&alloc.workload_id, &alloc.alloc_id)
-            })
+            .map(|alloc| overdrive_core::SpiffeId::for_workload(&alloc.workload_id))
             .collect();
         for row in &baseline {
             assert_eq!(
-                row.backends.iter().map(|backend| backend.workload_identity.clone()).collect::<Vec<_>>(),
+                row.backends
+                    .iter()
+                    .map(|backend| backend.workload_identity.clone())
+                    .collect::<Vec<_>>(),
                 identities,
                 "seed={seed}: exact allocation identities in allocation-ID order"
             );

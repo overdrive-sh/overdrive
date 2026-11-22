@@ -25,7 +25,7 @@ async fn default_lane_does_not_spawn_real_processes() {
     let spec = AllocationSpec {
         declared_listeners: Vec::new(),
         alloc: AllocationId::new("alloc-default-lane").expect("valid alloc id"),
-        identity: SpiffeId::new("spiffe://overdrive.local/workload/payments/alloc/a1")
+        identity: SpiffeId::new("spiffe://overdrive.local/workload/payments")
             .expect("valid spiffe id"),
         driver: DriverPayload::Vm(VmPayload {
             volume: None,

@@ -55,7 +55,7 @@ fn vip_v4(o: u8) -> ServiceVip {
 
 fn backend() -> Backend {
     Backend {
-        workload_identity: SpiffeId::new("spiffe://overdrive.local/workload/dns/alloc/dns-0")
+        workload_identity: SpiffeId::new("spiffe://overdrive.local/workload/dns")
             .expect("valid SpiffeId"),
         addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(10, 1, 0, 1)), 5353),
         weight: 1,

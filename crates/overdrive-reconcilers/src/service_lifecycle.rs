@@ -960,11 +960,10 @@ async fn hydrate_service_alloc_facts(
         let latest_liveness_probe =
             latest_probe_row(&probe_rows, ProbeRole::Liveness, ProbeIdx::new(0));
 
-        let phase =
-            ServiceAllocPhase::from_row(&row, SpiffeId::for_allocation(workload_id, &row.alloc_id))
-                .map_err(|refused| HydrateError::RunningAllocationWithoutWorkloadAddr {
-                    alloc_id: refused.alloc_id,
-                })?;
+        let phase = ServiceAllocPhase::from_row(&row, SpiffeId::for_workload(workload_id))
+            .map_err(|refused| HydrateError::RunningAllocationWithoutWorkloadAddr {
+                alloc_id: refused.alloc_id,
+            })?;
 
         let fact = ServiceAllocFact {
             stable_committed: matches!(
@@ -1338,7 +1337,7 @@ mod tests {
                                             stable_committed: committed,
                                             alloc_id: alloc.clone(),
                                             phase: ServiceAllocPhase::Running(ServiceBackendIdentity {
-                                                spiffe: SpiffeId::new("spiffe://overdrive.local/workload/policy/alloc/0").unwrap(),
+                                                spiffe: SpiffeId::new("spiffe://overdrive.local/workload/policy").unwrap(),
                                                 ip: "192.0.2.10".parse().unwrap(),
                                             }),
                                             started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1))),
@@ -1421,10 +1420,8 @@ mod tests {
             stable_committed: false,
             alloc_id: alloc_id.clone(),
             phase: ServiceAllocPhase::Running(ServiceBackendIdentity {
-                spiffe: SpiffeId::new(
-                    "spiffe://overdrive.local/workload/startup-hook/alloc/startup-window-hook",
-                )
-                .expect("valid spiffe id"),
+                spiffe: SpiffeId::new("spiffe://overdrive.local/workload/startup-hook")
+                    .expect("valid spiffe id"),
                 ip: "192.0.2.10".parse().expect("valid IPv4"),
             }),
             started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(100))),

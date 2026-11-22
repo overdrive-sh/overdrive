@@ -95,7 +95,7 @@ pub async fn evaluate_reverse_nat_lockstep() -> InvariantResult {
                 u8::try_from(s + 1).expect("s < 256"),
                 u8::try_from(b + 1).expect("b < 256"),
             );
-            backends.push(backend(s, b, backend_ip, 8080));
+            backends.push(backend(s, backend_ip, 8080));
         }
         layout.insert(vip, (proto, backends));
     }
@@ -187,7 +187,7 @@ async fn check_dual_proto_coresident_purge(dataplane: &SimDataplane) -> Option<S
 
     let dual_vip = Ipv4Addr::new(10, 0, 0, 200);
     let dual_backends: Vec<Backend> = (0..DUAL_BACKENDS)
-        .map(|b| backend(99, b, Ipv4Addr::new(10, 9, 0, u8::try_from(b + 1).expect("b < 256")), 53))
+        .map(|b| backend(99, Ipv4Addr::new(10, 9, 0, u8::try_from(b + 1).expect("b < 256")), 53))
         .collect();
 
     for proto in [Proto::Tcp, Proto::Udp] {
@@ -294,10 +294,10 @@ fn check_lockstep(
     None
 }
 
-fn backend(service_idx: u32, backend_idx: u32, ip: Ipv4Addr, port: u16) -> Backend {
+fn backend(service_idx: u32, ip: Ipv4Addr, port: u16) -> Backend {
     Backend {
         workload_identity: SpiffeId::new(&format!(
-            "spiffe://overdrive.local/workload/svc-{service_idx}/alloc/b-{backend_idx}"
+            "spiffe://overdrive.local/workload/svc-{service_idx}"
         ))
         .expect("valid SPIFFE ID"),
         addr: std::net::SocketAddr::new(std::net::IpAddr::V4(ip), port),

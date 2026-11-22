@@ -219,7 +219,7 @@ fn svid_lifecycle_manages_workloads_with_running_allocations_or_a_held_svid_and_
             .await;
         // held with no row: the hold outlived a failed row write.
         let held_alloc = overdrive_core::id::AllocationId::new("held-only-0").expect("alloc");
-        let held_spiffe = SpiffeId::for_allocation(&workload_id("held-only"), &held_alloc);
+        let held_spiffe = SpiffeId::for_workload(&workload_id("held-only"));
         let material = issue(
             &world,
             &held_spiffe,
@@ -231,7 +231,7 @@ fn svid_lifecycle_manages_workloads_with_running_allocations_or_a_held_svid_and_
         let ever_alloc = overdrive_core::id::AllocationId::new("ever-only-0").expect("alloc");
         issue(
             &world,
-            &SpiffeId::for_allocation(&workload_id("ever-only"), &ever_alloc),
+            &SpiffeId::for_workload(&workload_id("ever-only")),
             overdrive_core::ca::issued_certificate_row::IssuedFor::Allocation(ever_alloc.clone()),
         )
         .await;

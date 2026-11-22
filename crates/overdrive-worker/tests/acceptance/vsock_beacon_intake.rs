@@ -238,7 +238,7 @@ impl Node {
         AllocationSpec {
             declared_listeners: Vec::new(),
             alloc: AllocationId::new(alloc).expect("valid alloc id"),
-            identity: SpiffeId::new("spiffe://overdrive.local/workload/beacon/alloc/x")
+            identity: SpiffeId::new("spiffe://overdrive.local/workload/beacon")
                 .expect("valid spiffe id"),
             driver: DriverPayload::Vm(VmPayload {
                 volume: None,

@@ -92,7 +92,7 @@ fn liveness_running_fact(alloc_id: &AllocationId) -> ServiceAllocFact {
         alloc_id: alloc_id.clone(),
         phase: overdrive_reconcilers::service_lifecycle::ServiceAllocPhase::Running(
             overdrive_reconcilers::service_lifecycle::ServiceBackendIdentity {
-                spiffe: overdrive_core::SpiffeId::for_allocation(&jid(WORKLOAD), alloc_id),
+                spiffe: overdrive_core::SpiffeId::for_workload(&jid(WORKLOAD)),
                 ip: std::net::Ipv4Addr::LOCALHOST,
             },
         ),

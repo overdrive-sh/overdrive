@@ -587,7 +587,7 @@ pub enum Action {
         /// The allocation the SVID is issued for.
         alloc_id: AllocationId,
         /// The workload identity, built PURE by the reconciler via
-        /// [`SpiffeId::for_allocation`] (ADR-0067 D5) — identity derivation
+        /// [`SpiffeId::for_workload`] (ADR-0067 D5, ADR-0344) — identity derivation
         /// is pure; identity issuance is the executor's.
         spiffe_id: SpiffeId,
         /// The node the SVID is issued on. Self-describing: this is the

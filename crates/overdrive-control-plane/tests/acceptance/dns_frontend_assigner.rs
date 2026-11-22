@@ -226,13 +226,13 @@ async fn seed_service_payload_at_sub_key(
 }
 
 /// A running-AND-healthy `Backend` for `<workload>=id`, whose `alloc` SVID carries
-/// `/workload/<id>/alloc/...` — the shape `name_index::workload_of` extracts the `<workload>`
+/// `/workload/<id>` — the shape `name_index::workload_of` extracts the `<workload>`
 /// from. Mirrors `dns_answer_for.rs::backend_for` (the 01-03 fixture). The
 /// per-instance backend addr sits in `10.99.0.0/16`, DELIBERATELY a different
 /// block from the frontend `F` the answer must return.
 fn running_healthy_backend(id: &str) -> Backend {
-    let spiffe = SpiffeId::new(&format!("spiffe://overdrive.local/workload/{id}/alloc/a1"))
-        .expect("valid spiffe id");
+    let spiffe =
+        SpiffeId::new(&format!("spiffe://overdrive.local/workload/{id}")).expect("valid spiffe id");
     Backend {
         workload_identity: spiffe,
         addr: SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(10, 99, 0, 1), 8080)),

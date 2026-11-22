@@ -63,7 +63,7 @@ fn spiffe(path: &str) -> SpiffeId {
 /// share a backend endpoint, so each VIP gets its own.
 fn backend_for(vip: Ipv4Addr) -> Backend {
     Backend {
-        workload_identity: spiffe("/workload/payments/alloc/a1b2c3"),
+        workload_identity: spiffe("/workload/payments"),
         addr: SocketAddr::new(IpAddr::V4(vip), 8080),
         weight: 100,
         healthy: true,

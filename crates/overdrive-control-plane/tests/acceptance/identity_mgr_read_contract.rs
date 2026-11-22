@@ -116,7 +116,7 @@ fn identity_read_returns_svid_and_trust_bundle_without_reissue() {
     let (ca, issue_calls) = CountingCa::new();
     let ca: Arc<dyn Ca> = Arc::new(ca);
 
-    let spiffe = "spiffe://overdrive.local/workload/payments/alloc/a1b2c3";
+    let spiffe = "spiffe://overdrive.local/workload/payments";
     let not_after = not_after_at(1_700_003_600);
     let held = svid(spiffe, not_after);
 
@@ -170,10 +170,7 @@ fn identity_read_returns_none_after_drop() {
     let a = alloc("alloc-a1b2c3-0");
     mgr.hold(
         a.clone(),
-        svid(
-            "spiffe://overdrive.local/workload/payments/alloc/a1b2c3",
-            not_after_at(1_700_003_600),
-        ),
+        svid("spiffe://overdrive.local/workload/payments", not_after_at(1_700_003_600)),
     );
 
     let reader: &dyn IdentityRead = &mgr;

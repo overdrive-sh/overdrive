@@ -546,7 +546,6 @@ fn allocator_issues_final_u32_identity_once_then_stops_without_wrap() {
 /// `.../workload/<w>/alloc/<a>`.
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "a replacement allocation presents its workload's identity")]
 fn a_replacement_allocation_presents_the_identity_of_its_workload() {
     for driver in ComposedDriver::ALL {
         let workload = "vm-replacement";
@@ -570,7 +569,6 @@ fn a_replacement_allocation_presents_the_identity_of_its_workload() {
 /// presents the workload identity (initial placement and replacement agree).
 /// CONTRACT_SHAPE: pure-function.
 #[test]
-#[should_panic(expected = "an initial allocation presents its workload's identity")]
 fn an_initial_allocation_presents_the_identity_of_its_workload() {
     let workload = "vm-initial";
     let (desired, actual) = states(ComposedDriver::job(workload), []);

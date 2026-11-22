@@ -23,8 +23,7 @@ fn spec_with(declared: Vec<Listener>) -> AllocationSpec {
     let alloc = AllocationId::new("tcp-view-0").expect("alloc id");
     AllocationSpec {
         alloc,
-        identity: SpiffeId::new("spiffe://overdrive.local/workload/tcp-view/alloc/tcp-view-0")
-            .expect("spiffe id"),
+        identity: SpiffeId::new("spiffe://overdrive.local/workload/tcp-view").expect("spiffe id"),
         driver: DriverPayload::Vm(VmPayload {
             volume: None,
             command: "/bin/serve".to_owned(),

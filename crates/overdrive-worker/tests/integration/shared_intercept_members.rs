@@ -769,8 +769,7 @@ fn member_spec(alloc: &str, address: Ipv4Addr) -> AllocationSpec {
     let launch = LaunchToken::from_bytes([0x5a; 16]).expect("a non-zero launch token");
     AllocationSpec {
         alloc: AllocationId::new(alloc).expect("a valid allocation id"),
-        identity: SpiffeId::new("spiffe://overdrive.local/workload/sa/alloc/01")
-            .expect("a valid SPIFFE id"),
+        identity: SpiffeId::new("spiffe://overdrive.local/workload/sa").expect("a valid SPIFFE id"),
         driver: DriverPayload::Vm(VmPayload {
             volume: None,
             command: "/bin/true".to_owned(),

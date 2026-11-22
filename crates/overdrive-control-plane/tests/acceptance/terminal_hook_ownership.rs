@@ -146,7 +146,7 @@ fn probed_spec(alloc: &AllocationId) -> AllocationSpec {
 fn spec(alloc: &AllocationId, probe_descriptors: Vec<ProbeDescriptor>) -> AllocationSpec {
     AllocationSpec {
         alloc: alloc.clone(),
-        identity: SpiffeId::from_str("spiffe://overdrive.local/workload/hooks/alloc/0")
+        identity: SpiffeId::from_str("spiffe://overdrive.local/workload/hooks")
             .expect("valid spiffe id"),
         driver: DriverPayload::Vm(VmPayload {
             volume: None,

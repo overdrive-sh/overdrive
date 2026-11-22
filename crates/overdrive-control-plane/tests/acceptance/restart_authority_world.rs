@@ -465,8 +465,8 @@ impl RestartWorld {
 
     /// Whether the readiness projection publishes `alloc` as a backend
     /// (`None`: no backend row lists it).
-    pub async fn backend_healthy(&self, alloc: &AllocationId) -> Option<bool> {
-        let spiffe = SpiffeId::for_allocation(&self.workload, alloc);
+    pub async fn backend_healthy(&self, _alloc: &AllocationId) -> Option<bool> {
+        let spiffe = SpiffeId::for_workload(&self.workload);
         self.obs
             .service_backends_rows(&self.service_id)
             .await
@@ -481,7 +481,7 @@ impl RestartWorld {
     /// address, after applying every written `ServiceBackendRow`: `Some(true)`
     /// when it resolves to the backend (`Mesh`), `Some(false)` for the
     /// fail-closed `MeshUnreachable`, `None` when no row lists the allocation.
-    pub async fn resolver_routes_to(&self, alloc: &AllocationId) -> Option<bool> {
+    pub async fn resolver_routes_to(&self, _alloc: &AllocationId) -> Option<bool> {
         use overdrive_control_plane::mtls_resolve_adapter::BackendIndex;
         use overdrive_core::traits::mtls_resolve::MtlsResolution;
         let rows = self.obs.service_backends_rows(&self.service_id).await.expect("backend rows");
@@ -489,9 +489,11 @@ impl RestartWorld {
         for row in &rows {
             index.apply_row(row.service_id, &row.backends);
         }
-        let spiffe = SpiffeId::for_allocation(&self.workload, alloc);
-        let backend =
-            rows.iter().flat_map(|row| row.backends.iter()).find(|b| b.workload_identity == spiffe)?;
+        let spiffe = SpiffeId::for_workload(&self.workload);
+        let backend = rows
+            .iter()
+            .flat_map(|row| row.backends.iter())
+            .find(|b| b.workload_identity == spiffe)?;
         let std::net::SocketAddr::V4(addr) = backend.addr else { return None };
         Some(matches!(index.classify(addr, Proto::Tcp), MtlsResolution::Mesh(_)))
     }

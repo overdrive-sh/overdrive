@@ -209,7 +209,7 @@ pub(crate) async fn ensure_intercept_identity(
     if identity.held_snapshot().contains_key(alloc_id) {
         return Ok(());
     }
-    let spiffe_id = SpiffeId::for_allocation(workload_id, alloc_id);
+    let spiffe_id = SpiffeId::for_workload(workload_id);
     let target = format!("svid-lifecycle/{alloc_id}");
     let spec_hash = ContentHash::of(spiffe_id.as_str().as_bytes());
     let action = Action::IssueSvid {
@@ -4404,10 +4404,7 @@ mod admission_refusal_acceptance {
     fn spec(name: &str) -> AllocationSpec {
         AllocationSpec {
             alloc: alloc_id(name),
-            identity: SpiffeId::new(&format!(
-                "spiffe://overdrive.local/workload/nd295/alloc/{name}"
-            ))
-            .expect("SPIFFE ID"),
+            identity: SpiffeId::new("spiffe://overdrive.local/workload/nd295").expect("SPIFFE ID"),
             driver: DriverPayload::Vm(VmPayload {
                 volume: None,
                 command: "/bin/true".to_owned(),

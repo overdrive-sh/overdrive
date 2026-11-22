@@ -63,7 +63,7 @@ fn fact(
                 overdrive_reconcilers::service_lifecycle::ServiceAllocPhase::Running(
                     overdrive_reconcilers::service_lifecycle::ServiceBackendIdentity {
                         spiffe: overdrive_core::SpiffeId::new(
-                            "spiffe://overdrive.local/workload/svc/alloc/x",
+                            "spiffe://overdrive.local/workload/svc",
                         )
                         .expect("valid spiffe"),
                         ip: std::net::Ipv4Addr::LOCALHOST,
@@ -939,10 +939,8 @@ fn readiness_fact(
         alloc_id: aid(&format!("svc-{index}")),
         phase: overdrive_reconcilers::service_lifecycle::ServiceAllocPhase::Running(
             overdrive_reconcilers::service_lifecycle::ServiceBackendIdentity {
-                spiffe: overdrive_core::SpiffeId::new(&format!(
-                    "spiffe://overdrive.local/workload/svc/alloc/a{index}"
-                ))
-                .expect("valid spiffe"),
+                spiffe: overdrive_core::SpiffeId::new("spiffe://overdrive.local/workload/svc")
+                    .expect("valid spiffe"),
                 ip: std::net::Ipv4Addr::new(
                     192,
                     168,
@@ -1183,7 +1181,7 @@ fn liveness_fact(
                 overdrive_reconcilers::service_lifecycle::ServiceAllocPhase::Running(
                     overdrive_reconcilers::service_lifecycle::ServiceBackendIdentity {
                         spiffe: overdrive_core::SpiffeId::new(
-                            "spiffe://overdrive.local/workload/svc/alloc/x",
+                            "spiffe://overdrive.local/workload/svc",
                         )
                         .expect("valid spiffe"),
                         ip: std::net::Ipv4Addr::LOCALHOST,

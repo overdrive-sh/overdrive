@@ -193,8 +193,10 @@ async fn listener_fact_guard_never_held_across_await_under_contention() {
             service_id: sid,
             vip: vip_addr,
             backends: vec![Backend {
-                workload_identity: SpiffeId::from_str("spiffe://overdrive.local/workload/contended/alloc/a1")
-                    .expect("spiffe"),
+                workload_identity: SpiffeId::from_str(
+                    "spiffe://overdrive.local/workload/contended",
+                )
+                .expect("spiffe"),
                 addr: SocketAddr::from_str("10.1.1.1:8080").expect("addr"),
                 weight: 100,
                 healthy: true,

@@ -1670,9 +1670,8 @@ mod capability_registry_acceptance {
         AllocationId::new(name).expect("allocation id")
     }
 
-    fn identity(name: &str) -> SpiffeId {
-        SpiffeId::new(&format!("spiffe://overdrive.local/workload/nd295/alloc/{name}"))
-            .expect("SPIFFE ID")
+    fn identity(_name: &str) -> SpiffeId {
+        SpiffeId::new("spiffe://overdrive.local/workload/nd295").expect("SPIFFE ID")
     }
 
     fn ports() -> BTreeSet<NonZeroU16> {
@@ -4076,9 +4075,8 @@ mod tests {
 
     fn minimal_spec(alloc: AllocationId) -> AllocationSpec {
         AllocationSpec {
-            identity: SpiffeId::for_allocation(
+            identity: SpiffeId::for_workload(
                 &overdrive_core::WorkloadId::new("worker-owner-test").expect("valid workload id"),
-                &alloc,
             ),
             alloc,
             driver: DriverPayload::Vm(VmPayload {
@@ -4529,7 +4527,7 @@ mod tests {
             worker.capabilities.begin_registration(
                 alloc("shared-teardown-contender"),
                 address,
-                SpiffeId::new("spiffe://overdrive.local/workload/shared-teardown/alloc/contender",)
+                SpiffeId::new("spiffe://overdrive.local/workload/shared-teardown",)
                     .expect("SPIFFE ID"),
                 std::iter::once(NonZeroU16::new(8443).expect("non-zero port")).collect(),
             ),
@@ -4541,8 +4539,7 @@ mod tests {
         let successor = worker.capabilities.begin_registration(
             alloc("shared-teardown-successor"),
             address,
-            SpiffeId::new("spiffe://overdrive.local/workload/shared-teardown/alloc/successor")
-                .expect("SPIFFE ID"),
+            SpiffeId::new("spiffe://overdrive.local/workload/shared-teardown").expect("SPIFFE ID"),
             std::iter::once(NonZeroU16::new(8443).expect("non-zero port")).collect(),
         );
         let successor_accepted = successor.is_ok();

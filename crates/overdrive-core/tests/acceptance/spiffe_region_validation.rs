@@ -27,7 +27,7 @@
 
 use std::str::FromStr;
 
-use overdrive_core::id::{AllocationId, IdParseError, NodeId, Region, SpiffeId, WorkloadId};
+use overdrive_core::id::{IdParseError, NodeId, Region, SpiffeId};
 use proptest::prelude::*;
 
 // -----------------------------------------------------------------------------
@@ -37,7 +37,7 @@ use proptest::prelude::*;
 #[test]
 fn spiffe_id_parses_canonical_whitepaper_example_and_exposes_accessors() {
     // Given the input from whitepaper §8.
-    let input = "spiffe://overdrive.local/workload/payments/alloc/a1b2c3";
+    let input = "spiffe://overdrive.local/workload/payments";
 
     // When Ana constructs a SpiffeId from that input.
     let id = SpiffeId::from_str(input).expect("canonical SPIFFE URI must parse");
@@ -52,11 +52,7 @@ fn spiffe_id_parses_canonical_whitepaper_example_and_exposes_accessors() {
 
     // And whose path accessor returns everything from (and including) the
     // leading `/` onward.
-    assert_eq!(
-        id.path(),
-        "/workload/payments/alloc/a1b2c3",
-        "path() must return the leading-`/`-prefixed path"
-    );
+    assert_eq!(id.path(), "/workload/payments", "path() must return the leading-`/`-prefixed path");
 
     // And whose Display output equals the input byte-for-byte — the input
     // is already lowercase, so canonicalisation is a no-op here; §3.1
@@ -229,22 +225,6 @@ fn region_with_whitespace_is_rejected_with_invalid_char_variant() {
     }
 }
 
-// -----------------------------------------------------------------------------
-// ADR-0067 D5 — `SpiffeId::for_allocation` canonical extraction (step 01-01).
-//
-// `for_allocation(&WorkloadId, &AllocationId)` derives the SVID identity
-// `spiffe://overdrive.local/workload/<workload>/alloc/<alloc>`. The allocation →
-// SPIFFE-URI derivation previously existed twice as private reconciler helpers
-// (`mint_alloc_identity` in `backend_discovery_bridge.rs`, `mint_identity` in
-// `workload_lifecycle.rs`); D5 consolidates them onto this single public
-// constructor.
-//
-// PARADIGM: proptest newtype roundtrip (the mandatory call site in
-// `.claude/rules/testing.md` § "Property-based testing"). The canonical-form
-// preservation is the *property* over a generated `(WorkloadId, AllocationId)`
-// strategy; the consolidation is the example-pinned companion below.
-// -----------------------------------------------------------------------------
-
 const ALPHA: &str = "abcdefghijklmnopqrstuvwxyz";
 const ALNUM_DASH: &str = "abcdefghijklmnopqrstuvwxyz0123456789-";
 
@@ -276,79 +256,12 @@ fn valid_label() -> impl Strategy<Value = String> {
     ]
 }
 
-proptest! {
-    /// For any valid `(WorkloadId, AllocationId)`, `SpiffeId::for_allocation`
-    /// yields a `SpiffeId` whose canonical `Display` equals
-    /// `spiffe://overdrive.local/workload/<workload>/alloc/<alloc>` AND round-trips
-    /// losslessly through `FromStr` — the newtype-roundtrip property.
-    ///
-    /// The generated segments vary per case and are never a fixed sentinel,
-    /// so a body returning a constant cannot satisfy this across the input
-    /// space. `trust_domain()` / `path()` accessors pin the structural shape
-    /// without string-splitting at the call site.
-    #[test]
-    fn spiffe_for_allocation_derives_canonical_uri_and_consolidates_both_helpers(
-        workload_raw in valid_label(),
-        alloc_raw in valid_label(),
-    ) {
-        let workload = WorkloadId::new(&workload_raw).expect("generator yields valid WorkloadId");
-        let alloc = AllocationId::new(&alloc_raw).expect("generator yields valid AllocationId");
-
-        // When the SVID identity is derived for the allocation.
-        let id = SpiffeId::for_allocation(&workload, &alloc);
-
-        // Then its canonical Display equals the contracted URI.
-        let expected = format!(
-            "spiffe://overdrive.local/workload/{}/alloc/{}",
-            workload.as_str(),
-            alloc.as_str(),
-        );
-        prop_assert_eq!(id.as_str(), expected.as_str());
-
-        // And it exposes the SPIFFE structural shape without string-splitting.
-        prop_assert_eq!(id.trust_domain(), "overdrive.local");
-        prop_assert_eq!(
-            id.path(),
-            format!("/workload/{}/alloc/{}", workload.as_str(), alloc.as_str())
-        );
-
-        // And it round-trips losslessly through FromStr (newtype-roundtrip).
-        let reparsed = SpiffeId::from_str(id.as_str()).expect("canonical Display re-parses");
-        prop_assert_eq!(reparsed.as_str(), id.as_str());
-
-        // And the canonical Display re-parses to the same value as the
-        // contracted URI parsed directly — proving the derived form IS the
-        // canonical SpiffeId, not merely string-equal.
-        let from_contract = SpiffeId::new(&expected).expect("contracted URI is a valid SpiffeId");
-        prop_assert_eq!(from_contract, id);
-    }
-}
-
-// Example-pinned consolidation companion: the public `for_allocation`
-// constructor is the single derivation the two migrated reconciler helpers now
-// route through. On a representative `(WorkloadId, AllocationId)` the derived
-// SpiffeId equals the exact string both `mint_alloc_identity` and
-// `mint_identity` historically produced — pinning that the migration preserved
-// the wire identity byte-for-byte (no THIRD implementation, no drift).
-#[test]
-fn for_allocation_matches_the_historical_helper_string_on_a_pinned_example() {
-    let workload = WorkloadId::new("payments").expect("valid WorkloadId");
-    let alloc = AllocationId::new("a1b2c3").expect("valid AllocationId");
-
-    let id = SpiffeId::for_allocation(&workload, &alloc);
-
-    // The exact string both private helpers built via
-    // `format!("spiffe://overdrive.local/workload/{}/alloc/{}", ..)`.
-    assert_eq!(id.to_string(), "spiffe://overdrive.local/workload/payments/alloc/a1b2c3");
-}
-
 // -----------------------------------------------------------------------------
 // S-PIG-128 — `SpiffeId::for_gateway` derives the dedicated non-allocation
 // gateway identity `spiffe://overdrive.local/gateway/<node-id>`.
 //
 // The body's `unreachable!` rests on every valid `NodeId` forming a valid SPIFFE
-// path, so the property ranges over generated valid node ids (the
-// `for_allocation` precedent above). `valid_label()` yields strings the
+// path, so the property ranges over generated valid node ids. `valid_label()` yields strings the
 // `NodeId` grammar accepts, lowercase, so the round trip is byte for byte.
 // -----------------------------------------------------------------------------
 

@@ -48,18 +48,14 @@
 //!
 //! # OQ-1 — `<workload>` extraction (DECISION: local parse helper, ADR-0072)
 //!
-//! Each `Backend.alloc` is a [`SpiffeId`] of the shape
-//! `spiffe://overdrive.local/workload/<workload>/alloc/<alloc>` (the
-//! [`SpiffeId::for_allocation`] derivation). The OQ-1 primitive — extract the
-//! `<workload>` label from a `SpiffeId`'s path so the rows can be grouped by `<workload>`
-//! and looked up against the [`FrontendAddrAllocator`] (keyed by
-//! [`MeshServiceName`]) — is implemented as the LOCAL [`workload_of`] parse helper
-//! here, NOT a new `SpiffeId::job_segment()` accessor on the
-//! `overdrive-core::id` newtype. Rationale: the extraction is a `dns_responder`
-//! consumer concern (one call site), it stays inside this slice's module
-//! boundary (no `overdrive-core/src/id.rs` edit), and the inverse direction
-//! (`<workload>` string → [`MeshServiceName`]) already exists via
-//! [`MeshServiceName::new`]. A SpiffeId whose `<workload>` segment is not a valid v1
+//! Each `Backend.workload_identity` is a [`SpiffeId`] of the shape
+//! `spiffe://overdrive.local/workload/<workload>` (the [`SpiffeId::for_workload`]
+//! derivation). The OQ-1 primitive — extract the `<workload>` label from the
+//! identity so the rows can be grouped by `<workload>` and looked up against the
+//! [`FrontendAddrAllocator`] (keyed by [`MeshServiceName`]) — is the LOCAL
+//! [`workload_of`] helper here, which routes through [`SpiffeId::workload_id`]
+//! (the one inverse of `for_workload`, ADR-0344) and maps the label to a
+//! [`MeshServiceName`] via [`MeshServiceName::new`]. A SpiffeId whose `<workload>` segment is not a valid v1
 //! single-label mesh name (dotted, `_`-bearing, over 63 octets) is simply not
 //! mesh-dialable by name — its backend does not contribute a resolvable `<workload>`,
 //! which is the design's intended scope, not a regression.
@@ -107,42 +103,23 @@ pub enum NameIndexError {
     },
 }
 
-/// Extract the `<workload>` label from a workload [`SpiffeId`]'s path and reconstruct
-/// the [`MeshServiceName`] it dials as.
+/// Extract the workload a [`SpiffeId`] names and reconstruct the
+/// [`MeshServiceName`] it dials as.
 ///
-/// The path is `/workload/<workload>/alloc/<alloc>` (the [`SpiffeId::for_allocation`]
-/// shape). This pulls the segment immediately after `/workload/` and validates it
-/// as a v1 single-label mesh name via [`MeshServiceName::new`]. Returns `None`
-/// when the path is not the `workload/.../alloc/...` shape OR the `<workload>` segment is
-/// not a valid v1 single-label mesh name (dotted, out-of-class, over 63
-/// octets) — such a backend is not mesh-dialable by name in v1.
+/// The workload comes from [`SpiffeId::workload_id`] (`/workload/<workload>`);
+/// it is then validated as a v1 single-label mesh name via
+/// [`MeshServiceName::new`]. Returns `None` when the identity names no workload
+/// (the gateway identity or any other shape) OR the `<workload>` label is not a
+/// valid v1 single-label mesh name (dotted, out-of-class, over 63 octets) — such
+/// a backend is not mesh-dialable by name in v1.
 ///
-/// This is the OQ-1 primitive — see the module rustdoc for the DECISION
-/// rationale (local helper, NOT a new `SpiffeId` accessor).
-///
-/// `pub(crate)` (02-01): the re-keyed `MtlsResolve`'s `by_frontend` drain
-/// projection ([`crate::mtls_resolve_adapter`]) extracts the SAME `<workload>` from
-/// the SAME `service_backends` rows to key `by_frontend` from the shared
-/// allocator — reusing this one parse helper rather than re-deriving the
-/// `/workload/<workload>/alloc/<alloc>` shape (CLAUDE.md § "Implement to the design —
-/// never invent API surface"; the design pins "mirror the `name_index` drain's
-/// row→`<workload>`→snapshot pattern").
-pub(crate) fn workload_of(alloc: &SpiffeId) -> Option<MeshServiceName> {
-    // The path is `/workload/<workload>/alloc/<alloc>` — split on `/`, find the
-    // segment immediately after the `workload` marker. A path that does not carry
-    // a `workload` segment (or has nothing after it) yields no `<workload>`.
-    let mut segments = alloc.path().split('/').filter(|segment| !segment.is_empty());
-    let workload_label = loop {
-        match segments.next() {
-            Some("workload") => break segments.next()?,
-            Some(_) => {}
-            None => return None,
-        }
-    };
-    // Reconstruct the full mesh name and validate it as a v1 single-label name.
-    // An out-of-class / dotted / over-63-octet `<workload>` is not mesh-dialable in
-    // v1 and contributes no resolvable name.
-    MeshServiceName::new(&format!("{workload_label}.{}", MeshServiceName::SUFFIX)).ok()
+/// `pub(crate)`: the re-keyed `MtlsResolve`'s `by_frontend` drain projection
+/// ([`crate::mtls_resolve_adapter`]) extracts the SAME `<workload>` from the
+/// SAME `service_backends` rows to key `by_frontend` from the shared allocator,
+/// reusing this one helper.
+pub(crate) fn workload_of(identity: &SpiffeId) -> Option<MeshServiceName> {
+    let workload = identity.workload_id()?;
+    MeshServiceName::new(&format!("{}.{}", workload.as_str(), MeshServiceName::SUFFIX)).ok()
 }
 
 /// The in-RAM resolvability set: the `<workload>`s with ≥1 running-AND-healthy

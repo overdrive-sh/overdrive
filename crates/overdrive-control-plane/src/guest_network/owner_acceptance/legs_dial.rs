@@ -85,13 +85,13 @@ const SERVER: &str = "legs-server";
 
 /// A placeholder held SVID for `alloc` (the sim performs no handshake; the
 /// held set's presence is its outcome).
-fn held_svid(alloc: &AllocationId) -> SvidMaterial {
+fn held_svid() -> SvidMaterial {
     let workload = WorkloadId::new("legs-dial").expect("valid workload id");
     SvidMaterial::new(
         CaCertPem::new("-----BEGIN CERTIFICATE-----\nLEGS\n-----END CERTIFICATE-----\n".into()),
         CaCertDer::new(vec![0x30, 0x00]),
         CertSerial::new("0a0b0c0d").expect("valid serial"),
-        SpiffeId::for_allocation(&workload, alloc),
+        SpiffeId::for_workload(&workload),
         CaKeyPem::new("-----BEGIN PRIVATE KEY-----\nLEGS\n-----END PRIVATE KEY-----\n".into()),
         UnixInstant::from_unix_duration(Duration::from_secs(4_102_444_800)),
     )
@@ -120,10 +120,7 @@ fn compose(seed: u64, verification: Verification) -> (Composition, Arc<SimMtlsEn
         CaCertPem::new("-----BEGIN CERTIFICATE-----\nROOT\n-----END CERTIFICATE-----\n".into()),
         None,
     ));
-    let identity = Arc::new(SimIdentityRead::new(
-        BTreeMap::from([(server.clone(), held_svid(&server))]),
-        bundle,
-    ));
+    let identity = Arc::new(SimIdentityRead::new(BTreeMap::from([(server, held_svid())]), bundle));
     let dial = Arc::new(OwnerDial::unbound());
     let enforcement = Arc::new(SimMtlsEnforcement::new(
         identity,

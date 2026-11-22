@@ -97,11 +97,10 @@ struct Fixture {
     sid: ServiceId,
 }
 
-fn backend(index: usize, address: Ipv4Addr) -> Backend {
+fn backend(address: Ipv4Addr) -> Backend {
     Backend {
         workload_identity: SpiffeId::from_str(&format!(
-            "spiffe://overdrive.local/workload/{SERVICE}/alloc/{}",
-            ALLOCS[index.min(ALLOCS.len() - 1)]
+            "spiffe://overdrive.local/workload/{SERVICE}"
         ))
         .expect("spiffe"),
         addr: SocketAddr::new(address.into(), 8080),
@@ -133,10 +132,10 @@ async fn fixture(world: &World) -> Fixture {
     }
     let rows = match world.backend_row {
         BackendRow::Absent => None,
-        BackendRow::Stale => Some(vec![backend(0, Ipv4Addr::new(100, 95, 0, 200))]),
-        BackendRow::OverBroad => Some(
-            (0..world.allocs.len()).map(|index| backend(index, addr_of(index))).collect::<Vec<_>>(),
-        ),
+        BackendRow::Stale => Some(vec![backend(Ipv4Addr::new(100, 95, 0, 200))]),
+        BackendRow::OverBroad => {
+            Some((0..world.allocs.len()).map(|index| backend(addr_of(index))).collect::<Vec<_>>())
+        }
     };
     if let Some(backends) = rows {
         node_

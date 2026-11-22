@@ -505,7 +505,7 @@ impl BackendIndex {
         // `service_id`): a different service's frontend key is never touched.
         self.by_frontend.retain(|_, &mut sid| sid != row.service_id);
         for backend in &row.backends {
-            // A backend whose SpiffeId is not the `/workload/<workload>/alloc/<alloc>`
+            // A backend whose SpiffeId is not the `/workload/<workload>`
             // shape (or whose `<workload>` is not a v1 mesh name) contributes no
             // frontend key — it is not mesh-dialable by name.
             let Some(workload) = workload_of(&backend.workload_identity) else { continue };
@@ -1027,8 +1027,12 @@ mod tests {
     /// A `Backend` at the given V4 addr with the given readiness.
     fn backend(addr: SocketAddrV4, healthy: bool) -> Backend {
         Backend {
-            workload_identity: SpiffeId::new(&format!("spiffe://test/b/{}-{}", addr.ip(), addr.port()))
-                .expect("valid spiffe id"),
+            workload_identity: SpiffeId::new(&format!(
+                "spiffe://test/b/{}-{}",
+                addr.ip(),
+                addr.port()
+            ))
+            .expect("valid spiffe id"),
             addr: SocketAddr::V4(addr),
             weight: 1,
             healthy,
@@ -1659,7 +1663,7 @@ mod tests {
     /// frontend-subnet-miss fail-closed arm → `MeshUnreachable`, NEVER `Mesh`).
     #[tokio::test]
     async fn by_frontend_projection_reads_the_shared_allocator_and_never_assigns() {
-        use overdrive_core::id::{AllocationId, MeshServiceName, WorkloadId};
+        use overdrive_core::id::{MeshServiceName, WorkloadId};
 
         let store = fresh_store();
         let frontend = FrontendAddrAllocator::new();
@@ -1671,15 +1675,14 @@ mod tests {
         let bound_job = MeshServiceName::new("bound.svc.overdrive.local").expect("valid mesh name");
         let f_bound = frontend.assign(&bound_job).expect("assign F for the bound job");
 
-        // A backend whose alloc SpiffeId is the `/workload/<workload>/alloc/<alloc>` shape
+        // A backend whose workload identity is the `/workload/<workload>` shape
         // the projection parses (`workload_of`). The backend's listener port is the
         // port the frontend key re-uses verbatim.
         let backend_port = 8080;
         let backend_addr = v4(10, 99, 0, 6, backend_port);
         let mk_backend = |job_label: &str, addr: SocketAddrV4, healthy: bool| Backend {
-            workload_identity: SpiffeId::for_allocation(
+            workload_identity: SpiffeId::for_workload(
                 &WorkloadId::new(job_label).expect("valid workload id"),
-                &AllocationId::new("alloc-1").expect("valid alloc id"),
             ),
             addr: SocketAddr::V4(addr),
             weight: 1,

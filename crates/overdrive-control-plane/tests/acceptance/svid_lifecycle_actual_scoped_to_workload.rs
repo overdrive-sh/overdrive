@@ -13,8 +13,10 @@
 //! `desired`.
 //!
 //! The fix filters the held snapshot to entries whose SPIFFE id equals
-//! `SpiffeId::for_allocation(target_workload, alloc_id)` — symmetry with the
-//! desired side.
+//! `SpiffeId::for_workload(target_workload)` (workload equality, ADR-0344: every
+//! allocation of a workload shares one identity, so the filter selects the
+//! workload's allocations, never one allocation) — symmetry with the desired
+//! side.
 //!
 //! Port-to-port: the driving port is `run_convergence_tick` for `svid-lifecycle`;
 //! the observable outcome is the `IdentityMgr` held set after a `workload/payments`

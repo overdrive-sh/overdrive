@@ -219,12 +219,11 @@ fn fresh_store() -> Arc<SimObservationStore> {
 }
 
 /// A `service_backends` row for `service_id` carrying one healthy backend whose
-/// alloc SpiffeId is the `/workload/<workload>/alloc/<alloc>` shape `workload_of` parses.
+/// workload identity is the `/workload/<workload>` shape `workload_of` parses.
 fn job_backend_row(service_id: u64, job: &str, addr: SocketAddrV4) -> ServiceBackendRow {
     let backend = Backend {
-        workload_identity: SpiffeId::for_allocation(
+        workload_identity: SpiffeId::for_workload(
             &WorkloadId::new(job).expect("valid workload id"),
-            &AllocationId::new("alloc-1").expect("valid alloc id"),
         ),
         addr: std::net::SocketAddr::V4(addr),
         weight: 1,

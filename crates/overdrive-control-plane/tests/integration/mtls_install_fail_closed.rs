@@ -199,7 +199,7 @@ fn build_spec(alloc: &AllocationId) -> AllocationSpec {
     AllocationSpec {
         declared_listeners: Vec::new(),
         alloc: alloc.clone(),
-        identity: overdrive_core::SpiffeId::new("spiffe://overdrive.local/workload/mif/alloc/01")
+        identity: overdrive_core::SpiffeId::new("spiffe://overdrive.local/workload/mif")
             .expect("valid spiffe id"),
         driver: overdrive_core::traits::driver::DriverPayload::Vm(
             overdrive_core::traits::driver::VmPayload {
@@ -224,12 +224,12 @@ fn build_spec(alloc: &AllocationId) -> AllocationSpec {
 /// Held identity fixture for paths whose subject was already issued before
 /// dispatch. It prevents the SVID-audit write from consuming an injected
 /// lifecycle-write refusal, keeping the fault pinned to `Running`.
-fn held_svid(workload: &WorkloadId, alloc: &AllocationId) -> SvidMaterial {
+fn held_svid(workload: &WorkloadId) -> SvidMaterial {
     SvidMaterial::new(
         CaCertPem::new("-----BEGIN CERTIFICATE-----\nLEAF\n-----END CERTIFICATE-----\n".into()),
         CaCertDer::new(vec![0xDE, 0xAD]),
         CertSerial::new("0badc0de").expect("serial parses"),
-        SpiffeId::for_allocation(workload, alloc),
+        SpiffeId::for_workload(workload),
         CaKeyPem::new("-----BEGIN PRIVATE KEY-----\nKEY\n-----END PRIVATE KEY-----\n".into()),
         UnixInstant::from_unix_duration(Duration::from_secs(1_700_003_600)),
     )
@@ -919,7 +919,7 @@ async fn drive_running_write_rejection_over_the_seam(arm: Arm) -> LeaseRunningWr
     let effect_alloc = if matches!(arm, Arm::Start) { alloc.clone() } else { successor.clone() };
     let workload = WorkloadId::new("svc-running-write-reject").expect("valid workload id");
     let node = NodeId::new("node-001").expect("valid node id");
-    fixture.state.identity.hold(effect_alloc.clone(), held_svid(&workload, &effect_alloc));
+    fixture.state.identity.hold(effect_alloc.clone(), held_svid(&workload));
     let action = match arm {
         Arm::Start => Action::StartAllocation {
             alloc_id: alloc.clone(),

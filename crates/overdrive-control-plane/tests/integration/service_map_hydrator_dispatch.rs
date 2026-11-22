@@ -103,7 +103,7 @@ fn sample_action() -> (ServiceId, ServiceVip, Vec<Backend>, Action) {
     let service_id = ServiceId::new(42).expect("ServiceId");
     let vip = ServiceVip::new(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1))).expect("ServiceVip");
     let backends = vec![Backend {
-        workload_identity: SpiffeId::new("spiffe://overdrive.local/workload/payments/alloc/a1b2c3")
+        workload_identity: SpiffeId::new("spiffe://overdrive.local/workload/payments")
             .expect("SpiffeId"),
         addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 10)), 8080),
         weight: 100,
@@ -184,7 +184,7 @@ async fn dispatch_rejects_ipv6_vip_with_a_failure_event() {
     let ipv6_vip =
         ServiceVip::new(IpAddr::V6(Ipv6Addr::new(0xfd, 0xc2, 0, 0, 0, 0, 0, 1))).expect("v6 VIP");
     let backends = vec![Backend {
-        workload_identity: SpiffeId::new("spiffe://overdrive.local/workload/payments/alloc/a1b2c3")
+        workload_identity: SpiffeId::new("spiffe://overdrive.local/workload/payments")
             .expect("SpiffeId"),
         addr: SocketAddr::new(IpAddr::V4(Ipv4Addr::new(192, 168, 1, 10)), 8080),
         weight: 100,

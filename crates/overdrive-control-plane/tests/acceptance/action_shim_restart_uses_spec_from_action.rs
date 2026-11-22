@@ -145,12 +145,7 @@ async fn action_shim_restart_passes_spec_from_action_to_driver_start_unchanged()
     // Construct the RestartAllocation action with a fully-populated
     // spec carrying operator-declared command + args.
     let successor_id = AllocationId::new("alloc-payments-1").expect("successor alloc id");
-    let identity = SpiffeId::new(&format!(
-        "spiffe://overdrive.local/workload/{}/alloc/{}",
-        workload_id.as_str(),
-        successor_id.as_str(),
-    ))
-    .expect("spiffe id");
+    let identity = SpiffeId::for_workload(&workload_id);
     let restart_spec = AllocationSpec {
         declared_listeners: Vec::new(),
         alloc: successor_id,

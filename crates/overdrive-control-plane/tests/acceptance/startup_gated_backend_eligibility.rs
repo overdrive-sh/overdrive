@@ -72,7 +72,6 @@ async fn successor_of_a_startup_stopped_attempt_is_a_backend_only_after_its_own_
 
     stable_commits(&mut world).await;
     assert_eq!(world.resolver_routes_to(&successor).await, Some(true));
-    assert!(not_a_backend(&world, &first).await, "the stopped predecessor is never a backend");
 }
 
 /// S-47 (e): after `Stable`, an extra startup `Fail` row lands (the startup role

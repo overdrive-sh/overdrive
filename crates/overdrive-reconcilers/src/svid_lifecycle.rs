@@ -33,6 +33,7 @@ use serde::{Deserialize, Serialize};
 
 use overdrive_core::SpiffeId;
 use overdrive_core::ca::WORKLOAD_SVID_TTL;
+use overdrive_core::ca::issued_certificate_row::IssuedFor;
 // `HeldSvidFacts` relocated to `overdrive_core::identity` per ADR-0086 D6 (it crosses the
 // `HeldSvidView` core read-port signature). This module still uses it in
 // `SvidLifecycleState::actual` and re-exports it via `reconcilers::mod`.
@@ -46,7 +47,7 @@ use super::{Action, Reconciler, ReconcilerName, TargetResource, TickContext, bac
 
 /// The per-allocation `desired` fact the `SvidLifecycle` reconciler needs to
 /// emit [`Action::IssueSvid`] for a Running allocation — the inputs to the pure
-/// `SpiffeId::for_allocation` derivation plus the issuing node.
+/// `SpiffeId::for_workload` derivation plus the issuing node.
 ///
 /// The runtime's hydrate-desired projects one of these per Running
 /// `alloc_status` observation row (filtered to the target workload), exactly as
@@ -56,7 +57,7 @@ use super::{Action, Reconciler, ReconcilerName, TargetResource, TickContext, bac
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RunningAlloc {
     /// The workload the allocation belongs to — the first component of the
-    /// derived `spiffe://overdrive.local/workload/<workload>/alloc/<alloc>` identity.
+    /// derived `spiffe://overdrive.local/workload/<workload>` identity.
     pub workload_id: WorkloadId,
     /// The node the allocation runs on — carried on `IssueSvid` so the action is
     /// self-describing (the `issued_certificates` row's `node_id`, ADR-0067 D2).
@@ -90,9 +91,9 @@ pub struct SvidLifecycleState {
     /// allocation is currently held; the value is the non-secret
     /// [`HeldSvidFacts`] projection (`IdentityMgr::held_snapshot`).
     pub actual: BTreeMap<AllocationId, HeldSvidFacts>,
-    /// The DURABLE restart-recovery success signal (ADR-0067 rev 5 D10): the set
-    /// of `SpiffeId`s observed in the `issued_certificates` audit rows. A running
-    /// alloc whose pure-derived [`SpiffeId::for_allocation`] is in this set was
+    /// The DURABLE restart-recovery success signal (ADR-0067 rev 5 D10, ADR-0345):
+    /// the set of `AllocationId`s observed in the `issued_certificates` audit rows
+    /// whose `issued_for` is `Allocation`. A running alloc in this set was
     /// *successfully issued before* (audit-before-hold, ADR-0063 D6 — the row
     /// exists only on a prior successful mint).
     ///
@@ -100,15 +101,15 @@ pub struct SvidLifecycleState {
     /// is the unambiguous *restart marker* (minted-then-lost-hold), distinguished
     /// from `¬held ∧ ¬ever_issued` (genuinely never-succeeded). It is a
     /// recomputed-each-tick projection of the durable audit rows — derived at read
-    /// time in the runtime's `hydrate_actual`, NEVER persisted (the audit row is
-    /// an existing observation INPUT the reconciler READS; it writes nothing). The
-    /// reconciler derives the expected `spiffe_id` per running alloc and tests
-    /// membership against this set — keyed on `spiffe_id` because the audit row
-    /// carries `spiffe_id`, NOT `alloc_id`.
+    /// time in `hydrate_actual`, NEVER persisted (the audit row is an existing
+    /// observation INPUT the reconciler READS; it writes nothing). Keyed on the
+    /// allocation, not the identity: every allocation of a workload shares the
+    /// workload identity (ADR-0344), so a sibling allocation never inherits
+    /// another's recovery.
     ///
     /// Empty on a `desired`-role value (`hydrate_desired` fills only `desired`);
     /// the reconcile body reads `actual.ever_issued` off the `actual`-role value.
-    pub ever_issued: BTreeSet<SpiffeId>,
+    pub ever_issued: BTreeSet<AllocationId>,
 }
 
 /// Per-allocation issue-retry memory — the INPUTS the backoff schedule consumes
@@ -318,7 +319,7 @@ impl Reconciler for SvidLifecycle {
             ctx.held_svid_view
                 .held_snapshot()
                 .values()
-                .filter_map(|facts| workload_of_allocation_identity(&facts.spiffe_id))
+                .filter_map(|facts| facts.spiffe_id.workload_id())
                 .map(|workload_id| crate::workload_target(&workload_id)),
         );
         Ok(targets)
@@ -330,17 +331,16 @@ impl Reconciler for SvidLifecycle {
     ///
     /// - **`running ∧ ¬held ∧ ever_issued`** (RESTART RECOVERY, ADR-0067 rev 5
     ///   D10) → emit [`Action::IssueSvid`] **IMMEDIATELY, bypassing the backoff
-    ///   gate**, and CLEAR the alloc's `IssueRetry` entry. `ever_issued` is the
-    ///   pure-derived [`SpiffeId::for_allocation`] identity being present in
-    ///   `actual.ever_issued` (the `issued_certificates` audit-row identity set,
-    ///   D4/D10) — an unambiguous restart marker (a prior successful mint whose
+    ///   gate**, and CLEAR the alloc's `IssueRetry` entry. `ever_issued` means the
+    ///   allocation is present in `actual.ever_issued` (the
+    ///   `issued_certificates` audit-row allocation set, ADR-0345) — an unambiguous restart marker (a prior successful mint whose
     ///   hold was lost when the holder was reset). Evaluated BEFORE the backoff
     ///   gate, so a stale retry entry (a record-on-emit artifact from the prior
     ///   successful issue) can no longer suppress recovery. This is the ordinary
     ///   first-issue branch running again — NOT the gated #40 rotation path.
     /// - **`running ∧ ¬held ∧ ¬ever_issued`** (first-issue / genuinely-failing) →
     ///   emit [`Action::IssueSvid`] carrying the pure-derived
-    ///   [`SpiffeId::for_allocation`] identity, the issuing `node_id`, and the
+    ///   [`SpiffeId::for_workload`] identity, the issuing `node_id`, and the
     ///   derived `issue-svid` correlation — BUT only when no [`IssueRetry`] entry
     ///   exists for the alloc OR the backoff window has elapsed (`tick.now_unix >=
     ///   last_failure_seen_at + backoff_for_attempt(attempts)`; the deadline is
@@ -475,14 +475,14 @@ impl Reconciler for SvidLifecycle {
                 continue;
             }
 
-            // ¬held — derive the identity once; it drives both the recovery
-            // membership test (against `actual.ever_issued`) and the action.
-            let spiffe_id = SpiffeId::for_allocation(&running.workload_id, alloc_id);
+            // ¬held — derive the workload identity once; it names the SVID the
+            // action requests.
+            let spiffe_id = SpiffeId::for_workload(&running.workload_id);
 
             // ¬held ∧ ever_issued → RESTART RECOVERY (ADR-0067 rev 5 D10): a
             // prior successful mint whose hold was lost to a control-plane
             // restart, proven by the `issued_certificates` audit row's identity
-            // being in `actual.ever_issued`. Re-issue IMMEDIATELY, BYPASSING the
+            // allocation being in `actual.ever_issued`. Re-issue IMMEDIATELY, BYPASSING the
             // backoff gate — and clear any stale retry entry, because a durable
             // success is proven (no failure is pending). This is the fix for the
             // `restart_after_successful_issue_before_clear` defect: the
@@ -491,7 +491,7 @@ impl Reconciler for SvidLifecycle {
             // issue) can no longer suppress recovery. It is the ordinary
             // first-issue branch running again because the holder was reset —
             // NOT the gated #40 rotation path.
-            if actual.ever_issued.contains(&spiffe_id) {
+            if actual.ever_issued.contains(alloc_id) {
                 next_view.retry.remove(alloc_id);
                 let correlation = identity_correlation(alloc_id, &spiffe_id, "issue-svid");
                 actions.push(Action::IssueSvid {
@@ -576,12 +576,11 @@ impl Reconciler for SvidLifecycle {
         next_view: &Self::View,
         tick: &TickContext,
     ) -> Option<UnixInstant> {
-        let first_issue_deadlines = desired.desired.iter().filter_map(|(alloc_id, running)| {
+        let first_issue_deadlines = desired.desired.keys().filter_map(|alloc_id| {
             if actual.actual.contains_key(alloc_id) {
                 return None;
             }
-            let spiffe_id = SpiffeId::for_allocation(&running.workload_id, alloc_id);
-            if actual.ever_issued.contains(&spiffe_id) {
+            if actual.ever_issued.contains(alloc_id) {
                 return None;
             }
             next_view.retry.get(alloc_id).map(issue_retry_deadline)
@@ -616,7 +615,7 @@ impl Reconciler for SvidLifecycle {
     }
 
     /// Hydrate the `actual` set — the held-set-as-`actual` (filtered to the
-    /// target workload via `SpiffeId::for_allocation`, ADR-0067 D5b) PLUS the
+    /// target workload by identity equality with `SpiffeId::for_workload`, ADR-0067 D5b) PLUS the
     /// durable `ever_issued` audit-row signal (moved off
     /// `reconciler_runtime::hydrate_svid_actual_held`, ADR-0086 S3).
     async fn hydrate_actual(
@@ -633,14 +632,6 @@ impl Reconciler for SvidLifecycle {
 // Hydration bodies — moved off the central `reconciler_runtime` free fns
 // (ADR-0086 S3).
 // ---------------------------------------------------------------------------
-
-/// The workload an allocation identity names: the inverse of
-/// [`SpiffeId::for_allocation`] (`/workload/<workload>/alloc/<alloc>`).
-/// `None` for any other identity shape.
-fn workload_of_allocation_identity(spiffe_id: &SpiffeId) -> Option<WorkloadId> {
-    let (workload, _alloc) = spiffe_id.path().strip_prefix("/workload/")?.split_once("/alloc/")?;
-    WorkloadId::new(workload).ok()
-}
 
 /// Project the `desired` set — the Running allocations for `workload_id`.
 async fn hydrate_svid_desired_running(
@@ -672,7 +663,7 @@ const fn svid_desired_state(desired: BTreeMap<AllocationId, RunningAlloc>) -> Sv
 }
 
 /// Project the `actual` set — the held snapshot filtered to the target workload,
-/// plus the global `ever_issued` audit-row SPIFFE-id set.
+/// plus the global `ever_issued` audit-row allocation set.
 async fn hydrate_svid_actual_held(
     ctx: &HydrationContext<'_>,
     workload_id: &WorkloadId,
@@ -681,16 +672,20 @@ async fn hydrate_svid_actual_held(
         .held_svid_view
         .held_snapshot()
         .into_iter()
-        .filter(|(alloc_id, facts)| {
-            facts.spiffe_id == SpiffeId::for_allocation(workload_id, alloc_id)
-        })
+        .filter(|(_, facts)| facts.spiffe_id == SpiffeId::for_workload(workload_id))
         .collect();
     let audit_rows = ctx
         .observation_store
         .issued_certificate_rows()
         .await
         .map_err(|e| HydrateError::ObservationRead(e.to_string()))?;
-    let ever_issued: BTreeSet<SpiffeId> = audit_rows.into_iter().map(|row| row.spiffe_id).collect();
+    let ever_issued: BTreeSet<AllocationId> = audit_rows
+        .into_iter()
+        .filter_map(|row| match row.issued_for {
+            IssuedFor::Allocation(alloc_id) => Some(alloc_id),
+            IssuedFor::Gateway => None,
+        })
+        .collect();
     Ok(SvidLifecycleState { desired: BTreeMap::new(), actual, ever_issued })
 }
 
@@ -717,7 +712,7 @@ mod tests {
     /// dropped or swapped a field is caught here.
     #[test]
     fn held_svid_facts_carries_the_identity_and_validity_end() {
-        let spiffe = SpiffeId::new("spiffe://overdrive.local/workload/payments/alloc/a1b2c3")
+        let spiffe = SpiffeId::new("spiffe://overdrive.local/workload/payments")
             .expect("valid workload SpiffeId");
         let not_after = UnixInstant::from_unix_duration(Duration::from_secs(1_700_003_600));
 
@@ -733,7 +728,7 @@ mod tests {
         let workload_id = WorkloadId::new("payments").expect("valid workload id");
         let alloc_id = AllocationId::new("payments-0").expect("valid allocation id");
         let node_id = NodeId::new("node-0").expect("valid node id");
-        let spiffe_id = SpiffeId::for_allocation(&workload_id, &alloc_id);
+        let spiffe_id = SpiffeId::for_workload(&workload_id);
         let running = RunningAlloc { workload_id, node_id };
         let mut desired_allocs = BTreeMap::new();
         desired_allocs.insert(alloc_id.clone(), running);
