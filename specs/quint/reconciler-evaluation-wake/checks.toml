@@ -12,9 +12,9 @@ temporal = "ProgressByPass"
 backend = "tlc"
 expect = "holds"
 ci = false
-timeout_secs = 43200
-heap_mb = 40960
-workers = 12
+timeout_secs = 900
+heap_mb = 16384
+workers = 14
 
 [[check]]
 name = "evaluation-wake-retention-schedules-backed-off-key"
@@ -23,10 +23,10 @@ main = "wake_retention"
 invariant = "RetentionSchedulesBackedOffKey"
 backend = "tlc"
 expect = "holds"
-ci = false
-timeout_secs = 21600
-heap_mb = 12288
-workers = 4
+ci = true
+timeout_secs = 900
+heap_mb = 4096
+workers = 8
 
 # ---- hazards (one per decision)
 

@@ -167,8 +167,8 @@
  *   WK-2  ReconcilerRuntime::submit_evaluation wakes the loop (ADR-0273), so a submitted key is drained without a
  *         separate sleep-until wake; the loop's cadence timer backstops it.
  *         Discharged by: the existing ADR-0273 submit-wakes-loop acceptance tests.
- *   WK-3  Time is abstract: the period is a timer event (Tick) with weak fairness, a backoff window ends by a
- *         WindowEnds event with weak fairness (one clock advance past the shared instant), which also makes a retained
+ *   WK-3  Time is abstract: the period is a timer event (Tick) with fairness (stated as []<>, see Fair), a backoff window ends by a
+ *         WindowEnds event with fairness (one clock advance past the shared instant), which also makes a retained
  *         NotBefore eligible, exactly when its window ends (the deadline IS last_failure_seen_at + backoff_for_attempt, D-3). The 30 s value, "within one
  *         period plus queue time" as a duration, and anchored re-arming at previous + period on the injected clock
  *         are NOT checked here. Discharged by: a DISTILL obligation on the default-lane seeded overdrive-sim / SimClock
@@ -540,12 +540,21 @@ module evaluation_wake {
     conf_step' = if (REC) variant("Crash", ()) else conf_step,
   }
 
-  action step = {
+  // Each action quantifies only the parameters it takes.
+  action stepKey = {
+    nondet k = KEYSET.oneOf()
+    any { DivergeWake(k), DivergeDrop(k), EdgeWake(k), WindowEnds(k) }
+  }
+  action stepFinish = {
     nondet k = KEYSET.oneOf()
     nondet o = Set("ok", "dpFail", "hydrateErr", "persistErr", "dispatchErr").oneOf()
-    nondet b = Set(true, false).oneOf()
-    any { Tick, PassStep(b), Drain, Finish(k, o), DivergeWake(k), DivergeDrop(k), EdgeWake(k), WindowEnds(k), Crash }
+    Finish(k, o)
   }
+  action stepPass = {
+    nondet b = Set(true, false).oneOf()
+    PassStep(b)
+  }
+  action step = any { Tick, Drain, Crash, stepPass, stepKey, stepFinish }
 
   val allVars = (has, need, inWin, vip, held, v3, r4, prog, rowNE, stU, rowD, active, pending, elig, due, passPos, faults, drifts, dispatched,
                  cancelled, conf_step)
@@ -582,10 +591,25 @@ module evaluation_wake {
   val RetentionSchedulesBackedOffKey: bool = inWin.forall(k => active.contains(k) or inP(pending, k))
 
   // ------------------------------------------------------------------ progress (temporal)
+  // Weak fairness stated as state-level []<> conjuncts. Each is implied by WF of the named action,
+  // WF(A) = <>[]ENABLED A => []<>taken A:
+  //   Tick               []<>due (Tick is enabled iff not due and sets due)
+  //   Finish(k, "ok")    []<>(k not in flight) (enabled iff k is in flight; taking it ends the flight)
+  //   WindowEnds(k)      []<>(k not in its window) (enabled iff k is in its window; taking it ends the window); only k2 and
+  //                      k4 ever enter a window
+  //   PassStep(true)     for every pass position c, []<>not(enabled and passPos == c) (a step always changes passPos)
+  //   Drain              for every key k, []<>(k not in drainSel) (a Drain admits all of drainSel, so k leaves pending)
+  // The PassStep and Drain conjuncts are implied by, not equivalent to, their WF.
+  val passEnabled: bool = not(NO_PASS) and passPos < NREC and (passPos > 0 or due)
   temporal Fair = and {
-    weakFair(Tick, allVars), weakFair(PassStep(true), allVars), weakFair(Drain, allVars),
-    weakFair(Finish("k1", "ok"), allVars), weakFair(Finish("k2", "ok"), allVars), weakFair(Finish("k3", "ok"), allVars), weakFair(Finish("k4", "ok"), allVars),
-    weakFair(WindowEnds("k1"), allVars), weakFair(WindowEnds("k2"), allVars), weakFair(WindowEnds("k3"), allVars), weakFair(WindowEnds("k4"), allVars),
+    always(eventually(due)),
+    always(eventually(not(passEnabled and passPos == 0))), always(eventually(not(passEnabled and passPos == 1))),
+    always(eventually(not(passEnabled and passPos == 2))), always(eventually(not(passEnabled and passPos == 3))),
+    always(eventually(not(inP(drainSel, "k1")))), always(eventually(not(inP(drainSel, "k2")))),
+    always(eventually(not(inP(drainSel, "k3")))), always(eventually(not(inP(drainSel, "k4")))),
+    always(eventually(not(active.contains("k1")))), always(eventually(not(active.contains("k2")))),
+    always(eventually(not(active.contains("k3")))), always(eventually(not(active.contains("k4")))),
+    always(eventually(not(inWin.contains("k2")))), always(eventually(not(inWin.contains("k4")))),
   }
   // D-1: every needy key is eventually evaluated to convergence, from every error outcome, dropped wake and crash
   temporal ProgressByPass = Fair.implies(KEYSET.forall(k => always(need.contains(k).implies(eventually(not(need.contains(k)))))))

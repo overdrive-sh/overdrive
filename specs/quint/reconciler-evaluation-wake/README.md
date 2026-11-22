@@ -137,7 +137,7 @@ pending key collapses and counts in `cancelled` whether or not the key is needy 
 | Broker | `pending` FIFO list of unique keys, `elig` `imm` / `nb`; same-key submit collapses and keeps its slot; Immediate merges a pending NotBefore to Immediate | `eval_broker.rs` `submit`, `merge_eligibility` |
 | Admission | `Drain`: oldest first, up to CAP - active, skip a blocked target, skip a non-Immediate key, atomic batch | `eval_broker.rs` `drain_pending`; `lib.rs:5165-5260` |
 | Evaluation | `Drain` admits only; `Finish(k, outcome)` is `run_convergence_tick`, which hydrates at its start (the world is read at `Finish`, so a change between `Drain` and `Finish` is seen); outcomes `ok`, `dpFail`, `hydrateErr`, `persistErr` (only where the View changes, D9), `dispatchErr`; a tick that emitted an action self-requeues Immediate on every path including `dispatchErr`; an in-window Noop (hydrator, svid-lifecycle) requeues NotBefore when `next_evaluation_at` is `Some` | `reconciler_runtime.rs:1580-1750` |
-| Resync pass (D-1b) | `Tick` (period timer, weak fairness) sets `due`; `PassStep` walks `r1S`, `r2M`, `r3V`, `r4W` in registered (BTreeMap) order, each either submitting the reconciler's whole managed set Immediate or (enumeration fault) nothing; the first pass is due at boot and after a crash | feature-delta D-1a, D-1b |
+| Resync pass (D-1b) | `Tick` (period timer, fair) sets `due`; `PassStep` walks `r1S`, `r2M`, `r3V`, `r4W` in registered (BTreeMap) order, each either submitting the reconciler's whole managed set Immediate or (enumeration fault) nothing; the first pass is due at boot and after a crash | feature-delta D-1a, D-1b |
 | Faults | hydrate / persist / dispatch error, dataplane failure, enumeration failure, crash (broker, its `dispatched` / `cancelled` counters and in-flight set lost; View, intent, observation survive), dropped edge wake, drift; budgeted by `MAXF = 2`, `MAXD = 2` | feature-delta "Formal protocol model" |
 
 ## Properties, named after the decision they defend
@@ -191,17 +191,20 @@ process restart (svid-lifecycle's restart recovery re-issues), but the conforman
 ## Check results and timings
 
 One faithful model: `wake_full` at `MAXF = 2`, `MAXD = 2`, every key, fault and drift kind (the verified model is the
-conformance oracle; it is not split into an abstract and a faithful main). There is no per-check cap beyond the runner's
-`timeout_secs`; `ci = true` only for checks under two minutes (`.claude/rules/design.md`). Recorded run (TLC, exhaustive,
-16 CPU / 61 GiB test machine). The recorded evidence does not carry TLC state counts.
+conformance oracle; it is not split into an abstract and a faithful main). `ci = true` only for checks under two minutes
+(`.claude/rules/design.md`). Recorded run (TLC, exhaustive, 16 CPU / 61 GiB test machine). The recorded evidence does not
+carry TLC state counts.
 
 | Check | Main | Verdict | Time | Peak memory | `ci` |
 |---|---|---|---|---|---|
-| `evaluation-wake-progress-by-pass` | `wake_full` | holds | 4794.2 s (79.9 min) | 6.8 GiB (heap 40 GiB, 12 workers) | false |
-| `evaluation-wake-retention-schedules-backed-off-key` | `wake_retention` (faults `dpFail`, `dispatchErr`) | holds | 634.0 s | 3.0 GiB (heap 12 GiB, 4 workers) | false |
-| `evaluation-wake-hazard-no-pass` | `wake_noPass` | violation | 13.2 s | 1.4 GiB | true |
-| `evaluation-wake-hazard-no-retention` | `wake_noRetention` | violation | 12.1 s | 1.4 GiB | true |
-| 10 named runs | `wake_conf` | holds | 2.5 s to 4.1 s each | about 0.2 GiB | true |
+| `evaluation-wake-progress-by-pass` | `wake_full` | holds | 168.8 s | 6.4 GiB (heap 16 GiB, 14 workers) | false |
+| `evaluation-wake-retention-schedules-backed-off-key` | `wake_retention` (faults `dpFail`, `dispatchErr`) | holds | 48.0 s | 2.4 GiB (heap 4 GiB, 8 workers) | true |
+| `evaluation-wake-hazard-no-pass` | `wake_noPass` | violation | 14.2 s | 1.5 GiB | true |
+| `evaluation-wake-hazard-no-retention` | `wake_noRetention` | violation | 11.9 s | 0.9 GiB | true |
+| 10 named runs | `wake_conf` | holds | 2.5 s to 3.3 s each | about 0.2 GiB | true |
+
+Each action in `step` quantifies only the parameters it takes. `ProgressByPass` states weak fairness as state-level
+`[]<>` conjuncts, each implied by the `WF` of its action (derivations in the `Fair` comment in `evaluation_wake.qnt`).
 
 ## Limits
 
