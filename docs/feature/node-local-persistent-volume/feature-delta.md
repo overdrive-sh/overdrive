@@ -289,6 +289,13 @@ and mode are not restored at teardown; no other VMM can open another workload's 
 own launch arguments (ADR-0315). `rlimit_fsize` is unchanged. Fork: only F2 (ADR-0319, the `O_EXCL` open) is a fork change; F1 (ADR-0316) and F3 (ADR-0320) are upstream Cloud Hypervisor's own behaviour
 since the fork moved to upstream `main` (2026-11-20, ADR-0161 § Amendment); the pinned revision and checksums follow that move.
 
+**Wire contract: the VMM's exit status.** The launcher (`build_confined_command`, `overdrive-host/src/vmm.rs`) runs the fork, and the fork
+exits with status **111** when the volume disk's exclusive open returns `EBUSY` (ADR-0319): the typed signal that another holder has the
+device. The fork reads it from the typed error (a `BlockError` of kind `Io`, operation `Open`, with an `EBUSY` source) and never from stderr
+text. Every other start failure exits 1, and a successful run exits 0. The constant is `EXIT_DISK_BUSY` in the fork's
+`cloud-hypervisor/src/main.rs`. The driver's mapping of 111 to a held-volume failure is the consumer of this contract. Evidence:
+`spike-scratch/node-local-persistent-volume-ch-exit/` (held device exits 111, nonexistent disk exits 1, free device opens).
+
 ### Launch path and driver failures (VD-8, VD-9)
 
 `VmDriver::provision_vmm`, for a `VolumePayload`, after claiming supervision and before `Vmm::create`: `ensure` (awaited to its return; the 30 s

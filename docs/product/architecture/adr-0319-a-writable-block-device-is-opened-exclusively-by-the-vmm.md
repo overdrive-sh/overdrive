@@ -16,8 +16,16 @@ Overdrive runs no stock VMM. The fix is on branch `spike/node-local-persistent-v
 
 ## Decision
 
-**The fork opens a writable block device with `O_EXCL`. The pinned fork revision and its checksums change
-(ADR-0161).**
+**The fork opens a writable block device with `O_EXCL`, and exits with status 111 when that open fails with
+`EBUSY`. The pinned fork revision and its checksums change (ADR-0161).**
+
+The exit status is the typed signal for "another holder has the device". Cloud Hypervisor reads it from the
+error chain: a `BlockError` of kind `Io`, operation `Open`, whose source is an `io::Error` with
+`raw_os_error() == Some(EBUSY)` (`cloud-hypervisor/src/main.rs`, `is_disk_busy`; `EXIT_DISK_BUSY`). It
+does not match text. Every other start failure keeps exit status 1. 111 is not used by Cloud Hypervisor
+(it exits 0 or 1; clap usage errors exit 2) and is below the shell's 126/127 and the 128+signal range.
+Metal evidence: a loop device held by an `O_EXCL` opener makes the fork exit 111; a nonexistent disk exits
+1; a free device opens (spike `spike-scratch/node-local-persistent-volume-ch-exit/`, kernel 7.0.0-38).
 
 ## Alternatives considered
 
@@ -34,7 +42,9 @@ Overdrive runs no stock VMM. The fix is on branch `spike/node-local-persistent-v
 - Positive: single writer holds across any device node. For a block device the refusal is `EBUSY` from
   `open`, raised before the lock; it also means any other claimant of the device, and the message does
   not say which.
-- Negative: one patch to carry across fork rebases.
+- Positive: the driver tells a held volume from every other start failure by the VMM's exit status, not by
+  its stderr text.
+- Negative: two small patches to carry across fork rebases (the open, and the exit status).
 
 ## Links
 
