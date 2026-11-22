@@ -2,16 +2,12 @@
 
 A VM Service that keeps data on a node-local volume (GH #348). The Service
 declares `[vm.volume] size = "1GiB"`; the volume belongs to the workload, so it
-is still there, with its data, after a restart, a stop and resume, and a node
-reboot.
+is still there, with its data, after a restart and after a stop and resume.
 
 **Status.** This runs end to end through `overdrive serve` and `overdrive deploy`
-on a node with the volume pool. The Tier-3 journeys in
+on a node with the volume pool. The journeys in
 `crates/overdrive-cli/tests/integration/volume_survives.rs` exercise the same
-path on the real pool: data survives a workload restart and a killed VMM, and a
-stop keeps the volume so a resume reattaches it with its data. The volume node
-is `root:<VMM group>` mode `0660`, so the uid-dropped VMM can claim it. What the
-example demonstrates: declare a volume, see it in `describe`, restart the
+path on the real pool. What the example demonstrates: declare a volume, see it in `describe`, restart the
 workload, and read back the data the guest wrote earlier.
 
 ## What is here
@@ -85,27 +81,6 @@ logical volume, however many times the workload started.
 volume-oversized` until the allocation reason names the shortage. The reason
 is a typed volume failure, not a generic error. The runner checks that the pool
 is unchanged afterwards; the exact wording is whatever `describe` prints.
-
-## Across a node reboot
-
-The runner cannot reboot the node, so the reboot journey is the same commands
-in separate steps. Rebooting a shared host needs its owner's approval.
-
-```bash
-examples/node-local-volume/run-example.sh prepare
-examples/node-local-volume/run-example.sh serve &           # keep it running
-overdrive deploy --detach examples/node-local-volume/volume-service.toml
-overdrive workload describe volume-notes
-# reboot the node; once it is back, with the preparation directory still present:
-examples/node-local-volume/run-example.sh serve &
-overdrive workload describe volume-notes
-```
-
-Both `overdrive` invocations need `OVERDRIVE_CONFIG_DIR=/srv/vm/overdrive-testing/svm-e08/config`.
-After a boot the volume is inactive; the Service's next launch activates it,
-with no operator step, and the guest reads the earlier notes back. The new
-note's `prior_verified` shows how many. `run-example.sh cleanup` removes the
-preparation directory; it never removes a volume.
 
 ## Limits
 

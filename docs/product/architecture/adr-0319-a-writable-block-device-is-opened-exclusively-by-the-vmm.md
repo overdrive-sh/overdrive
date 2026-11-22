@@ -21,9 +21,8 @@ Overdrive runs no stock VMM. The fix is on branch `spike/node-local-persistent-v
 
 The exit status is the typed signal for "another holder has the device". Cloud Hypervisor reads it from the
 error chain: a `BlockError` of kind `Io`, operation `Open`, whose source is an `io::Error` with
-`raw_os_error() == Some(EBUSY)` (`cloud-hypervisor/src/main.rs`, `is_disk_busy`; `EXIT_DISK_BUSY`). It
-does not match text. Every other start failure keeps exit status 1. 111 is not used by Cloud Hypervisor
-(it exits 0 or 1; clap usage errors exit 2) and is below the shell's 126/127 and the 128+signal range.
+`raw_os_error() == Some(EBUSY)`. It
+does not match text. Every other start failure keeps exit status 1.
 Metal evidence: a loop device held by an `O_EXCL` opener makes the fork exit 111; a nonexistent disk exits
 1; a free device opens (spike `spike-scratch/node-local-persistent-volume-ch-exit/`, kernel 7.0.0-38).
 

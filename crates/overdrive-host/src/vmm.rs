@@ -538,7 +538,7 @@ impl Vmm for CloudHypervisorVmm {
             // Unclassified (`.claude/rules/development.md` § "Errors").
             return Err(VmmError::ConfinementUnavailable {
                 control: ConfinementControl::UidDrop,
-                detail: format!("prepare confined paths for {}: {source}", clone_dest.display()),
+                detail: format!("prepare confined paths: {source}"),
             });
         }
 
@@ -768,8 +768,7 @@ fn ficlone_rootfs(master: &Path, clone_dest: &Path) -> Result<()> {
 ///    read its kernel copy under the dropped uid.
 /// 4. **Volume node** — when the launch attaches a volume, the symlink-resolved
 ///    device node is set to `root:gid` mode `0660`, so the dropped identity can
-///    open it `O_EXCL` for the claim. The node is platform-owned; no operator
-///    artifact is widened.
+///    open it `O_EXCL` for the claim.
 fn prepare_confined_paths(
     clone_dest: &Path,
     kernel_master: &Path,
@@ -779,7 +778,9 @@ fn prepare_confined_paths(
     uid: u32,
     gid: u32,
 ) -> io::Result<()> {
-    std::os::unix::fs::chown(clone_dest, Some(uid), Some(gid))?;
+    std::os::unix::fs::chown(clone_dest, Some(uid), Some(gid)).map_err(|e| {
+        io::Error::new(e.kind(), format!("rootfs clone {}: {e}", clone_dest.display()))
+    })?;
 
     // Copy the operator's kernel into this allocation's run dir. `std::fs::copy`
     // only READS the master (mode/bytes untouched) and writes a fresh file the
@@ -793,11 +794,21 @@ fn prepare_confined_paths(
     }
 
     if let Some(device) = volume_device {
-        let node = std::fs::canonicalize(device)?;
-        std::os::unix::fs::chown(&node, Some(0), Some(gid))?;
-        std::fs::set_permissions(&node, std::os::unix::fs::PermissionsExt::from_mode(0o660))?;
+        let node =
+            std::fs::canonicalize(device).map_err(|e| volume_node_error(device, None, &e))?;
+        std::os::unix::fs::chown(&node, Some(0), Some(gid))
+            .map_err(|e| volume_node_error(device, Some(&node), &e))?;
+        std::fs::set_permissions(&node, std::os::unix::fs::PermissionsExt::from_mode(0o660))
+            .map_err(|e| volume_node_error(device, Some(&node), &e))?;
     }
     Ok(())
+}
+
+/// Wrap a volume-node preparation failure so the error detail names the volume
+/// device (and its resolved node, once known) instead of the rootfs clone.
+fn volume_node_error(device: &Path, node: Option<&Path>, source: &io::Error) -> io::Error {
+    let resolved = node.map_or_else(String::new, |n| format!(" (resolved to {})", n.display()));
+    io::Error::new(source.kind(), format!("volume node {}{resolved}: {source}", device.display()))
 }
 
 /// Classify a resolved (or failed-to-observe) child exit into the
