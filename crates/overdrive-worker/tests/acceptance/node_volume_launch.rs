@@ -346,6 +346,24 @@ impl Node {
         Some(pid)
     }
 
+    /// Waits until the launch's VMM opened its device, then has that VMM end by itself with
+    /// `exit_code` before the guest reports READY: the VMM's own ending wins the boot race.
+    async fn vmm_exits_during_start(&self, launch: &Launch, exit_code: i32) {
+        let cid = Self::cid(launch.index);
+        let pid = tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                if let Some(pid) = self.vmm.vsock_device_holders().get(&cid) {
+                    break *pid;
+                }
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+        })
+        .await
+        .expect("the launch reached Vmm::create");
+        assert!(self.vmm.exit_process(pid, Some(exit_code), None), "the VMM was live");
+        self.settle().await;
+    }
+
     /// Advances simulated time by `secs` in one-second steps, letting the launch react: each
     /// step yields to the runtime and gives the launch a moment of real time to reach its next
     /// wait, so an assertion about what a launch has NOT done is made after it had the chance.
@@ -753,4 +771,44 @@ async fn a_control_plane_restart_between_create_and_attach_reuses_the_volume() {
     node.complete_ready(&next, Duration::from_secs(10)).await.expect("the successor attaches");
     next.result().await.expect("the successor launches");
     assert_eq!(sim.volumes_created(), 1, "never a second volume");
+}
+
+// ----- The VMM's own busy-disk exit (ADR-0319) ---------------------------------------------
+
+/// ADR-0319: the VMM refuses the volume disk's exclusive open (exit 111) while the claim
+/// poll saw it free. With a volume attached that is a held volume, the same cause as a claim
+/// held past the bound, and the launch attaches nothing further.
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+async fn sad_a_vmm_that_exits_busy_at_start_with_a_volume_fails_held() {
+    let sim = pool(1024);
+    let mut node = Node::new(Some(sim.clone()), PoolOnNode::Composed).await;
+    let launch = node.begin(Some(40));
+    node.vmm_exits_during_start(&launch, 111).await;
+    let what = "a volume launch whose VMM exits busy";
+    let cause = volume_failure(what, node.end_of(launch, BOUND_SECS + 5, what).await);
+    assert_eq!(cause, VolumeUnavailableCause::Held);
+    assert_eq!(node.attachments().len(), 1, "one VMM was created and none replaced it");
+}
+
+/// The same exit status without a volume is not a held volume: 111 means a busy disk only when
+/// a volume disk was attached, so the launch takes the generic unreported-exit failure.
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+async fn guard_a_vmm_exit_111_without_a_volume_is_the_generic_unreported_exit() {
+    let mut node = Node::new(None, PoolOnNode::NotComposed).await;
+    let launch = node.begin(None);
+    node.vmm_exits_during_start(&launch, 111).await;
+    let result =
+        node.end_of(launch, BOUND_SECS + 5, "a volumeless launch whose VMM exits 111").await;
+    let Err(DriverError::StartRejected { failure }) = result else {
+        panic!("a VMM exit during start must reject the start, got {result:?}");
+    };
+    assert_eq!(
+        failure.class,
+        DriverStartClass::Vm(VmStartFailure::GuestExitUnreported {
+            vmm_exit_code: Some(111),
+            vmm_signal: None,
+        }),
+    );
 }

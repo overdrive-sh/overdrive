@@ -2947,3 +2947,137 @@ mod launch_seccomp_kernel {
         assert_eq!(owner_uid(&run_dir), run_dir_owner, "the run directory must not be handed over");
     }
 }
+
+/// The volume device node's ownership and mode in a confined launch's path
+/// preparation (GH #348). `prepare_confined_paths` hands the symlink-resolved
+/// node to `root:<VMM gid>` mode `0660`; the chown to uid 0 needs root, so the
+/// cases run in a guest, where the test process is root.
+#[cfg(all(test, feature = "integration-tests"))]
+#[allow(clippy::expect_used, clippy::unwrap_used)]
+#[allow(
+    clippy::doc_markdown,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+)]
+mod volume_node_ownership {
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+    use std::path::{Path, PathBuf};
+
+    use overdrive_testing::overdrive_test;
+
+    use super::prepare_confined_paths;
+
+    /// The run's confined identity; both differ from root's.
+    const CONFINED_UID: u32 = 1000;
+    const VMM_GID: u32 = 994;
+
+    /// What a path's owner and mode are, read without following a symlink.
+    #[derive(Debug, PartialEq, Eq)]
+    struct OwnerAndMode {
+        uid: u32,
+        gid: u32,
+        mode: u32,
+    }
+
+    fn owner_and_mode(path: &Path) -> OwnerAndMode {
+        let meta = std::fs::symlink_metadata(path).expect("stat the path");
+        OwnerAndMode { uid: meta.uid(), gid: meta.gid(), mode: meta.mode() & 0o7777 }
+    }
+
+    /// A launch's artifacts in a scratch directory, plus a volume device node
+    /// reachable through a symlink, with a sibling file beside the node.
+    struct Fixture {
+        _scratch: tempfile::TempDir,
+        clone_dest: PathBuf,
+        kernel_master: PathBuf,
+        kernel_copy: PathBuf,
+        run_dir: PathBuf,
+        node: PathBuf,
+        symlink: PathBuf,
+        sibling: PathBuf,
+    }
+
+    impl Fixture {
+        fn new() -> Self {
+            let scratch = tempfile::TempDir::new().expect("scratch directory");
+            let root = scratch.path();
+            let clone_dest = root.join("clone.img");
+            let kernel_master = root.join("vmlinuz");
+            let run_dir = root.join("run");
+            let devices = root.join("dev");
+            std::fs::write(&clone_dest, b"rootfs clone").expect("stage the clone");
+            std::fs::write(&kernel_master, b"kernel").expect("stage the kernel");
+            std::fs::create_dir(&run_dir).expect("create the run directory");
+            std::fs::create_dir(&devices).expect("create the device directory");
+            let node = devices.join("dm-7");
+            let sibling = devices.join("dm-8");
+            let symlink = devices.join("volume");
+            for file in [&node, &sibling] {
+                std::fs::write(file, b"").expect("stage a device stand-in");
+                std::fs::set_permissions(file, std::fs::Permissions::from_mode(0o644))
+                    .expect("set the starting mode");
+            }
+            std::os::unix::fs::symlink(&node, &symlink).expect("link the volume device");
+            Self {
+                kernel_copy: run_dir.join("vmlinuz.copy"),
+                _scratch: scratch,
+                clone_dest,
+                kernel_master,
+                run_dir,
+                node,
+                symlink,
+                sibling,
+            }
+        }
+
+        fn prepare(&self, volume_device: Option<&Path>) {
+            prepare_confined_paths(
+                &self.clone_dest,
+                &self.kernel_master,
+                &self.kernel_copy,
+                &self.run_dir,
+                volume_device,
+                CONFINED_UID,
+                VMM_GID,
+            )
+            .expect("prepare the confined paths");
+        }
+
+        fn volume_paths(&self) -> [OwnerAndMode; 3] {
+            [&self.node, &self.symlink, &self.sibling].map(|path| owner_and_mode(path))
+        }
+    }
+
+    /// The device node the volume path resolves to is handed to `root:<VMM gid>`
+    /// at mode `0660`; the symlink itself and the node's sibling are untouched.
+    /// CONTRACT_SHAPE: bounded-change.
+    #[overdrive_test(guest = "cgroup-default")]
+    #[test]
+    fn a_volume_launch_hands_the_resolved_node_to_the_vmm_group_and_nothing_else() {
+        let fixture = Fixture::new();
+        let [node_before, symlink_before, sibling_before] = fixture.volume_paths();
+
+        fixture.prepare(Some(&fixture.symlink));
+
+        let [node_after, symlink_after, sibling_after] = fixture.volume_paths();
+        assert_eq!(
+            node_after,
+            OwnerAndMode { uid: 0, gid: VMM_GID, mode: 0o660 },
+            "the resolved node must be root:<VMM gid> at 0660 (was {node_before:?})",
+        );
+        assert_eq!(symlink_after, symlink_before, "the symlink itself must not be changed");
+        assert_eq!(sibling_after, sibling_before, "a sibling of the node must not be changed");
+    }
+
+    /// A launch with no volume touches no device node, symlink or sibling.
+    /// CONTRACT_SHAPE: bounded-change.
+    #[overdrive_test(guest = "cgroup-default")]
+    #[test]
+    fn a_launch_without_a_volume_leaves_the_device_nodes_alone() {
+        let fixture = Fixture::new();
+        let before = fixture.volume_paths();
+
+        fixture.prepare(None);
+
+        assert_eq!(fixture.volume_paths(), before, "no volume device path may be changed");
+    }
+}
