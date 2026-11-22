@@ -1229,7 +1229,9 @@ mod linux {
             match (
                 workload.parse::<Ipv4Addr>(),
                 launch.parse::<LaunchToken>(),
-                port.parse::<u16>().map_err(drop).and_then(|raw| ListenPort::new(raw).map_err(drop)),
+                port.parse::<u16>()
+                    .map_err(drop)
+                    .and_then(|raw| ListenPort::new(raw).map_err(drop)),
                 warmup.parse::<usize>(),
                 timed.parse::<usize>(),
             ) {

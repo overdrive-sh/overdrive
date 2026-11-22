@@ -86,7 +86,9 @@ fn connect_hook_cost(rep: &mut Replicate) -> Result<(), ReplicateFailure> {
     rep.record("wall_ns_per_connect", wall.as_nanos() as f64 / f64::from(TIMED_CONNECTS))?;
     match (no_hook, start, end) {
         (true, ..) => rep.record_absent("hook_ns_per_connect", NO_HOOK_REASON)?,
-        (false, Some(start), Some(end)) => rep.record("hook_ns_per_connect", hook_ns(&start, &end)?)?,
+        (false, Some(start), Some(end)) => {
+            rep.record("hook_ns_per_connect", hook_ns(&start, &end)?)?;
+        }
         (false, ..) => {
             rep.record_absent("hook_ns_per_connect", "BPF statistics are not held under smoke")?;
         }
@@ -107,9 +109,7 @@ fn read_stats(
     let Some(hold) = rep.bpf_stats() else {
         return Ok(None);
     };
-    hold.read(program)
-        .map(Some)
-        .map_err(|error| ReplicateFailure::measurement(&error.to_string()))
+    hold.read(program).map(Some).map_err(|error| ReplicateFailure::measurement(&error.to_string()))
 }
 
 /// The program's `run_time_ns` delta over its `run_count` delta; a run count that did not

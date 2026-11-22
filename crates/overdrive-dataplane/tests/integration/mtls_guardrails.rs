@@ -646,12 +646,16 @@ fn outbound_peer_serve(
         let _ = roots.add(c);
     }
     let Ok(verifier) = WebPkiClientVerifier::builder(Arc::new(roots)).build() else { return };
-    let Ok(cfg) = ServerConfig::builder()
+    let Ok(mut cfg) = ServerConfig::builder()
         .with_client_cert_verifier(verifier)
         .with_single_cert(vec![cert, intermediate], key)
     else {
         return;
     };
+    // Production's mTLS server legs suppress NewSessionTicket (`tls_config.rs`): a post-handshake
+    // ticket is a non-data record on the agent's kTLS-RX socket, which `splice` rejects with EINVAL
+    // (`tls_sw_splice_read`), killing the return pump.
+    cfg.send_tls13_tickets = 0;
     let Ok((tcp, _)) = listener.accept() else { return };
     tcp.set_nodelay(true).ok();
     let mut tcp = tcp;
@@ -747,15 +751,27 @@ async fn an_outbound_connection_names_its_pump_threads_by_role() {
     };
     let handle = adapter.enforce(conn).await.expect("the outbound connection is established");
     assert_eq!(adapter.liveness(&handle), PumpLiveness::Running, "the pumps are live");
-    let during = live_thread_names();
-    let count = |name: &str| during.iter().filter(|n| n.as_str() == name).count();
+    // `std::thread::Builder::name` names the thread from INSIDE the new thread (`pthread_setname_np`
+    // runs at the start of its main), so for a moment after `enforce` returns a just-spawned pump
+    // still carries its spawner's comm. Poll a bounded interval for the role names to appear; the
+    // exact-count assertions below still fail on a duplicate or a missing thread.
+    let count_in =
+        |names: &[String], name: &str| names.iter().filter(|n| n.as_str() == name).count();
+    let deadline = std::time::Instant::now() + Duration::from_secs(1);
+    let mut during = live_thread_names();
+    while (count_in(&during, "mtls-out-fwd") != 1 || count_in(&during, "mtls-out-ret") != 1)
+        && std::time::Instant::now() < deadline
+    {
+        std::thread::sleep(Duration::from_millis(5));
+        during = live_thread_names();
+    }
     assert_eq!(
-        count("mtls-out-fwd"),
+        count_in(&during, "mtls-out-fwd"),
         1,
         "an outbound connection must have exactly one forward pump thread: {during:?}"
     );
     assert_eq!(
-        count("mtls-out-ret"),
+        count_in(&during, "mtls-out-ret"),
         1,
         "an outbound connection must have exactly one return pump thread: {during:?}"
     );

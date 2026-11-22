@@ -72,8 +72,8 @@ use syn::parse::{Parse, ParseStream};
 use syn::spanned::Spanned;
 use syn::visit::Visit;
 use syn::{
-    AttrStyle, Attribute, Block, Expr, Fields, FnArg, Ident, ImplItem, ImplItemFn, ItemImpl, ItemStruct,
-    ItemUse, LitBool, Meta, Pat, Stmt, Token, Type, UseTree, braced, parenthesized,
+    AttrStyle, Attribute, Block, Expr, Fields, FnArg, Ident, ImplItem, ImplItemFn, ItemImpl,
+    ItemStruct, ItemUse, LitBool, Meta, Pat, Stmt, Token, Type, UseTree, braced, parenthesized,
 };
 
 /// The marker that exempts a justified `Sim*` arbiter read.
@@ -915,9 +915,11 @@ impl CfgScanner<'_> {
         matches!(attr.style, AttrStyle::Inner(_))
             && is_empty_any
             && line > 1
-            && self.source.lines().nth(line - 2).is_some_and(|text| {
-                has_reasoned_marker(text, PENDING_OWNER_API_MARKER)
-            })
+            && self
+                .source
+                .lines()
+                .nth(line - 2)
+                .is_some_and(|text| has_reasoned_marker(text, PENDING_OWNER_API_MARKER))
     }
 }
 
@@ -1681,11 +1683,11 @@ fn lease_conformance() -> impl Driver { LeaseDriver::new() }
             "// conformance-lint: pending-owner-api Owner::cursor\n\n#![cfg(any())]\nfn a() {}\n";
         assert_eq!(count(&rules(not_adjacent), ConformanceRule::AlwaysFalseCfg), 1);
 
-        let item_level = "// conformance-lint: pending-owner-api Owner::cursor\n#[cfg(any())]\nmod m {}\n";
+        let item_level =
+            "// conformance-lint: pending-owner-api Owner::cursor\n#[cfg(any())]\nmod m {}\n";
         assert_eq!(count(&rules(item_level), ConformanceRule::AlwaysFalseCfg), 1);
 
-        let other_predicate =
-            "// conformance-lint: pending-owner-api Owner::cursor\n#![cfg(not(all()))]\nfn a() {}\n";
+        let other_predicate = "// conformance-lint: pending-owner-api Owner::cursor\n#![cfg(not(all()))]\nfn a() {}\n";
         assert_eq!(count(&rules(other_predicate), ConformanceRule::AlwaysFalseCfg), 1);
     }
 
