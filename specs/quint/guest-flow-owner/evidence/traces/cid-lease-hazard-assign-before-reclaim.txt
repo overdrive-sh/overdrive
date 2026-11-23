@@ -5,11 +5,12 @@ State 1
   att = <<0, 0>>
   up = TRUE
   lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
   dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
   conf_step = [init |-> [tag |-> "UNIT"]]
   al = << [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
   cursor = 0
-  g = [ clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE, stopped |-> {}, lastEnd |-> <<"none", "none">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {} ]
+  g = [ clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE, stopped |-> {}, lastEnd |-> <<"none", "none">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {}, unreapedOrphans |-> {} ]
   bootLeft = -1
 
 State 2 [Assign]
@@ -28,7 +29,7 @@ State 4 [Crash]
   dev = (0 :> -2 @@ 1 :> 0 @@ 2 :> 0)
   al = << [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
   cursor = 0
-  g = [ clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE, stopped |-> {}, lastEnd |-> <<"reclaim", "none">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {} ]
+  g = [ clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE, stopped |-> {}, lastEnd |-> <<"reclaim", "none">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {}, unreapedOrphans |-> {} ]
 
 State 5 [Restart]
   up = TRUE
@@ -40,4 +41,4 @@ State 6 [Assign]
 
 State 7 [Launch]
   al = << [ st |-> "retiring", off |-> 0, retry |-> TRUE, ex |-> FALSE, chg |-> TRUE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
-  g = [ clash |-> TRUE, rebooted |-> FALSE, reclaimed |-> FALSE, stopped |-> {}, lastEnd |-> <<"crash", "none">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {} ]
+  g = [ clash |-> TRUE, rebooted |-> FALSE, reclaimed |-> FALSE, stopped |-> {}, lastEnd |-> <<"crash", "none">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {}, unreapedOrphans |-> {} ]

@@ -1,0 +1,28 @@
+# cid-lease-hazard-release-unreaped-at-stop: counterexample, 4 state(s) (from the TLC trace)
+
+State 1
+  late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  al = << [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
+  conf_step = [init |-> [tag |-> "UNIT"]]
+  cursor = 0
+  bootLeft = -1
+  att = <<0, 0>>
+  reclaimed = TRUE
+  g = [ clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE, stopped |-> {}, lastEnd |-> <<"none", "none">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {}, unreapedOrphans |-> {} ]
+  up = TRUE
+
+State 2 [Assign]
+  lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+  al = << [ st |-> "leased", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
+  cursor = 1
+
+State 3 [Launch]
+  dev = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+  al = << [ st |-> "running", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
+
+State 4 [StopUnreaped]
+  lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  al = << [ st |-> "done", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
+  g = [ clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE, stopped |-> {1}, lastEnd |-> <<"stop", "none">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {}, unreapedOrphans |-> {} ]

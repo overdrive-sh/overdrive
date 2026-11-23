@@ -1,6 +1,7 @@
 State 1: <Initial predicate>
 /\ lease_bugRetryOffByOne_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugRetryOffByOne_cid_lease_att = <<0, 0>>
+/\ lease_bugRetryOffByOne_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugRetryOffByOne_cid_lease_al = << [ st |-> "wait",
      off |-> -1,
      retry |-> FALSE,
@@ -24,15 +25,17 @@ State 1: <Initial predicate>
   lastEnd |-> <<"none", "none">>,
   preEnd |-> <<"none", "none">>,
   pendingGen |-> <<"", "">>,
-  fin |-> {} ]
+  fin |-> {},
+  unreapedOrphans |-> {} ]
 /\ lease_bugRetryOffByOne_cid_lease_bootLeft = -1
 /\ lease_bugRetryOffByOne_cid_lease_cursor = 0
 /\ lease_bugRetryOffByOne_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ lease_bugRetryOffByOne_cid_lease_up = TRUE
 
-State 2: <lease_bugRetryOffByOne_cid_lease_Assign line 1222, col 3 to line 1302, col 54 of module lease_bugRetryOffByOne>
+State 2: <lease_bugRetryOffByOne_cid_lease_Assign line 1380, col 3 to line 1462, col 54 of module lease_bugRetryOffByOne>
 /\ lease_bugRetryOffByOne_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugRetryOffByOne_cid_lease_att = <<0, 0>>
+/\ lease_bugRetryOffByOne_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugRetryOffByOne_cid_lease_al = << [ st |-> "leased",
      off |-> 0,
      retry |-> FALSE,
@@ -56,15 +59,17 @@ State 2: <lease_bugRetryOffByOne_cid_lease_Assign line 1222, col 3 to line 1302,
   lastEnd |-> <<"none", "none">>,
   preEnd |-> <<"none", "none">>,
   pendingGen |-> <<"", "">>,
-  fin |-> {} ]
+  fin |-> {},
+  unreapedOrphans |-> {} ]
 /\ lease_bugRetryOffByOne_cid_lease_bootLeft = -1
 /\ lease_bugRetryOffByOne_cid_lease_cursor = 1
 /\ lease_bugRetryOffByOne_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ lease_bugRetryOffByOne_cid_lease_up = TRUE
 
-State 3: <lease_bugRetryOffByOne_cid_lease_Launch line 1364, col 3 to line 1453, col 54 of module lease_bugRetryOffByOne>
+State 3: <lease_bugRetryOffByOne_cid_lease_Launch line 1526, col 3 to line 1617, col 54 of module lease_bugRetryOffByOne>
 /\ lease_bugRetryOffByOne_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugRetryOffByOne_cid_lease_att = <<0, 0>>
+/\ lease_bugRetryOffByOne_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugRetryOffByOne_cid_lease_al = << [ st |-> "running",
      off |-> 0,
      retry |-> FALSE,
@@ -88,15 +93,17 @@ State 3: <lease_bugRetryOffByOne_cid_lease_Launch line 1364, col 3 to line 1453,
   lastEnd |-> <<"none", "none">>,
   preEnd |-> <<"none", "none">>,
   pendingGen |-> <<"", "">>,
-  fin |-> {} ]
+  fin |-> {},
+  unreapedOrphans |-> {} ]
 /\ lease_bugRetryOffByOne_cid_lease_bootLeft = -1
 /\ lease_bugRetryOffByOne_cid_lease_cursor = 1
 /\ lease_bugRetryOffByOne_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ lease_bugRetryOffByOne_cid_lease_up = TRUE
 
-State 4: <lease_bugRetryOffByOne_cid_lease_VmmCrash line 1459, col 3 to line 1470, col 54 of module lease_bugRetryOffByOne>
+State 4: <lease_bugRetryOffByOne_cid_lease_VmmCrash line 1623, col 3 to line 1634, col 54 of module lease_bugRetryOffByOne>
 /\ lease_bugRetryOffByOne_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugRetryOffByOne_cid_lease_att = <<0, 0>>
+/\ lease_bugRetryOffByOne_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugRetryOffByOne_cid_lease_al = << [ st |-> "ended",
      off |-> 0,
      retry |-> TRUE,
@@ -120,15 +127,17 @@ State 4: <lease_bugRetryOffByOne_cid_lease_VmmCrash line 1459, col 3 to line 147
   lastEnd |-> <<"crash", "none">>,
   preEnd |-> <<"none", "none">>,
   pendingGen |-> <<"", "">>,
-  fin |-> {} ]
+  fin |-> {},
+  unreapedOrphans |-> {} ]
 /\ lease_bugRetryOffByOne_cid_lease_bootLeft = -1
 /\ lease_bugRetryOffByOne_cid_lease_cursor = 1
 /\ lease_bugRetryOffByOne_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ lease_bugRetryOffByOne_cid_lease_up = TRUE
 
-State 5: <lease_bugRetryOffByOne_cid_lease_Assign line 1222, col 3 to line 1302, col 54 of module lease_bugRetryOffByOne>
+State 5: <lease_bugRetryOffByOne_cid_lease_Assign line 1380, col 3 to line 1462, col 54 of module lease_bugRetryOffByOne>
 /\ lease_bugRetryOffByOne_cid_lease_lease = (0 :> 1 @@ 1 :> 1 @@ 2 :> 0)
 /\ lease_bugRetryOffByOne_cid_lease_att = <<1, 0>>
+/\ lease_bugRetryOffByOne_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugRetryOffByOne_cid_lease_al = << [ st |-> "leased",
      off |-> 1,
      retry |-> FALSE,
@@ -152,15 +161,17 @@ State 5: <lease_bugRetryOffByOne_cid_lease_Assign line 1222, col 3 to line 1302,
   lastEnd |-> <<"crash", "none">>,
   preEnd |-> <<"none", "none">>,
   pendingGen |-> <<"", "">>,
-  fin |-> {} ]
+  fin |-> {},
+  unreapedOrphans |-> {} ]
 /\ lease_bugRetryOffByOne_cid_lease_bootLeft = -1
 /\ lease_bugRetryOffByOne_cid_lease_cursor = 2
 /\ lease_bugRetryOffByOne_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ lease_bugRetryOffByOne_cid_lease_up = TRUE
 
-State 6: <lease_bugRetryOffByOne_cid_lease_Launch line 1364, col 3 to line 1453, col 54 of module lease_bugRetryOffByOne>
+State 6: <lease_bugRetryOffByOne_cid_lease_Launch line 1526, col 3 to line 1617, col 54 of module lease_bugRetryOffByOne>
 /\ lease_bugRetryOffByOne_cid_lease_lease = (0 :> 1 @@ 1 :> 1 @@ 2 :> 0)
 /\ lease_bugRetryOffByOne_cid_lease_att = <<1, 0>>
+/\ lease_bugRetryOffByOne_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugRetryOffByOne_cid_lease_al = << [ st |-> "running",
      off |-> 1,
      retry |-> FALSE,
@@ -184,15 +195,17 @@ State 6: <lease_bugRetryOffByOne_cid_lease_Launch line 1364, col 3 to line 1453,
   lastEnd |-> <<"crash", "none">>,
   preEnd |-> <<"none", "none">>,
   pendingGen |-> <<"", "">>,
-  fin |-> {} ]
+  fin |-> {},
+  unreapedOrphans |-> {} ]
 /\ lease_bugRetryOffByOne_cid_lease_bootLeft = -1
 /\ lease_bugRetryOffByOne_cid_lease_cursor = 2
 /\ lease_bugRetryOffByOne_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ lease_bugRetryOffByOne_cid_lease_up = TRUE
 
-State 7: <lease_bugRetryOffByOne_cid_lease_VmmCrash line 1459, col 3 to line 1470, col 54 of module lease_bugRetryOffByOne>
+State 7: <lease_bugRetryOffByOne_cid_lease_VmmCrash line 1623, col 3 to line 1634, col 54 of module lease_bugRetryOffByOne>
 /\ lease_bugRetryOffByOne_cid_lease_lease = (0 :> 1 @@ 1 :> 1 @@ 2 :> 0)
 /\ lease_bugRetryOffByOne_cid_lease_att = <<1, 0>>
+/\ lease_bugRetryOffByOne_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugRetryOffByOne_cid_lease_al = << [ st |-> "ended",
      off |-> 1,
      retry |-> FALSE,
@@ -216,7 +229,8 @@ State 7: <lease_bugRetryOffByOne_cid_lease_VmmCrash line 1459, col 3 to line 147
   lastEnd |-> <<"crash", "none">>,
   preEnd |-> <<"none", "none">>,
   pendingGen |-> <<"", "">>,
-  fin |-> {} ]
+  fin |-> {},
+  unreapedOrphans |-> {} ]
 /\ lease_bugRetryOffByOne_cid_lease_bootLeft = -1
 /\ lease_bugRetryOffByOne_cid_lease_cursor = 2
 /\ lease_bugRetryOffByOne_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]

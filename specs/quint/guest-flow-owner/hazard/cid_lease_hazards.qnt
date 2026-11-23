@@ -29,3 +29,6 @@ module lease_bugTerminalBeforeRelease { import cid_lease(OFF = Set("terminalBefo
 // item 7.3 step boundary off (tickDuringPredecessorTeardown): a tick runs while the workload's dispatch is held at a
 // predecessor teardown; Assign from `ended` then overwrites the retiring predecessor lease
 module lease_bugTickDuringPredecessorTeardown { import cid_lease(OFF = Set("tickDuringPredecessorTeardown"), CFG = "ok", REC = false).* from "../cid_lease" }
+// decision 12 off (releaseUnreapedAtStop): the stop of an unreaped VMM frees its lease with the stop, as for a reaped VMM;
+// the stuck VMM still holds its CID's device, so next-fit hands the CID to a new launch
+module lease_bugReleaseUnreapedAtStop { import cid_lease(OFF = Set("releaseUnreapedAtStop"), CFG = "ok", REC = false).* from "../cid_lease" }

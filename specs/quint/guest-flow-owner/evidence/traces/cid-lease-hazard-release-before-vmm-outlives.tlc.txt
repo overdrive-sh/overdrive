@@ -14,6 +14,7 @@ State 1: <Initial predicate>
      pred |-> -1,
      pst |-> "none" ] >>
 /\ lease_bugReleaseBeforeVmm_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_bugReleaseBeforeVmm_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugReleaseBeforeVmm_cid_lease_att = <<0, 0>>
 /\ lease_bugReleaseBeforeVmm_cid_lease_g = [ clash |-> FALSE,
   rebooted |-> FALSE,
@@ -22,7 +23,8 @@ State 1: <Initial predicate>
   lastEnd |-> <<"none", "none">>,
   preEnd |-> <<"none", "none">>,
   pendingGen |-> <<"", "">>,
-  fin |-> {} ]
+  fin |-> {},
+  unreapedOrphans |-> {} ]
 /\ lease_bugReleaseBeforeVmm_cid_lease_reclaimed = TRUE
 /\ lease_bugReleaseBeforeVmm_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugReleaseBeforeVmm_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
@@ -30,7 +32,7 @@ State 1: <Initial predicate>
 /\ lease_bugReleaseBeforeVmm_cid_lease_cursor = 0
 /\ lease_bugReleaseBeforeVmm_cid_lease_bootLeft = -1
 
-State 2: <lease_bugReleaseBeforeVmm_cid_lease_Assign line 1255, col 3 to line 1336, col 57 of module lease_bugReleaseBeforeVmm>
+State 2: <lease_bugReleaseBeforeVmm_cid_lease_Assign line 1413, col 3 to line 1496, col 57 of module lease_bugReleaseBeforeVmm>
 /\ lease_bugReleaseBeforeVmm_cid_lease_al = << [ st |-> "leased",
      off |-> 0,
      retry |-> FALSE,
@@ -46,6 +48,7 @@ State 2: <lease_bugReleaseBeforeVmm_cid_lease_Assign line 1255, col 3 to line 13
      pred |-> -1,
      pst |-> "none" ] >>
 /\ lease_bugReleaseBeforeVmm_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_bugReleaseBeforeVmm_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugReleaseBeforeVmm_cid_lease_att = <<0, 0>>
 /\ lease_bugReleaseBeforeVmm_cid_lease_g = [ clash |-> FALSE,
   rebooted |-> FALSE,
@@ -54,7 +57,8 @@ State 2: <lease_bugReleaseBeforeVmm_cid_lease_Assign line 1255, col 3 to line 13
   lastEnd |-> <<"none", "none">>,
   preEnd |-> <<"none", "none">>,
   pendingGen |-> <<"", "">>,
-  fin |-> {} ]
+  fin |-> {},
+  unreapedOrphans |-> {} ]
 /\ lease_bugReleaseBeforeVmm_cid_lease_reclaimed = TRUE
 /\ lease_bugReleaseBeforeVmm_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugReleaseBeforeVmm_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
@@ -62,7 +66,7 @@ State 2: <lease_bugReleaseBeforeVmm_cid_lease_Assign line 1255, col 3 to line 13
 /\ lease_bugReleaseBeforeVmm_cid_lease_cursor = 1
 /\ lease_bugReleaseBeforeVmm_cid_lease_bootLeft = -1
 
-State 3: <lease_bugReleaseBeforeVmm_cid_lease_Launch line 1400, col 3 to line 1489, col 57 of module lease_bugReleaseBeforeVmm>
+State 3: <lease_bugReleaseBeforeVmm_cid_lease_Launch line 1562, col 3 to line 1653, col 57 of module lease_bugReleaseBeforeVmm>
 /\ lease_bugReleaseBeforeVmm_cid_lease_al = << [ st |-> "running",
      off |-> 0,
      retry |-> FALSE,
@@ -78,6 +82,7 @@ State 3: <lease_bugReleaseBeforeVmm_cid_lease_Launch line 1400, col 3 to line 14
      pred |-> -1,
      pst |-> "none" ] >>
 /\ lease_bugReleaseBeforeVmm_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_bugReleaseBeforeVmm_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugReleaseBeforeVmm_cid_lease_att = <<0, 0>>
 /\ lease_bugReleaseBeforeVmm_cid_lease_g = [ clash |-> FALSE,
   rebooted |-> FALSE,
@@ -86,7 +91,8 @@ State 3: <lease_bugReleaseBeforeVmm_cid_lease_Launch line 1400, col 3 to line 14
   lastEnd |-> <<"none", "none">>,
   preEnd |-> <<"none", "none">>,
   pendingGen |-> <<"", "">>,
-  fin |-> {} ]
+  fin |-> {},
+  unreapedOrphans |-> {} ]
 /\ lease_bugReleaseBeforeVmm_cid_lease_reclaimed = TRUE
 /\ lease_bugReleaseBeforeVmm_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugReleaseBeforeVmm_cid_lease_dev = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
@@ -94,7 +100,7 @@ State 3: <lease_bugReleaseBeforeVmm_cid_lease_Launch line 1400, col 3 to line 14
 /\ lease_bugReleaseBeforeVmm_cid_lease_cursor = 1
 /\ lease_bugReleaseBeforeVmm_cid_lease_bootLeft = -1
 
-State 4: <lease_bugReleaseBeforeVmm_cid_lease_Release line 1549, col 3 to line 1675, col 57 of module lease_bugReleaseBeforeVmm>
+State 4: <lease_bugReleaseBeforeVmm_cid_lease_Release line 1715, col 3 to line 1843, col 57 of module lease_bugReleaseBeforeVmm>
 /\ lease_bugReleaseBeforeVmm_cid_lease_al = << [ st |-> "wait",
      off |-> -1,
      retry |-> FALSE,
@@ -110,6 +116,7 @@ State 4: <lease_bugReleaseBeforeVmm_cid_lease_Release line 1549, col 3 to line 1
      pred |-> -1,
      pst |-> "none" ] >>
 /\ lease_bugReleaseBeforeVmm_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_bugReleaseBeforeVmm_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugReleaseBeforeVmm_cid_lease_att = <<0, 0>>
 /\ lease_bugReleaseBeforeVmm_cid_lease_g = [ clash |-> FALSE,
   rebooted |-> FALSE,
@@ -118,7 +125,8 @@ State 4: <lease_bugReleaseBeforeVmm_cid_lease_Release line 1549, col 3 to line 1
   lastEnd |-> <<"none", "none">>,
   preEnd |-> <<"none", "none">>,
   pendingGen |-> <<"", "">>,
-  fin |-> {} ]
+  fin |-> {},
+  unreapedOrphans |-> {} ]
 /\ lease_bugReleaseBeforeVmm_cid_lease_reclaimed = TRUE
 /\ lease_bugReleaseBeforeVmm_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugReleaseBeforeVmm_cid_lease_dev = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)

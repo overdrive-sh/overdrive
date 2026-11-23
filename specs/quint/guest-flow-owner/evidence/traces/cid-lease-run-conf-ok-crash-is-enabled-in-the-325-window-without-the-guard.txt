@@ -6,20 +6,20 @@
 
   1) lease_conf_ok::cid_lease::CrashIsEnabledInThe325WindowWithoutTheGuard:
        Error [QNT508]: Cannot continue to "expect"
-        at /home/ubuntu/overdrive-worktrees/42eb0530ea7060ec208638d98fd744ee251bd4d48943e87080a1d216ff4da3de/specs/quint/guest-flow-owner/cid_lease.qnt:793:53
-        793:   run CrashIsEnabledInThe325WindowWithoutTheGuard = init
+        at /home/ubuntu/overdrive-worktrees/9d340a8ca57d5ca89b626cece0d62d03770aa9cd213856dc63ec27e31d3a81cc/specs/quint/guest-flow-owner/cid_lease.qnt:886:53
+        886:   run CrashIsEnabledInThe325WindowWithoutTheGuard = init
                                                                  ^^^^
-        794:     .then(Assign(1)).then(Launch(1)).then(Stop(1)).then(Release(1)).expect(Safety and st(1) == "done")
+        887:     .then(Assign(1)).then(Launch(1)).then(Stop(1)).then(Release(1)).expect(Safety and st(1) == "done")
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        795:     .then(Redeploy(1)).then(Assign(1))
+        888:     .then(Redeploy(1)).then(Assign(1))
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        796:     .expect(Safety and st(1) == "leased" and g.pendingGen.get(1) != "" and up and bootLeft != 0 and inGenWindow(1))
+        889:     .expect(Safety and st(1) == "leased" and g.pendingGen.get(1) != "" and up and bootLeft != 0 and inGenWindow(1))
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        797:     .then(Crash).expect(Safety and not(up) and st(1) == "wait")
+        890:     .then(Crash).expect(Safety and not(up) and st(1) == "wait")
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    Use --seed=0xba9877ce8de598a7 --match=lease_conf_ok::cid_lease::CrashIsEnabledInThe325WindowWithoutTheGuard to repeat.
+    Use --seed=0x8386d3b7f03e45fe --match=lease_conf_ok::cid_lease::CrashIsEnabledInThe325WindowWithoutTheGuard to repeat.
 
 
   Use --verbosity=3 to show executions.
-  Further debug with: quint test --verbosity=3 /home/ubuntu/overdrive-worktrees/42eb0530ea7060ec208638d98fd744ee251bd4d48943e87080a1d216ff4da3de/specs/quint/guest-flow-owner/cid_lease.qnt
+  Further debug with: quint test --verbosity=3 /home/ubuntu/overdrive-worktrees/9d340a8ca57d5ca89b626cece0d62d03770aa9cd213856dc63ec27e31d3a81cc/specs/quint/guest-flow-owner/cid_lease.qnt
 error: Tests failed

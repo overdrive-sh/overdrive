@@ -3,10 +3,11 @@
 State 1
   lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
   att = <<0, 0>>
+  late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
   al = << [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
   reclaimed = TRUE
   dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
-  g = [ clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE, stopped |-> {}, lastEnd |-> <<"none", "none">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {} ]
+  g = [ clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE, stopped |-> {}, lastEnd |-> <<"none", "none">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {}, unreapedOrphans |-> {} ]
   bootLeft = -1
   cursor = 0
   conf_step = [init |-> [tag |-> "UNIT"]]
@@ -24,7 +25,7 @@ State 3 [Launch]
 State 4 [VmmCrash]
   al = << [ st |-> "ended", off |-> 0, retry |-> TRUE, ex |-> FALSE, chg |-> TRUE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
   dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
-  g = [ clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE, stopped |-> {}, lastEnd |-> <<"crash", "none">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {} ]
+  g = [ clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE, stopped |-> {}, lastEnd |-> <<"crash", "none">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {}, unreapedOrphans |-> {} ]
 
 State 5 [Assign]
   lease = (0 :> 1 @@ 1 :> 1 @@ 2 :> 0)

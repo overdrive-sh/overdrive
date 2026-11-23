@@ -1,11 +1,12 @@
 # cid-lease-hazard-reset-reboots: counterexample, 4 state(s) (from the TLC trace)
 
 State 1
-  g = [ clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE, stopped |-> {}, lastEnd |-> <<"none", "none">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {} ]
+  g = [ clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE, stopped |-> {}, lastEnd |-> <<"none", "none">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {}, unreapedOrphans |-> {} ]
   att = <<0, 0>>
   cursor = 0
   lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
   conf_step = [init |-> [tag |-> "UNIT"]]
+  late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
   dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
   up = TRUE
   reclaimed = TRUE
@@ -22,4 +23,4 @@ State 3 [Launch]
   al = << [ st |-> "running", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
 
 State 4 [GuestReset]
-  g = [ clash |-> FALSE, rebooted |-> TRUE, reclaimed |-> FALSE, stopped |-> {}, lastEnd |-> <<"none", "none">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {} ]
+  g = [ clash |-> FALSE, rebooted |-> TRUE, reclaimed |-> FALSE, stopped |-> {}, lastEnd |-> <<"none", "none">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {}, unreapedOrphans |-> {} ]

@@ -3,8 +3,9 @@
 State 1
   al = << [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
   conf_step = [init |-> [tag |-> "UNIT"]]
+  late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
   att = <<0, 0>>
-  g = [ clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE, stopped |-> {}, lastEnd |-> <<"none", "none">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {} ]
+  g = [ clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE, stopped |-> {}, lastEnd |-> <<"none", "none">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {}, unreapedOrphans |-> {} ]
   reclaimed = TRUE
   lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
   dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)

@@ -8,7 +8,8 @@ State 1: <Initial predicate>
   lastEnd |-> <<"none", "none">>,
   preEnd |-> <<"none", "none">>,
   pendingGen |-> <<"", "">>,
-  fin |-> {} ]
+  fin |-> {},
+  unreapedOrphans |-> {} ]
 /\ lease_bugCrashForgetsStop_cid_lease_att = <<0, 0>>
 /\ lease_bugCrashForgetsStop_cid_lease_up = TRUE
 /\ lease_bugCrashForgetsStop_cid_lease_bootLeft = -1
@@ -29,8 +30,9 @@ State 1: <Initial predicate>
      chg |-> FALSE,
      pred |-> -1,
      pst |-> "none" ] >>
+/\ lease_bugCrashForgetsStop_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 
-State 2: <lease_bugCrashForgetsStop_cid_lease_Assign line 1253, col 3 to line 1334, col 57 of module lease_bugCrashForgetsStop>
+State 2: <lease_bugCrashForgetsStop_cid_lease_Assign line 1411, col 3 to line 1494, col 57 of module lease_bugCrashForgetsStop>
 /\ lease_bugCrashForgetsStop_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugCrashForgetsStop_cid_lease_reclaimed = TRUE
 /\ lease_bugCrashForgetsStop_cid_lease_g = [ clash |-> FALSE,
@@ -40,7 +42,8 @@ State 2: <lease_bugCrashForgetsStop_cid_lease_Assign line 1253, col 3 to line 13
   lastEnd |-> <<"none", "none">>,
   preEnd |-> <<"none", "none">>,
   pendingGen |-> <<"", "">>,
-  fin |-> {} ]
+  fin |-> {},
+  unreapedOrphans |-> {} ]
 /\ lease_bugCrashForgetsStop_cid_lease_att = <<0, 0>>
 /\ lease_bugCrashForgetsStop_cid_lease_up = TRUE
 /\ lease_bugCrashForgetsStop_cid_lease_bootLeft = -1
@@ -61,8 +64,9 @@ State 2: <lease_bugCrashForgetsStop_cid_lease_Assign line 1253, col 3 to line 13
      chg |-> FALSE,
      pred |-> -1,
      pst |-> "none" ] >>
+/\ lease_bugCrashForgetsStop_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 
-State 3: <lease_bugCrashForgetsStop_cid_lease_Launch line 1398, col 3 to line 1487, col 57 of module lease_bugCrashForgetsStop>
+State 3: <lease_bugCrashForgetsStop_cid_lease_Launch line 1560, col 3 to line 1651, col 57 of module lease_bugCrashForgetsStop>
 /\ lease_bugCrashForgetsStop_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugCrashForgetsStop_cid_lease_reclaimed = TRUE
 /\ lease_bugCrashForgetsStop_cid_lease_g = [ clash |-> FALSE,
@@ -72,7 +76,8 @@ State 3: <lease_bugCrashForgetsStop_cid_lease_Launch line 1398, col 3 to line 14
   lastEnd |-> <<"none", "none">>,
   preEnd |-> <<"none", "none">>,
   pendingGen |-> <<"", "">>,
-  fin |-> {} ]
+  fin |-> {},
+  unreapedOrphans |-> {} ]
 /\ lease_bugCrashForgetsStop_cid_lease_att = <<0, 0>>
 /\ lease_bugCrashForgetsStop_cid_lease_up = TRUE
 /\ lease_bugCrashForgetsStop_cid_lease_bootLeft = -1
@@ -93,8 +98,9 @@ State 3: <lease_bugCrashForgetsStop_cid_lease_Launch line 1398, col 3 to line 14
      chg |-> FALSE,
      pred |-> -1,
      pst |-> "none" ] >>
+/\ lease_bugCrashForgetsStop_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 
-State 4: <lease_bugCrashForgetsStop_cid_lease_Stop line 550, col 3 to line 619, col 57 of module lease_bugCrashForgetsStop>
+State 4: <lease_bugCrashForgetsStop_cid_lease_Stop line 620, col 3 to line 691, col 57 of module lease_bugCrashForgetsStop>
 /\ lease_bugCrashForgetsStop_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugCrashForgetsStop_cid_lease_reclaimed = TRUE
 /\ lease_bugCrashForgetsStop_cid_lease_g = [ clash |-> FALSE,
@@ -104,7 +110,8 @@ State 4: <lease_bugCrashForgetsStop_cid_lease_Stop line 550, col 3 to line 619, 
   lastEnd |-> <<"stop", "none">>,
   preEnd |-> <<"none", "none">>,
   pendingGen |-> <<"", "">>,
-  fin |-> {} ]
+  fin |-> {},
+  unreapedOrphans |-> {} ]
 /\ lease_bugCrashForgetsStop_cid_lease_att = <<0, 0>>
 /\ lease_bugCrashForgetsStop_cid_lease_up = TRUE
 /\ lease_bugCrashForgetsStop_cid_lease_bootLeft = -1
@@ -125,8 +132,9 @@ State 4: <lease_bugCrashForgetsStop_cid_lease_Stop line 550, col 3 to line 619, 
      chg |-> FALSE,
      pred |-> -1,
      pst |-> "none" ] >>
+/\ lease_bugCrashForgetsStop_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 
-State 5: <lease_bugCrashForgetsStop_cid_lease_Crash line 1679, col 3 to line 1751, col 57 of module lease_bugCrashForgetsStop>
+State 5: <lease_bugCrashForgetsStop_cid_lease_Crash line 1847, col 3 to line 1941, col 57 of module lease_bugCrashForgetsStop>
 /\ lease_bugCrashForgetsStop_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugCrashForgetsStop_cid_lease_reclaimed = FALSE
 /\ lease_bugCrashForgetsStop_cid_lease_g = [ clash |-> FALSE,
@@ -136,7 +144,8 @@ State 5: <lease_bugCrashForgetsStop_cid_lease_Crash line 1679, col 3 to line 175
   lastEnd |-> <<"stop", "none">>,
   preEnd |-> <<"none", "none">>,
   pendingGen |-> <<"", "">>,
-  fin |-> {} ]
+  fin |-> {},
+  unreapedOrphans |-> {} ]
 /\ lease_bugCrashForgetsStop_cid_lease_att = <<0, 0>>
 /\ lease_bugCrashForgetsStop_cid_lease_up = FALSE
 /\ lease_bugCrashForgetsStop_cid_lease_bootLeft = -1
@@ -157,3 +166,4 @@ State 5: <lease_bugCrashForgetsStop_cid_lease_Crash line 1679, col 3 to line 175
      chg |-> FALSE,
      pred |-> -1,
      pst |-> "none" ] >>
+/\ lease_bugCrashForgetsStop_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)

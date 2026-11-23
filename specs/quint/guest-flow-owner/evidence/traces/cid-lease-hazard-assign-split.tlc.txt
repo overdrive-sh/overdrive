@@ -5,6 +5,7 @@ State 1: <Initial predicate>
 /\ lease_bugAssignSplit_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugAssignSplit_cid_lease_att = <<0, 0>>
 /\ lease_bugAssignSplit_cid_lease_up = TRUE
+/\ lease_bugAssignSplit_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugAssignSplit_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ lease_bugAssignSplit_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugAssignSplit_cid_lease_g = [ clash |-> FALSE,
@@ -14,7 +15,8 @@ State 1: <Initial predicate>
   lastEnd |-> <<"none", "none">>,
   preEnd |-> <<"none", "none">>,
   pendingGen |-> <<"", "">>,
-  fin |-> {} ]
+  fin |-> {},
+  unreapedOrphans |-> {} ]
 /\ lease_bugAssignSplit_cid_lease_al = << [ st |-> "wait",
      off |-> -1,
      retry |-> FALSE,
@@ -30,13 +32,14 @@ State 1: <Initial predicate>
      pred |-> -1,
      pst |-> "none" ] >>
 
-State 2: <lease_bugAssignSplit_cid_lease_AssignPick line 1292, col 3 to line 1337, col 52 of module lease_bugAssignSplit>
+State 2: <lease_bugAssignSplit_cid_lease_AssignPick line 1472, col 3 to line 1519, col 52 of module lease_bugAssignSplit>
 /\ lease_bugAssignSplit_cid_lease_reclaimed = TRUE
 /\ lease_bugAssignSplit_cid_lease_cursor = 0
 /\ lease_bugAssignSplit_cid_lease_bootLeft = -1
 /\ lease_bugAssignSplit_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugAssignSplit_cid_lease_att = <<0, 0>>
 /\ lease_bugAssignSplit_cid_lease_up = TRUE
+/\ lease_bugAssignSplit_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugAssignSplit_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ lease_bugAssignSplit_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugAssignSplit_cid_lease_g = [ clash |-> FALSE,
@@ -46,7 +49,8 @@ State 2: <lease_bugAssignSplit_cid_lease_AssignPick line 1292, col 3 to line 133
   lastEnd |-> <<"none", "none">>,
   preEnd |-> <<"none", "none">>,
   pendingGen |-> <<"", "">>,
-  fin |-> {} ]
+  fin |-> {},
+  unreapedOrphans |-> {} ]
 /\ lease_bugAssignSplit_cid_lease_al = << [ st |-> "picked",
      off |-> 0,
      retry |-> FALSE,
@@ -62,13 +66,14 @@ State 2: <lease_bugAssignSplit_cid_lease_AssignPick line 1292, col 3 to line 133
      pred |-> -1,
      pst |-> "none" ] >>
 
-State 3: <lease_bugAssignSplit_cid_lease_AssignPick line 1292, col 3 to line 1337, col 52 of module lease_bugAssignSplit>
+State 3: <lease_bugAssignSplit_cid_lease_AssignPick line 1472, col 3 to line 1519, col 52 of module lease_bugAssignSplit>
 /\ lease_bugAssignSplit_cid_lease_reclaimed = TRUE
 /\ lease_bugAssignSplit_cid_lease_cursor = 0
 /\ lease_bugAssignSplit_cid_lease_bootLeft = -1
 /\ lease_bugAssignSplit_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugAssignSplit_cid_lease_att = <<0, 0>>
 /\ lease_bugAssignSplit_cid_lease_up = TRUE
+/\ lease_bugAssignSplit_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugAssignSplit_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ lease_bugAssignSplit_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugAssignSplit_cid_lease_g = [ clash |-> FALSE,
@@ -78,7 +83,8 @@ State 3: <lease_bugAssignSplit_cid_lease_AssignPick line 1292, col 3 to line 133
   lastEnd |-> <<"none", "none">>,
   preEnd |-> <<"none", "none">>,
   pendingGen |-> <<"", "">>,
-  fin |-> {} ]
+  fin |-> {},
+  unreapedOrphans |-> {} ]
 /\ lease_bugAssignSplit_cid_lease_al = << [ st |-> "picked",
      off |-> 0,
      retry |-> FALSE,
@@ -94,13 +100,14 @@ State 3: <lease_bugAssignSplit_cid_lease_AssignPick line 1292, col 3 to line 133
      pred |-> -1,
      pst |-> "none" ] >>
 
-State 4: <lease_bugAssignSplit_cid_lease_AssignTake line 486, col 3 to line 536, col 52 of module lease_bugAssignSplit>
+State 4: <lease_bugAssignSplit_cid_lease_AssignTake line 491, col 3 to line 543, col 52 of module lease_bugAssignSplit>
 /\ lease_bugAssignSplit_cid_lease_reclaimed = TRUE
 /\ lease_bugAssignSplit_cid_lease_cursor = 1
 /\ lease_bugAssignSplit_cid_lease_bootLeft = -1
 /\ lease_bugAssignSplit_cid_lease_lease = (0 :> 2 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugAssignSplit_cid_lease_att = <<0, 0>>
 /\ lease_bugAssignSplit_cid_lease_up = TRUE
+/\ lease_bugAssignSplit_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugAssignSplit_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ lease_bugAssignSplit_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugAssignSplit_cid_lease_g = [ clash |-> FALSE,
@@ -110,7 +117,8 @@ State 4: <lease_bugAssignSplit_cid_lease_AssignTake line 486, col 3 to line 536,
   lastEnd |-> <<"none", "none">>,
   preEnd |-> <<"none", "none">>,
   pendingGen |-> <<"", "">>,
-  fin |-> {} ]
+  fin |-> {},
+  unreapedOrphans |-> {} ]
 /\ lease_bugAssignSplit_cid_lease_al = << [ st |-> "picked",
      off |-> 0,
      retry |-> FALSE,
@@ -126,13 +134,14 @@ State 4: <lease_bugAssignSplit_cid_lease_AssignTake line 486, col 3 to line 536,
      pred |-> -1,
      pst |-> "none" ] >>
 
-State 5: <lease_bugAssignSplit_cid_lease_AssignTake line 486, col 3 to line 536, col 52 of module lease_bugAssignSplit>
+State 5: <lease_bugAssignSplit_cid_lease_AssignTake line 491, col 3 to line 543, col 52 of module lease_bugAssignSplit>
 /\ lease_bugAssignSplit_cid_lease_reclaimed = TRUE
 /\ lease_bugAssignSplit_cid_lease_cursor = 1
 /\ lease_bugAssignSplit_cid_lease_bootLeft = -1
 /\ lease_bugAssignSplit_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugAssignSplit_cid_lease_att = <<0, 0>>
 /\ lease_bugAssignSplit_cid_lease_up = TRUE
+/\ lease_bugAssignSplit_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugAssignSplit_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ lease_bugAssignSplit_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugAssignSplit_cid_lease_g = [ clash |-> FALSE,
@@ -142,7 +151,8 @@ State 5: <lease_bugAssignSplit_cid_lease_AssignTake line 486, col 3 to line 536,
   lastEnd |-> <<"none", "none">>,
   preEnd |-> <<"none", "none">>,
   pendingGen |-> <<"", "">>,
-  fin |-> {} ]
+  fin |-> {},
+  unreapedOrphans |-> {} ]
 /\ lease_bugAssignSplit_cid_lease_al = << [ st |-> "leased",
      off |-> 0,
      retry |-> FALSE,

@@ -1382,6 +1382,9 @@ invariant = "Safety"
 backend = "tlc"
 expect = "holds"
 ci = false
+# decision 12: this instance excludes the unreaped-VMM stop (`five`, cid_lease.qnt `UNREAPED`): with it the five-offset
+# state space did not finish in 3600 s (over 35M distinct states, still growing; 277 s without it). The stop's safety is
+# exhaustive on `lease_ok` and `lease_live` (three offsets)
 
 [[check]]
 name = "cid-lease-live-safety-tlc"
@@ -1399,7 +1402,7 @@ main = "lease_live"
 temporal = "EventuallyPlaced"
 backend = "tlc"
 expect = "holds"
-ci = true
+ci = false
 
 [[check]]
 name = "cid-lease-hazard-release-before-vmm-outlives"
@@ -1770,6 +1773,66 @@ name = "cid-lease-hazard-tick-during-predecessor-teardown"
 spec = "hazard/cid_lease_hazards.qnt"
 main = "lease_bugTickDuringPredecessorTeardown"
 invariant = "NoUntrackedLease"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+# decision 12 (RB-1 item 11; ADR-0348, ADR-0156 amendment): a guest-address lease is released only once the allocation's
+# scope is absent, so the stop of a killed-not-reaped VMM holds its lease until the reap and a later reclaim attempt
+[[check]]
+name = "cid-lease-run-conf-ok-stop-of-an-unreaped-vmm-holds-its-lease-until-the-reap"
+spec = "cid_lease.qnt"
+main = "lease_conf_ok"
+run = "StopOfAnUnreapedVmmHoldsItsLeaseUntilTheReap"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-ok-next-fit-skips-an-unreaped-lease"
+spec = "cid_lease.qnt"
+main = "lease_ok"
+run = "NextFitSkipsAnUnreapedLease"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+# the same run on the recording main `lease_conf_three` (three offsets), the main the driver's #[quint_test] replays
+[[check]]
+name = "cid-lease-run-conf-three-next-fit-skips-an-unreaped-lease"
+spec = "cid_lease.qnt"
+main = "lease_conf_three"
+run = "NextFitSkipsAnUnreapedLease"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "cid-lease-run-conf-ok-serve-crash-with-an-unreaped-vmm-blocks-assign-until-it-exits"
+spec = "cid_lease.qnt"
+main = "lease_conf_ok"
+run = "ServeCrashWithAnUnreapedVmmBlocksAssignUntilItExits"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+# progress: a held lease whose device is free (the VMM reaped) is eventually released
+[[check]]
+name = "cid-lease-late-lease-eventually-released"
+spec = "cid_lease.qnt"
+main = "lease_live"
+temporal = "LateLeaseEventuallyReleased"
+backend = "tlc"
+expect = "holds"
+ci = false
+
+# releaseUnreapedAtStop (decision 12): the stop of an unreaped VMM frees its lease while the VMM still holds the CID's
+# device, so next-fit can hand the CID to a new launch (NoLaunchClash is violated after it)
+[[check]]
+name = "cid-lease-hazard-release-unreaped-at-stop"
+spec = "hazard/cid_lease_hazards.qnt"
+main = "lease_bugReleaseUnreapedAtStop"
+invariant = "LeaseOutlivesVmm"
 backend = "tlc"
 expect = "violation"
 ci = true

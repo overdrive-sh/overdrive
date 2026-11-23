@@ -513,8 +513,8 @@ Each workload's `al` carries its placement lease (`off`) and at most one predece
 `Assign`, `AssignRefused`, `Launch`, `Stop`, `VmmCrash`, `GuestReset`, `Finalize`, `Release`, `Redeploy`, `Crash`,
 `Restart`, `Reclaim` (D-UP-19:
 one `vm_reclamation_boot::converge` call kills every orphan in one step; the order it kills them in is not
-modelled, since no invariant depends on it), `OrphanExit` (an orphan that exits by itself, which also covers one
-killed before a later crash). Invariants: `CidUnique` (ADR-0156; every placement and predecessor lease),
+modelled, since no invariant depends on it; enabled only when no orphan is unreaped), `OrphanExit` (an orphan that exits by itself, which also covers one
+killed before a later crash, and an unreaped orphan's exit), `StopUnreaped`, `Reap`, `LateRelease` (decision 12, below). Invariants: `CidUnique` (ADR-0156; every placement and predecessor lease),
 `NoLaunchClash` (CID-NOCLAIM), `LeaseOutlivesVmm`
 (release-last, ADR-0133), `AssignAfterReclaim` (NO-SURVIVE), `GuestResetEndsVmm` (RESET-EXIT),
 `StoppedWorkloadNotPlaced` (the T-5 ruling: a stopped workload is not placed again until it is redeployed, across a
@@ -530,6 +530,26 @@ conformance composition runs `WorkloadLifecycle` through the production converge
 provisioner `provision` / `teardown` boundaries of one dispatch, `Stop` is the stop handler then a tick, `Redeploy` is
 the restart handler, and `wait` / `done` / `retry` come from the reconciler's `hydrate_desired` and
 `restart_status_for_alloc` (QPROJ-2W). `Crash` keeps a workload stopped and not yet released `done`.
+
+An unreaped VMM's lease (decision 12, RB-1 item 11; ADR-0348, the ADR-0156 amendment). A VMM killed and not reaped when
+`VMM_REAP_BOUND` elapsed (`VmTermination::KilledNotReaped`) keeps its cgroup scope, its vhost-vsock device and so its CID,
+so the shim releases a lease only once the allocation's scope is absent. `StopUnreaped(a)` is the stop of a running
+allocation with that outcome: the stop completes (the workload is `done`) while the device stays held by `a` and the lease
+stays held, recorded in the model-level map `late` (offset to the workload; a workload can accumulate several, so it is
+not a per-workload field). `Reap(o)` is the process's reap, which frees its device; `LateRelease(o)` is a later
+network-reclaim attempt, which frees the lease and the `late` entry only when the device is free (the scope is absent,
+K-C7; the guard has the shape of `canRelease`). A serve crash drops `late` with the pool and turns the held device into an
+orphan that boot reclamation cannot kill (`kill_scope` does not return on a scope an unreaped VMM still holds): `Reclaim`
+is enabled only when no orphan is unreaped (ghost `g.unreapedOrphans`, model-only: the kernel's holder table does not
+tell a stuck process from a running one), and an unreaped orphan leaves through `OrphanExit`, after which `assign` may
+run. `CidUnique` and `NoUntrackedLease` range over `late` as well; `LeaseOutlivesVmm` is unchanged and is the invariant
+with teeth. `FailedHoldsNoLease` excludes a `late` lease: it belongs to an earlier allocation of the workload. Progress
+(on `lease_live`): `LateLeaseEventuallyReleased`, a held lease whose device is free is eventually released. Hazard
+`releaseUnreapedAtStop`: the stop frees the lease with the stop, as for a reaped VMM; `LeaseOutlivesVmm` is violated
+(and a later launch on that CID would clash). Scope of `lease_five`: it is `conf_ok` without `StopUnreaped` (CFG
+`five`), because with it the five-offset exhaustive check did not finish in 3600 s (over 35M distinct states, 277 s
+without); the stop is exhaustive on `lease_ok` / `lease_live` (three offsets) and, on five offsets, covered by the named
+runs and the randomized conformance traces of `lease_conf_ok`.
 
 Crash-class restart granularity (feature delta, the `cid_lease` map, item 7; DR5-CLOSE), production's dispatch
 boundaries: `VmmCrash` / `GuestReset` free the device and run no tick, so the workload is `ended` with its lease still
@@ -794,6 +814,9 @@ checked on its module's conformance main (D-UP-1), the main a driver pins it on 
 | a successor leased but not launched at a serve crash is placed again with the same count | `ServeCrashBeforeLaunchPlacesTheSuccessorAgainWithItsCount` |
 | serve crash while FinalizeFailed's teardown is held: the restarted process finalises it (item 7) | `ServeCrashDuringFinalizeFinalizesAfterRestart` |
 | a stop of a workload whose VMM crashed reclaims its lease (item 7) | `StopOfAnEndedWorkloadReclaimsItsLease` |
+| decision 12: the stop of a killed-not-reaped VMM completes and holds its lease; the reap frees the device, a later reclaim attempt releases the lease (hazard `releaseUnreapedAtStop`) | `StopOfAnUnreapedVmmHoldsItsLeaseUntilTheReap` |
+| decision 12 (`lease_ok`, and replayed on the recording main `lease_conf_three`; three offsets): next-fit skips an unreaped VMM's held lease where the cursor wraps onto it | `NextFitSkipsAnUnreapedLease` |
+| decision 12: a serve crash with an unreaped VMM drops the pool; the stuck VMM is an unreaped orphan, boot reclamation cannot run and no assign runs until it exits | `ServeCrashWithAnUnreapedVmmBlocksAssignUntilItExits` |
 | **pending GH #325** (`lease_conf_325`): a generation replacement leased at a crash is not lost (hazard `crashLosesPlacedGeneration`) | `RedeployLeasedAtServeCrashIsPlacedAgain` |
 | `lease_ok`, and replayed on the recording main `lease_conf_three` (D-18; `ok`'s three offsets, since the five-offset pool never exhausts here): a pool refusal of a restart's successor cleans the predecessor, then the workload is placed with its count (item 7; hazard `refusalKeepsPredecessor`) | `PoolExhaustedRestartCleansThePredecessorThenPlaces` |
 | model only, not a `#[quint_test]` (holds on `lease_conf_ok`, violated on `lease_conf_325`): the #325-window guard refuses a `serve` crash while a `Redeploy`'s placement is leased and not launched (item 9) | `CrashIsNotEnabledInThe325Window` |
@@ -850,6 +873,7 @@ Nothing below is a modelled fact. Each is an input the model takes as given.
 | K-C1 | a duplicate CID is refused at device creation, the first holder unaffected; a CID is free right after the last reference closes | proven: P-16, V-30 Q2d (`findings-v30-guest-reset.md`). Unreachable in the design (lease uniqueness); reached only by hazards |
 | K-C4 | the VMM is the only holder of its vhost-vsock fd; no Overdrive process keeps a copy past VMM exit, so the device is released and host flows reset at VMM exit | proven: V-30 Q2c, Q2d |
 | K-C5 | Boot reclamation kills every VMM the new process does not supervise before any `assign`, and a reclaimed VMM's device is released before its cgroup can be removed. Source: an exiting task drops its files (kernel/exit.c:971 @ v7.0) and runs its task work (kernel/exit.c:976 @ v7.0), where the final fput of a user task is deferred (fs/file_table.c:528-530 @ v7.0) and reaches vhost_vsock_dev_release; cgroup_rmdir waits in cgroup_drain_dying until every task has passed cgroup_task_dead (kernel/cgroup/cgroup.c:6309 @ v7.0). OPEN: the Tier-3 serve-restart reclamation scenario V-RECLAIM; not contract-shaping | OPEN validation item V-RECLAIM (Tier-3 serve-restart reclamation scenario of NO-SURVIVE; not contract-shaping) |
+| K-C7 | the allocation's cgroup scope is absent only after the VMM's vhost-vsock device is released (the shim releases a lease only when the scope is absent; a killed-not-reaped VMM keeps both). Source: `cgroup_rmdir` succeeds only when no task is left (`cgroup_rmdir` -> `cgroup_drain_dying`, kernel/cgroup/cgroup.c:6254-6272, :6309-6311 @ v7.0); a task leaves its cgroup only after it dropped its files (kernel/exit.c:971, :976 @ v7.0; fs/file_table.c:528-530 @ v7.0, the K-C5 chain), the last close of the device file reaching `vhost_vsock_dev_release` (drivers/vhost/vsock.c:753-760 @ v7.0); a launch whose CID is still hashed fails -EADDRINUSE (`vhost_vsock_set_cid`, drivers/vhost/vsock.c:804-813 @ v7.0) | discharged by the source above; real-kernel check: Tier-3 S-VOL-T3-12 (no lease released while the held-flush VMM is unreaped; released after the drain) |
 | K-C6 | a guest reset (PID-1 crash, triple fault) ends the VMM in the pinned fork | validation item of ADR-0182: fork build with the change, PID-1 crash under `panic=1` and triple fault; not contract-shaping, blocks DELIVER of the fork step (V-30 Q3 is a reading, not a result) |
 | K-B1 | closing T_g / Q_g is observed by the host as the association's end, even when accepted after the guest closed | P-22; P-37 |
 | K-B2 | the guest `sock_release` report may be lost; the level-triggered audit finds the slot | R5-14 (Tier-3) |
@@ -1108,6 +1132,7 @@ and `lease_conf_three` (D-18), which carry one run each and no invariant that se
 | `cid-lease-hazard-release-before-vmm-outlives` | `lease_bugReleaseBeforeVmm` | release-last off: the lease is released while the VMM still holds the device | `LeaseOutlivesVmm` |
 | `cid-lease-hazard-assign-before-reclaim` | `lease_bugAssignBeforeReclaim` | NO-SURVIVE off: assign runs before boot reclamation killed the previous process's VMMs | `NoLaunchClash` |
 | `cid-lease-hazard-reset-reboots` | `lease_bugResetReboots` | RESET-EXIT off: a guest reset reboots the guest inside the same VMM | `GuestResetEndsVmm` |
+| `cid-lease-hazard-release-unreaped-at-stop` | `lease_bugReleaseUnreapedAtStop` | decision 12 off: the stop of an unreaped VMM frees its lease with the stop while the VMM still holds the CID's device | `LeaseOutlivesVmm` |
 | `cid-lease-hazard-crash-forgets-stop` | `lease_bugCrashForgetsStop` | T-5 ruling off: a serve crash forgets the stop intent, so a stopped workload is placed again after the restart | `StoppedWorkloadNotPlaced` |
 | `cid-lease-hazard-retry-off-by-one` | `lease_bugRetryOffByOne` | RESTART-SSOT off (retryOffByOne): the full pre-fix `restart_status_for_alloc` as the restart decision — restart iff attempts + 1 < CEILING, with no exemptions | `ExhaustsOnlyAtCeiling` |
 | `cid-lease-hazard-reclaim-not-exempt` | `lease_bugReclaimNotExempt` | RESTART-SSOT off (reclaimNotExempt): only the platform-reclaim exemption removed | `ExhaustsOnlyOnACrashClassFailure` |

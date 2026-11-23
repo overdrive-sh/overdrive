@@ -6,24 +6,24 @@
 
   1) lease_bugRefusalKeepsPredecessor::cid_lease::PoolExhaustedRestartCleansThePredecessorThenPlaces:
        Error [QNT508]: Expect condition does not hold true
-        at /home/ubuntu/overdrive-worktrees/42eb0530ea7060ec208638d98fd744ee251bd4d48943e87080a1d216ff4da3de/specs/quint/guest-flow-owner/cid_lease.qnt:802:60
-        802:   run PoolExhaustedRestartCleansThePredecessorThenPlaces = init
+        at /home/ubuntu/overdrive-worktrees/9d340a8ca57d5ca89b626cece0d62d03770aa9cd213856dc63ec27e31d3a81cc/specs/quint/guest-flow-owner/cid_lease.qnt:895:60
+        895:   run PoolExhaustedRestartCleansThePredecessorThenPlaces = init
                                                                         ^^^^
-        803:     .then(Assign(1)).then(Launch(1)).then(Assign(2)).then(Launch(2)).then(VmmCrash(1))
+        896:     .then(Assign(1)).then(Launch(1)).then(Assign(2)).then(Launch(2)).then(VmmCrash(1))
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        804:     .then(Assign(1)).expect(Safety and st(1) == "leased" and pstOf(1) == "held" and freeOffs == Set())
+        897:     .then(Assign(1)).expect(Safety and st(1) == "leased" and pstOf(1) == "held" and freeOffs == Set())
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        805:     .then(VmmCrash(2)).expect(Safety and st(2) == "ended" and al.get(2).retry and freeOffs == Set())
+        898:     .then(VmmCrash(2)).expect(Safety and st(2) == "ended" and al.get(2).retry and freeOffs == Set())
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        806:     .then(AssignRefused(2))
+        899:     .then(AssignRefused(2))
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        807:     .expect(Safety and st(2) == "wait" and pstOf(2) == "retiring" and att.get(2) == 0 and offOf(2) == -1
+        900:     .expect(Safety and st(2) == "wait" and pstOf(2) == "retiring" and att.get(2) == 0 and offOf(2) == -1
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        808:       and freeOffs == Set())
+        901:       and freeOffs == Set())
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    Use --seed=0x139435a51621924 --match=lease_bugRefusalKeepsPredecessor::cid_lease::PoolExhaustedRestartCleansThePredecessorThenPlaces to repeat.
+    Use --seed=0x6c307eefbfc04909 --match=lease_bugRefusalKeepsPredecessor::cid_lease::PoolExhaustedRestartCleansThePredecessorThenPlaces to repeat.
 
 
   Use --verbosity=3 to show executions.
-  Further debug with: quint test --verbosity=3 /home/ubuntu/overdrive-worktrees/42eb0530ea7060ec208638d98fd744ee251bd4d48943e87080a1d216ff4da3de/specs/quint/guest-flow-owner/hazard/cid_lease_hazards.qnt
+  Further debug with: quint test --verbosity=3 /home/ubuntu/overdrive-worktrees/9d340a8ca57d5ca89b626cece0d62d03770aa9cd213856dc63ec27e31d3a81cc/specs/quint/guest-flow-owner/hazard/cid_lease_hazards.qnt
 error: Tests failed

@@ -6,11 +6,13 @@ State 1: <Initial predicate>
   lastEnd |-> <<"none", "none">>,
   preEnd |-> <<"none", "none">>,
   pendingGen |-> <<"", "">>,
-  fin |-> {} ]
+  fin |-> {},
+  unreapedOrphans |-> {} ]
 /\ lease_bugResetReboots_cid_lease_att = <<0, 0>>
 /\ lease_bugResetReboots_cid_lease_cursor = 0
 /\ lease_bugResetReboots_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugResetReboots_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_bugResetReboots_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugResetReboots_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugResetReboots_cid_lease_up = TRUE
 /\ lease_bugResetReboots_cid_lease_reclaimed = TRUE
@@ -30,7 +32,7 @@ State 1: <Initial predicate>
      pred |-> -1,
      pst |-> "none" ] >>
 
-State 2: <lease_bugResetReboots_cid_lease_Assign line 1190, col 3 to line 1267, col 53 of module lease_bugResetReboots>
+State 2: <lease_bugResetReboots_cid_lease_Assign line 1344, col 3 to line 1423, col 53 of module lease_bugResetReboots>
 /\ lease_bugResetReboots_cid_lease_g = [ clash |-> FALSE,
   rebooted |-> FALSE,
   reclaimed |-> FALSE,
@@ -38,11 +40,13 @@ State 2: <lease_bugResetReboots_cid_lease_Assign line 1190, col 3 to line 1267, 
   lastEnd |-> <<"none", "none">>,
   preEnd |-> <<"none", "none">>,
   pendingGen |-> <<"", "">>,
-  fin |-> {} ]
+  fin |-> {},
+  unreapedOrphans |-> {} ]
 /\ lease_bugResetReboots_cid_lease_att = <<0, 0>>
 /\ lease_bugResetReboots_cid_lease_cursor = 1
 /\ lease_bugResetReboots_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugResetReboots_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_bugResetReboots_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugResetReboots_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugResetReboots_cid_lease_up = TRUE
 /\ lease_bugResetReboots_cid_lease_reclaimed = TRUE
@@ -62,7 +66,7 @@ State 2: <lease_bugResetReboots_cid_lease_Assign line 1190, col 3 to line 1267, 
      pred |-> -1,
      pst |-> "none" ] >>
 
-State 3: <lease_bugResetReboots_cid_lease_Launch line 1328, col 3 to line 1414, col 53 of module lease_bugResetReboots>
+State 3: <lease_bugResetReboots_cid_lease_Launch line 1486, col 3 to line 1574, col 53 of module lease_bugResetReboots>
 /\ lease_bugResetReboots_cid_lease_g = [ clash |-> FALSE,
   rebooted |-> FALSE,
   reclaimed |-> FALSE,
@@ -70,11 +74,13 @@ State 3: <lease_bugResetReboots_cid_lease_Launch line 1328, col 3 to line 1414, 
   lastEnd |-> <<"none", "none">>,
   preEnd |-> <<"none", "none">>,
   pendingGen |-> <<"", "">>,
-  fin |-> {} ]
+  fin |-> {},
+  unreapedOrphans |-> {} ]
 /\ lease_bugResetReboots_cid_lease_att = <<0, 0>>
 /\ lease_bugResetReboots_cid_lease_cursor = 1
 /\ lease_bugResetReboots_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugResetReboots_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_bugResetReboots_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugResetReboots_cid_lease_dev = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugResetReboots_cid_lease_up = TRUE
 /\ lease_bugResetReboots_cid_lease_reclaimed = TRUE
@@ -94,7 +100,7 @@ State 3: <lease_bugResetReboots_cid_lease_Launch line 1328, col 3 to line 1414, 
      pred |-> -1,
      pst |-> "none" ] >>
 
-State 4: <lease_bugResetReboots_cid_lease_GuestReset line 1437, col 3 to line 1467, col 53 of module lease_bugResetReboots>
+State 4: <lease_bugResetReboots_cid_lease_GuestReset line 1597, col 3 to line 1629, col 53 of module lease_bugResetReboots>
 /\ lease_bugResetReboots_cid_lease_g = [ clash |-> FALSE,
   rebooted |-> TRUE,
   reclaimed |-> FALSE,
@@ -102,11 +108,13 @@ State 4: <lease_bugResetReboots_cid_lease_GuestReset line 1437, col 3 to line 14
   lastEnd |-> <<"none", "none">>,
   preEnd |-> <<"none", "none">>,
   pendingGen |-> <<"", "">>,
-  fin |-> {} ]
+  fin |-> {},
+  unreapedOrphans |-> {} ]
 /\ lease_bugResetReboots_cid_lease_att = <<0, 0>>
 /\ lease_bugResetReboots_cid_lease_cursor = 1
 /\ lease_bugResetReboots_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugResetReboots_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_bugResetReboots_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugResetReboots_cid_lease_dev = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugResetReboots_cid_lease_up = TRUE
 /\ lease_bugResetReboots_cid_lease_reclaimed = TRUE
