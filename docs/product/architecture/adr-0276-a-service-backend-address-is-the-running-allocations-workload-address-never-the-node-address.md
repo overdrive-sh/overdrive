@@ -70,21 +70,6 @@ persisted or wire format changes.
   `ServiceMapHydrator` and the dataplane composer keep theirs; they have other
   consumers.
 
-## Amendment 2026-11-23 — a terminal row may carry the address it held (accepted 2026-11-23)
-
-Approved by the user on 2026-11-23 as decision 14 of GH #348 (ADR-0350). The
-decision above is unchanged: a backend identity exists only for a Running
-allocation row that carries an address, and hydration is already total over
-state (`ServiceAllocPhase::from_row`: every state other than Running is
-`NotRunning` whatever the address). What changes is a sentence of the Context:
-terminal rows no longer "lack the address". The stop, `FinalizeFailed` and the
-reclamation executor forward-carry the address the allocation held, so boot
-reclamation can reserve the guest-address offset of a VM that is stuck after
-its stop. A carried address on a non-Running row is not a backend. Code that
-reads `workload_addr` from a row outside this gate (the handlers, the CLI
-render) is checked in DELIVER for a reading that assumes a non-Running row has
-none.
-
 ## Links
 
 - [Feature delta: interface contracts, producers, fixtures, obligations](../../feature/no-host-ip-backend-fallback/feature-delta.md)

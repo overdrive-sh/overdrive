@@ -95,25 +95,23 @@ holds no file table (`kernel/vhost_task.c:130 @ v7.0`).
 
 ## Amendment 2026-11-23 — the lease outlives an unreaped VMM (accepted 2026-11-23)
 
-Approved by the user on 2026-11-23 as decision 12 of GH #348 (option a): a
-guest-address lease is released only once the allocation's cgroup scope is
-observed absent; while the scope is present the lease is retired and held, and
-the stop still completes.
+Approved by the user on 2026-11-23 as decision 12 of GH #348 (option a). This
+ADR is implemented, so the text above stays as the contract of the shipped
+code and this section states what changes.
 
-Amended by ADR-0348 (decision 11 of GH #348). ADR-0348 makes a stop whose
-VMM is killed but not yet reaped a completed stop. The text above is kept as
-the contract of the implemented code; the amendment changes three of its
-claims.
+ADR-0348 makes a stop whose VMM is killed but not yet reaped a completed stop.
+The VMM still holds `/dev/vhost-vsock` with its guest CID until its last task
+exits, so freeing its offset at the stop would let next-fit hand the CID to a
+new launch, which the kernel refuses with `EADDRINUSE`
+(`vhost_vsock_set_cid`, `drivers/vhost/vsock.c:804-813 @ v7.0`). Three claims
+above change.
 
 - **"The lease is released only after the allocation's VMM has exited"**
   becomes: only after the VMM has been *reaped*, observed as the allocation's
   cgroup scope being absent. A stop that ends with the VMM unreaped retires
   the lease and keeps it Retiring, so its offset stays held and next-fit
-  skips it. The release happens on the network-reclaim path after the reap.
-  The process holds the device until its last descriptor closes
-  (`vhost_vsock_dev_release`, `drivers/vhost/vsock.c:753-760 @ v7.0`), and the
-  scope can be removed only when no task of it remains
-  (`kernel/cgroup/cgroup.c:6254-6272`, `:6309-6311 @ v7.0`).
+  skips it, and the stop still completes. The release happens on the existing
+  network-reclaim path after the reap.
 - **"Under the rules above no production path produces that state"** (a launch
   whose CID is held) stays true only with the release gate: without it, a
   stop of an unreaped VMM followed by a next-fit wrap produces it. The holder
@@ -121,32 +119,50 @@ claims.
   reaped*; the last is a Retiring lease.
 - **Lease lifecycle:** Retiring now lasts until the VMM is reaped, which can
   be much later than the stop (or until reboot if it never reaps). A Retiring
-  lease still counts against the attachment cap. Boot reclamation is
-  unchanged: after a restart no lease exists, and reclamation completes only
-  after every unsupervised VMM's scope is removed.
+  lease still counts against the node-wide attachment cap, so enough unreaped
+  VMMs refuse every new launch and every restart's successor with
+  `AdmissionCapReached` until they reap. The lease is process-local and not
+  persisted (ADR-0118).
 
-The mechanism is pinned in the feature delta of the node-local persistent
-volume, § *A VMM kill's reap wait is bounded*, item 11. Alternatives
-(release at stop; a separate held-CID set; release owned by `VmReclamation`)
-are recorded in ADR-0348.
+Alternatives not taken: releasing the lease at the stop, as for a reaped VMM
+(the clash above); a separate held-CID set in next-fit or in `VmReclamation`
+(a second record of the same fact drifts from the lease, and
+`VmReclamation` observes host artifacts, not leases, so a lease whose scope
+was already gone would never be visited); owning the release in
+`VmReclamation` for the same reason. The network-reclaim path already
+converges "finished allocation that holds a lease".
 
 ## Amendment 2026-11-23 (second) — "scope absent" means removed after empty; boot reserves a stuck VM's offset (accepted 2026-11-23)
 
-Approved by the user on 2026-11-23 as decisions 16 and 14 of GH #348. This
-ADR is implemented, so the earlier text stays as the contract of the shipped
-code and this section states what changes.
+Approved by the user on 2026-11-23 as decisions 16 and 14 of GH #348, with
+ruling N-2.
 
 - **The release gate (changes the first amendment).** The first amendment
   gates release on the allocation's scope being observed absent, on the
   premise that a scope can be removed only once no task is left. The spike of
   2026-11-23 showed that on the running kernel `rmdir` removes a scope whose
   last task is stuck in exit, while the task still holds the device. The gate
-  is now: the scope is absent *and* the removal was the populated-first removal
-  of ADR-0349, which removes a scope only after `cgroup.events` reports
-  `populated 0`. Every scope removal in Overdrive takes that order, so absence
-  is a proof of emptiness. The citations for the exit ordering above
-  (`kernel/cgroup/cgroup.c:6168-6169`) describe the `v7.0` source; the design
+  is now: the scope is absent *and* every removal of a VM scope is the
+  populated-first removal of ADR-0349, the only one (ADR-0351), which removes
+  a scope only after `cgroup.events` reports `populated 0`. Absence is then a
+  proof that every descriptor of the VMM is closed, because every task of the
+  VMM is a member of the scope from before it executes (ADR-0352) and a task
+  closes its descriptors before it leaves the scope: `exit_files`
+  (`kernel/exit.c:971 @ v7.0`) closes each descriptor through `filp_close`
+  (`fs/file.c:474-504`, `fs/open.c:1478-1486 @ v7.0`), whose final `fput` is
+  queued on the exiting task (`fs/file_table.c:519-541`, `:583-587 @ v7.0`)
+  and run by `exit_task_work` (`kernel/exit.c:976`), calling the file's
+  `release` (`fs/file_table.c:468-469`: `vhost_vsock_dev_release`,
+  `drivers/vhost/vsock.c:753-760`; for the volume, `blkdev_release` and
+  `bdev_release`, `block/fops.c:703-707`, `block/bdev.c:1124-1166 @ v7.0`,
+  whose held flush is `sync_blockdev` at `:1141-1142`), all before
+  `cgroup_task_dead` (`kernel/sched/core.c:5183-5193`,
+  `kernel/cgroup/cgroup.c:7072-7102 @ v7.0`) empties the scope. The design
   does not depend on whether `rmdir` sleeps or succeeds early.
+- **The release site.** `teardown_guest_network` is the only place a lease is
+  released, for an Admitted lease, a Retiring lease and a boot reservation
+  alike; a reservation has no network plan, so the provisioner teardown is
+  skipped for it and the release is gated on the scope alone.
 - **"Boot reclamation precedes every `assign`" (changes the Decision).** Boot
   reclamation no longer refuses the boot for a VMM it cannot remove. It waits
   the bound, and for each scope still populated it reserves that VMM's offset
@@ -161,14 +177,12 @@ code and this section states what changes.
 - **One derivation.** The CID is still computed in exactly one place: the
   pool's offset-to-plan derivation, which `assign` and the boot reservation
   both use.
-- **The address is on record before the VMM.** Approved by the user on
-  2026-11-23 (ruling N-2). After `assign` hands out an offset and the network
-  is provisioned, and before the VMM can be created, the allocation's row is
-  written in the existing `Pending` state with `workload_addr` set; every later
-  row of the allocation carries it forward. Boot reads the offset to reserve
-  from that row, so every VMM that can hold a CID has its address on record,
-  including a launch parked in guest boot at a crash. The VMM's command line is
-  not read. The row's persisted format does not change.
+- **The address is on record before the VMM.** After `assign` hands out an
+  offset and the network is provisioned, and before the VMM can be created,
+  the allocation's row is written in the existing `Pending` state with
+  `workload_addr` set (ADR-0353). Boot reads the offset to reserve from that
+  row; the VMM's command line is not read.
 
-The contract is in the feature delta of the node-local persistent volume,
-§ *Boot proceeds past a stuck VM*. Alternatives are recorded in ADR-0350.
+The contracts are in the feature delta of the node-local persistent volume,
+§ *The guest-address lease outlives an unreaped VMM* and § *Boot proceeds past
+a stuck VM*.

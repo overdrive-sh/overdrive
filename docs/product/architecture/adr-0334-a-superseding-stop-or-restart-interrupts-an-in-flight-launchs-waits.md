@@ -5,7 +5,7 @@
 **Accepted** 2026-11-18 (decisions SD-1 to SD-5 of the node-local persistent volume feature, GH #348; user ruling of 2026-11-18, option B, and
 the user's approval of the exact decisions, including node shutdown as a producer). ADR-0102 is implemented, so this ADR amends it explicitly:
 the amendment is stated below and is recorded in ADR-0102's own amendment section. The driver side is implemented (steps 05-01 and 05-02); the
-shim's no-row outcome is amended by ruling N-4 of 2026-11-23 (section "Amendment 2026-11-23" below). It depends on one rule it does not own: a launch abandoned by supersession leaves its generation pending until its successor
+shim's no-row outcome is amended by ADR-0355 (section "Amendment 2026-11-23" below). It depends on one rule it does not own: a launch abandoned by supersession leaves its generation pending until its successor
 is observed ([ADR-0335](adr-0335-a-restart-generation-is-handled-when-its-successor-is-observed.md)).
 
 ## Context
@@ -97,7 +97,7 @@ the launch ends" is replaced by this ADR.
 - Bound: shutdown raises the signal when the convergence stage begins, after the gateway stage of `ServerHandle::shutdown` (bounded by its
   drain deadline); launches run on during the gateway stage as today.
 
-## Amendment 2026-11-23 (ruling N-4, option b): a superseded launch writes an abandoned row
+## Amendment 2026-11-23 (ADR-0355, ruling N-4, option b): a superseded launch writes an abandoned row
 
 The driver side of this ADR is implemented (step 05-01 observation points; 05-02 lane table and producers), together with a shim arm that writes
 no row for `StartSuperseded`. That arm is amended; the rest of the ADR stands.
@@ -105,12 +105,12 @@ no row for `StartSuperseded`. That arm is amended; the rest of the ADR stands.
 **Superseded contract** (the Decision above and Consequences): "The shim writes no allocation row for that outcome and charges nothing", and "it
 never wrote a row, so nothing is repaired".
 
-**Amended contract.** Since ADR-0350 (ruling N-2) a launch writes a `Pending` row before the VMM can exist. A launch that returns
+**Amended contract.** Since ADR-0353 a launch writes a `Pending` row before the VMM can exist. A launch that returns
 `StartSuperseded` ends that row: after the shim's releases it writes a `Terminated` row, `terminal` absent, reason `LaunchSuperseded`, the guest
 address carried, in both the start arm and the restart arm (the restart arm writes the successor's row, then runs the exact-old predecessor
 cleanup). It still charges nothing and still returns `Ok(())` for the action. The row is true (nothing was started), so a stopped or restarted
 workload's record shows that the launch was abandoned rather than an allocation stuck `Pending` or missing. The relaunch carries the abandoned
-row's own count (ADR-0335). The typed outcome is unchanged: `StartSuperseded` still has no `DriverStartFailure` or `TransitionReason` and cannot be
+row's own count (ADR-0335, item 4). The typed outcome is unchanged: `StartSuperseded` still has no `DriverStartFailure` or `TransitionReason` and cannot be
 written as a failure; the new reason is written by the shim from the typed outcome, not mapped from a failure.
 
 **Rework of the implemented step.** The driver's observation points, the lane table, the producers, `StartSuperseded` and `release_superseded_launch`

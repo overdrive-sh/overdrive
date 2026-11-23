@@ -43,7 +43,7 @@ has an allocation row, and a generation that the shim cannot honour is not pendi
    finished on its own is not re-run by crash replacement. The handler adds no answer for the no-op; the `restarted` answer it gives is #301's
    symptom.
 4. **A relaunch of an abandoned launch charges nothing.** An abandoned launch (superseded, or lost with the control plane) ends its row with a
-   `Terminated` row of reason `LaunchSuperseded` or `LaunchLostWithControlPlane` and no `terminal` (ADR-0350, ruling N-4). That row is the
+   `Terminated` row of reason `LaunchSuperseded` or `LaunchLostWithControlPlane` and no `terminal` (ADR-0355). That row is the
    allocation's row, so a generation whose issued id ended this way is handled and the relaunch runs through the ordinary restartable path, or
    as a generation replacement when a newer generation is pending. The relaunch carries the abandoned row's own count and
    `last_failure_seen_at` and adds nothing, so an abandoned crash-restart successor is charged once and not twice. An abandoned row is not a
