@@ -733,8 +733,9 @@ one process, so enrolling only the first pid also left every thread and child cr
 3. **What the child does** (the audited hook of ADR-0129 and ADR-0143, now run in the clone child, in this order, and nothing else): set the
    signal mask empty and `SIGPIPE` to its default disposition, as std's spawn does (the Rust runtime ignores `SIGPIPE`, and an ignored disposition
    survives `exec`); `dup2` the stdio descriptors onto 0, 1 and 2; `close_range(3, ~0, CLOSE_RANGE_CLOEXEC)`; `prctl(PR_SET_NO_NEW_PRIVS, 1)`;
-   load the seccomp filter; `execve`. Any failing step writes its `errno` to the error pipe (item 4) and ends the child with `_exit`. The steps and
-   their order are those the hook runs today; the filter is the same `VmmLaunchSeccompFilter`.
+   load the seccomp filter; `execve`. Any failing step writes its step identifier and `errno` to the error pipe (item 4) and ends the child with
+   `_exit`. The steps and their order are those the hook runs today; the filter is the same `VmmLaunchSeccompFilter`. (Joining the cgroup is
+   `clone3`'s own step in the kernel, `CLONE_INTO_CGROUP`; its failure is reported by `clone3` in the parent and never reaches the pipe, item 8.)
 4. **Standard I/O, environment, argv, failure report.** Preserved exactly: stdin and stdout are `/dev/null`, stderr is a pipe whose read end is
    the adapter's stderr capture (the bounded `VmmDiagnostics` capture of today), the environment is `serve`'s environment at the spawn with nothing
    added or removed, the working directory is inherited, and the argv is the one `build_confined_command` builds today (wrapper prefix, hypervisor
@@ -745,6 +746,27 @@ one process, so enrolling only the first pid also left every thread and child cr
    both ends) before the clone and reads it to end after: end-of-file with no data means the child reached `exec`; four bytes are the child's
    `errno`, in which case the parent reaps the child (`waitid(P_PIDFD)`), closes the descriptors and returns the error. Exec failure therefore
    keeps the semantics std's spawn gives today.
+
+   **The error-pipe payload (user ruling 2026-11-23, option a: a failed launch names its step).** The child writes exactly five bytes in one
+   `write`: one step byte, then the `errno` as a native-endian `i32`. The parent reads to end-of-file: no data is "reached `exec`"; five bytes
+   are a step and an `errno`; any other length is a child that died mid-write and is reported as the step `Execve` with the `errno` `EIO`
+   (the parent never guesses a step from a short read). The encoding is private to `launch_clone.rs`; it is a contract between the child and
+   the parent of one module and is not a wire or persisted format.
+   *The closed step set.* A crate-private enum `LaunchStep` in `launch_clone.rs`, a fixed `u8` discriminant per variant, with
+   `as_str(self) -> &'static str` on the enum (`.claude/rules/rust.md` § "Label enums own their string representation"); decoding an unknown
+   byte is the `Execve` case above. The steps, in the child's order:
+
+   | Step | `as_str` | Child step it names |
+   |---|---|---|
+   | `SignalReset` | `resetting signal state` | empty signal mask and `SIGPIPE` default |
+   | `Stdio` | `wiring standard I/O` | the `dup2` calls |
+   | `CloseRange` | `closing inherited descriptors` | `close_range` |
+   | `NoNewPrivs` | `setting no_new_privs` | `prctl(PR_SET_NO_NEW_PRIVS)` |
+   | `SeccompLoad` | `loading the seccomp filter` | the filter load |
+   | `Execve` | `executing the launch program` | `execve` |
+
+   Joining the cgroup is not a `LaunchStep`: it happens inside `clone3` in the kernel, before the child has a first instruction, so its refusal
+   is a `clone3` error of the parent and is named by the parent (item 8, `joining the cgroup`).
 5. **Holding, waiting for and killing the child.** `HostVmm`'s reaper task owns the child: it holds the pidfd and the stderr reader and nothing
    else holds a handle. Exit is `AsyncFd` readability of the pidfd followed by `waitid(P_PIDFD, WEXITED | WNOHANG)`, looped until it reports the
    exit; the siginfo (`CLD_EXITED`, `CLD_KILLED`, `CLD_DUMPED`, `si_status`) yields the same `VmmExit { exit_code, signal }` as `classify_exit` does
@@ -780,13 +802,17 @@ one process, so enrolling only the first pid also left every thread and child cr
    The source and target of the placement are the same as for the write `place_pid_in_scope` makes today (the VMM was forked from `serve`, so it
    starts in `serve`'s cgroup), so the delegation checks C3 are the ones the driver's write passes in every Tier-3 run now.
 8. **Failure.** A refusal at any of these points fails `create` and creates no process, the rootfs clone is removed (`launch-spawn` stage), and
-   the error is classified as every `create` error is; no `VmmError` variant is added:
+   the error is classified as every `create` error is. No `VmmError` variant or field is added: `VmmError::Create { detail: String }` already
+   carries the step in its `detail`, which `start_rejected_unclassified` shows the operator as it shows every `Create` detail today:
 
    | Refusal | Surfaces as |
    |---|---|
    | opening the scope directory fails (absent, no search permission) | `VmmError::Io` (open), before any clone |
-   | `clone3` returns `EBADF`, `ENODEV`, `EACCES`, `EPERM`, `EBUSY`, `EOPNOTSUPP`, `ENOENT`, `ENOMEM` | the primitive's `io::Error`, `VmmError::Create` through `classify_launch_spawn_error` |
-   | a child step (signal reset, `dup2`, `close_range`, `no_new_privs`, seccomp, `execve`) fails | the errno from the error pipe, the same classification; an unresolvable wrapper is `NotFound` and maps to `ConfinementUnavailable` |
+   | `clone3` returns `EBADF`, `ENODEV`, `EACCES`, `EPERM`, `EBUSY`, `EOPNOTSUPP`, `ENOENT`, `ENOMEM` | the primitive's `io::Error` (step `joining the cgroup`), `VmmError::Create` through `classify_launch_spawn_error`; the `detail` reads `joining the cgroup failed: <launch executable>: <errno text>` |
+   | a child step fails (`LaunchStep`, item 4) | the step and `errno` from the error pipe, `VmmError::Create`; the `detail` reads `<step.as_str()> failed: <launch executable>: <errno text>`, for example `loading the seccomp filter failed: /usr/bin/prlimit: Invalid argument (os error 22)`; an unresolvable wrapper is `NotFound` at the pre-clone resolution and maps to `ConfinementUnavailable` (unchanged) |
+
+   `classify_launch_spawn_error` keeps its classification (it reads the `errno`'s `io::ErrorKind`); the step is added to the `detail` text it
+   builds and changes no variant. A failing `execve` whose `errno` is `NotFound` for the wrapper is still `ConfinementUnavailable`.
 
    `EINVAL` from an undersized `clone_args` is a programming error the Tier-3 launch test catches; it has no operator recovery.
 9. **`CloudHypervisorVmm` needs the cgroup root** to resolve `CgroupPath` to a directory: `with_cgroup_root(PathBuf)`, a builder beside
@@ -816,8 +842,9 @@ one process, so enrolling only the first pid also left every thread and child cr
     A seccomp failure at launch surfaces at the first launch, not at boot: an architecture with no filter program fails `create` before any
     effect as `VmmError::ConfinementUnavailable { control: Seccomp }` (unchanged, `create`'s own check); a filter the kernel refuses to load
     is a child-step failure of item 8, whose `errno` comes back through the error pipe, the child ends with `_exit`, and `create` fails as
-    `VmmError::Create` through `classify_launch_spawn_error`, never an unconfined run. The error pipe carries the `errno` only, so the
-    `VmmError::Create` text names the launch executable and the `errno` and does not name the seccomp step; no `VmmError` variant is added here.
+    `VmmError::Create` through `classify_launch_spawn_error`, never an unconfined run. The error pipe carries the step with the `errno`
+    (item 4, user ruling 2026-11-23, option a), so the `detail` names the step, `loading the seccomp filter failed: ...`; no `VmmError` variant
+    is added here.
 13. **The contract shape.** `Vmm::create` is a bounded-change function: it creates one process tree and changes membership of exactly one scope.
     The universe of what it may change is the allocation's run directory, one scope and one process tree.
 
@@ -849,6 +876,16 @@ the wrapper is not found: the error pipe reports it, the child is reaped, no pro
   sweep after the boot never receives the CID the crashed VMM held and produces no `EADDRINUSE`.
 - Tier 3, refusal: `create` against a scope removed before the call, and against a scope with `subtree_control` set, each fails typed with no
   process created and the rootfs clone removed.
+- Tier 3, step naming (a `cgroup-default` guest, through `with_binary` and the existing `create` seams): `create` fails with a `detail`
+  naming the step for each of the steps a test can make fail with no new production seam: `joining the cgroup` (the scope removed or
+  `subtree_control` set, the same fixtures as the refusal test), and `executing the launch program` (a wrapper that resolves to an
+  absolute path and is not executable, so `execve` returns `EACCES`). Each asserts the `detail` contains the step's `as_str` and the
+  `errno` text, and that no process remains. `loading the seccomp filter`, `wiring standard I/O`, `closing inherited descriptors`,
+  `setting no_new_privs` and `resetting signal state` cannot be made to fail from a test without a production seam (a fault-injecting
+  filter, a descriptor limit the child cannot lift, a syscall interposer): none is invented. They are covered by a unit test on the
+  pipe codec in `launch_clone.rs`: every `LaunchStep` round-trips through the five-byte payload, an unknown step byte and a short read
+  decode as `Execve` / `EIO`, and `as_str` is distinct for every step. That the real child writes the right step byte for each failing
+  step is read in the module's audited child sequence at review, not tested.
 - Tier 3, reap: the stand-in's exit is observed through the pidfd with the right `VmmExit` (a normal exit, a signal, a core dump); `terminate`
   kills through the pidfd; a stand-in with a thread held in uninterruptible I/O returns `KilledNotReaped` at the bound (S-VOL-T3-12 covers the
   real held flush).
