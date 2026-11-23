@@ -1,0 +1,14 @@
+# PROBE (throwaway, isolated): can VmHostState::kill_scope wait on cgroup.events
+# instead of retrying rmdir? Not a member of the repo workspace.
+# See docs/feature/node-local-persistent-volume/spike/findings-cgroup-events.md
+[package]
+name = "cgroup-events-probe"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[dependencies]
+libc = "0.2"
+overdrive-testing = { path = "../../crates/overdrive-testing" }

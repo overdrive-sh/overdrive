@@ -1,0 +1,371 @@
+OVERDRIVE_METAL_RUN_ID=5fd61383377c29e4dd0a9c29
+        PASS [  79.495s] (1/4) cgroup-events-probe::probe a2_rmdir_immediately_after_populated0
+    SPIKE uname -r = 7.0.0-38-generic
+    SPIKE /proc/version = Linux version 7.0.0-38-generic (buildd@lcy02-amd64-070) (x86_64-linux-gnu-gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0, GNU ld (GNU Binutils for Ubuntu) 2.46) #38-Ubuntu SMP PREEMPT_DYNAMIC Fri Sep  4 09:10:14 UTC 2026
+    SPIKE kallsyms cgroup_drain_dying: []
+    SPIKE kallsyms cgroup_task_dead: ["ffffffff8982dcd5 t cgroup_task_dead.cold", "ffffffff89bbc810 T cgroup_task_dead"]
+    SPIKE kallsyms do_cgroup_task_dead: []
+    SPIKE kallsyms cgroup_rmdir: ["ffffffff89bbbcb0 T cgroup_rmdir"]
+    SPIKE kallsyms cgroup_destroy_locked: ["ffffffff89bbb810 t cgroup_destroy_locked"]
+    SPIKE kallsyms cgroup_task_exit: ["ffffffff89bbc750 T cgroup_task_exit"]
+    SPIKE scen=A2 trial=0 resume=1504.55 oracle_pop0=1508.15 poll_pop0=1508.13 inotify_pop0=1508.19 reaped=1508.14 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=6 reaped_minus_pop0=-0.01 child_alive_at_pop0=Some(false)
+    SPIKE scen=A2 trial=0 PRE-KILL state=S wchan=hrtimer_nanosleep flags=4194368 events=[populated 1;frozen 0;] procs=[189,] dm=[cgev-a2:L-sw:1]
+    SPIKE scen=A2 trial=0 HELD-BEFORE-RESUME state=D wchan=folio_wait_bit_common flags=4195404 events=[populated 1;frozen 0;] procs=[] rmdir_thread_tasks=[] dm=[cgev-a2:L-sw:1] child_cgroup=[0::/cgev.slice/A2-0.scope]
+    SPIKE scen=A2 trial=0 timeline      0.22 ms  t_kill
+    SPIKE scen=A2 trial=0 timeline    250.81 ms  poll_timeout
+    SPIKE scen=A2 trial=0 timeline    501.19 ms  poll_timeout
+    SPIKE scen=A2 trial=0 timeline    751.48 ms  poll_timeout
+    SPIKE scen=A2 trial=0 timeline   1001.86 ms  poll_timeout
+    SPIKE scen=A2 trial=0 timeline   1252.24 ms  poll_timeout
+    SPIKE scen=A2 trial=0 timeline   1502.62 ms  poll_timeout
+    SPIKE scen=A2 trial=0 timeline   1504.55 ms  resume
+    SPIKE scen=A2 trial=0 timeline   1508.13 ms  poll_pop0
+    SPIKE scen=A2 trial=0 timeline   1508.14 ms  reaped sig=9
+    SPIKE scen=A2 trial=0 timeline   1508.19 ms  inotify_pop0
+    SPIKE scen=A2 trial=1 resume=1504.29 oracle_pop0=1507.84 poll_pop0=1507.94 inotify_pop0=1507.96 reaped=1507.87 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.07(errno=0) poll_timeouts=6 reaped_minus_pop0=0.03 child_alive_at_pop0=Some(false)
+    SPIKE scen=A2 trial=1 PRE-KILL state=S wchan=hrtimer_nanosleep flags=4194368 events=[populated 1;frozen 0;] procs=[198,] dm=[cgev-a2:L-sw:1]
+    SPIKE scen=A2 trial=1 HELD-BEFORE-RESUME state=D wchan=folio_wait_bit_common flags=4195404 events=[populated 1;frozen 0;] procs=[] rmdir_thread_tasks=[] dm=[cgev-a2:L-sw:1] child_cgroup=[0::/cgev.slice/A2-1.scope]
+    SPIKE scen=A2 trial=1 timeline      0.20 ms  t_kill
+    SPIKE scen=A2 trial=1 timeline    250.79 ms  poll_timeout
+    SPIKE scen=A2 trial=1 timeline    501.17 ms  poll_timeout
+    SPIKE scen=A2 trial=1 timeline    751.54 ms  poll_timeout
+    SPIKE scen=A2 trial=1 timeline   1001.95 ms  poll_timeout
+    SPIKE scen=A2 trial=1 timeline   1252.33 ms  poll_timeout
+    SPIKE scen=A2 trial=1 timeline   1502.71 ms  poll_timeout
+    SPIKE scen=A2 trial=1 timeline   1504.29 ms  resume
+    SPIKE scen=A2 trial=1 timeline   1507.87 ms  reaped sig=9
+    SPIKE scen=A2 trial=1 timeline   1507.94 ms  poll_pop0
+    SPIKE scen=A2 trial=1 timeline   1507.94 ms  rmdir_after_pop0_start
+    SPIKE scen=A2 trial=1 timeline   1507.96 ms  inotify_pop0
+    SPIKE scen=A2 trial=1 timeline   1508.01 ms  rmdir_after_pop0_end errno=0
+    SPIKE scen=A2 trial=1 timeline   1508.01 ms  rmdir_after_pop0_dur 0.072
+    SPIKE scen=A2 trial=2 resume=1504.19 oracle_pop0=1507.74 poll_pop0=1507.59 inotify_pop0=1507.69 reaped=1507.57 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=6 reaped_minus_pop0=-0.17 child_alive_at_pop0=Some(false)
+    SPIKE scen=A2 trial=2 PRE-KILL state=S wchan=hrtimer_nanosleep flags=4194368 events=[populated 1;frozen 0;] procs=[207,] dm=[cgev-a2:L-sw:1]
+    SPIKE scen=A2 trial=2 HELD-BEFORE-RESUME state=D wchan=folio_wait_bit_common flags=4195404 events=[populated 1;frozen 0;] procs=[] rmdir_thread_tasks=[] dm=[cgev-a2:L-sw:1] child_cgroup=[0::/cgev.slice/A2-2.scope]
+    SPIKE scen=A2 trial=2 timeline      0.23 ms  t_kill
+    SPIKE scen=A2 trial=2 timeline    250.75 ms  poll_timeout
+    SPIKE scen=A2 trial=2 timeline    501.15 ms  poll_timeout
+    SPIKE scen=A2 trial=2 timeline    751.57 ms  poll_timeout
+    SPIKE scen=A2 trial=2 timeline   1001.98 ms  poll_timeout
+    SPIKE scen=A2 trial=2 timeline   1252.35 ms  poll_timeout
+    SPIKE scen=A2 trial=2 timeline   1502.77 ms  poll_timeout
+    SPIKE scen=A2 trial=2 timeline   1504.19 ms  resume
+    SPIKE scen=A2 trial=2 timeline   1507.57 ms  reaped sig=9
+    SPIKE scen=A2 trial=2 timeline   1507.59 ms  poll_pop0
+    SPIKE scen=A2 trial=2 timeline   1507.69 ms  inotify_pop0
+    SPIKE scen=A2 trial=3 resume=1504.27 oracle_pop0=1507.74 poll_pop0=1507.75 inotify_pop0=- reaped=1507.80 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.14(errno=0) poll_timeouts=6 reaped_minus_pop0=0.05 child_alive_at_pop0=Some(false)
+    SPIKE scen=A2 trial=3 PRE-KILL state=S wchan=hrtimer_nanosleep flags=4194368 events=[populated 1;frozen 0;] procs=[216,] dm=[cgev-a2:L-sw:1]
+    SPIKE scen=A2 trial=3 HELD-BEFORE-RESUME state=D wchan=folio_wait_bit_common flags=4195404 events=[populated 1;frozen 0;] procs=[] rmdir_thread_tasks=[] dm=[cgev-a2:L-sw:1] child_cgroup=[0::/cgev.slice/A2-3.scope]
+    SPIKE scen=A2 trial=3 timeline      0.20 ms  t_kill
+    SPIKE scen=A2 trial=3 timeline    250.73 ms  poll_timeout
+    SPIKE scen=A2 trial=3 timeline    501.12 ms  poll_timeout
+    SPIKE scen=A2 trial=3 timeline    751.53 ms  poll_timeout
+    SPIKE scen=A2 trial=3 timeline   1001.90 ms  poll_timeout
+    SPIKE scen=A2 trial=3 timeline   1252.28 ms  poll_timeout
+    SPIKE scen=A2 trial=3 timeline   1502.67 ms  poll_timeout
+    SPIKE scen=A2 trial=3 timeline   1504.27 ms  resume
+    SPIKE scen=A2 trial=3 timeline   1507.75 ms  poll_pop0
+    SPIKE scen=A2 trial=3 timeline   1507.78 ms  rmdir_after_pop0_start
+    SPIKE scen=A2 trial=3 timeline   1507.80 ms  reaped sig=9
+    SPIKE scen=A2 trial=3 timeline   1507.88 ms  inotify_gone
+    SPIKE scen=A2 trial=3 timeline   1507.92 ms  rmdir_after_pop0_end errno=0
+    SPIKE scen=A2 trial=3 timeline   1507.92 ms  rmdir_after_pop0_dur 0.141
+    SPIKE scen=A2 trial=4 resume=1504.24 oracle_pop0=1507.96 poll_pop0=1507.77 inotify_pop0=1507.79 reaped=1507.75 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=6 reaped_minus_pop0=-0.21 child_alive_at_pop0=Some(false)
+    SPIKE scen=A2 trial=5 resume=1504.30 oracle_pop0=- poll_pop0=1507.51 inotify_pop0=- reaped=1507.54 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.07(errno=0) poll_timeouts=6 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=A2 trial=6 resume=1504.56 oracle_pop0=1508.17 poll_pop0=1507.93 inotify_pop0=1508.00 reaped=1507.92 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=6 reaped_minus_pop0=-0.25 child_alive_at_pop0=Some(false)
+    SPIKE scen=A2 trial=7 resume=1504.80 oracle_pop0=- poll_pop0=1508.29 inotify_pop0=- reaped=1508.31 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.11(errno=0) poll_timeouts=6 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=A2 trial=8 resume=1504.36 oracle_pop0=1507.89 poll_pop0=1507.87 inotify_pop0=1507.89 reaped=1507.82 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=6 reaped_minus_pop0=-0.08 child_alive_at_pop0=Some(false)
+    SPIKE scen=A2 trial=9 resume=1504.25 oracle_pop0=- poll_pop0=1507.70 inotify_pop0=- reaped=1507.73 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.16(errno=0) poll_timeouts=6 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=A2 trial=10 resume=1504.43 oracle_pop0=1507.75 poll_pop0=1507.74 inotify_pop0=1507.77 reaped=1507.76 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=6 reaped_minus_pop0=0.01 child_alive_at_pop0=Some(false)
+    SPIKE scen=A2 trial=11 resume=1504.45 oracle_pop0=1507.94 poll_pop0=1507.91 inotify_pop0=- reaped=1507.92 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.09(errno=0) poll_timeouts=6 reaped_minus_pop0=-0.02 child_alive_at_pop0=Some(false)
+    SPIKE scen=A2 trial=12 resume=1504.39 oracle_pop0=1507.56 poll_pop0=1507.50 inotify_pop0=1507.54 reaped=1507.51 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=6 reaped_minus_pop0=-0.05 child_alive_at_pop0=Some(false)
+    SPIKE scen=A2 trial=13 resume=1503.33 oracle_pop0=- poll_pop0=1506.85 inotify_pop0=- reaped=1506.84 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.11(errno=0) poll_timeouts=6 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=A2 trial=14 resume=1504.48 oracle_pop0=1507.86 poll_pop0=1507.63 inotify_pop0=1507.74 reaped=1507.64 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=6 reaped_minus_pop0=-0.22 child_alive_at_pop0=Some(false)
+    SPIKE scen=A2 trial=15 resume=1504.08 oracle_pop0=- poll_pop0=1507.48 inotify_pop0=1507.52 reaped=1507.49 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.07(errno=0) poll_timeouts=6 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=A2 trial=16 resume=1503.86 oracle_pop0=1507.43 poll_pop0=1507.25 inotify_pop0=1507.30 reaped=1507.27 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=6 reaped_minus_pop0=-0.17 child_alive_at_pop0=Some(false)
+    SPIKE scen=A2 trial=17 resume=1503.85 oracle_pop0=1507.53 poll_pop0=1507.55 inotify_pop0=- reaped=1507.60 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.10(errno=0) poll_timeouts=6 reaped_minus_pop0=0.07 child_alive_at_pop0=Some(false)
+    SPIKE scen=A2 trial=18 resume=1507.36 oracle_pop0=1510.84 poll_pop0=1510.87 inotify_pop0=1510.87 reaped=1510.80 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=6 reaped_minus_pop0=-0.04 child_alive_at_pop0=Some(false)
+    SPIKE scen=A2 trial=19 resume=1504.51 oracle_pop0=- poll_pop0=1506.48 inotify_pop0=- reaped=1506.50 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.09(errno=0) poll_timeouts=6 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=A2 trial=20 resume=1504.12 oracle_pop0=1507.98 poll_pop0=1507.84 inotify_pop0=1507.89 reaped=1507.86 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=6 reaped_minus_pop0=-0.12 child_alive_at_pop0=Some(false)
+    SPIKE scen=A2 trial=21 resume=1504.29 oracle_pop0=1507.61 poll_pop0=1507.64 inotify_pop0=1507.68 reaped=1507.66 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.08(errno=0) poll_timeouts=6 reaped_minus_pop0=0.05 child_alive_at_pop0=Some(false)
+    SPIKE scen=A2 trial=22 resume=1504.28 oracle_pop0=1507.74 poll_pop0=1507.72 inotify_pop0=1507.78 reaped=1507.74 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=6 reaped_minus_pop0=0.00 child_alive_at_pop0=Some(false)
+    SPIKE scen=A2 trial=23 resume=1504.17 oracle_pop0=1507.59 poll_pop0=1507.57 inotify_pop0=- reaped=1507.60 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.08(errno=0) poll_timeouts=6 reaped_minus_pop0=0.01 child_alive_at_pop0=Some(false)
+    SPIKE scen=A2 trial=24 resume=1504.24 oracle_pop0=1507.96 poll_pop0=1507.81 inotify_pop0=1507.85 reaped=1507.79 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=6 reaped_minus_pop0=-0.17 child_alive_at_pop0=Some(false)
+    SPIKE scen=A2 trial=25 resume=1504.35 oracle_pop0=1507.51 poll_pop0=1507.47 inotify_pop0=- reaped=1507.49 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.13(errno=0) poll_timeouts=6 reaped_minus_pop0=-0.02 child_alive_at_pop0=Some(false)
+    SPIKE scen=A2 trial=26 resume=1504.40 oracle_pop0=1507.95 poll_pop0=1508.00 inotify_pop0=1508.08 reaped=1508.01 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=6 reaped_minus_pop0=0.06 child_alive_at_pop0=Some(false)
+    SPIKE scen=A2 trial=27 resume=1504.12 oracle_pop0=- poll_pop0=1507.65 inotify_pop0=- reaped=1507.64 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.15(errno=0) poll_timeouts=6 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=A2 trial=28 resume=1504.37 oracle_pop0=1508.14 poll_pop0=1507.92 inotify_pop0=1508.00 reaped=1507.92 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=6 reaped_minus_pop0=-0.22 child_alive_at_pop0=Some(false)
+    SPIKE scen=A2 trial=29 resume=1504.36 oracle_pop0=1507.85 poll_pop0=1507.86 inotify_pop0=- reaped=1507.86 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.11(errno=0) poll_timeouts=6 reaped_minus_pop0=0.01 child_alive_at_pop0=Some(false)
+    SPIKE scen=A2 trial=30 resume=1504.20 oracle_pop0=1507.94 poll_pop0=1507.74 inotify_pop0=1507.83 reaped=1507.76 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=6 reaped_minus_pop0=-0.18 child_alive_at_pop0=Some(false)
+    SPIKE scen=A2 trial=31 resume=1504.39 oracle_pop0=1507.50 poll_pop0=1507.47 inotify_pop0=- reaped=1507.50 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.13(errno=0) poll_timeouts=6 reaped_minus_pop0=0.00 child_alive_at_pop0=Some(false)
+    SPIKE scen=A2 trial=32 resume=1502.90 oracle_pop0=1505.40 poll_pop0=1505.19 inotify_pop0=1505.28 reaped=1505.18 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=6 reaped_minus_pop0=-0.22 child_alive_at_pop0=Some(false)
+    SPIKE scen=A2 trial=33 resume=1504.27 oracle_pop0=1507.82 poll_pop0=1507.83 inotify_pop0=1507.86 reaped=1507.80 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.11(errno=0) poll_timeouts=6 reaped_minus_pop0=-0.02 child_alive_at_pop0=Some(false)
+    SPIKE scen=A2 trial=34 resume=1504.20 oracle_pop0=1507.72 poll_pop0=1507.64 inotify_pop0=1507.68 reaped=1507.65 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=6 reaped_minus_pop0=-0.07 child_alive_at_pop0=Some(false)
+    SPIKE scen=A2 trial=35 resume=1504.39 oracle_pop0=1507.84 poll_pop0=1507.89 inotify_pop0=1507.88 reaped=1507.90 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.10(errno=0) poll_timeouts=6 reaped_minus_pop0=0.06 child_alive_at_pop0=Some(false)
+    SPIKE scen=A2 trial=36 resume=1504.47 oracle_pop0=1508.00 poll_pop0=1507.92 inotify_pop0=1507.97 reaped=1507.90 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=6 reaped_minus_pop0=-0.10 child_alive_at_pop0=Some(false)
+    SPIKE scen=A2 trial=37 resume=1503.05 oracle_pop0=- poll_pop0=1505.04 inotify_pop0=- reaped=1505.06 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.44(errno=0) poll_timeouts=6 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=A2 trial=38 resume=1503.00 oracle_pop0=1505.08 poll_pop0=1504.96 inotify_pop0=1505.01 reaped=1504.99 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=6 reaped_minus_pop0=-0.09 child_alive_at_pop0=Some(false)
+    SPIKE scen=A2 trial=39 resume=1502.84 oracle_pop0=- poll_pop0=1504.86 inotify_pop0=- reaped=1504.86 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.08(errno=0) poll_timeouts=6 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE leakcheck(a2) cgroup_scopes_left=0 dmsetup_ls=[cgev-a2(252:0)] losetup=[/dev/loop1: [64768]:226 (/tmp/cgev-a2.img);/dev/loop0: [64768]:216 (/var/lib/overdrive-testing/reflink.xfs)]
+    SPIKE stat A2 rmdir duration right after populated 0 (ms): n=20 min=0.07 median=0.11 max=0.44
+    SPIKE verdict A2.rmdir_after_populated0_never_blocks_or_EBUSY: HOLDS violations=0/20 (odd trials rmdir on the waiter's wake)
+    SPIKE stat A2(even, no rmdir) resume->populated0 ms (oracle): n=20 min=2.09 median=3.55 max=3.86
+    SPIKE stat A2(even) oracle_pop0->poll_pop0 ms (poll POLLPRI waiter latency): n=20 min=-0.24 median=-0.13 max=0.05
+    SPIKE stat A2(even) oracle_pop0->inotify_pop0 ms (inotify IN_MODIFY waiter latency): n=20 min=-0.17 median=-0.05 max=0.12
+    SPIKE verdict A2.no_waiter_missed_populated0: HOLDS missed=0/20
+    SPIKE verdict A2.populated0_never_before_resume_while_task_held: HOLDS early=0/20
+    SPIKE stat A2 poll 250ms timeouts while held: min=6 max=6
+    SPIKE stat A2 oracle_pop0->reaped ms: n=31 min=-0.25 median=-0.04 max=0.07
+    SPIKE cleanup dev=cgev-a2 done
+    OVERDRIVE_GUEST_KIT_TIMING group=cgroup-default test=a2_rmdir_immediately_after_populated0 staging_ms=468 boot_ms=2258 total_ms=79488
+        PASS [  45.298s] (2/4) cgroup-events-probe::probe a_held_in_exit_with_concurrent_rmdir
+    SPIKE uname -r = 7.0.0-38-generic
+    SPIKE /proc/version = Linux version 7.0.0-38-generic (buildd@lcy02-amd64-070) (x86_64-linux-gnu-gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0, GNU ld (GNU Binutils for Ubuntu) 2.46) #38-Ubuntu SMP PREEMPT_DYNAMIC Fri Sep  4 09:10:14 UTC 2026
+    SPIKE kallsyms cgroup_drain_dying: []
+    SPIKE kallsyms cgroup_task_dead: ["ffffffffb2e2dcd5 t cgroup_task_dead.cold", "ffffffffb31bc810 T cgroup_task_dead"]
+    SPIKE kallsyms do_cgroup_task_dead: []
+    SPIKE kallsyms cgroup_rmdir: ["ffffffffb31bbcb0 T cgroup_rmdir"]
+    SPIKE kallsyms cgroup_destroy_locked: ["ffffffffb31bb810 t cgroup_destroy_locked"]
+    SPIKE kallsyms cgroup_task_exit: ["ffffffffb31bc750 T cgroup_task_exit"]
+    SPIKE scen=A trial=0 resume=1504.63 oracle_pop0=- poll_pop0=- inotify_pop0=- reaped=1508.10 rmdir_thread_end=1.03(errno=0) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=0 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=A trial=0 PRE-KILL state=S wchan=hrtimer_nanosleep flags=4194368 events=[populated 1;frozen 0;] procs=[190,] dm=[cgev-a:L-sw:1]
+    SPIKE scen=A trial=0 HELD-BEFORE-RESUME state=D wchan=folio_wait_bit_common flags=4195404 events=[ERR No such file or directory (os error 2)] procs=[] rmdir_thread_tasks=[] dm=[cgev-a:L-sw:1] child_cgroup=[0::/cgev.slice/A-0.scope (deleted)]
+    SPIKE scen=A trial=0 timeline      0.21 ms  t_kill
+    SPIKE scen=A trial=0 timeline      0.88 ms  rmdir_thread_start delay=0 pre: state=D wchan=folio_wait_bit_common flags=4195404 events=[populated 1;frozen 0;]
+    SPIKE scen=A trial=0 timeline      1.03 ms  rmdir_thread_end errno=0 post: state=D wchan=folio_wait_bit_common flags=4195404 cgroup_of_child=[0::/cgev.slice/A-0.scope (deleted)]
+    SPIKE scen=A trial=0 timeline    201.04 ms  inotify_gone
+    SPIKE scen=A trial=0 timeline    251.17 ms  poll_gone errno=19
+    SPIKE scen=A trial=0 timeline   1504.63 ms  resume
+    SPIKE scen=A trial=0 timeline   1508.10 ms  reaped sig=9
+    SPIKE scen=A trial=1 resume=1504.49 oracle_pop0=- poll_pop0=- inotify_pop0=- reaped=1507.86 rmdir_thread_end=10.86(errno=0) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=0 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=A trial=1 PRE-KILL state=S wchan=hrtimer_nanosleep flags=4194368 events=[populated 1;frozen 0;] procs=[200,] dm=[cgev-a:L-sw:1]
+    SPIKE scen=A trial=1 HELD-BEFORE-RESUME state=D wchan=folio_wait_bit_common flags=4195404 events=[ERR No such file or directory (os error 2)] procs=[] rmdir_thread_tasks=[] dm=[cgev-a:L-sw:1] child_cgroup=[0::/cgev.slice/A-1.scope (deleted)]
+    SPIKE scen=A trial=1 timeline      0.24 ms  t_kill
+    SPIKE scen=A trial=1 timeline     10.70 ms  rmdir_thread_start delay=10 pre: state=D wchan=folio_wait_bit_common flags=4195404 events=[populated 1;frozen 0;]
+    SPIKE scen=A trial=1 timeline     10.86 ms  rmdir_thread_end errno=0 post: state=D wchan=folio_wait_bit_common flags=4195404 cgroup_of_child=[0::/cgev.slice/A-1.scope (deleted)]
+    SPIKE scen=A trial=1 timeline    200.75 ms  inotify_gone
+    SPIKE scen=A trial=1 timeline    250.88 ms  poll_gone errno=19
+    SPIKE scen=A trial=1 timeline   1504.49 ms  resume
+    SPIKE scen=A trial=1 timeline   1507.86 ms  reaped sig=9
+    SPIKE scen=A trial=2 resume=1504.00 oracle_pop0=- poll_pop0=- inotify_pop0=- reaped=1507.42 rmdir_thread_end=50.95(errno=0) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=0 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=A trial=2 PRE-KILL state=S wchan=hrtimer_nanosleep flags=4194368 events=[populated 1;frozen 0;] procs=[210,] dm=[cgev-a:L-sw:1]
+    SPIKE scen=A trial=2 HELD-BEFORE-RESUME state=D wchan=folio_wait_bit_common flags=4195404 events=[ERR No such file or directory (os error 2)] procs=[] rmdir_thread_tasks=[] dm=[cgev-a:L-sw:1] child_cgroup=[0::/cgev.slice/A-2.scope (deleted)]
+    SPIKE scen=A trial=2 timeline      0.24 ms  t_kill
+    SPIKE scen=A trial=2 timeline     50.79 ms  rmdir_thread_start delay=50 pre: state=D wchan=folio_wait_bit_common flags=4195404 events=[populated 1;frozen 0;]
+    SPIKE scen=A trial=2 timeline     50.95 ms  rmdir_thread_end errno=0 post: state=D wchan=folio_wait_bit_common flags=4195404 cgroup_of_child=[0::/cgev.slice/A-2.scope (deleted)]
+    SPIKE scen=A trial=2 timeline    200.87 ms  inotify_gone
+    SPIKE scen=A trial=2 timeline    250.82 ms  poll_gone errno=19
+    SPIKE scen=A trial=2 timeline   1504.00 ms  resume
+    SPIKE scen=A trial=2 timeline   1507.42 ms  reaped sig=9
+    SPIKE scen=A trial=3 resume=1504.30 oracle_pop0=- poll_pop0=- inotify_pop0=- reaped=1507.88 rmdir_thread_end=500.85(errno=0) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=1 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=A trial=3 PRE-KILL state=S wchan=hrtimer_nanosleep flags=4194368 events=[populated 1;frozen 0;] procs=[221,] dm=[cgev-a:L-sw:1]
+    SPIKE scen=A trial=3 HELD-BEFORE-RESUME state=D wchan=folio_wait_bit_common flags=4195404 events=[ERR No such file or directory (os error 2)] procs=[] rmdir_thread_tasks=[] dm=[cgev-a:L-sw:1] child_cgroup=[0::/cgev.slice/A-3.scope (deleted)]
+    SPIKE scen=A trial=3 timeline      0.24 ms  t_kill
+    SPIKE scen=A trial=3 timeline    250.84 ms  poll_timeout
+    SPIKE scen=A trial=3 timeline    500.67 ms  rmdir_thread_start delay=500 pre: state=D wchan=folio_wait_bit_common flags=4195404 events=[populated 1;frozen 0;]
+    SPIKE scen=A trial=3 timeline    500.85 ms  rmdir_thread_end errno=0 post: state=D wchan=folio_wait_bit_common flags=4195404 cgroup_of_child=[0::/cgev.slice/A-3.scope (deleted)]
+    SPIKE scen=A trial=3 timeline    501.24 ms  poll_gone errno=19
+    SPIKE scen=A trial=3 timeline    601.69 ms  inotify_gone
+    SPIKE scen=A trial=3 timeline   1504.30 ms  resume
+    SPIKE scen=A trial=3 timeline   1507.88 ms  reaped sig=9
+    SPIKE scen=A trial=4 resume=1504.53 oracle_pop0=- poll_pop0=- inotify_pop0=- reaped=1507.52 rmdir_thread_end=0.72(errno=0) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=0 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=A trial=5 resume=1504.09 oracle_pop0=- poll_pop0=- inotify_pop0=- reaped=1507.44 rmdir_thread_end=10.80(errno=0) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=0 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=A trial=6 resume=1504.61 oracle_pop0=- poll_pop0=- inotify_pop0=- reaped=1508.11 rmdir_thread_end=51.02(errno=0) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=0 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=A trial=7 resume=1504.50 oracle_pop0=- poll_pop0=- inotify_pop0=- reaped=1507.96 rmdir_thread_end=501.06(errno=0) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=1 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=A trial=8 resume=1504.38 oracle_pop0=- poll_pop0=- inotify_pop0=- reaped=1507.75 rmdir_thread_end=0.92(errno=0) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=0 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=A trial=9 resume=1504.59 oracle_pop0=- poll_pop0=- inotify_pop0=- reaped=1507.68 rmdir_thread_end=10.74(errno=0) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=0 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=A trial=10 resume=1504.35 oracle_pop0=- poll_pop0=- inotify_pop0=- reaped=1507.77 rmdir_thread_end=51.03(errno=0) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=0 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=A trial=11 resume=1504.45 oracle_pop0=- poll_pop0=- inotify_pop0=- reaped=1507.82 rmdir_thread_end=500.88(errno=0) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=1 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=A trial=12 resume=1504.35 oracle_pop0=- poll_pop0=- inotify_pop0=- reaped=1507.64 rmdir_thread_end=0.99(errno=0) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=0 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=A trial=13 resume=1504.43 oracle_pop0=- poll_pop0=- inotify_pop0=- reaped=1507.83 rmdir_thread_end=10.91(errno=0) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=0 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=A trial=14 resume=1504.46 oracle_pop0=- poll_pop0=- inotify_pop0=- reaped=1508.28 rmdir_thread_end=50.99(errno=0) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=0 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=A trial=15 resume=1504.46 oracle_pop0=- poll_pop0=- inotify_pop0=- reaped=1507.49 rmdir_thread_end=501.09(errno=0) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=1 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=A trial=16 resume=1504.46 oracle_pop0=- poll_pop0=- inotify_pop0=- reaped=1507.76 rmdir_thread_end=0.98(errno=0) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=0 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=A trial=17 resume=1504.60 oracle_pop0=- poll_pop0=- inotify_pop0=- reaped=1508.22 rmdir_thread_end=10.96(errno=0) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=0 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=A trial=18 resume=1508.60 oracle_pop0=- poll_pop0=- inotify_pop0=- reaped=1511.92 rmdir_thread_end=50.94(errno=0) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=0 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=A trial=19 resume=1504.42 oracle_pop0=- poll_pop0=- inotify_pop0=- reaped=1507.61 rmdir_thread_end=500.96(errno=0) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=1 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE leakcheck(a) cgroup_scopes_left=0 dmsetup_ls=[cgev-a(252:0)] losetup=[/dev/loop1: [64768]:226 (/tmp/cgev-a.img);/dev/loop0: [64768]:216 (/var/lib/overdrive-testing/reflink.xfs)]
+    SPIKE verdict A.rmdir_returned_Ok_before_resume_while_task_still_held: HOLDS 20/20
+    SPIKE verdict A.task_still_alive_after_that_rmdir_until_resume: HOLDS 20/20
+    SPIKE stat A rmdir duration (ms, minus its own start delay): n=20 min=0.72 median=0.96 max=1.09
+    SPIKE stat A resume->task reaped ms: n=20 min=2.99 median=3.37 max=3.81
+    SPIKE cleanup dev=cgev-a done
+    OVERDRIVE_GUEST_KIT_TIMING group=cgroup-default test=a_held_in_exit_with_concurrent_rmdir staging_ms=446 boot_ms=2159 total_ms=45291
+        PASS [  28.562s] (3/4) cgroup-events-probe::probe b_held_in_running_write_not_exiting
+    SPIKE uname -r = 7.0.0-38-generic
+    SPIKE /proc/version = Linux version 7.0.0-38-generic (buildd@lcy02-amd64-070) (x86_64-linux-gnu-gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0, GNU ld (GNU Binutils for Ubuntu) 2.46) #38-Ubuntu SMP PREEMPT_DYNAMIC Fri Sep  4 09:10:14 UTC 2026
+    SPIKE kallsyms cgroup_drain_dying: []
+    SPIKE kallsyms cgroup_task_dead: ["ffffffff84c2dcd5 t cgroup_task_dead.cold", "ffffffff84fbc810 T cgroup_task_dead"]
+    SPIKE kallsyms do_cgroup_task_dead: []
+    SPIKE kallsyms cgroup_rmdir: ["ffffffff84fbbcb0 T cgroup_rmdir"]
+    SPIKE kallsyms cgroup_destroy_locked: ["ffffffff84fbb810 t cgroup_destroy_locked"]
+    SPIKE kallsyms cgroup_task_exit: ["ffffffff84fbc750 T cgroup_task_exit"]
+    SPIKE scen=B trial=0 resume=1504.51 oracle_pop0=1508.02 poll_pop0=1508.01 inotify_pop0=1508.12 reaped=1508.00 rmdir_thread_end=51.23(errno=16) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=6 reaped_minus_pop0=-0.01 child_alive_at_pop0=Some(false)
+    SPIKE scen=B trial=0 PRE-KILL state=D wchan=submit_bio_wait flags=4194368 events=[populated 1;frozen 0;] procs=[188,] dm=[cgev-b:L-sw:1]
+    SPIKE scen=B trial=0 HELD-BEFORE-RESUME state=D wchan=submit_bio_wait flags=4194368 events=[populated 1;frozen 0;] procs=[188,] rmdir_thread_tasks=[] dm=[cgev-b:L-sw:1] child_cgroup=[0::/cgev.slice/B-0.scope]
+    SPIKE scen=B trial=0 timeline      0.42 ms  t_kill
+    SPIKE scen=B trial=0 timeline     51.10 ms  rmdir_thread_start delay=50 pre: state=D wchan=submit_bio_wait flags=4194368 events=[populated 1;frozen 0;]
+    SPIKE scen=B trial=0 timeline     51.23 ms  rmdir_thread_end errno=16 post: state=D wchan=submit_bio_wait flags=4194368 cgroup_of_child=[0::/cgev.slice/B-0.scope]
+    SPIKE scen=B trial=0 timeline    251.00 ms  poll_timeout
+    SPIKE scen=B trial=0 timeline    501.39 ms  poll_timeout
+    SPIKE scen=B trial=0 timeline    751.80 ms  poll_timeout
+    SPIKE scen=B trial=0 timeline   1002.22 ms  poll_timeout
+    SPIKE scen=B trial=0 timeline   1252.61 ms  poll_timeout
+    SPIKE scen=B trial=0 timeline   1503.03 ms  poll_timeout
+    SPIKE scen=B trial=0 timeline   1504.51 ms  resume
+    SPIKE scen=B trial=0 timeline   1508.00 ms  reaped sig=9
+    SPIKE scen=B trial=0 timeline   1508.01 ms  poll_pop0
+    SPIKE scen=B trial=0 timeline   1508.12 ms  inotify_pop0
+    SPIKE scen=B trial=1 resume=1504.38 oracle_pop0=1507.90 poll_pop0=1507.90 inotify_pop0=1507.97 reaped=1507.98 rmdir_thread_end=51.01(errno=16) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=6 reaped_minus_pop0=0.08 child_alive_at_pop0=Some(false)
+    SPIKE scen=B trial=1 PRE-KILL state=D wchan=submit_bio_wait flags=4194368 events=[populated 1;frozen 0;] procs=[198,] dm=[cgev-b:L-sw:1]
+    SPIKE scen=B trial=1 HELD-BEFORE-RESUME state=D wchan=submit_bio_wait flags=4194368 events=[populated 1;frozen 0;] procs=[198,] rmdir_thread_tasks=[] dm=[cgev-b:L-sw:1] child_cgroup=[0::/cgev.slice/B-1.scope]
+    SPIKE scen=B trial=1 timeline      0.27 ms  t_kill
+    SPIKE scen=B trial=1 timeline     50.92 ms  rmdir_thread_start delay=50 pre: state=D wchan=submit_bio_wait flags=4194368 events=[populated 1;frozen 0;]
+    SPIKE scen=B trial=1 timeline     51.01 ms  rmdir_thread_end errno=16 post: state=D wchan=submit_bio_wait flags=4194368 cgroup_of_child=[0::/cgev.slice/B-1.scope]
+    SPIKE scen=B trial=1 timeline    250.77 ms  poll_timeout
+    SPIKE scen=B trial=1 timeline    501.17 ms  poll_timeout
+    SPIKE scen=B trial=1 timeline    751.58 ms  poll_timeout
+    SPIKE scen=B trial=1 timeline   1001.98 ms  poll_timeout
+    SPIKE scen=B trial=1 timeline   1252.37 ms  poll_timeout
+    SPIKE scen=B trial=1 timeline   1502.76 ms  poll_timeout
+    SPIKE scen=B trial=1 timeline   1504.38 ms  resume
+    SPIKE scen=B trial=1 timeline   1507.90 ms  poll_pop0
+    SPIKE scen=B trial=1 timeline   1507.97 ms  inotify_pop0
+    SPIKE scen=B trial=1 timeline   1507.98 ms  reaped sig=9
+    SPIKE scen=B trial=2 resume=1504.52 oracle_pop0=1507.85 poll_pop0=1507.89 inotify_pop0=1507.95 reaped=1507.90 rmdir_thread_end=50.86(errno=16) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=6 reaped_minus_pop0=0.05 child_alive_at_pop0=Some(false)
+    SPIKE scen=B trial=2 PRE-KILL state=D wchan=submit_bio_wait flags=4194368 events=[populated 1;frozen 0;] procs=[209,] dm=[cgev-b:L-sw:1]
+    SPIKE scen=B trial=2 HELD-BEFORE-RESUME state=D wchan=submit_bio_wait flags=4194368 events=[populated 1;frozen 0;] procs=[209,] rmdir_thread_tasks=[] dm=[cgev-b:L-sw:1] child_cgroup=[0::/cgev.slice/B-2.scope]
+    SPIKE scen=B trial=2 timeline      0.25 ms  t_kill
+    SPIKE scen=B trial=2 timeline     50.76 ms  rmdir_thread_start delay=50 pre: state=D wchan=submit_bio_wait flags=4194368 events=[populated 1;frozen 0;]
+    SPIKE scen=B trial=2 timeline     50.86 ms  rmdir_thread_end errno=16 post: state=D wchan=submit_bio_wait flags=4194368 cgroup_of_child=[0::/cgev.slice/B-2.scope]
+    SPIKE scen=B trial=2 timeline    250.72 ms  poll_timeout
+    SPIKE scen=B trial=2 timeline    501.10 ms  poll_timeout
+    SPIKE scen=B trial=2 timeline    751.49 ms  poll_timeout
+    SPIKE scen=B trial=2 timeline   1001.89 ms  poll_timeout
+    SPIKE scen=B trial=2 timeline   1252.28 ms  poll_timeout
+    SPIKE scen=B trial=2 timeline   1502.68 ms  poll_timeout
+    SPIKE scen=B trial=2 timeline   1504.52 ms  resume
+    SPIKE scen=B trial=2 timeline   1507.89 ms  poll_pop0
+    SPIKE scen=B trial=2 timeline   1507.90 ms  reaped sig=9
+    SPIKE scen=B trial=2 timeline   1507.95 ms  inotify_pop0
+    SPIKE scen=B trial=3 resume=1504.32 oracle_pop0=1508.25 poll_pop0=1508.09 inotify_pop0=1508.14 reaped=1508.12 rmdir_thread_end=50.91(errno=16) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=6 reaped_minus_pop0=-0.13 child_alive_at_pop0=Some(false)
+    SPIKE scen=B trial=3 PRE-KILL state=D wchan=submit_bio_wait flags=4194368 events=[populated 1;frozen 0;] procs=[221,] dm=[cgev-b:L-sw:1]
+    SPIKE scen=B trial=3 HELD-BEFORE-RESUME state=D wchan=submit_bio_wait flags=4194368 events=[populated 1;frozen 0;] procs=[221,] rmdir_thread_tasks=[] dm=[cgev-b:L-sw:1] child_cgroup=[0::/cgev.slice/B-3.scope]
+    SPIKE scen=B trial=3 timeline      0.21 ms  t_kill
+    SPIKE scen=B trial=3 timeline     50.80 ms  rmdir_thread_start delay=50 pre: state=D wchan=submit_bio_wait flags=4194368 events=[populated 1;frozen 0;]
+    SPIKE scen=B trial=3 timeline     50.91 ms  rmdir_thread_end errno=16 post: state=D wchan=submit_bio_wait flags=4194368 cgroup_of_child=[0::/cgev.slice/B-3.scope]
+    SPIKE scen=B trial=3 timeline    250.72 ms  poll_timeout
+    SPIKE scen=B trial=3 timeline    501.12 ms  poll_timeout
+    SPIKE scen=B trial=3 timeline    751.52 ms  poll_timeout
+    SPIKE scen=B trial=3 timeline   1001.90 ms  poll_timeout
+    SPIKE scen=B trial=3 timeline   1252.27 ms  poll_timeout
+    SPIKE scen=B trial=3 timeline   1502.70 ms  poll_timeout
+    SPIKE scen=B trial=3 timeline   1504.32 ms  resume
+    SPIKE scen=B trial=3 timeline   1508.09 ms  poll_pop0
+    SPIKE scen=B trial=3 timeline   1508.12 ms  reaped sig=9
+    SPIKE scen=B trial=3 timeline   1508.14 ms  inotify_pop0
+    SPIKE scen=B trial=4 resume=1504.38 oracle_pop0=1508.05 poll_pop0=1507.96 inotify_pop0=1508.07 reaped=1507.93 rmdir_thread_end=50.84(errno=16) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=6 reaped_minus_pop0=-0.12 child_alive_at_pop0=Some(false)
+    SPIKE scen=B trial=5 resume=1504.42 oracle_pop0=1508.05 poll_pop0=1508.03 inotify_pop0=1508.11 reaped=1508.05 rmdir_thread_end=50.89(errno=16) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=6 reaped_minus_pop0=-0.01 child_alive_at_pop0=Some(false)
+    SPIKE scen=B trial=6 resume=1504.35 oracle_pop0=1507.94 poll_pop0=1507.97 inotify_pop0=1508.03 reaped=1507.94 rmdir_thread_end=50.87(errno=16) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=6 reaped_minus_pop0=-0.00 child_alive_at_pop0=Some(false)
+    SPIKE scen=B trial=7 resume=1504.51 oracle_pop0=1507.77 poll_pop0=1507.79 inotify_pop0=1507.79 reaped=1507.75 rmdir_thread_end=50.90(errno=16) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=6 reaped_minus_pop0=-0.02 child_alive_at_pop0=Some(false)
+    SPIKE scen=B trial=8 resume=1504.19 oracle_pop0=1507.96 poll_pop0=1507.87 inotify_pop0=1507.94 reaped=1507.88 rmdir_thread_end=50.93(errno=16) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=6 reaped_minus_pop0=-0.08 child_alive_at_pop0=Some(false)
+    SPIKE scen=B trial=9 resume=1504.39 oracle_pop0=1507.75 poll_pop0=1507.66 inotify_pop0=1507.73 reaped=1507.60 rmdir_thread_end=50.86(errno=16) after_pop0_rmdir_dur=-(errno=-) poll_timeouts=6 reaped_minus_pop0=-0.15 child_alive_at_pop0=Some(false)
+    SPIKE leakcheck(b) cgroup_scopes_left=0 dmsetup_ls=[cgev-b(252:0)] losetup=[/dev/loop1: [64768]:226 (/tmp/cgev-b.img);/dev/loop0: [64768]:216 (/var/lib/overdrive-testing/reflink.xfs)]
+    SPIKE verdict B.rmdir_EBUSY_while_task_visible: HOLDS EBUSY=10/10
+    SPIKE verdict B.populated_stays_1_until_resume: HOLDS 
+    SPIKE stat B resume->oracle_pop0 ms: n=10 min=3.26 median=3.59 max=3.93
+    SPIKE cleanup dev=cgev-b done
+    OVERDRIVE_GUEST_KIT_TIMING group=cgroup-default test=b_held_in_running_write_not_exiting staging_ms=432 boot_ms=2173 total_ms=28555
+        PASS [  18.752s] (4/4) cgroup-events-probe::probe c_control_without_held_io
+    SPIKE uname -r = 7.0.0-38-generic
+    SPIKE /proc/version = Linux version 7.0.0-38-generic (buildd@lcy02-amd64-070) (x86_64-linux-gnu-gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0, GNU ld (GNU Binutils for Ubuntu) 2.46) #38-Ubuntu SMP PREEMPT_DYNAMIC Fri Sep  4 09:10:14 UTC 2026
+    SPIKE kallsyms cgroup_drain_dying: []
+    SPIKE kallsyms cgroup_task_dead: ["ffffffff96a2dcd5 t cgroup_task_dead.cold", "ffffffff96dbc810 T cgroup_task_dead"]
+    SPIKE kallsyms do_cgroup_task_dead: []
+    SPIKE kallsyms cgroup_rmdir: ["ffffffff96dbbcb0 T cgroup_rmdir"]
+    SPIKE kallsyms cgroup_destroy_locked: ["ffffffff96dbb810 t cgroup_destroy_locked"]
+    SPIKE kallsyms cgroup_task_exit: ["ffffffff96dbc750 T cgroup_task_exit"]
+    SPIKE scen=C trial=0 resume=- oracle_pop0=- poll_pop0=1.12 inotify_pop0=1.22 reaped=1.12 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.16(errno=0) poll_timeouts=0 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=C trial=0 PRE-KILL state=S wchan=hrtimer_nanosleep flags=4194368 events=[populated 1;frozen 0;] procs=[186,] dm=[cgev-c:L--w:1]
+    SPIKE scen=C trial=0 HELD-BEFORE-RESUME 
+    SPIKE scen=C trial=0 timeline      0.31 ms  t_kill
+    SPIKE scen=C trial=0 timeline      1.12 ms  poll_pop0
+    SPIKE scen=C trial=0 timeline      1.12 ms  rmdir_after_pop0_start
+    SPIKE scen=C trial=0 timeline      1.12 ms  reaped sig=9
+    SPIKE scen=C trial=0 timeline      1.22 ms  inotify_pop0
+    SPIKE scen=C trial=0 timeline      1.28 ms  rmdir_after_pop0_end errno=0
+    SPIKE scen=C trial=0 timeline      1.29 ms  rmdir_after_pop0_dur 0.164
+    SPIKE scen=C trial=1 resume=- oracle_pop0=0.89 poll_pop0=0.89 inotify_pop0=0.93 reaped=0.90 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.08(errno=0) poll_timeouts=0 reaped_minus_pop0=0.01 child_alive_at_pop0=Some(false)
+    SPIKE scen=C trial=1 PRE-KILL state=S wchan=hrtimer_nanosleep flags=4194368 events=[populated 1;frozen 0;] procs=[192,] dm=[cgev-c:L--w:1]
+    SPIKE scen=C trial=1 HELD-BEFORE-RESUME 
+    SPIKE scen=C trial=1 timeline      0.18 ms  t_kill
+    SPIKE scen=C trial=1 timeline      0.89 ms  poll_pop0
+    SPIKE scen=C trial=1 timeline      0.90 ms  rmdir_after_pop0_start
+    SPIKE scen=C trial=1 timeline      0.90 ms  reaped sig=9
+    SPIKE scen=C trial=1 timeline      0.93 ms  inotify_pop0
+    SPIKE scen=C trial=1 timeline      0.97 ms  rmdir_after_pop0_end errno=0
+    SPIKE scen=C trial=1 timeline      0.98 ms  rmdir_after_pop0_dur 0.079
+    SPIKE scen=C trial=2 resume=- oracle_pop0=0.98 poll_pop0=0.96 inotify_pop0=- reaped=0.96 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.16(errno=0) poll_timeouts=0 reaped_minus_pop0=-0.01 child_alive_at_pop0=Some(false)
+    SPIKE scen=C trial=2 PRE-KILL state=S wchan=hrtimer_nanosleep flags=4194368 events=[populated 1;frozen 0;] procs=[198,] dm=[cgev-c:L--w:1]
+    SPIKE scen=C trial=2 HELD-BEFORE-RESUME 
+    SPIKE scen=C trial=2 timeline      0.23 ms  t_kill
+    SPIKE scen=C trial=2 timeline      0.96 ms  poll_pop0
+    SPIKE scen=C trial=2 timeline      0.96 ms  rmdir_after_pop0_start
+    SPIKE scen=C trial=2 timeline      0.96 ms  reaped sig=9
+    SPIKE scen=C trial=2 timeline      1.04 ms  inotify_gone
+    SPIKE scen=C trial=2 timeline      1.12 ms  rmdir_after_pop0_end errno=0
+    SPIKE scen=C trial=2 timeline      1.13 ms  rmdir_after_pop0_dur 0.160
+    SPIKE scen=C trial=3 resume=- oracle_pop0=- poll_pop0=0.87 inotify_pop0=0.90 reaped=0.88 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.08(errno=0) poll_timeouts=0 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=C trial=3 PRE-KILL state=S wchan=hrtimer_nanosleep flags=4194368 events=[populated 1;frozen 0;] procs=[204,] dm=[cgev-c:L--w:1]
+    SPIKE scen=C trial=3 HELD-BEFORE-RESUME 
+    SPIKE scen=C trial=3 timeline      0.19 ms  t_kill
+    SPIKE scen=C trial=3 timeline      0.87 ms  poll_pop0
+    SPIKE scen=C trial=3 timeline      0.87 ms  rmdir_after_pop0_start
+    SPIKE scen=C trial=3 timeline      0.88 ms  reaped sig=9
+    SPIKE scen=C trial=3 timeline      0.90 ms  inotify_pop0
+    SPIKE scen=C trial=3 timeline      0.95 ms  rmdir_after_pop0_end errno=0
+    SPIKE scen=C trial=3 timeline      0.95 ms  rmdir_after_pop0_dur 0.081
+    SPIKE scen=C trial=4 resume=- oracle_pop0=- poll_pop0=0.93 inotify_pop0=- reaped=0.92 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.15(errno=0) poll_timeouts=0 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=C trial=5 resume=- oracle_pop0=- poll_pop0=0.90 inotify_pop0=- reaped=0.90 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.12(errno=0) poll_timeouts=0 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=C trial=6 resume=- oracle_pop0=- poll_pop0=0.94 inotify_pop0=- reaped=0.94 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.27(errno=0) poll_timeouts=0 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=C trial=7 resume=- oracle_pop0=0.97 poll_pop0=0.95 inotify_pop0=- reaped=0.93 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.13(errno=0) poll_timeouts=0 reaped_minus_pop0=-0.04 child_alive_at_pop0=Some(false)
+    SPIKE scen=C trial=8 resume=- oracle_pop0=0.95 poll_pop0=0.96 inotify_pop0=1.00 reaped=0.95 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.09(errno=0) poll_timeouts=0 reaped_minus_pop0=-0.00 child_alive_at_pop0=Some(false)
+    SPIKE scen=C trial=9 resume=- oracle_pop0=- poll_pop0=0.97 inotify_pop0=- reaped=0.98 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.08(errno=0) poll_timeouts=0 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=C trial=10 resume=- oracle_pop0=- poll_pop0=0.89 inotify_pop0=0.95 reaped=0.90 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.12(errno=0) poll_timeouts=0 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=C trial=11 resume=- oracle_pop0=- poll_pop0=0.92 inotify_pop0=- reaped=0.91 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.14(errno=0) poll_timeouts=0 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=C trial=12 resume=- oracle_pop0=- poll_pop0=1.01 inotify_pop0=1.05 reaped=1.00 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.17(errno=0) poll_timeouts=0 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=C trial=13 resume=- oracle_pop0=1.00 poll_pop0=0.95 inotify_pop0=- reaped=0.95 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.13(errno=0) poll_timeouts=0 reaped_minus_pop0=-0.06 child_alive_at_pop0=Some(false)
+    SPIKE scen=C trial=14 resume=- oracle_pop0=- poll_pop0=0.89 inotify_pop0=0.95 reaped=0.90 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.09(errno=0) poll_timeouts=0 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=C trial=15 resume=- oracle_pop0=0.93 poll_pop0=0.90 inotify_pop0=- reaped=0.89 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.10(errno=0) poll_timeouts=0 reaped_minus_pop0=-0.03 child_alive_at_pop0=Some(false)
+    SPIKE scen=C trial=16 resume=- oracle_pop0=- poll_pop0=1.00 inotify_pop0=- reaped=1.01 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.16(errno=0) poll_timeouts=0 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=C trial=17 resume=- oracle_pop0=0.95 poll_pop0=0.98 inotify_pop0=- reaped=0.97 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.13(errno=0) poll_timeouts=0 reaped_minus_pop0=0.03 child_alive_at_pop0=Some(false)
+    SPIKE scen=C trial=18 resume=- oracle_pop0=- poll_pop0=0.97 inotify_pop0=- reaped=0.97 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.17(errno=0) poll_timeouts=0 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=C trial=19 resume=- oracle_pop0=- poll_pop0=1.00 inotify_pop0=- reaped=1.06 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.11(errno=0) poll_timeouts=0 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=C trial=20 resume=- oracle_pop0=- poll_pop0=1.08 inotify_pop0=1.11 reaped=1.06 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.08(errno=0) poll_timeouts=0 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=C trial=21 resume=- oracle_pop0=- poll_pop0=0.96 inotify_pop0=- reaped=0.97 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.18(errno=0) poll_timeouts=0 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=C trial=22 resume=- oracle_pop0=1.03 poll_pop0=0.98 inotify_pop0=- reaped=0.98 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.15(errno=0) poll_timeouts=0 reaped_minus_pop0=-0.05 child_alive_at_pop0=Some(false)
+    SPIKE scen=C trial=23 resume=- oracle_pop0=- poll_pop0=0.95 inotify_pop0=0.99 reaped=0.93 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.13(errno=0) poll_timeouts=0 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=C trial=24 resume=- oracle_pop0=1.06 poll_pop0=1.00 inotify_pop0=- reaped=1.00 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.13(errno=0) poll_timeouts=0 reaped_minus_pop0=-0.06 child_alive_at_pop0=Some(false)
+    SPIKE scen=C trial=25 resume=- oracle_pop0=- poll_pop0=0.90 inotify_pop0=- reaped=0.93 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.15(errno=0) poll_timeouts=0 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=C trial=26 resume=- oracle_pop0=- poll_pop0=0.90 inotify_pop0=- reaped=0.88 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.11(errno=0) poll_timeouts=0 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=C trial=27 resume=- oracle_pop0=- poll_pop0=0.90 inotify_pop0=- reaped=0.87 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.11(errno=0) poll_timeouts=0 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=C trial=28 resume=- oracle_pop0=0.91 poll_pop0=0.93 inotify_pop0=- reaped=0.94 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.15(errno=0) poll_timeouts=0 reaped_minus_pop0=0.03 child_alive_at_pop0=Some(false)
+    SPIKE scen=C trial=29 resume=- oracle_pop0=- poll_pop0=0.84 inotify_pop0=0.86 reaped=0.82 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.10(errno=0) poll_timeouts=0 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=C trial=30 resume=- oracle_pop0=- poll_pop0=0.99 inotify_pop0=1.03 reaped=0.99 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.08(errno=0) poll_timeouts=0 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=C trial=31 resume=- oracle_pop0=- poll_pop0=1.02 inotify_pop0=- reaped=1.02 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.12(errno=0) poll_timeouts=0 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=C trial=32 resume=- oracle_pop0=- poll_pop0=0.88 inotify_pop0=- reaped=0.87 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.10(errno=0) poll_timeouts=0 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=C trial=33 resume=- oracle_pop0=- poll_pop0=0.92 inotify_pop0=- reaped=0.92 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.12(errno=0) poll_timeouts=0 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=C trial=34 resume=- oracle_pop0=- poll_pop0=0.91 inotify_pop0=- reaped=0.90 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.21(errno=0) poll_timeouts=0 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=C trial=35 resume=- oracle_pop0=- poll_pop0=1.02 inotify_pop0=- reaped=1.03 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.09(errno=0) poll_timeouts=0 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=C trial=36 resume=- oracle_pop0=- poll_pop0=0.93 inotify_pop0=- reaped=0.93 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.14(errno=0) poll_timeouts=0 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=C trial=37 resume=- oracle_pop0=1.03 poll_pop0=1.04 inotify_pop0=1.11 reaped=1.03 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.12(errno=0) poll_timeouts=0 reaped_minus_pop0=0.00 child_alive_at_pop0=Some(false)
+    SPIKE scen=C trial=38 resume=- oracle_pop0=- poll_pop0=0.96 inotify_pop0=1.01 reaped=0.97 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.12(errno=0) poll_timeouts=0 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE scen=C trial=39 resume=- oracle_pop0=- poll_pop0=1.05 inotify_pop0=1.11 reaped=1.04 rmdir_thread_end=-(errno=-) after_pop0_rmdir_dur=0.12(errno=0) poll_timeouts=0 reaped_minus_pop0=- child_alive_at_pop0=None
+    SPIKE leakcheck(c) cgroup_scopes_left=0 dmsetup_ls=[cgev-c(252:0)] losetup=[/dev/loop1: [64768]:226 (/tmp/cgev-c.img);/dev/loop0: [64768]:216 (/var/lib/overdrive-testing/reflink.xfs)]
+    SPIKE stat C kill->populated0 ms: n=11 min=0.89 median=0.97 max=1.06
+    SPIKE stat C oracle_pop0->poll_pop0 ms: n=11 min=-0.06 median=-0.02 max=0.04
+    SPIKE stat C rmdir duration after populated 0 (ms): n=40 min=0.08 median=0.12 max=0.27
+    SPIKE verdict C.rmdir_after_populated0_never_blocks_or_EBUSY: HOLDS violations=0/40
+    SPIKE cleanup dev=cgev-c done
+    OVERDRIVE_GUEST_KIT_TIMING group=cgroup-default test=c_control_without_held_io staging_ms=448 boot_ms=2142 total_ms=18743
+     Summary [ 172.112s] 4 tests run: 4 passed (1 slow), 0 skipped
