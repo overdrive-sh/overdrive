@@ -95,5 +95,6 @@ removal order is ADR-0349.)
   release and the scope's removal after it is empty (feature-delta, same section, item 11).
 - ADR-0156 is amended: the lease is released after the VMM is reaped, not merely after the stop.
 - After a `KilledNotReaped` stop `VmDriver::stop` does not remove the scope (it is known to be populated); `VmReclamation` removes it after
-  the reap. On a reaped stop the driver's scope removal must be the populated-first removal of ADR-0349 (proposed: through `kill_scope`;
-  awaiting the user's ruling, feature-delta N-1).
+  the reap. On a reaped stop, and in the start-failure cleanup, the driver removes the scope through `kill_scope`, the populated-first
+  removal of ADR-0349 (user ruling 2026-11-23, N-1, option a), so `kill_scope` is the only remover of a VM scope. A `ResourceBusy` from it
+  does not change the stop: it completes, and the scope is left to `VmReclamation`.

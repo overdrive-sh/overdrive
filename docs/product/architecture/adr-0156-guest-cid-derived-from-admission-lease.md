@@ -161,6 +161,14 @@ code and this section states what changes.
 - **One derivation.** The CID is still computed in exactly one place: the
   pool's offset-to-plan derivation, which `assign` and the boot reservation
   both use.
+- **The address is on record before the VMM.** Approved by the user on
+  2026-11-23 (ruling N-2). After `assign` hands out an offset and the network
+  is provisioned, and before the VMM can be created, the allocation's row is
+  written in the existing `Pending` state with `workload_addr` set; every later
+  row of the allocation carries it forward. Boot reads the offset to reserve
+  from that row, so every VMM that can hold a CID has its address on record,
+  including a launch parked in guest boot at a crash. The VMM's command line is
+  not read. The row's persisted format does not change.
 
 The contract is in the feature delta of the node-local persistent volume,
 § *Boot proceeds past a stuck VM*. Alternatives are recorded in ADR-0350.

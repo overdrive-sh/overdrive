@@ -4,7 +4,8 @@
 
 **Accepted** 2026-11-23 (decision RB-3 of the node-local persistent volume feature, GH #348; the user's ruling of 2026-11-23, decision 13,
 option a; the mechanism was revised by the user's ruling of the same day, decision 16: the wait is on "the cgroup is empty", not on
-"the cgroup is gone"). Not implemented, so the text is in the present tense. The interface contract is pinned in
+"the cgroup is gone"; the VM driver's own scope cleanup goes through `kill_scope` by ruling N-1, and the boot executor step writes the
+terminal row of a busy scope by ruling N-3, both of 2026-11-23). Not implemented, so the text is in the present tense. The interface contract is pinned in
 [`feature-delta.md`](../../feature/node-local-persistent-volume/feature-delta.md) § "A scope kill's settle wait is bounded". The evidence is
 [`spike/findings-cgroup-events.md`](../../feature/node-local-persistent-volume/spike/findings-cgroup-events.md).
 
@@ -45,16 +46,22 @@ wait is the only pacing on that retry.
 **A removed VM scope is a proof of an empty scope, because the one removal path is the one that waited.** `kill_scope` is the only remover
 of a VM allocation's scope. A reader that sees the scope absent (the guest-address lease gate, ADR-0348) may therefore treat absence as "the
 scope was empty and removed". A removal that skipped the wait would break that reading; the appliance has no foreign remover. The VM
-driver's own cleanup today removes the scope with a bare `rmdir`; moving it onto `kill_scope` is proposed and awaits the user's ruling
-(feature-delta, ruling N-1).
+driver's own cleanup, at a stop and at a start failure, goes through `kill_scope` too, so it cannot remove a populated scope. On a
+`ResourceBusy` from it the stop still completes (ADR-0348), the run directory and the clone are still removed, and the scope is left to
+`VmReclamation` (user ruling 2026-11-23, N-1, option a).
 
 Callers treat busy as "not settled, try again later" and take no further step on that scope (no artifact discard). The boot reclamation
-executor step is the one exception: it writes the allocation's terminal row, because the kill is delivered (proposed, ruling N-3 in the
-feature-delta):
+executor step is the one exception: it writes the allocation's terminal row, because the kill is delivered (user ruling 2026-11-23, N-3,
+option a; ADR-0350):
 
 - **`VmReclamation`** (the steady-state tick) returns the error as it does for any substrate failure; the target is re-evaluated by the
   existing requeue and the 30 s resync pass. Other allocations' actions in the same tick are still dispatched.
-- **Boot reclamation** waits the bound per leftover scope, in parallel, and does not refuse the boot on a busy scope: ADR-0350.
+- **Boot reclamation** waits the bound per leftover scope, in parallel, and does not refuse the boot on a busy scope: ADR-0350. Its executor
+  step writes the terminal row (the kill is delivered, so the VMM can run no guest code) and leaves the artifact discard to `VmReclamation`.
+  This is the one caller exempt from "busy means no row write".
+- **The VM driver's cleanup** (`VmDriver::stop` on a reaped stop, start-failure and boot-race cleanup) calls `kill_scope` in place of its own
+  `cgroup.kill` and bare removal. `ResourceBusy` there is the best effort the cleanup already is: nothing is returned for it and the stop is
+  unchanged. After a `KilledNotReaped` stop the driver does not call it (the scope is known to be populated).
 - **Guest-address lease release** (ADR-0348, ADR-0156) is gated on the scope being removed, so a busy scope keeps its lease held.
 
 ## Alternatives considered
@@ -70,6 +77,10 @@ feature-delta):
   `io::Result` for every method, and no caller needs more than the kind.
 - **Return busy at once when the scope is not empty.** Rejected: it makes the busy return instantaneous, and with the immediate requeue the
   `node/<id>` target spins.
+- **Make `CgroupManager::remove_workload_scope` populated-first as well, leaving the driver's removal in place.** Rejected by the user (N-1):
+  two implementations of one discipline; a drift in either breaks the lease gate.
+- **The driver stops removing VM scopes and `VmReclamation` is the only remover.** Rejected by the user (N-1): every ordinary stop would keep
+  its lease slot until the 30 s pass.
 - **A pacing field in `VmReclamation`'s View.** Rejected: it adds state to defend a retry that the bounded wait already paces, and a View field
   never decides whether the scope is gone (`reconcilers.md` § "A View decides when to act").
 

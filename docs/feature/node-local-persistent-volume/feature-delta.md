@@ -489,8 +489,7 @@ zero grace) and the failed EXEC release (`:2315`, zero grace).
    `vm.lifecycle.stop_not_reaped` (allocation id, pid), writes the beacon writer's `vmm_has_exited` as for any `terminate` completion, runs
    `cleanup_driver_artifacts` in the same order (`cgroup.kill`, scope removal, run directory, clone then index link), except that on
    `KilledNotReaped` it does not remove the scope: the process is not reaped, so the scope is populated by definition, and `VmReclamation`
-   removes it after the reap (item 9). On a reaped stop the driver's scope removal goes through `kill_scope` and its populated-first order (§ "A scope kill's settle wait is bounded", decision 16, ruling N-1
-   proposed), and a `ResourceBusy` from it is the best effort the cleanup already is. The driver does not touch the guest
+   removes it after the reap (item 9). On a reaped stop the driver's scope removal goes through `kill_scope` and its populated-first order (§ "A scope kill's settle wait is bounded", decision 16, ruling N-1, approved 2026-11-23), and a `ResourceBusy` from it is the best effort the cleanup already is: the stop completes and the scope is left to `VmReclamation`. The driver does not touch the guest
    lease; the shim holds it (item 11). `status()` is `Err(NotFound)` (the
    entry is `EndingInFlight`, as for every stop); the entry stays `EndingInFlight` until the shim's `release_supervision`. No new
    `DriverError`: the return type of `Driver::stop` is unchanged. The `Driver::stop` contract says: on `Ok`, the VMM has been killed and is
@@ -535,8 +534,8 @@ zero grace) and the failed EXEC release (`:2315`, zero grace).
       on neither. It depends on this: `cgroup.events` `populated` stays 1 until the task is gone and reads 0 only after (0/20 early, 0/20
       missed; `cgroup_is_populated`, `:3817-3824`; `do_cgroup_task_dead`, `:7072-7101 @ v7.0`), and a removal entered after `populated 0` neither
       sleeps nor fails (60/60). So the **gate** is: *the scope is absent from `observe()`, and every removal of a workload scope in Overdrive is
-      the populated-first removal*. Today the VM driver's own cleanup (`vm_driver.rs:1322`, `:1738`) is a second, bare `rmdir`; the proposed
-      fix (ruling N-1, § "A scope kill's settle wait is bounded", item 4) makes `RealVmHostState::kill_scope` the only remover of a VM scope.
+      the populated-first removal*. Today the VM driver's own cleanup (`vm_driver.rs:1322`, `:1738`) is a second, bare `rmdir`; ruling N-1
+      (approved 2026-11-23, § "A scope kill's settle wait is bounded", item 4) makes `RealVmHostState::kill_scope` the only remover of a VM scope.
       A removal outside it (the appliance has no foreign remover) would break the gate. The shim reads the resource, not the
       stop's outcome: it needs no signal from `Driver::stop`, and it is right if the process is reaped a moment after the bound.
     - *The mechanism, one function.* Every release goes through `teardown_guest_network`; the stop, the restart predecessor and successor
@@ -668,12 +667,22 @@ on "removed").**
      its own bound; a scope that empties during the wait returns `Ok` without waiting out the bound; a non-`ResourceBusy` error is returned
      at once.
    - *Errors:* `ResourceBusy` is the only kind a caller retries; any other kind is a refusal (`PermissionDenied`, `EIO`).
-   - *A VM scope has one remover (PROPOSED, awaiting the user's ruling N-1).* The VM driver also removes the scope at a stop and at a
+   - *A VM scope has one remover (user ruling 2026-11-23, N-1, option a).* The VM driver also removed the scope at a stop and at a
      start-failure cleanup (`cleanup_driver_artifacts`, `vm_driver.rs:1738`; `:1322`): `cgroup.kill` then
      `CgroupManager::remove_workload_scope`, a bare `rmdir` with no wait, which on the running kernel removes a scope under a live task. The
-     lease gate needs every removal of a VM scope to be populated-first. Proposed: the driver removes a VM's scope through
-     `VmHostState::kill_scope` (given to `VmDriver` as a required constructor parameter), so `kill_scope` is the only remover of a VM scope;
-     `remove_workload_scope` stays for exec scopes, which hold no guest device and are outside the lease gate.
+     lease gate needs every removal of a VM scope to be populated-first. **The contract change:** `VmDriver` takes `Arc<dyn VmHostState>` as a
+     required constructor parameter (no default, per `development.md` § "Port-trait dependencies"), and `cleanup_driver_artifacts`
+     replaces its `cgroup.kill` write and its `remove_workload_scope` call for a VM scope with one `VmHostState::kill_scope` call. After the
+     change `kill_scope` is the only remover of a VM scope. `remove_workload_scope` stays for exec scopes, which hold no guest device and
+     are outside the lease gate; the driver's VM path no longer calls it. The same function serves the stop and the start-failure cleanup.
+     *How `ResourceBusy` is handled on those two paths:* it is the best effort the cleanup already is. The stop completes as ADR-0348 says
+     (the shim writes the terminal row as for any stop), the start-failure cleanup returns the failure it was reporting, the run
+     directory and the clone are still removed in the same order after the scope step (both are removable while a task is stuck), no new
+     error type or event is added, and the scope is left to `VmReclamation`, whose next pass calls `kill_scope` again (item 9 of § "A VMM
+     kill's reap wait is bounded"). Every other error kind keeps today's best-effort handling of a failed scope step. After
+     `KilledNotReaped` the driver does not call `kill_scope` (the scope is known to be populated). A reaped stop's scope is empty, so the
+     call returns within milliseconds and the bound is not paid; a scope that still holds another live task pays the bound once and
+     returns busy.
 5. **`SimVmHostState`.** It does not wait and measures no time: the bound is a property of the host adapter's wait, not of the state a sim
    models. It models busy by scripted state: a test holds an allocation's scope (the holding method is DISTILL's), `observe()` keeps reporting
    the scope, `kill_scope` on a held scope returns `Err(ResourceBusy)` at once, changes nothing and does not consume the scripted-failure queue,
@@ -709,6 +718,11 @@ on "removed").**
 - Tier 1, seeded, production `VmReclamation` tick over `SimVmHostState` with a held scope: the tick returns busy without discarding, writing a
   row or advancing the lease; other allocations' actions in the same tick still run; after the hold clears the next tick removes the scope.
 - The boot-reclamation test double (`vm_reclamation_boot.rs:821`) gains the busy case.
+- The driver's scope cleanup (ruling N-1). Tier 1, production `VmDriver` over `SimVmm` and `SimVmHostState`: a reaped stop and a
+  start-failure cleanup remove the scope through `kill_scope` (the sim records the call) and never by any other path; a held scope makes both
+  return their normal outcome (the stop completes and the shim writes `Terminated`/`Stopped`; the start failure is the one reported), with the
+  run directory and clone removed and the scope still observed; after the hold clears, a `VmReclamation` pass removes it. After
+  `KilledNotReaped` no `kill_scope` call is made by the driver.
 
 **Quint impact (decision 16; the modeler edits the specs, none is edited here).** `specs/quint/guest-flow-owner/cid_lease.qnt`:
 
@@ -740,65 +754,99 @@ returns `Err`. In order:
    opens in the composition root before `run_server`, and `GuestAddressPool::new` at `lib.rs:4346` runs before `converge` at `:4552`, which
    already reads the rows). A scope maps to its allocation by name, `<alloc_id>.scope` (`cgroup.rs:57-62`, `observe_scopes`,
    `vm_host_state.rs:123-143`).
-2. **Reserve, before any kill.** For every leftover VM scope the held guest address is determined and reserved in `GuestAddressPool`
-   (item below). The pool is empty at boot, so a reservation cannot conflict with a lease. Reserving first leaves no window in which a kill
-   has run and the offset is unprotected.
+2. **Reserve, before any kill.** For every leftover VM scope the held guest address is read from the allocation's row (§ "The address is on
+   record before the VMM exists", below) and reserved in `GuestAddressPool`. The pool is empty at boot, so a reservation cannot conflict with
+   a lease. Reserving first leaves no window in which a kill has run and the offset is unprotected.
 3. **Kill, in parallel.** The executors run for all scopes concurrently, each waiting at most `KILL_SCOPE_SETTLE_BOUND` (ADR-0349), so
    boot waits one bound in the worst case and not one per stuck scope.
-4. **A busy scope is not an error here.** `kill_scope` returning `ResourceBusy` (the kill is delivered, the scope is populated) ends the
-   scope's executor step as follows: the terminal row is written as for a settled scope, with the address carried (below); the artifact
+4. **A busy scope is not an error here (user ruling 2026-11-23, N-3, option a).** `kill_scope` returning `ResourceBusy` (the kill is
+   delivered, the scope is populated) ends the scope's executor step as follows: the terminal row is written as for a settled scope (the
+   Platform-Reclamation row `execute_reclaim_allocation` writes, as ADR-0348 does for an unreaped stop), with the address carried (below); the artifact
    discard (scope, run directory) is not done and is left to `VmReclamation`, which emits `DiscardStrandedArtifacts` for a terminal VM
    allocation with host artifacts and retries each pass (item 9 of § "A VMM kill's reap wait is bounded"). The terminal row is true: the
    VMM is killed and can run no guest code (ADR-0348); it makes the workload eligible for restart, with the replacement waiting on the
    volume claim as ADR-0317 states. Any other executor error stays `ConvergeError::Reclamation` and refuses the boot: it is a substrate
-   refusal, not a stuck VM.
+   refusal, not a stuck VM. The boot executor step is the one caller exempt from ADR-0349's "busy means no row write"; the steady-state
+   `VmReclamation` tick still writes no row on a busy scope (§ "A scope kill's settle wait is bounded", item 6). The difference between the two
+   callers of `execute_reclaim_allocation` is internal structure the crafter decides; the contract is the observable outcome: after
+   `converge` returns on a busy scope the row is terminal and carries the address, after a tick that meets the same busy scope the row is
+   unchanged.
 5. **Surface.** The existing surfaces carry it: the allocation's terminal row, the scope that stays in `VmHostState::observe()`, and the
    attachment occupancy (`GuestAttachmentOccupancy` `held` and `retiring`) that `describe` already shows (W-1). Boot also emits one `tracing`
    event `vm.reclamation.boot_stuck` (allocation id, CID) per busy scope. No new row, field or `describe` line.
 6. **Continue.** `converge` returns `Ok(())` and boot continues. Cleanup retries on every later pass.
 
-**Where the held address comes from.** The offset is `workload_addr - GUEST_NODE_PREFIX.network()` (`100.95.0.0/16`, a compile-time constant;
-the inverse is `GuestAddressPool::release`, `guest_network.rs:651-652`) and the CID is `GUEST_CID_BASE + offset`. Sources, in order:
+**The address is on record before the VMM exists (user ruling 2026-11-23, N-2; it replaces the earlier proposal to read `--vsock cid=` from the
+VMM's command line, which the user rejected).** The offset is `workload_addr - GUEST_NODE_PREFIX.network()` (`100.95.0.0/16`, a compile-time
+constant; the inverse is `GuestAddressPool::release`, `guest_network.rs:651-652`) and the CID is `GUEST_CID_BASE + offset`. Boot reads the
+address from `AllocStatusRow.workload_addr` (`observation_store.rs:984`) and from nowhere else. That is sound only if every VMM that can hold a
+CID has its address on a row; this section pins how that holds. Boot never reads the VMM, and `VmHostState` gains no method.
 
-- **The row.** `AllocStatusRow.workload_addr` (`observation_store.rs:984`) is written on `Running` rows (`action_shim/mod.rs:2027-2029`,
-  `:2515-2519`) and carried onto exit-observer terminal rows (`exit_observer.rs:562`).
-- **The VMM's command line**, for a scope whose row gives no address. The launcher passes `--vsock cid=<cid>,backend=vhost-kernel`
-  (`vmm.rs:304`, `:385`), and the leftover VMM is alive when boot starts, so the read is taken in step 2, before step 3 writes
-  `cgroup.kill`.
+*The row and the moment.* The row state is the existing `AllocState::Pending`; no state is added. The field is the existing
+`workload_addr: Option<Ipv4Addr>` (the `AllocStatusRowV2` field, GH #241); it carries the `GuestTransportAssignment::workload_addr` of the
+lease the pool has just handed out (`spec.transport`, injected by `provision_and_inject_netns`). The write is **one call to
+`write_alloc_lifecycle`** (the writer the Running row uses), made in the action shim at one point per arm, immediately after
+`provision_and_inject_netns` returns `Ok(plan)` and before `ensure_intercept_identity` and `driver.start` (so before `Vmm::create` is
+reachable):
 
-**Gaps closed (user's gap (i), "a CID held with no address in any row").** Three producers leave a row without the address:
+- `StartAllocation`: between the `Ok(plan)` of the `match provision_and_inject_netns(..)` arm (`action_shim/mod.rs:1828`) and
+  `ensure_intercept_identity` (`:1897`).
+- `RestartAllocation`: in the successor's `Ok(plan)` arm (`:2342`), before `ensure_intercept_identity` (`:2343`). The row is the successor's
+  (`successor_alloc_id`).
 
-| Producer | Today | Fix |
+`provision_and_inject_netns` itself is unchanged: it assigns and provisions and returns the plan. A provision failure (`Err`) writes no
+`Pending` row because no VMM can exist: it keeps its `Failed` row (S3, R6). The row fields: `state: Pending`, `started_at: None`, `reason`,
+`detail`, `terminal`, `stderr_tail` all `None`, `workload_addr: Some(addr)`, `kind` as the action's. A Start whose prior row is already
+non-terminal (a stale duplicate dispatch of the same id: `Pending`, `Running`, `Draining` or `Suspended`) writes no `Pending` row: that row
+is already the record, and it carries the same address because `assign` replays the same lease for an id it already holds. **If the `Pending`
+write fails, no VMM is created:** the arm retires and tears down the lease (`retire_guest_network_lease`, `teardown_for_dispatch`) and returns
+the typed `ShimError` (`N-REC`, as S9/R11). Cost: **one extra observation write per launch**, on a path that already makes the Running write.
+
+*Every later row carries the address.* The `Running` row sets it (as today). Every other row the shim or the observers write for the
+allocation after the `Pending` row copies it from the prior row, so a VMM that is killed-not-reaped at any later point still has its address on
+the allocation's latest row:
+
+| Producer | Today | Contract |
 |---|---|---|
+| the `Failed` row of a failed start (`StartRejected`, S5, S6, R7, R8; `action_shim/mod.rs:2027-2031`, `:2515-2519`) | `None` (set only when `Running`) | carries the `Pending` row's address (a start-failure cleanup can leave a killed-not-reaped VMM, ADR-0348 item 7) |
 | terminal row of `FinalizeFailed` (`action_shim/mod.rs:1693`) | drops it (`if is_stable { prior } else { None }`) | forward-carries `prior_row.workload_addr` always |
 | the stop's terminal row, and the reclamation executor's row (`action_shim/reclamation.rs:265`) | `None` | carry the prior row's address |
-| the launch parked in guest boot (`NoRow`, `vm_reclamation_boot.rs:1753-1757`): a VMM and no row | no source | the VMM's command line (above) |
+| exit-observer terminal row (`exit_observer.rs:562`) | carries it | unchanged |
 
-Options evaluated for the three (`design.md` § "Design the correct mechanism"):
+*Persisted format.* None changes. `AllocStatusRow.workload_addr` and `AllocState::Pending` exist in the persisted `AllocStatusRowV2` envelope
+payload today; a `Pending` row with an address is a value the type already represents. No rkyv envelope bump, no new fixture
+(`.claude/rules/development.md` § "rkyv schema evolution" is not triggered). The row's wire shape (`AllocStateWire::Pending`, the OpenAPI
+schema) already has the state.
 
-- *Forward-carry on terminal rows + hydration gated on `state == Running` (chosen for the two terminal cases).* No new field and no new write:
-  `AllocStatusRow.workload_addr` already exists and the forward-carry pattern already exists (ADR-0078). ADR-0276's hydration is already total
-  over state (`ServiceAllocPhase::from_row`, `service_lifecycle.rs:102-113`: every non-Running state is `NotRunning` whatever the address), so a
-  carried address on a terminal row is never a backend. ADR-0276 gets a one-paragraph amendment; no change to its decision. The comment at
-  `action_shim/mod.rs:1690-1692` ("a dead alloc is not a live backend") is rewritten: the gate is the state, not the field.
-- *Persist the address before the VMM is created (rejected for `NoRow`).* It needs a row before the launch, and a row means "an allocation was
-  observed" to the generation logic (ADR-0335) while a superseded launch writes none (ADR-0334); a separate record is a second source for a fact
-  the VMM already carries on its command line.
-- *Derive the CID from host state (chosen for `NoRow`).* The VMM's command line is the observable owner of the CID, read once while it is alive.
-  It is not enough alone: a VMM already killed-not-reaped at the crash has lost its command line, so the row (which the stop now keeps the
-  address on) is the primary source and the command line the one for the no-row case.
-- *Derive every CID from the command line only (rejected).* The same lost-command-line case.
+*Who reads a `Pending` row with an address.* Each reader below ignores a not-yet-running row, by the reader's own gate:
 
-**Residual exposure (for the user, ruling N-2).** A `NoRow` VMM that is already exiting when the new `serve` reads it has neither source. It
-is not reserved. The exposure is a launch whose next-fit offset equals that VMM's CID: it fails `EADDRINUSE`, which is the VMM's typed start
-failure (ADR-0146), charged to the restart budget and retried. Reaching it needs a crash during guest boot and a VMM exit before the next
-boot reads it. Boot emits `vm.reclamation.boot_unaddressed` (allocation id) for such a scope.
+| Reader | What it does with a `Pending` row |
+|---|---|
+| ADR-0276 service-backend hydration (`ServiceAllocPhase::from_row`, `service_lifecycle.rs:102-113`) | already total over state: every non-`Running` state is `NotRunning` whatever the address, so a `Pending` address is never a backend. ADR-0276 gets a one-paragraph amendment stating that the gate is the state, not the field; its decision is unchanged. The comment at `action_shim/mod.rs:1690-1692` ("a dead alloc is not a live backend") is rewritten the same way |
+| exit observer (`exit_observer.rs:562`) | no `ExitEvent` exists for a `Pending` row (the watcher parks on the Running-confirmed gate); its terminal rows forward-carry the address as today |
+| scheduler placement (`overdrive_core::scheduler`, `:157`) | counts `Running` rows only, so a `Pending` row consumes no node capacity |
+| the lifecycle reconciler: restart, readiness, probes | a `Pending` row is neither `Running`, restartable (`is_restartable`: `Terminated`, `Draining`, `Failed`) nor terminal, so no stop, restart-budget or probe logic acts on it; the readiness and probe paths gate on `Running`. How a `Pending` row that no launch is completing is treated is **proposed**, ruling N-4 below |
+| the LWW counter and crash facts (ADR-0077, ADR-0078) | the `Pending` row is written with `LogicalTimestamp::dominating` over the prior row (Start) and `dominating(.., None)` (Restart successor); the later `Running` or `Failed` row dominates the `Pending` row it follows, so the store never refuses the follow-up write as non-dominating. Both rows of one launch derive their crash facts from the same prior row, so `restart_count` and `last_terminated` are identical on the `Pending` and the `Running` row and never counted twice |
+| `describe` / alloc-status API and CLI rendering (`handlers.rs:129-144`, `render.rs:606`) | show the `Pending` state and address; `started_at` is `None` for `Pending` already. The lifecycle bus emits the `Pending` transition (`from` the prior state, `to: Pending`) |
+
+*Why the earlier objection no longer holds.* The earlier text rejected a row before launch because "a row means an allocation was observed" to
+the generation logic (ADR-0335) while a superseded launch writes none (ADR-0334). The user's ruling takes the row, so ADR-0335's "handled"
+test and the no-row outcomes (N-SUP, N-IDEM, N-REC, a launch lost with the control plane) must be re-read for a `Pending` row; that is ruling
+N-4.
+
+Options evaluated (`design.md` § "Design the correct mechanism"):
+
+- *Record the address on the existing `Pending` row at hand-out (chosen, ruling N-2).* No new state, field or format. Boot has the address for
+  every VM that can hold a CID, with no port read and no window.
+- *Read `--vsock cid=` from the VMM's command line for a scope with no address (rejected by the user).* A new port read; works only while the
+  VMM is alive; a VMM already exiting at boot has neither source.
+- *Forward-carry on terminal rows alone (insufficient).* Leaves the launch parked in guest boot, which has a VMM and no row.
 
 **Pool API (crate-internal to `overdrive-control-plane`; the pool methods are not public, as `assign` and `release` are not).**
 
-- `GuestAddressPool::reserve_leftover(&self, alloc: &AllocationId, held: LeftoverGuestAddress) -> Result<(), GuestNetworkError>`, with
-  `LeftoverGuestAddress` the two-variant sum `Address(Ipv4Addr)` | `Cid(GuestCid)`. The pool derives the offset from either, by the one
-  derivation `assign` uses (the CID is still computed in one place, ADR-0156). It inserts a **Retiring lease** for `alloc` at that offset:
+- `GuestAddressPool::reserve_leftover(&self, alloc: &AllocationId, held: Ipv4Addr) -> Result<(), GuestNetworkError>`, with `held` the row's
+  `workload_addr`. The pool derives the offset from it by the one derivation `assign` uses (the CID is still computed in one place,
+  ADR-0156). It inserts a **Retiring lease** for `alloc` at that offset:
   the existing lease type in the state a stuck VMM's lease already has (ADR-0348), not a parallel structure, so the held bitmap, `leases`,
   the occupancy counts and the attachment cap stay one source of truth. **A reservation counts toward the attachment cap** (`leases.len()`
   and `retiring` both include it), so the cap is truthful. `assign` for the same allocation id returns the existing `LeaseRetiring`.
@@ -806,17 +854,14 @@ boot reads it. Boot emits `vm.reclamation.boot_unaddressed` (allocation id) for 
   same), both as one new `GuestNetworkError` variant `ReservationRefused { alloc, held }`. A refusal here is a substrate-class refusal and
   refuses the boot.
 - It is released by the existing path: `teardown_guest_network` (item 11), gated on the scope being absent after the populated-first removal.
-  For an allocation with a terminal row the network-reclaim retry reaches it (the row carries the lease). For `NoRow` there is no row to
-  reach it, so the two reclamation executors (`execute_reclaim_allocation`, `execute_discard_stranded_artifacts`) end, after a successful
-  scope removal, by running `teardown_for_dispatch` for the allocation, which they already hold the pool and provisioner for. A reservation
-  has no network to tear down and `teardown` converges on absence.
-- Tracing: `vm.reclamation.boot_stuck`, `vm.reclamation.boot_unaddressed` as above.
+  The allocation's row is terminal after boot reclamation's executor step (it carries the address and the lease), so the network-reclaim
+  retry reaches it. A reservation has no network to tear down and `teardown` converges on absence.
+- A leftover scope whose row carries no `workload_addr`, or which has no row, is not reserved and boot does not look elsewhere for an address:
+  the address is on record before the VMM exists, so such a VMM cannot hold a CID. (A scope with no row is a stranded artifact the planner
+  already discards, row 5 of `plan_reclamation`.)
+- Tracing: `vm.reclamation.boot_stuck` as above. There is no `vm.reclamation.boot_unaddressed` event.
 
-**`VmHostState` gains one read**, used only by boot reclamation: `async fn scope_guest_cid(&self, scope: &CgroupPath) ->
-std::io::Result<Option<GuestCid>>`. `Ok(Some)` when a task of the scope carries `--vsock cid=<cid>,...`; `Ok(None)` when the scope has no
-task or no such argument; `Err` only for a substrate failure other than absence of the scope or a task that disappears while read
-(both `Ok(None)`). Pure read, no effect. `SimVmHostState` reports the CID of a scripted live process; a scope with only exited tasks is
-`None`. It is read only for scopes whose row gives no address.
+**`VmHostState` gains no method.** It keeps `observe`, `kill_scope`, `discard_artifacts` and `probe`.
 
 **Lifecycle Gate Ownership.** Adds no gate: the reservation is the existing Retiring lease and its release gate (item 11) is unchanged. One
 state meaning moves, recorded in ADR-0350: ADR-0156's "boot reclamation completes before the first `assign`" becomes "boot reclamation, and the
@@ -825,11 +870,14 @@ run no guest code" (ADR-0348), not "scope removed".
 
 **Boundary scenarios.** (1) A leftover VM that settles within the bound: removed at boot, reservation released by the executor step, boot
 unchanged. (2) A stuck VM with a `Running` row: reserved from the row, row becomes terminal, boot continues, `launch` never receives its CID.
-(3) A stuck VM with a terminal row carrying the address: reserved from the row. (4) `NoRow`: reserved from the command line. (5) A
-stuck VM's reaping later: scope removed by `VmReclamation`, lease released by the network-reclaim retry (or the executor step for `NoRow`),
-CID free. (6) Several stuck VMs: one bound of boot delay, all reserved. (7) A busy scope never makes boot fail; a non-busy substrate
+(3) A stuck VM with a terminal row carrying the address: reserved from the row. (4) A launch parked in guest boot at the crash: its row is
+the `Pending` row written before `Vmm::create`; boot reserves its offset from that row, the executor writes the terminal row (carrying the
+address), the boot continues. (5) A stuck VM's reaping later: scope removed by `VmReclamation`, lease released by the network-reclaim
+retry, CID free. (6) Several stuck VMs: one bound of boot delay, all reserved. (7) A busy scope never makes boot fail; a non-busy substrate
 error still does. (8) Reservations at the cap: a new launch is refused `AdmissionCapReached` (W-1 shows the wait). (9) A second crash during
-a stuck window: the next boot derives the reservation again from the rows (the terminal row carries the address).
+a stuck window: the next boot derives the reservation again from the rows (the terminal row carries the address). (10) The `Pending` write
+fails: no VMM is created, so no CID is held and nothing needs reserving. (11) A crash after the `Pending` write and before the VMM exists: no
+scope; the row stays `Pending` and is handled as ruling N-4 says.
 
 **Tests this decision requires (for the acceptance designer; none is written here).**
 
@@ -841,18 +889,29 @@ a stuck window: the next boot derives the reservation again from the rows (the t
 - **The reservation is released after the scope empties.** Tier 1: after the scripted reap, a `VmReclamation` pass and a reclaim attempt,
   the pool no longer holds the offset and the CID is assignable; before the reap it stays held across several attempts.
 - **`kill_scope` never removes a populated scope** (the tests of § "A scope kill's settle wait is bounded").
-- **The `NoRow` case.** Tier 1: a VMM and a held scope with no row: reserved from the scripted command line, held until the scripted reap, and
-  released by the executor step after `DiscardStrandedArtifacts` removes the scope (no row ever exists). A `NoRow` scope with an unreadable
-  command line: boot continues, `vm.reclamation.boot_unaddressed` is emitted.
-- **The terminal-row carry.** Acceptance: the stop's terminal row, the `FinalizeFailed` terminal row and the reclamation executor's row each
-  carry the prior row's `workload_addr`; a Service allocation with a terminal row carrying an address has no backend (ADR-0276's gate).
+- **Every VM allocation has its address on record before `Vmm::create` (ruling N-2).** Tier 1, seeded, production `StartAllocation` and
+  `RestartAllocation` dispatch over `SimVmm` and the production observation store: at the instant `Vmm::create` is entered, the store holds
+  the allocation's `Pending` row and its `workload_addr` equals the lease's address, for both arms and for a first placement, a crash restart
+  and a generation replacement. When the `Pending` write is made to fail, `Vmm::create` is never entered, the lease is released and the typed
+  error is returned. A stale duplicate dispatch against a non-terminal row writes no second `Pending` row. The `Pending` and `Running` rows of
+  one launch carry the same `restart_count` and `last_terminated`, and the `Running` write is accepted by the store (it dominates).
+- **Boot reserves a stuck VM from a launch parked in guest boot (ruling N-2).** Tier 1, seeded, production `converge` over `SimVmm`,
+  `SimVmHostState` and a store holding only the launch's `Pending` row (no `Running` row ever written): the scope is held and the VMM
+  unreaped; `converge` returns `Ok`, the pool holds the offset named by the `Pending` row (Retiring, counted in occupancy), a launch sweep
+  including a next-fit wrap never receives that CID, the row is terminal and carries the address, and after the scripted reap, a
+  `VmReclamation` pass and a reclaim attempt the offset is assignable. Tier 3: the same on a real guest with a launch held in guest boot across
+  a `serve` crash.
+- **The terminal-row carry.** Acceptance: the stop's terminal row, the `FinalizeFailed` terminal row, the `Failed` row of a failed start (Start
+  and Restart arms) and the reclamation executor's row each carry the prior row's `workload_addr`; a Service allocation whose row is `Pending`
+  or terminal and carries an address has no backend (ADR-0276's gate).
 - A busy boot executor step writes the terminal row and does not discard artifacts; the next `VmReclamation` pass discards them after the hold clears.
 - A non-busy executor error still refuses the boot with `ConvergeError::Reclamation`.
 - Pool: `reserve_leftover` counts toward the cap; refuses an address outside the prefix; `assign` of a reserved allocation returns
   `LeaseRetiring`; the reservation survives a next-fit wrap.
-- `VmHostState` equivalence: `scope_guest_cid` agrees across adapters on a live process, an empty scope and an absent scope.
+- A busy boot executor step writes the terminal row (ruling N-3) while the steady-state `VmReclamation` tick that meets the same busy scope
+  leaves the row unchanged.
 
-**Quint impact (decision 14; the modeler edits the specs, none is edited here).** `cid_lease.qnt`:
+**Quint impact (decision 14, revised by ruling N-2; the modeler edits the specs, none is edited here).** `cid_lease.qnt`:
 
 - Today `Reclaim` is enabled only when no orphan is unreaped. It becomes: at boot, `Reclaim` is enabled whenever, and first **reserves the
   offset of every unreaped orphan** (a model-level `reserved` set, a Retiring lease), then proceeds. `Assign` skips reserved offsets;
@@ -864,8 +923,19 @@ a stuck window: the next boot derives the reservation again from the rows (the t
   proceeds, a wrap-around assign skips the reserved offset, the orphan exits, the reservation is released). Hazard variant
   `bootWithoutReservation` (one per decision 14): `Reclaim` proceeds without reserving; the checker must find `NoLaunchClash` violated. The
   hazard `assignBeforeReclaim` is kept.
-- The assumption that the reservation knows every unreaped orphan's offset (row address, or command line) is the model's; it is discharged by the
-  `NoRow` and terminal-row tests above, and the exposure above is its stated exception.
+- **The no-row CID read is removed from the model and the design.** There is no command-line source and no "unaddressed orphan" exception.
+  The model gains a durable `recorded` map (offset to allocation): `Assign` sets it, and `Launch(a)` is enabled only when `a`'s offset is
+  recorded (the record precedes the VMM). `Crash` keeps `recorded` (the observation store is durable) and drops the pool; `Reclaim` reserves
+  the offset of every unreaped orphan from `recorded`. Hazard variant `launchBeforeRecord` (one per ruling N-2): `Launch` no longer requires
+  the record, so a crash during guest boot leaves an orphan with no record that `Reclaim` cannot reserve; the checker must find
+  `NoLaunchClash` violated. Named run `ServeCrashDuringGuestBootReservesFromTheRecordedAddress` replaces the `NoRow` run: assign, record,
+  launch parked, crash, boot reserves from the record, a wrap-around assign skips it, the orphan exits, the reservation is released.
+  Projection for the conformance driver: `recorded` is read through `ObservationStore::alloc_status_rows()` (the existing production read;
+  the `workload_addr` of the allocation's row), and the driving port for `Assign`/`Launch` is the production dispatch of
+  `StartAllocation`/`RestartAllocation`.
+- The assumption that the reservation knows every unreaped orphan's offset is the model's, now by construction (`Launch` requires `recorded`);
+  it is discharged by the two tests above (the address on record before `Vmm::create`, and boot reserving from a launch parked in guest boot)
+  and the terminal-row carry test. The hazard is added on three offsets only (decision 15).
 - `lease_five` runs a CFG without `StopUnreaped` (decision 15, below), so the boot-reservation runs are exhaustively checked on three offsets and
   by named runs and randomized traces on five.
 - Everything else is unchanged: `node-local-volume` needs no change.
@@ -875,26 +945,36 @@ a stuck window: the next boot derives the reservation again from the rows (the t
 the pool-wrap case, and is covered on five offsets by the named runs and the randomized traces (`specs/quint/guest-flow-owner/`, commit
 `7f32d5b83`). The decision 14 and 16 hazards are added on three offsets only. Any further growth returns to the user.
 
-**Needs user ruling (decisions 14 and 16 work out choices beyond the user's words; each is PROPOSED, not accepted).**
+**Rulings on the choices decisions 14 and 16 left open (user, 2026-11-23).**
 
-- **N-1. Who removes a VM's scope at a stop.** *Context:* `VmDriver`'s cleanup (`vm_driver.rs:1322`, `:1738`) removes the scope with a bare
-  `rmdir` after `cgroup.kill`. *Problem:* on the running kernel that removes the scope under a live stuck task, so the lease gate reads
-  "absent" while the VMM holds the CID; decision 16's gate is only as good as its weakest remover. *Options:* (a) the driver removes VM scopes
-  through `VmHostState::kill_scope` (one remover); (b) add a `cgroup.events` read to the `CgroupFs` port and make
-  `CgroupManager::remove_workload_scope` populated-first (two implementations of one discipline); (c) the driver stops removing scopes and
-  `VmReclamation` is the only remover (every ordinary stop then keeps its lease slot until the 30 s pass). *Recommendation:* (a). It makes
-  "scope absent implies emptied" structural and adds no port method.
-- **N-2. The `NoRow` residual.** *Context:* a launch parked in guest boot has no row; its CID is read from the VMM's command line, which is
-  gone once the VMM is exiting. *Problem:* a `NoRow` VMM already exiting when the new `serve` reads it has no source, so it is not reserved.
-  *Options:* (a) accept it: a launch whose offset equals that CID fails `EADDRINUSE`, a typed start failure charged to the restart budget
-  (needs a crash during guest boot plus an exit before the next boot's read); (b) refuse the boot for it, against decision 14. (c) persist the
-  address before the VMM is created, rejected in § above. *Recommendation:* (a), with the `vm.reclamation.boot_unaddressed` event. It also
-  adds the `VmHostState::scope_guest_cid` read; if you prefer no new port method, (a) applies to every `NoRow` scope.
-- **N-3. A busy boot scope writes its terminal row.** *Context:* ADR-0349 as first written said a busy scope takes no row write.
-  *Problem:* with boot no longer refusing, the stuck VM's row would stay `Running` for a VM that can run no guest code, and its workload
-  would not restart until the reap. *Options:* (a) write the terminal row once the kill is delivered, as a `KilledNotReaped` stop does
-  (ADR-0348), and leave the artifacts to `VmReclamation`; (b) leave the row `Running` until the scope empties. *Recommendation:* (a): the row is true
-  and the workload recovers while the VM drains. (ADR-0349's caller rule is amended to exempt this executor step.)
+- **N-1: approved, option (a).** The VM driver removes a VM scope only through `VmHostState::kill_scope`; `kill_scope` is the only remover of a
+  VM scope (§ "A scope kill's settle wait is bounded", item 4; ADR-0349, ADR-0348).
+- **N-2: replaced by "save the address when it is handed out".** The user rejected the `--vsock cid=` command-line read. The address is on the
+  allocation's `Pending` row before `Vmm::create` (§ "The address is on record before the VMM exists"; ADR-0350, ADR-0156). The
+  `VmHostState::scope_guest_cid` read, the `NoRow` case and the `vm.reclamation.boot_unaddressed` event are removed.
+- **N-3: approved, option (a).** A busy boot scope writes the terminal row once the kill is delivered; the boot executor step is exempt from
+  ADR-0349's "busy means no row write" (item 4 of the contract above; ADR-0349, ADR-0350).
+
+**Needs user ruling (worked out by the N-2 ruling; PROPOSED, not accepted).**
+
+- **N-4. What the lifecycle reconciler does with a `Pending` row that no launch is completing.** *Context:* `WorkloadLifecycle` picks the
+  allocation with the highest id suffix as the workload's current one (`current_alloc`), and ADR-0335 treats a restart generation as handled
+  once the id issued for it has a row (`generation_replacement_pending`). A launch ends with no row today in three named cases: it is
+  superseded by an operator commit or shutdown (N-SUP, ADR-0334), it is lost with the control plane, or its write fails (N-REC). Under the N-2
+  ruling every such launch has already written its `Pending` row. *Problem:* a `Pending` row is neither `Running`, restartable nor terminal.
+  As the current allocation it would hold the generation as handled and nothing would start the workload: the operator sees an allocation
+  `Pending` for ever after `workload restart`, or after a crash that left no VM behind (boot reclamation only visits rows that left host
+  artifacts, so it never meets it). *Options:* (a) a `Pending` row is never the current allocation: `current_alloc` and
+  `generation_replacement_pending` (one definition in `overdrive-reconcilers`) skip it. Lane exclusivity (ADR-0102) means no launch of the
+  target is in flight when an evaluation hydrates, so a `Pending` row seen then is an abandoned launch and is treated exactly as the no-row case
+  is today: the older row stays current, the generation stays pending, the relaunch takes the next id and is uncharged. One stale `Pending` row
+  per abandoned launch stays in the allocation list, and ADR-0335 is amended to "has a row that is not `Pending`". A crash that left a VM is
+  unchanged: boot reclamation ends its non-terminal row with a terminal row. (b) the shim ends the `Pending` row at each of those exits with a
+  terminal row, and boot gains a step that ends every non-terminal VM row with no host artifacts. That needs a terminal reason for "launch never
+  ran" (a new `TransitionReason` variant, so an rkyv envelope bump) and charges or special-cases the relaunch. (c) the reconciler relaunches
+  a `Pending` row after a timeout: a timer for a fact the lane already gives. *Recommendation:* (a): no new state, reason or format, and the
+  launch outcomes of § "Launch outcomes" keep their handling. The restart-generation Quint model reads "issued, no row" as "issued, no row
+  that is not `Pending`", and its conformance driver follows.
 
 ### Restart generation is handled when its successor is observed (SD-6; ADR-0335, which amends ADR-0073, with ADR-0337 and ADR-0338)
 
