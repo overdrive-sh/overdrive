@@ -488,7 +488,8 @@ zero grace) and the failed EXEC release (`:2315`, zero grace).
 6. **`VmDriver::stop` on `Ok(KilledNotReaped)`.** The outcome is a completed stop. The driver emits one `tracing` event
    `vm.lifecycle.stop_not_reaped` (allocation id, pid), writes the beacon writer's `vmm_has_exited` as for any `terminate` completion, runs
    `cleanup_driver_artifacts` in the same order (`cgroup.kill`, scope removal, run directory, clone then index link), treating a scope
-   removal that fails for the non-empty scope as the best effort it already is, and returns `Ok(())`. `status()` is `Err(NotFound)` (the
+   removal that fails for the non-empty scope as the best effort it already is, and returns `Ok(())`. The driver does not touch the guest
+   lease; the shim holds it (item 11). `status()` is `Err(NotFound)` (the
    entry is `EndingInFlight`, as for every stop); the entry stays `EndingInFlight` until the shim's `release_supervision`. No new
    `DriverError`: the return type of `Driver::stop` is unchanged. The `Driver::stop` contract says: on `Ok`, the VMM has been killed and is
    reaped, or killed and not yet reaped (ADR-0348); the shim comment at `action_shim/mod.rs:2774` ("`Driver::stop` awaits process quiescence")
@@ -496,7 +497,8 @@ zero grace) and the failed EXEC release (`:2315`, zero grace).
 7. **The other callers.** Start-failure and boot-race cleanup and the failed EXEC release ignore the outcome as they do today; a
    `KilledNotReaped` there leaves the same leftovers, owned as in item 9, and the failure they were reporting is unchanged.
 8. **What the shim writes.** Nothing new. `StopAllocation` proceeds exactly as for a reaped VMM: `retire_guest_network_lease`,
-   `mtls_lifecycle.stop_alloc`, `teardown_for_dispatch`, then the `Terminated` row with `TransitionReason::Stopped { by: Reconciler }` and
+   `mtls_lifecycle.stop_alloc`, `teardown_for_dispatch` (which, while the VMM is unreaped, tears the network down but keeps the lease
+   Retiring: item 11), then the `Terminated` row with `TransitionReason::Stopped { by: Reconciler }` and
    the action's `terminal`, no `Failed` row, no restart-budget input, then `release_supervision`. A `Running` row therefore becomes
    `Terminated` within `VM_STOP_GRACE + VMM_REAP_BOUND` plus the cleanup time. `restart` (`RestartAllocation`) stops its predecessor through
    the same `Driver::stop` and is bounded the same way.
@@ -508,11 +510,45 @@ zero grace) and the failed EXEC release (`:2315`, zero grace).
    | the cgroup scope (non-empty while a thread is stuck) | `VmReclamation` | the first pass after `release_supervision` and after the process is reaped: terminal VM allocation with host artifacts and no driver claim emits `DiscardStrandedArtifacts` (`vm_reclamation.rs:161-171`); the pass runs at boot and every `VM_RECLAMATION_SWEEP_INTERVAL` (30 s). A pass that cannot remove it returns and the next pass retries |
    | the run directory and the clone | `VmDriver::stop` (best effort, both are removable while the process is stuck); `VmReclamation` as the backstop | at stop; otherwise the same pass |
    | the volume's kernel claim | the kernel | when the stuck I/O drains and the process exits; Overdrive neither releases nor fences it (ADR-0317). A replacement's claim wait covers it; past its bound the replacement fails typed `Held` (ADR-0317) |
-   | the vsock device and its CID | the kernel, at the process's exit | the same reap; the guest lease is retired by the shim at stop |
+   | the vsock device and its CID | the kernel, at the process's exit | the same reap |
+   | the guest-address lease (its offset names the CID) | the shim: `teardown_guest_network`, at stop; the network-reclaim path, if the VMM was unreaped at stop | retired at stop; released only once the allocation's scope is absent (item 11), so a lease whose VMM is unreaped is released by the first network-reclaim attempt after `VmReclamation` has removed the scope |
 
 10. **Not changed.** `Driver::stop`'s signature; the lane and supersession path (ADR-0334); the claim wait and its 30 s bound (ADR-0317);
     `VM_STOP_GRACE`; the exit watcher (it finds `EndingInFlight` at a late reap and returns, as it does today for every stop); the reconcilers;
-    the observation row shapes; `kill_for_test`.
+    the observation row shapes; `kill_for_test`; the `GuestAddressPool` methods and their signatures; `GuestNetworkProvisioner`'s signatures;
+    the `DiscardStrandedArtifacts` action and its executor; `VmHostState`'s signatures.
+11. **The guest-address lease is released only once the VMM is reaped (amends ADR-0156).** No public API.
+    - *The fact.* A guest's CID is `GUEST_CID_BASE` plus its lease offset (ADR-0156). The kernel unhashes a CID at the last close of the device
+      file (`vhost_vsock_dev_release`, `drivers/vhost/vsock.c:753-760 @ v7.0`), and a launch whose CID is still hashed fails
+      `-EADDRINUSE` (`vhost_vsock_set_cid`, `:804-813 @ v7.0`). A killed-not-reaped VMM still holds the file, so freeing its offset would let
+      next-fit hand its CID to a new launch. Release-last (`GuestAddressPool::release`, `GuestNetworkProvisioner::teardown` rustdoc) means
+      *reaped*, not *stopped*; both docs say so.
+    - *The precondition, and why this fact.* The shim releases a lease only when the allocation's cgroup scope is absent from
+      `VmHostState::observe()` (`scopes`). `rmdir` of a scope succeeds only when the cgroup has no task left (`cgroup_rmdir` ->
+      `cgroup_drain_dying`, `kernel/cgroup/cgroup.c:6254-6272`, `:6309-6311 @ v7.0`; a live thread in an uninterruptible wait is a visible task,
+      so `-EBUSY`), and a task leaves its cgroup only after it has dropped its files (ADR-0156 § Decision, the exit-ordering citations). The
+      shim reads the resource, not the stop's outcome: it needs no signal from `Driver::stop`, and it is right if the process is reaped a
+      moment after the bound.
+    - *The mechanism, one function.* Every release goes through `teardown_guest_network`; the stop, the restart predecessor and successor
+      cleanups, the start-failure cleanups and `reclaim_guest_network` all reach it through `teardown_for_dispatch`, so the gate holds at every
+      site. Its order: (1) the plan is read from the pool; none, return `Ok` as today. (2) `VmHostState::observe()`; a failure returns the
+      existing host-substrate `ShimError::Reclamation` before any effect, so the existing replay retry applies and nothing is torn down twice.
+      (3) `GuestNetworkProvisioner::teardown(plan)`, unchanged. (4) Scope absent: `release`, as today. Scope present: the lease is left
+      Retiring (retired if still Admitted), not released, and the function returns `Ok`. The `Ok` is what lets `StopAllocation` write its
+      terminal row (item 8).
+    - *The late release.* A `Terminated` or `Failed` row whose allocation still holds a lease is already a network-reclaim candidate:
+      `WorkloadLifecycle` emits `Action::ReclaimAllocationNetwork` for it (`workload_lifecycle.rs:485-516`), paced by `reclaim_attempts` and
+      `reclaim_emitted_at` (`backoff_for_attempt`), and its executor `reclaim_guest_network` re-runs `teardown_for_dispatch`.
+      `GuestNetworkProvisioner::teardown` converges on absence, so the re-run on a torn-down network returns `Ok`. After the reap,
+      `VmReclamation` removes the scope (`DiscardStrandedArtifacts`, item 9), the next reclaim attempt finds it absent and releases. No new
+      action, no new View field, no new port method. `reclaim_guest_network` and the helpers above gain a `&dyn VmHostState` (the dispatch
+      already holds one); that is crate-internal structure.
+    - *Boot.* A lease is process-local and not persisted (ADR-0118): after a restart there is no Retiring lease to settle. The invariant
+      across a restart is boot reclamation's: `vm_reclamation_boot::converge` removes every unsupervised VMM's scope, and so completes only
+      after those VMMs have exited, before the first `assign`. A VMM that stays unreaped across a `serve` crash is the `kill_scope` busy case
+      (Open point below), not a lease case.
+    - *Cost.* One `observe()` (a bounded directory walk) per teardown, which is not a hot path. One attachment slot per unreaped VMM until
+      the reap, counted as Retiring against the cap; at the cap a new launch is refused `AdmissionCapReached`, typed, as for any held lease.
 
 **Lifecycle Gate Ownership.** This adds no gate. It changes the meaning of one existing state, recorded here and in ADR-0348: an allocation
 ended by a stop is `Terminated` once the VMM is killed and can run no guest code, not once its process is reaped. The kernel fact behind it:
@@ -524,7 +560,9 @@ in an uninterruptible wait exits when the wait ends. The user approved this mean
 the stuck stop releases its own lane at the end of its own wait. (4) Late reap after the stop: the exit watcher finds no `Live` entry, so no
 `ExitEvent` and no row write; the row stays as written. (5) A control-plane crash or node reboot while a process is unreapable: the process dies
 with the node on reboot; after a control-plane crash only, the boot sweep handles it as for any unsupervised VMM (M7). (6) A reapable VMM never
-sees the new outcome.
+sees the new outcome. (7) An unreaped VMM's lease is held Retiring after the stop: a later assign that wraps onto its offset skips it, and the
+lease is released after the reap, not before. (8) Observing the scope fails at the stop: the stop returns the typed error, the row stays
+`Running`, and the replay retries.
 
 **Tests this decision requires (for the acceptance designer; none is written here).**
 
@@ -541,9 +579,42 @@ sees the new outcome.
 - `VmReclamation`: a pass over a terminal allocation whose scope cannot be removed returns without waiting and emits again on the next pass;
   after the reap the next pass removes it.
 - Stop-totality: the existing `vm_driver_stop_totality.rs` doubles gain a `KilledNotReaped` case.
+- Tier 1, seeded, production shim and `WorkloadLifecycle` over `SimVmm` and `SimVmHostState` (item 11): (e) after the unreaped stop the pool
+  reports the lease Retiring, the row is `Terminated`, and an assign that wraps to the offset takes another; (f) after the scripted reap, a
+  `VmReclamation` pass and a reclaim attempt, the lease is released and no launch clashed. The sim obligation: `SimVmHostState.observe()`
+  reports the unreaped process's scope, and its `kill_scope` removes it only once `SimVmm` has reaped that process; the two adapters share
+  that one fact. (g) The scope observation fails at the stop: typed error, no teardown, no row, the replay succeeds.
+- Tier 3: S-VOL-T3-12 additionally asserts no lease is released while the held-flush VMM is unreaped, and that a lease is released after the
+  drain (real scope removal, real device close).
+- Quint (`specs/quint/guest-flow-owner/cid_lease.qnt`; the modeler edits it, this is the required change): the stop of a running allocation
+  gains a second outcome, `StopUnreaped(a)`: the workload goes `done` as for `Stop`, but the device stays held by `a` and the lease stays held,
+  recorded in a model-level `late: offset -> workload` map (a workload can accumulate several, so not a per-workload field). `Reap(o)`
+  clears the device of an offset in `late`. `LateRelease(o)` frees the lease and the `late` entry, enabled only when the device is not held by
+  the lease's holder (the existing `canRelease` guard shape). `Crash` drops `late` with the pool and turns a held device into an orphan, as for
+  a running VMM; `Reclaim` is enabled only when no orphan is unreaped, and an unreaped orphan leaves through `OrphanExit`. Invariants:
+  `CidUnique` and `NoUntrackedLease` range over `late` as well; `LeaseOutlivesVmm` is unchanged and is the check with teeth. Progress on the
+  liveness instance: an offset in `late` whose device is free is eventually released. Named runs for `checks.toml`:
+  `StopOfAnUnreapedVmmHoldsItsLeaseUntilTheReap`, `NextFitSkipsAnUnreapedLease` (three offsets, the wrap lands on the held one),
+  `ServeCrashWithAnUnreapedVmmBlocksAssignUntilItExits`. One hazard variant, `releaseUnreapedAtStop`: the unreaped stop frees the lease with
+  the stop (today's behaviour for a reaped VMM); the checker must find `NoLaunchClash` / `LeaseOutlivesVmm` violated. Assumption K-C7:
+  the scope is absent only after the device is released (cgroup.c:6254-6311 and ADR-0156's exit-ordering citations), discharged by the
+  Tier 3 addition above. Conformance mapping for the DISTILL driver: `StopUnreaped` is the real stop handler and tick over an unreapable
+  `SimVmm` process; `Reap` is the scripted `SimVmm::exit_process`; `LateRelease` is the production convergence tick that dispatches
+  `ReclaimAllocationNetwork`; `late` and the lease are projected from `GuestAddressPool::observe` and `snapshot` (already pinned for
+  `lease`), and `dev` from `SimVmm::vsock_device_holders` (the existing marked arbiter read).
 
 **Open point carried to DELIVER, not a contract.** `VmHostState::kill_scope` (`vm_reclamation_boot.rs:5`) must return on a scope that rmdir
 refuses as busy rather than wait. The cell above covers it; the code is read when the step lands.
+
+**Open questions (surfaced, not decided here).**
+- `kill_scope`'s port rustdoc says it retries removal until the scope settles, with no bound. For a scope held by an unreaped VMM that never
+  returns, which stalls `VmReclamation`'s single `node/<id>` target for every VM and, at boot, `converge`. Item 11 depends on `Ok` meaning
+  "scope removed". Bounding the settle wait and returning a busy `io::ErrorKind` (no new type) changes the `VmHostState` port contract, so it
+  needs the user's ruling before DELIVER. The pre-existing open point above is the same question.
+- Network-reclaim pacing (`backoff_for_attempt`) has no attempt ceiling in the code read here (`reclaim_attempts` is kept while the lease
+  exists). DELIVER confirms there is none, since a ceiling would strand the lease; the late release depends on it.
+- A stopped allocation whose operator restart is pending is its workload's restart owner until the successor row is observed
+  (`pending_restart_owner`), so its late reclaim is deferred until then. DELIVER confirms the lease still releases after the successor row.
 
 ### Restart generation is handled when its successor is observed (SD-6; ADR-0335, which amends ADR-0073, with ADR-0337 and ADR-0338)
 

@@ -32,6 +32,16 @@ states.
 The terminal state is truthful because a killed VMM can never run guest code again: the fatal signal is pending on every thread, and a thread
 leaves its uninterruptible wait only to exit.
 
+**The guest-address lease is held until the VMM is reaped.** The stuck process still holds `/dev/vhost-vsock` with its guest CID, and the CID is
+`GUEST_CID_BASE` plus the lease offset (ADR-0156). Freeing the offset at the stop would let next-fit hand the CID to a new launch, which the
+kernel refuses with `EADDRINUSE`. So a stop of an unreaped VMM retires the lease and does not release it: a Retiring lease keeps its offset
+held and next-fit skips it. Release has one added precondition, observed rather than inferred from the stop's outcome: the allocation's cgroup
+scope is absent, which the kernel permits only once every task of the VMM has exited and dropped its descriptors. The release happens on the
+existing network-reclaim path, which retries a finished allocation that still holds a lease until it is released. The lease costs one
+attachment slot until the reap, the same cost this decision already accepts for the scope.
+
+(The lease clause is proposed pending the user's approval, 2026-11-23; it works out decision 11 and changes no other decision.)
+
 ## Alternatives considered
 
 - **b. Return an error from `terminate` and leave the row `Running`.** Rejected by the user. A `Running` row for a VM that can never run
@@ -41,6 +51,12 @@ leaves its uninterruptible wait only to exit.
   the test would hide a reachable failure.
 - **Drop the `terminate` future at the bound, from the driver.** Rejected: the outcome belongs to the port, so every caller (stop,
   start-failure cleanup, boot teardown) gets it, and a driver-side timeout cannot tell the caller the process is still alive.
+- **Release the lease at the stop, as for a reaped VMM.** Rejected: a later next-fit wrap onto that offset launches a VMM whose CID the stuck
+  process still holds; the launch fails with `EADDRINUSE` and is charged as a start failure. ADR-0156's "no production path produces that
+  state" would be false.
+- **Skip held CIDs in next-fit by a separate set, or have `VmReclamation` own the release.** Rejected: a second record of the same fact drifts
+  from the lease, and `VmReclamation` observes host artifacts, not leases, so a lease whose scope was already gone would never be visited. The
+  network-reclaim path already converges "finished allocation that holds a lease".
 - **Never wait for the reap.** Rejected: the common case reaps in milliseconds, and an immediate return would leave the scope, run
   directory and clone to the reclamation sweep on every stop for no gain.
 
@@ -52,9 +68,18 @@ leaves its uninterruptible wait only to exit.
 - A stop of a VMM that is not reaped takes the existing grace window plus the bound, then completes. The lane is released by the end of that
   time instead of never.
 - The stuck process keeps its descriptors until it is reaped, including the volume's kernel claim and the VMM's vsock device. Both are
-  released by the kernel at exit; neither is released by Overdrive.
+  released by the kernel at exit; neither is released by Overdrive. The guest-address lease that names the device's CID is held, Retiring,
+  for the same time, and is released only after the scope is gone.
+- A Retiring lease of an unreaped VMM counts against the attachment cap until the reap. If the process never reaps, the slot stays consumed
+  until the node reboots (the lease is process-local and not persisted, ADR-0118).
+- Release latency after a late reap is the sum of two existing periods: the `VmReclamation` pass that removes the scope, then the next
+  network-reclaim attempt (its backoff). Neither is on a hot path.
+- Across a `serve` restart no lease exists: the pool is empty, and boot reclamation completes only after every unsupervised VMM's scope is
+  removed, before the first assign (ADR-0156).
 - Leftovers (the scope) persist until the process is reaped; `VmReclamation` retries each pass. A stuck process that is never reaped leaves
   one scope per such allocation until the node reboots. There is no operator to remove it, and none is needed for correctness.
 - The bound is a policy value, revisited if a production `KilledNotReaped` is observed for a healthy disk.
 - `Vmm` gains one outcome variant and a bound constant; every exhaustive match on the outcome gains one arm.
-- The `node-local-volume` Quint model needs no change (feature-delta, same section).
+- The `node-local-volume` Quint model needs no change. The `guest-flow-owner` model (`cid_lease.qnt`) gains the unreaped stop and the late
+  release (feature-delta, same section, item 11).
+- ADR-0156 is amended: the lease is released after the VMM is reaped, not merely after the stop.

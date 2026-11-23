@@ -92,3 +92,35 @@ holds no file table (`kernel/vhost_task.c:130 @ v7.0`).
   reclamation before assignment, and of the device release before cgroup
   removal, is a validation item of the feature delta's validation plan
   (V-RECLAIM).
+
+## Amendment 2026-11-23 — the lease outlives an unreaped VMM (proposed, pending the user's approval)
+
+Amended by ADR-0348 (decision 11 of GH #348). ADR-0348 makes a stop whose
+VMM is killed but not yet reaped a completed stop. The text above is kept as
+the contract of the implemented code; the amendment changes three of its
+claims.
+
+- **"The lease is released only after the allocation's VMM has exited"**
+  becomes: only after the VMM has been *reaped*, observed as the allocation's
+  cgroup scope being absent. A stop that ends with the VMM unreaped retires
+  the lease and keeps it Retiring, so its offset stays held and next-fit
+  skips it. The release happens on the network-reclaim path after the reap.
+  The process holds the device until its last descriptor closes
+  (`vhost_vsock_dev_release`, `drivers/vhost/vsock.c:753-760 @ v7.0`), and the
+  scope can be removed only when no task of it remains
+  (`kernel/cgroup/cgroup.c:6254-6272`, `:6309-6311 @ v7.0`).
+- **"Under the rules above no production path produces that state"** (a launch
+  whose CID is held) stays true only with the release gate: without it, a
+  stop of an unreaped VMM followed by a next-fit wrap produces it. The holder
+  set the lease covers is now Admitted, Retiring, and *ended but not yet
+  reaped*; the last is a Retiring lease.
+- **Lease lifecycle:** Retiring now lasts until the VMM is reaped, which can
+  be much later than the stop (or until reboot if it never reaps). A Retiring
+  lease still counts against the attachment cap. Boot reclamation is
+  unchanged: after a restart no lease exists, and reclamation completes only
+  after every unsupervised VMM's scope is removed.
+
+The mechanism is pinned in the feature delta of the node-local persistent
+volume, § *A VMM kill's reap wait is bounded*, item 11. Alternatives
+(release at stop; a separate held-CID set; release owned by `VmReclamation`)
+are recorded in ADR-0348.
