@@ -36,13 +36,16 @@ leaves its uninterruptible wait only to exit.
 `GUEST_CID_BASE` plus the lease offset (ADR-0156). Freeing the offset at the stop would let next-fit hand the CID to a new launch, which the
 kernel refuses with `EADDRINUSE`. So a stop of an unreaped VMM retires the lease and does not release it: a Retiring lease keeps its offset
 held and next-fit skips it. Release has one added precondition, observed rather than inferred from the stop's outcome: the allocation's cgroup
-scope is absent, which the kernel permits only once every task of the VMM has exited and dropped its descriptors. The release happens on the
+scope is absent, and absence is a proof only because every removal of a VM scope first waits for the scope to report empty (`populated 0`,
+ADR-0349). A scope directory can be removed under a live, stuck task on the running kernel, so absence alone is not trusted; absence after
+the populated-first removal means every task of the VMM has exited and dropped its descriptors. The release happens on the
 existing network-reclaim path, which retries a finished allocation that still holds a lease until it is released. The lease costs one
 attachment slot until the reap, the same cost this decision already accepts for the scope.
 
 (The lease clause is approved: user ruling 2026-11-23, decision 12 of GH #348, option a: the lease is released only once the allocation's
 cgroup scope is observed absent; while the scope is present the lease is retired and held, and the stop still completes. It works out
-decision 11 and changes no other decision.)
+decision 11 and changes no other decision. User ruling 2026-11-23, decision 16: "absent" means removed after the scope reported empty; the
+removal order is ADR-0349.)
 
 ## Alternatives considered
 
@@ -78,8 +81,8 @@ decision 11 and changes no other decision.)
   the decision already accepts, and it is accepted with decision 12.
 - Release latency after a late reap is the sum of two existing periods: the `VmReclamation` pass that removes the scope, then the next
   network-reclaim attempt (its backoff). Neither is on a hot path.
-- Across a `serve` restart no lease exists: the pool is empty, and boot reclamation completes only after every unsupervised VMM's scope is
-  removed, before the first assign (ADR-0156).
+- Across a `serve` restart no lease exists: the pool is empty. Boot reclamation removes every unsupervised VMM's scope it can within the
+  bound and reserves the guest-address offset of each one that is still stuck, before the first assign (ADR-0350, ADR-0156).
 - Once the successor row exists, the predecessor's lease is eligible for network reclaim: the restart path does not mark the predecessor
   handled, and the network-reclaim retry has a constant backoff and no attempt ceiling, so a lease held for an unreaped VMM is retried until
   the scope is gone. Terminal rows stay in `VmReclamation`'s managed targets, so the resync pass keeps revisiting them.
@@ -88,6 +91,9 @@ decision 11 and changes no other decision.)
   one scope per such allocation until the node reboots. There is no operator to remove it, and none is needed for correctness.
 - The bound is a policy value, revisited if a production `KilledNotReaped` is observed for a healthy disk.
 - `Vmm` gains one outcome variant and a bound constant; every exhaustive match on the outcome gains one arm.
-- The `node-local-volume` Quint model needs no change. The `guest-flow-owner` model (`cid_lease.qnt`) gains the unreaped stop and the late
-  release (feature-delta, same section, item 11).
+- The `node-local-volume` Quint model needs no change. The `guest-flow-owner` model (`cid_lease.qnt`) gains the unreaped stop, the late
+  release and the scope's removal after it is empty (feature-delta, same section, item 11).
 - ADR-0156 is amended: the lease is released after the VMM is reaped, not merely after the stop.
+- After a `KilledNotReaped` stop `VmDriver::stop` does not remove the scope (it is known to be populated); `VmReclamation` removes it after
+  the reap. On a reaped stop the driver's scope removal must be the populated-first removal of ADR-0349 (proposed: through `kill_scope`;
+  awaiting the user's ruling, feature-delta N-1).

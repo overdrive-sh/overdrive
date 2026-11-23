@@ -129,3 +129,38 @@ The mechanism is pinned in the feature delta of the node-local persistent
 volume, § *A VMM kill's reap wait is bounded*, item 11. Alternatives
 (release at stop; a separate held-CID set; release owned by `VmReclamation`)
 are recorded in ADR-0348.
+
+## Amendment 2026-11-23 (second) — "scope absent" means removed after empty; boot reserves a stuck VM's offset (accepted 2026-11-23)
+
+Approved by the user on 2026-11-23 as decisions 16 and 14 of GH #348. This
+ADR is implemented, so the earlier text stays as the contract of the shipped
+code and this section states what changes.
+
+- **The release gate (changes the first amendment).** The first amendment
+  gates release on the allocation's scope being observed absent, on the
+  premise that a scope can be removed only once no task is left. The spike of
+  2026-11-23 showed that on the running kernel `rmdir` removes a scope whose
+  last task is stuck in exit, while the task still holds the device. The gate
+  is now: the scope is absent *and* the removal was the populated-first removal
+  of ADR-0349, which removes a scope only after `cgroup.events` reports
+  `populated 0`. Every scope removal in Overdrive takes that order, so absence
+  is a proof of emptiness. The citations for the exit ordering above
+  (`kernel/cgroup/cgroup.c:6168-6169`) describe the `v7.0` source; the design
+  does not depend on whether `rmdir` sleeps or succeeds early.
+- **"Boot reclamation precedes every `assign`" (changes the Decision).** Boot
+  reclamation no longer refuses the boot for a VMM it cannot remove. It waits
+  the bound, and for each scope still populated it reserves that VMM's offset
+  in the pool before the first `assign` (ADR-0350). The invariant that
+  matters stands in a different form: before the first `assign`, every offset
+  held by a leftover VMM is either removed or reserved, so no launch is handed
+  a CID a leftover VMM holds.
+- **"Under the rules above no production path produces that state."** Stays
+  true with the reservation. The holder set the pool covers is now Admitted,
+  Retiring, ended-but-not-reaped (a Retiring lease), and reserved-at-boot
+  (also a Retiring lease, counted toward the attachment cap).
+- **One derivation.** The CID is still computed in exactly one place: the
+  pool's offset-to-plan derivation, which `assign` and the boot reservation
+  both use.
+
+The contract is in the feature delta of the node-local persistent volume,
+§ *Boot proceeds past a stuck VM*. Alternatives are recorded in ADR-0350.

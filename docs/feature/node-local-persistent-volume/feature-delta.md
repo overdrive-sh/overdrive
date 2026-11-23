@@ -1,8 +1,8 @@
 # Feature delta: node-local persistent volume for VM workloads (GH #348)
 
 **Status:** the design is approved by the user; rulings run through 2026-11-23. The decision table (VD-1 to VD-10, SD-1 to SD-6, J-1, DE-1, D-1,
-H1, H2, W-1 to W-4, R-1, VB-1, VB-2, RB-1 to RB-3, B-1 to B-3, P-1 to P-3) and the scope-limitation table (L1 to L9) are owned by
-[`design/wave-decisions.md`](design/wave-decisions.md); each ADR (0310 to 0320, 0334 to 0338, 0348, 0349) holds one decision. This file owns the interface
+H1, H2, W-1 to W-4, R-1, VB-1 to VB-3, RB-1 to RB-4, B-1 to B-3, P-1 to P-3) and the scope-limitation table (L1 to L9) are owned by
+[`design/wave-decisions.md`](design/wave-decisions.md); each ADR (0310 to 0320, 0334 to 0338, 0348 to 0350) holds one decision. This file owns the interface
 contracts, the boundary scenarios and the model's boundary. Executable test obligations, mutation targets and test re-sync lists are DISTILL's
 input in [`distill/upstream-issues.md`](distill/upstream-issues.md). The model is two Quint specs, `specs/quint/node-local-volume/` and
 `specs/quint/restart-generation/`; their verdicts are in each spec's `evidence/summary.md`, not in this document.
@@ -487,8 +487,10 @@ zero grace) and the failed EXEC release (`:2315`, zero grace).
    unreapable process, but is released at the scripted reap; its exit sender fires only at the scripted reap. The reapable path is unchanged.
 6. **`VmDriver::stop` on `Ok(KilledNotReaped)`.** The outcome is a completed stop. The driver emits one `tracing` event
    `vm.lifecycle.stop_not_reaped` (allocation id, pid), writes the beacon writer's `vmm_has_exited` as for any `terminate` completion, runs
-   `cleanup_driver_artifacts` in the same order (`cgroup.kill`, scope removal, run directory, clone then index link), treating a scope
-   removal that fails for the non-empty scope as the best effort it already is, and returns `Ok(())`. The driver does not touch the guest
+   `cleanup_driver_artifacts` in the same order (`cgroup.kill`, scope removal, run directory, clone then index link), except that on
+   `KilledNotReaped` it does not remove the scope: the process is not reaped, so the scope is populated by definition, and `VmReclamation`
+   removes it after the reap (item 9). On a reaped stop the driver's scope removal goes through `kill_scope` and its populated-first order (§ "A scope kill's settle wait is bounded", decision 16, ruling N-1
+   proposed), and a `ResourceBusy` from it is the best effort the cleanup already is. The driver does not touch the guest
    lease; the shim holds it (item 11). `status()` is `Err(NotFound)` (the
    entry is `EndingInFlight`, as for every stop); the entry stays `EndingInFlight` until the shim's `release_supervision`. No new
    `DriverError`: the return type of `Driver::stop` is unchanged. The `Driver::stop` contract says: on `Ok`, the VMM has been killed and is
@@ -524,12 +526,19 @@ zero grace) and the failed EXEC release (`:2315`, zero grace).
       `-EADDRINUSE` (`vhost_vsock_set_cid`, `:804-813 @ v7.0`). A killed-not-reaped VMM still holds the file, so freeing its offset would let
       next-fit hand its CID to a new launch. Release-last (`GuestAddressPool::release`, `GuestNetworkProvisioner::teardown` rustdoc) means
       *reaped*, not *stopped*; both docs say so.
-    - *The precondition, and why this fact.* The shim releases a lease only when the allocation's cgroup scope is absent from
-      `VmHostState::observe()` (`scopes`). `rmdir` of a scope succeeds only when the cgroup has no task left (`cgroup_rmdir` ->
-      `cgroup_drain_dying`, `kernel/cgroup/cgroup.c:6254-6272`, `:6309-6311 @ v7.0`; a live thread in an uninterruptible wait is a visible task,
-      so `-EBUSY`), and a task leaves its cgroup only after it has dropped its files (ADR-0156 § Decision, the exit-ordering citations). The
-      shim reads the resource, not the stop's outcome: it needs no signal from `Driver::stop`, and it is right if the process is reaped a
-      moment after the bound.
+    - *The precondition, and why this fact (restated by decision 16, 2026-11-23).* The shim releases a lease only when the allocation's cgroup
+      scope is absent from `VmHostState::observe()` (`scopes`), **and absence is trusted only because every scope removal first waits for the
+      scope to report empty.** The earlier reading, "assumption K-C7: `rmdir` of a scope succeeds only when no task is left, so scope absent
+      implies device released", is **false on the running kernel** (`7.0.0-38-generic`): `rmdir` of a scope whose last task is held in exit
+      returned `Ok` in about 1 ms (20/20) while the task was alive and held the device (`spike/findings-cgroup-events.md`). The vendored
+      `v7.0` source predicts `-EBUSY` or a sleep instead (`cgroup_drain_dying`, `kernel/cgroup/cgroup.c:6254-6297 @ v7.0`). The design depends
+      on neither. It depends on this: `cgroup.events` `populated` stays 1 until the task is gone and reads 0 only after (0/20 early, 0/20
+      missed; `cgroup_is_populated`, `:3817-3824`; `do_cgroup_task_dead`, `:7072-7101 @ v7.0`), and a removal entered after `populated 0` neither
+      sleeps nor fails (60/60). So the **gate** is: *the scope is absent from `observe()`, and every removal of a workload scope in Overdrive is
+      the populated-first removal*. Today the VM driver's own cleanup (`vm_driver.rs:1322`, `:1738`) is a second, bare `rmdir`; the proposed
+      fix (ruling N-1, § "A scope kill's settle wait is bounded", item 4) makes `RealVmHostState::kill_scope` the only remover of a VM scope.
+      A removal outside it (the appliance has no foreign remover) would break the gate. The shim reads the resource, not the
+      stop's outcome: it needs no signal from `Driver::stop`, and it is right if the process is reaped a moment after the bound.
     - *The mechanism, one function.* Every release goes through `teardown_guest_network`; the stop, the restart predecessor and successor
       cleanups, the start-failure cleanups and `reclaim_guest_network` all reach it through `teardown_for_dispatch`, so the gate holds at every
       site. Its order: (1) the plan is read from the pool; none, return `Ok` as today. (2) `VmHostState::observe()`; a failure returns the
@@ -545,9 +554,9 @@ zero grace) and the failed EXEC release (`:2315`, zero grace).
       action, no new View field, no new port method. `reclaim_guest_network` and the helpers above gain a `&dyn VmHostState` (the dispatch
       already holds one); that is crate-internal structure.
     - *Boot.* A lease is process-local and not persisted (ADR-0118): after a restart there is no Retiring lease to settle. The invariant
-      across a restart is boot reclamation's: `vm_reclamation_boot::converge` removes every unsupervised VMM's scope, and so completes only
-      after those VMMs have exited, before the first `assign`. A VMM that stays unreaped across a `serve` crash is the `kill_scope` busy case
-      (§ "A scope kill's settle wait is bounded", below), not a lease case.
+      across a restart is boot reclamation's: before the first `assign`, every leftover VMM's scope is removed or its offset is reserved
+      (§ "Boot proceeds past a stuck VM", RB-4, ADR-0350). A VMM that stays unreaped across a `serve` crash is a reserved offset, not a refused
+      boot.
     - *Cost.* One `observe()` (a bounded directory walk) per teardown, which is not a hot path. One attachment slot per unreaped VMM until
       the reap, counted as Retiring against the cap; at the cap a new launch is refused `AdmissionCapReached`, typed, as for any held lease.
       The cap is node-wide (`at_cap`), so enough unreaped VMMs stall every launch and every restart's successor on the node until they reap.
@@ -602,10 +611,16 @@ lease is released after the reap, not before. (8) Observing the scope fails at t
   `CidUnique` and `NoUntrackedLease` range over `late` as well; `LeaseOutlivesVmm` is unchanged and is the check with teeth. Progress on the
   liveness instance: an offset in `late` whose device is free is eventually released. Named runs for `checks.toml`:
   `StopOfAnUnreapedVmmHoldsItsLeaseUntilTheReap`, `NextFitSkipsAnUnreapedLease` (three offsets, the wrap lands on the held one),
-  `ServeCrashWithAnUnreapedVmmBlocksAssignUntilItExits`. One hazard variant, `releaseUnreapedAtStop`: the unreaped stop frees the lease with
-  the stop (today's behaviour for a reaped VMM); the checker must find `NoLaunchClash` / `LeaseOutlivesVmm` violated. Assumption K-C7:
-  the scope is absent only after the device is released (cgroup.c:6254-6311 and ADR-0156's exit-ordering citations), discharged by the
-  Tier 3 addition above. Conformance mapping for the DISTILL driver: `StopUnreaped` is the real stop handler and tick over an unreapable
+  `ServeCrashWithAnUnreapedVmmReservesItsCidAndBoots` (renamed by decision 14; see "Quint impact" in § "Boot proceeds past a stuck VM"). One
+  hazard variant, `releaseUnreapedAtStop`: the unreaped stop frees the lease with
+  the stop (today's behaviour for a reaped VMM); the checker must find `NoLaunchClash` / `LeaseOutlivesVmm` violated. **Assumption K-C7,
+  restated by decision 16:** the scope is removed only after it reports empty, which holds only because every removal is the
+  populated-first removal (§ "A scope kill's settle wait is bounded"); it is no longer "the scope is absent only after the device is
+  released" as a kernel fact. It is discharged by the Tier 3 and unit obligations of that section (a removal while `populated 1` is never
+  issued; a held VMM keeps the scope present). The text for the spec README, for the modeler: "K-C7: a workload scope is removed only
+  after `cgroup.events` reports `populated 0` for it; the scope's absence therefore implies the VMM's device is released. The running
+  kernel removes a scope under a live stuck task when `rmdir` is issued without that wait (spike `findings-cgroup-events.md`); the model
+  never does." Conformance mapping for the DISTILL driver: `StopUnreaped` is the real stop handler and tick over an unreapable
   `SimVmm` process; `Reap` is the scripted `SimVmm::exit_process`; `LateRelease` is the production convergence tick that dispatches
   `ReclaimAllocationNetwork`; `late` and the lease are projected from `GuestAddressPool::observe` and `snapshot` (already pinned for
   `lease`), and `dev` from `SimVmm::vsock_device_holders` (the existing marked arbiter read).
@@ -614,13 +629,15 @@ lease is released after the reap, not before. (8) Observing the scope fails at t
 
 **Today.** `RealVmHostState::kill_scope` (`crates/overdrive-host/src/vm_host_state.rs:229-257`) writes `cgroup.kill` and then retries
 `tokio::fs::remove_dir` up to 150 times at 20 ms (3 s), returning the last error whatever its kind. Each attempt is a blocking `rmdir` on the
-blocking pool. `rmdir` returns `-EBUSY` while a task of the scope is visible (`cgroup_drain_dying`, `kernel/cgroup/cgroup.c:6254-6272 @ v7.0`),
-but when every remaining task is already exiting it sleeps `TASK_UNINTERRUPTIBLE` until the last passes `cgroup_task_dead`
-(`:6274-6297 @ v7.0`, the lock is released before the sleep). That attempt never returns, so the attempt count is no bound: `kill_scope`,
-`VmReclamation`'s `node/<id>` target and boot `converge` stall behind a VMM held in the close of a suspended device. The port rustdoc
+blocking pool. The `v7.0` source predicts `-EBUSY` while a task of the scope is visible (`cgroup_drain_dying`,
+`kernel/cgroup/cgroup.c:6254-6272 @ v7.0`) and an uninterruptible sleep when every remaining task is already exiting (`:6274-6297 @ v7.0`).
+The running kernel does neither (spike `findings-cgroup-events.md`, decision 16): `rmdir` of a scope whose last task is held in exit returns
+`Ok` in about 1 ms, with the task alive and holding the device. So today's `kill_scope` can return `Ok` for a scope whose VMM is not gone,
+and the lease gate that trusts "scope absent" releases a lease while the VMM holds the CID. The port rustdoc
 (`overdrive-core/src/traits/vm_host_state.rs:138-165`) states the settle contract with no bound.
 
-**The contract (user ruling 2026-11-23, decision 13, option a).**
+**The contract (user ruling 2026-11-23, decision 13, option a; mechanism revised by decision 16, the same day: the wait is on "empty", not
+on "removed").**
 
 1. **The outcome.** No signature change: `async fn kill_scope(&self, scope: &CgroupPath) -> std::io::Result<()>`. `Err` whose
    `kind() == io::ErrorKind::ResourceBusy` means the kill was delivered and the scope is not yet removed. No new type, no new variant. Every
@@ -629,60 +646,255 @@ but when every remaining task is already exiting it sleeps `TASK_UNINTERRUPTIBLE
    trait, as `VMM_REAP_BOUND` sits beside `Vmm`. 3 s is today's 150 x 20 ms: an ordinary scope settles in milliseconds, a stop has already
    waited `VMM_REAP_BOUND` for the reap, and boot reclamation pays the bound once per stuck scope in series. It is a policy value (ADR-0349
    Consequences). The 20 ms poll interval stays private to the host adapter.
-3. **What the bound covers and what clock measures it.** It starts when `kill_scope` is entered and covers the whole call, including a blocked
-   `rmdir`. `RealVmHostState` measures it on real time (`tokio::time`), as `CloudHypervisorVmm` does for `grace`; it takes no clock. The
-   adapter runs each removal on the blocking pool under that deadline and returns `ResourceBusy` at the bound, leaving a removal still in
-   flight to finish by itself. It holds an in-flight claim per scope (`ClaimSet`, `rust.md` § "Check-and-act must be atomic"), so there is at
-   most one removal in flight per scope; while one is, a call does not start another, it polls whether the scope directory is gone at the same
-   interval and returns `Ok(())` if so, `ResourceBusy` at the deadline otherwise. A busy return therefore always takes the full bound.
+3. **The order, what the bound covers and what clock measures it.** `kill_scope` (a) writes `cgroup.kill`; (b) waits for the scope's
+   `cgroup.events` to report `populated 0`; (c) only then removes the directory. It never issues the removal while the scope reports
+   `populated 1`. The bound starts when `kill_scope` is entered and covers the whole call (the wait; the removal after it is entered only
+   when the scope is empty and does not wait). `RealVmHostState` measures it on real time (`tokio::time`), as `CloudHypervisorVmm` does for
+   `grace`; it takes no clock. The wait is a read of `cgroup.events` that cannot miss a transition and is cancellable by the bound's timer,
+   with no thread blocked in the kernel; the spike's discipline (arm, read, test, poll `POLLPRI`; read after arming, or a change between the
+   first read and the wait is lost) is the adapter's, not a contract. At the bound with `populated 1`, the call returns `ResourceBusy`, the
+   scope in place, no removal attempted. A scope that is empty at entry, or whose `cgroup.events` is absent (`NotFound`), skips the wait. A
+   removal after `populated 0` that fails is a real error returned at once (`EBUSY` there means a population appeared after the empty
+   reading, which is not a retry). A busy return always takes the full bound. There is no in-flight claim and no removal on the blocking
+   pool, so `ClaimSet` is not used here.
 4. **`VmHostState::kill_scope` rustdoc states** (each clause is part of the port contract and is covered by the equivalence test):
-   - *Postcondition on `Ok`:* the scope directory is absent (removed, or `NotFound`). A following `observe()` does not report it.
-   - *On `Err(ResourceBusy)`:* `cgroup.kill` was written, the scope is still present, and it is the bound that ended the call. The scope may report
-     an empty `pids` in a following `observe()` (tasks that are exiting are not listed). The call returns within `KILL_SCOPE_SETTLE_BOUND`
-     plus scheduling latency, never earlier than the bound, and never waits on the process.
+   - *Postcondition on `Ok`:* `populated 0` was observed for the scope and the directory is absent (removed, or `NotFound`), so no task of
+     the scope is left and every descriptor of its VMM is closed. A following `observe()` does not report it.
+   - *On `Err(ResourceBusy)`:* `cgroup.kill` was written, the scope is still present and was not removed, and it is the bound that ended the
+     call. The scope may report an empty `pids` in a following `observe()` (tasks that are exiting are not listed): an empty `pids` is not
+     emptiness. The call returns within `KILL_SCOPE_SETTLE_BOUND` plus scheduling latency, never earlier than the bound, and never waits on
+     the process beyond it.
    - *Edge cases:* idempotent as before (an absent scope is `Ok`); a second call for a scope that is still busy is `ResourceBusy` again after
-     its own bound; a scope that settles during the wait returns `Ok` without waiting out the bound; a non-`ResourceBusy` error is returned
+     its own bound; a scope that empties during the wait returns `Ok` without waiting out the bound; a non-`ResourceBusy` error is returned
      at once.
    - *Errors:* `ResourceBusy` is the only kind a caller retries; any other kind is a refusal (`PermissionDenied`, `EIO`).
-5. **`SimVmHostState`.** It does not wait and measures no time: the bound is a property of the host adapter's retry, not of the state a sim
+   - *A VM scope has one remover (PROPOSED, awaiting the user's ruling N-1).* The VM driver also removes the scope at a stop and at a
+     start-failure cleanup (`cleanup_driver_artifacts`, `vm_driver.rs:1738`; `:1322`): `cgroup.kill` then
+     `CgroupManager::remove_workload_scope`, a bare `rmdir` with no wait, which on the running kernel removes a scope under a live task. The
+     lease gate needs every removal of a VM scope to be populated-first. Proposed: the driver removes a VM's scope through
+     `VmHostState::kill_scope` (given to `VmDriver` as a required constructor parameter), so `kill_scope` is the only remover of a VM scope;
+     `remove_workload_scope` stays for exec scopes, which hold no guest device and are outside the lease gate.
+5. **`SimVmHostState`.** It does not wait and measures no time: the bound is a property of the host adapter's wait, not of the state a sim
    models. It models busy by scripted state: a test holds an allocation's scope (the holding method is DISTILL's), `observe()` keeps reporting
    the scope, `kill_scope` on a held scope returns `Err(ResourceBusy)` at once, changes nothing and does not consume the scripted-failure queue,
-   and the scope leaves only when the hold is cleared. The hold and `SimVmm`'s unreaped process share one fact, the reap (the item 11
+   and the scope leaves only when the hold is cleared. **It never removes a scope while it is held**, which is the sim's form of "never
+   `rmdir` while populated": a held scope's removal is not representable, and the sim does not model the kernel's early `rmdir`. The hold and `SimVmm`'s unreaped process share one fact, the reap (the item 11
    obligation), so the scripted reap clears both. The existing `script_kill_scope_failure(ErrorKind::ResourceBusy)` remains a one-call busy.
 6. **Callers.**
 
    | Caller | On `ResourceBusy` |
    |---|---|
    | `execute_reclaim_allocation`, `execute_discard_stranded_artifacts` (`action_shim/reclamation.rs:239`, `:338`) | return `ReclamationError::Host(err)` as for any substrate failure: no `discard_artifacts`, no terminal row, no evaluation submitted. Unchanged code; one `tracing` event `vm.reclamation.scope_busy` (allocation id) at info level, since a busy scope is expected while a VMM is unreaped. The tick requeues the target (`reconciler_runtime.rs:1648-1655`, `:1764-1770`) and the 30 s resync pass is the backstop; the busy wait is the pacing. `dispatch` records the first error and continues with the tick's other actions (`action_shim/mod.rs:951-957`) |
-   | `vm_reclamation_boot::converge` | unchanged contract: any executor error is `ConvergeError::Reclamation` and refuses the boot (fail-closed), after at most `KILL_SCOPE_SETTLE_BOUND` per stuck scope instead of never. The supervisor's restart retries the boot. See the open question below |
-   | the shim's lease release (item 11) | the release is gated on `observe()` reporting the scope absent, so a busy scope keeps its lease held; nothing is added |
+   | `vm_reclamation_boot::converge` | a busy scope does not refuse the boot: § "Boot proceeds past a stuck VM" (RB-4, decision 14). Any other executor error stays `ConvergeError::Reclamation` and refuses the boot, as a substrate refusal |
+   | the shim's lease release (item 11) | the release is gated on the scope being absent after the populated-first removal, so a busy scope keeps its lease held; nothing is added |
 
 7. **Not changed.** The `VmHostState` signatures, `RealVmHostState::new`'s parameters, `observe`, `probe`, `discard_artifacts`, the
    `ReclamationError` and `ConvergeError` variants, the planner, `VmReclamation`'s View and the tick's requeue.
 
 **Tests this decision requires (for the acceptance designer; none is written here).**
 
-- Host adapter, real cgroupfs (Tier 3, native metal or a guest): `kill_scope` on a scope with a thread blocked in a held flush returns
-  `ResourceBusy` within the bound; on a scope whose last tasks are exiting and held (the `rmdir` sleep, not `EBUSY`) it returns `ResourceBusy`
-  within the bound, and the scope is removed after the drain; repeated calls leave one blocked removal per scope, not one per call.
-- `VmHostState` equivalence (`vm_host_state_equivalence.rs`): both adapters agree on `Ok` implies absent, on `ResourceBusy` leaving the scope
-  present and observed, on idempotence, and on a non-busy error returning at once without retry.
-- Host adapter, unit: a `PermissionDenied` removal is returned on the first attempt; a scope that settles mid-wait returns `Ok` early.
+- **`kill_scope` never removes a populated scope (decision 16).** Host adapter, real cgroupfs (Tier 3, native metal or a guest; the spike's
+  `volume-pool` hold is the fixture): with the scope's last task held in exit, `kill_scope` returns `ResourceBusy` at the bound, the scope
+  directory is still present, the task is still alive, and no removal was issued while `cgroup.events` read `populated 1` (observed as the
+  directory's presence for the whole hold, which the early `rmdir` of the running kernel would have broken); after the drain it returns `Ok`
+  with the scope absent. Host adapter, unit, over a fake `cgroup.events` that reads `populated 1` then `0`: the removal is issued only after
+  the `0` read, and never at `1`.
+- `VmHostState` equivalence (`vm_host_state_equivalence.rs`): both adapters agree on `Ok` implies absent and no task left, on `ResourceBusy`
+  leaving the scope present and observed, on idempotence, and on a non-busy error returning at once without retry.
+- Host adapter, unit: a `PermissionDenied` removal is returned on the first attempt; a scope that empties mid-wait returns `Ok` early; a
+  scope with no `cgroup.events` is `Ok`.
+- Lease gate (decision 16), Tier 1 seeded over `SimVmm` and `SimVmHostState`: an unreaped VMM's lease is held while its scope is held and
+  released only after the scope's removal, in a trace where the scripted reap is delayed past several reclaim attempts; Tier 3, S-VOL-T3-12
+  asserts the lease is not released while the held-flush VMM is alive, which the early `rmdir` would have broken.
 - Tier 1, seeded, production `VmReclamation` tick over `SimVmHostState` with a held scope: the tick returns busy without discarding, writing a
   row or advancing the lease; other allocations' actions in the same tick still run; after the hold clears the next tick removes the scope.
-- Tier 1, production boot `converge` over a held scope: refuses with `ConvergeError::Reclamation` carrying `ResourceBusy`; after the hold
-  clears the next boot succeeds.
 - The boot-reclamation test double (`vm_reclamation_boot.rs:821`) gains the busy case.
 
-**Quint impact.** None beyond item 11's already-required edit to `specs/quint/guest-flow-owner/cid_lease.qnt`. A refused boot is the model's
-`Reclaim` not being enabled while an orphan is unreaped, and the run `ServeCrashWithAnUnreapedVmmBlocksAssignUntilItExits` is that scenario;
-its liveness progress (an unreaped orphan eventually exits, then `Reclaim` completes) covers the retry. No new action, run or hazard: the
-decision is covered by the hazard `assignBeforeReclaim`. `node-local-volume` (`Drain`, `Reclaim(a)`) needs no change: `Reclaim` there is the
-VMM's death, and the busy period is the held claim until `Drain`.
+**Quint impact (decision 16; the modeler edits the specs, none is edited here).** `specs/quint/guest-flow-owner/cid_lease.qnt`:
 
-**Open question carried to the user.** At boot, a busy scope refuses the boot (above). Letting boot proceed past a busy scope would need the
-unreaped VMM's CID to stay unassignable across a restart, which no lease records (ADR-0118), and would amend ADR-0156's "reclamation completes
-before the first assign". The design keeps the refusal.
+- The scope becomes a state: a per-allocation `scope` flag (present or removed) and an action `RemoveScope(o)` enabled only when the
+  offset's device is free (the guard is `populated 0`). The release gate (`LateRelease`, and the release at an ordinary stop) reads the
+  scope's absence, not the device. K-C7 is restated as in item 11 (the README text is given there).
+- `Reap(o)` is the task's exit and so the model's `populated 0`; it no longer implies the scope is gone. `LateRelease(o)` is enabled only
+  when the scope is removed.
+- Hazard variant `removeScopeWhilePopulated` (one per decision 16): `RemoveScope` loses its guard, so a scope can be removed under a live
+  unreaped VMM and the lease released; the checker must find `NoLaunchClash` / `LeaseOutlivesVmm` violated. Named run
+  `ScopeIsRemovedOnlyAfterItIsEmpty`: stop unreaped, attempt removal (disabled), reap, remove, release, a wrap-around assign succeeds.
+- Decision 15 (below, § "Validation budget"): `lease_five` runs a CFG without `StopUnreaped`.
+- Decision 14's model change is in § "Boot proceeds past a stuck VM".
+- `node-local-volume` (`Drain`, `Reclaim(a)`) needs no change: `Reclaim` there is the VMM's death, and the busy period is the held claim until
+  `Drain`.
+
+### Boot proceeds past a stuck VM (RB-4; ADR-0350, which amends ADR-0156)
+
+**Today.** `vm_reclamation_boot::converge` (`crates/overdrive-control-plane/src/vm_reclamation_boot.rs:75`) runs the reclamation executors for
+every leftover VM, and `kill_scope(...).await?` in `execute_reclaim_allocation` (`action_shim/reclamation.rs:239`) turns any error into
+`ConvergeError::Reclamation`, which `run_server` returns at `lib.rs:4552-4563`: `serve` refuses to boot. With ADR-0349 as first written, a
+leftover VM whose last task is stuck in exit refuses the boot after the bound, on every restart, until the I/O drains.
+
+**The contract (user ruling 2026-11-23, decision 14, option c; the user's words: "the node should not refuse to start just because of a dead
+vm").** `converge` keeps its signature (`async fn converge(state: &AppState) -> Result<(), ConvergeError>`), and a busy scope no longer
+returns `Err`. In order:
+
+1. **Observe.** The leftover VM scopes (`VmHostState::observe`) and the allocation rows (`alloc_status_rows`, readable: the observation store
+   opens in the composition root before `run_server`, and `GuestAddressPool::new` at `lib.rs:4346` runs before `converge` at `:4552`, which
+   already reads the rows). A scope maps to its allocation by name, `<alloc_id>.scope` (`cgroup.rs:57-62`, `observe_scopes`,
+   `vm_host_state.rs:123-143`).
+2. **Reserve, before any kill.** For every leftover VM scope the held guest address is determined and reserved in `GuestAddressPool`
+   (item below). The pool is empty at boot, so a reservation cannot conflict with a lease. Reserving first leaves no window in which a kill
+   has run and the offset is unprotected.
+3. **Kill, in parallel.** The executors run for all scopes concurrently, each waiting at most `KILL_SCOPE_SETTLE_BOUND` (ADR-0349), so
+   boot waits one bound in the worst case and not one per stuck scope.
+4. **A busy scope is not an error here.** `kill_scope` returning `ResourceBusy` (the kill is delivered, the scope is populated) ends the
+   scope's executor step as follows: the terminal row is written as for a settled scope, with the address carried (below); the artifact
+   discard (scope, run directory) is not done and is left to `VmReclamation`, which emits `DiscardStrandedArtifacts` for a terminal VM
+   allocation with host artifacts and retries each pass (item 9 of § "A VMM kill's reap wait is bounded"). The terminal row is true: the
+   VMM is killed and can run no guest code (ADR-0348); it makes the workload eligible for restart, with the replacement waiting on the
+   volume claim as ADR-0317 states. Any other executor error stays `ConvergeError::Reclamation` and refuses the boot: it is a substrate
+   refusal, not a stuck VM.
+5. **Surface.** The existing surfaces carry it: the allocation's terminal row, the scope that stays in `VmHostState::observe()`, and the
+   attachment occupancy (`GuestAttachmentOccupancy` `held` and `retiring`) that `describe` already shows (W-1). Boot also emits one `tracing`
+   event `vm.reclamation.boot_stuck` (allocation id, CID) per busy scope. No new row, field or `describe` line.
+6. **Continue.** `converge` returns `Ok(())` and boot continues. Cleanup retries on every later pass.
+
+**Where the held address comes from.** The offset is `workload_addr - GUEST_NODE_PREFIX.network()` (`100.95.0.0/16`, a compile-time constant;
+the inverse is `GuestAddressPool::release`, `guest_network.rs:651-652`) and the CID is `GUEST_CID_BASE + offset`. Sources, in order:
+
+- **The row.** `AllocStatusRow.workload_addr` (`observation_store.rs:984`) is written on `Running` rows (`action_shim/mod.rs:2027-2029`,
+  `:2515-2519`) and carried onto exit-observer terminal rows (`exit_observer.rs:562`).
+- **The VMM's command line**, for a scope whose row gives no address. The launcher passes `--vsock cid=<cid>,backend=vhost-kernel`
+  (`vmm.rs:304`, `:385`), and the leftover VMM is alive when boot starts, so the read is taken in step 2, before step 3 writes
+  `cgroup.kill`.
+
+**Gaps closed (user's gap (i), "a CID held with no address in any row").** Three producers leave a row without the address:
+
+| Producer | Today | Fix |
+|---|---|---|
+| terminal row of `FinalizeFailed` (`action_shim/mod.rs:1693`) | drops it (`if is_stable { prior } else { None }`) | forward-carries `prior_row.workload_addr` always |
+| the stop's terminal row, and the reclamation executor's row (`action_shim/reclamation.rs:265`) | `None` | carry the prior row's address |
+| the launch parked in guest boot (`NoRow`, `vm_reclamation_boot.rs:1753-1757`): a VMM and no row | no source | the VMM's command line (above) |
+
+Options evaluated for the three (`design.md` § "Design the correct mechanism"):
+
+- *Forward-carry on terminal rows + hydration gated on `state == Running` (chosen for the two terminal cases).* No new field and no new write:
+  `AllocStatusRow.workload_addr` already exists and the forward-carry pattern already exists (ADR-0078). ADR-0276's hydration is already total
+  over state (`ServiceAllocPhase::from_row`, `service_lifecycle.rs:102-113`: every non-Running state is `NotRunning` whatever the address), so a
+  carried address on a terminal row is never a backend. ADR-0276 gets a one-paragraph amendment; no change to its decision. The comment at
+  `action_shim/mod.rs:1690-1692` ("a dead alloc is not a live backend") is rewritten: the gate is the state, not the field.
+- *Persist the address before the VMM is created (rejected for `NoRow`).* It needs a row before the launch, and a row means "an allocation was
+  observed" to the generation logic (ADR-0335) while a superseded launch writes none (ADR-0334); a separate record is a second source for a fact
+  the VMM already carries on its command line.
+- *Derive the CID from host state (chosen for `NoRow`).* The VMM's command line is the observable owner of the CID, read once while it is alive.
+  It is not enough alone: a VMM already killed-not-reaped at the crash has lost its command line, so the row (which the stop now keeps the
+  address on) is the primary source and the command line the one for the no-row case.
+- *Derive every CID from the command line only (rejected).* The same lost-command-line case.
+
+**Residual exposure (for the user, ruling N-2).** A `NoRow` VMM that is already exiting when the new `serve` reads it has neither source. It
+is not reserved. The exposure is a launch whose next-fit offset equals that VMM's CID: it fails `EADDRINUSE`, which is the VMM's typed start
+failure (ADR-0146), charged to the restart budget and retried. Reaching it needs a crash during guest boot and a VMM exit before the next
+boot reads it. Boot emits `vm.reclamation.boot_unaddressed` (allocation id) for such a scope.
+
+**Pool API (crate-internal to `overdrive-control-plane`; the pool methods are not public, as `assign` and `release` are not).**
+
+- `GuestAddressPool::reserve_leftover(&self, alloc: &AllocationId, held: LeftoverGuestAddress) -> Result<(), GuestNetworkError>`, with
+  `LeftoverGuestAddress` the two-variant sum `Address(Ipv4Addr)` | `Cid(GuestCid)`. The pool derives the offset from either, by the one
+  derivation `assign` uses (the CID is still computed in one place, ADR-0156). It inserts a **Retiring lease** for `alloc` at that offset:
+  the existing lease type in the state a stuck VMM's lease already has (ADR-0348), not a parallel structure, so the held bitmap, `leases`,
+  the occupancy counts and the attachment cap stay one source of truth. **A reservation counts toward the attachment cap** (`leases.len()`
+  and `retiring` both include it), so the cap is truthful. `assign` for the same allocation id returns the existing `LeaseRetiring`.
+  Errors: an address outside the node prefix or past the last usable offset, and an offset already held (not producible at boot, typed all the
+  same), both as one new `GuestNetworkError` variant `ReservationRefused { alloc, held }`. A refusal here is a substrate-class refusal and
+  refuses the boot.
+- It is released by the existing path: `teardown_guest_network` (item 11), gated on the scope being absent after the populated-first removal.
+  For an allocation with a terminal row the network-reclaim retry reaches it (the row carries the lease). For `NoRow` there is no row to
+  reach it, so the two reclamation executors (`execute_reclaim_allocation`, `execute_discard_stranded_artifacts`) end, after a successful
+  scope removal, by running `teardown_for_dispatch` for the allocation, which they already hold the pool and provisioner for. A reservation
+  has no network to tear down and `teardown` converges on absence.
+- Tracing: `vm.reclamation.boot_stuck`, `vm.reclamation.boot_unaddressed` as above.
+
+**`VmHostState` gains one read**, used only by boot reclamation: `async fn scope_guest_cid(&self, scope: &CgroupPath) ->
+std::io::Result<Option<GuestCid>>`. `Ok(Some)` when a task of the scope carries `--vsock cid=<cid>,...`; `Ok(None)` when the scope has no
+task or no such argument; `Err` only for a substrate failure other than absence of the scope or a task that disappears while read
+(both `Ok(None)`). Pure read, no effect. `SimVmHostState` reports the CID of a scripted live process; a scope with only exited tasks is
+`None`. It is read only for scopes whose row gives no address.
+
+**Lifecycle Gate Ownership.** Adds no gate: the reservation is the existing Retiring lease and its release gate (item 11) is unchanged. One
+state meaning moves, recorded in ADR-0350: ADR-0156's "boot reclamation completes before the first `assign`" becomes "boot reclamation, and the
+reservation of every VM it could not remove, complete before the first `assign`". The terminal row written on a busy scope means "killed, can
+run no guest code" (ADR-0348), not "scope removed".
+
+**Boundary scenarios.** (1) A leftover VM that settles within the bound: removed at boot, reservation released by the executor step, boot
+unchanged. (2) A stuck VM with a `Running` row: reserved from the row, row becomes terminal, boot continues, `launch` never receives its CID.
+(3) A stuck VM with a terminal row carrying the address: reserved from the row. (4) `NoRow`: reserved from the command line. (5) A
+stuck VM's reaping later: scope removed by `VmReclamation`, lease released by the network-reclaim retry (or the executor step for `NoRow`),
+CID free. (6) Several stuck VMs: one bound of boot delay, all reserved. (7) A busy scope never makes boot fail; a non-busy substrate
+error still does. (8) Reservations at the cap: a new launch is refused `AdmissionCapReached` (W-1 shows the wait). (9) A second crash during
+a stuck window: the next boot derives the reservation again from the rows (the terminal row carries the address).
+
+**Tests this decision requires (for the acceptance designer; none is written here).**
+
+- **Stuck leftover boots and does not reuse its CID.** Tier 1, seeded, production `converge` and a production launch over `SimVmm` and
+  `SimVmHostState` with a held scope: `converge` returns `Ok`; the pool reports the offset held (Retiring, counted in occupancy); a
+  sweep of launches across the whole offset range, including a next-fit wrap onto the held offset, never receives the stuck VMM's CID
+  (the `SimVmm` vsock holder is the arbiter) and produces no `EADDRINUSE`. Tier 3: the same on a real guest with a held flush across a
+  `serve` crash and restart.
+- **The reservation is released after the scope empties.** Tier 1: after the scripted reap, a `VmReclamation` pass and a reclaim attempt,
+  the pool no longer holds the offset and the CID is assignable; before the reap it stays held across several attempts.
+- **`kill_scope` never removes a populated scope** (the tests of § "A scope kill's settle wait is bounded").
+- **The `NoRow` case.** Tier 1: a VMM and a held scope with no row: reserved from the scripted command line, held until the scripted reap, and
+  released by the executor step after `DiscardStrandedArtifacts` removes the scope (no row ever exists). A `NoRow` scope with an unreadable
+  command line: boot continues, `vm.reclamation.boot_unaddressed` is emitted.
+- **The terminal-row carry.** Acceptance: the stop's terminal row, the `FinalizeFailed` terminal row and the reclamation executor's row each
+  carry the prior row's `workload_addr`; a Service allocation with a terminal row carrying an address has no backend (ADR-0276's gate).
+- A busy boot executor step writes the terminal row and does not discard artifacts; the next `VmReclamation` pass discards them after the hold clears.
+- A non-busy executor error still refuses the boot with `ConvergeError::Reclamation`.
+- Pool: `reserve_leftover` counts toward the cap; refuses an address outside the prefix; `assign` of a reserved allocation returns
+  `LeaseRetiring`; the reservation survives a next-fit wrap.
+- `VmHostState` equivalence: `scope_guest_cid` agrees across adapters on a live process, an empty scope and an absent scope.
+
+**Quint impact (decision 14; the modeler edits the specs, none is edited here).** `cid_lease.qnt`:
+
+- Today `Reclaim` is enabled only when no orphan is unreaped. It becomes: at boot, `Reclaim` is enabled whenever, and first **reserves the
+  offset of every unreaped orphan** (a model-level `reserved` set, a Retiring lease), then proceeds. `Assign` skips reserved offsets;
+  reservations count toward the cap. `ReleaseReservation(o)` is enabled only when the orphan's device is free and its scope is removed (the
+  decision 16 guard). `OrphanExit(o)` is unchanged.
+- `CidUnique`, `NoLaunchClash` and `NoUntrackedLease` range over `reserved`. Progress: a reserved offset whose orphan has exited is eventually
+  released.
+- The run `ServeCrashWithAnUnreapedVmmBlocksAssignUntilItExits` is replaced by `ServeCrashWithAnUnreapedVmmReservesItsCidAndBoots` (crash, boot
+  proceeds, a wrap-around assign skips the reserved offset, the orphan exits, the reservation is released). Hazard variant
+  `bootWithoutReservation` (one per decision 14): `Reclaim` proceeds without reserving; the checker must find `NoLaunchClash` violated. The
+  hazard `assignBeforeReclaim` is kept.
+- The assumption that the reservation knows every unreaped orphan's offset (row address, or command line) is the model's; it is discharged by the
+  `NoRow` and terminal-row tests above, and the exposure above is its stated exception.
+- `lease_five` runs a CFG without `StopUnreaped` (decision 15, below), so the boot-reservation runs are exhaustively checked on three offsets and
+  by named runs and randomized traces on five.
+- Everything else is unchanged: `node-local-volume` needs no change.
+
+**Validation budget (decision 15, user ruling 2026-11-23).** The five-offset exhaustive check `lease_five` now runs a CFG without
+`StopUnreaped`; it did not finish. The unreaped stop stays exhaustively checked on three offsets (`lease_ok` and its siblings), which reaches
+the pool-wrap case, and is covered on five offsets by the named runs and the randomized traces (`specs/quint/guest-flow-owner/`, commit
+`7f32d5b83`). The decision 14 and 16 hazards are added on three offsets only. Any further growth returns to the user.
+
+**Needs user ruling (decisions 14 and 16 work out choices beyond the user's words; each is PROPOSED, not accepted).**
+
+- **N-1. Who removes a VM's scope at a stop.** *Context:* `VmDriver`'s cleanup (`vm_driver.rs:1322`, `:1738`) removes the scope with a bare
+  `rmdir` after `cgroup.kill`. *Problem:* on the running kernel that removes the scope under a live stuck task, so the lease gate reads
+  "absent" while the VMM holds the CID; decision 16's gate is only as good as its weakest remover. *Options:* (a) the driver removes VM scopes
+  through `VmHostState::kill_scope` (one remover); (b) add a `cgroup.events` read to the `CgroupFs` port and make
+  `CgroupManager::remove_workload_scope` populated-first (two implementations of one discipline); (c) the driver stops removing scopes and
+  `VmReclamation` is the only remover (every ordinary stop then keeps its lease slot until the 30 s pass). *Recommendation:* (a). It makes
+  "scope absent implies emptied" structural and adds no port method.
+- **N-2. The `NoRow` residual.** *Context:* a launch parked in guest boot has no row; its CID is read from the VMM's command line, which is
+  gone once the VMM is exiting. *Problem:* a `NoRow` VMM already exiting when the new `serve` reads it has no source, so it is not reserved.
+  *Options:* (a) accept it: a launch whose offset equals that CID fails `EADDRINUSE`, a typed start failure charged to the restart budget
+  (needs a crash during guest boot plus an exit before the next boot's read); (b) refuse the boot for it, against decision 14. (c) persist the
+  address before the VMM is created, rejected in § above. *Recommendation:* (a), with the `vm.reclamation.boot_unaddressed` event. It also
+  adds the `VmHostState::scope_guest_cid` read; if you prefer no new port method, (a) applies to every `NoRow` scope.
+- **N-3. A busy boot scope writes its terminal row.** *Context:* ADR-0349 as first written said a busy scope takes no row write.
+  *Problem:* with boot no longer refusing, the stuck VM's row would stay `Running` for a VM that can run no guest code, and its workload
+  would not restart until the reap. *Options:* (a) write the terminal row once the kill is delivered, as a `KilledNotReaped` stop does
+  (ADR-0348), and leave the artifacts to `VmReclamation`; (b) leave the row `Running` until the scope empties. *Recommendation:* (a): the row is true
+  and the workload recovers while the VM drains. (ADR-0349's caller rule is amended to exempt this executor step.)
 
 ### Restart generation is handled when its successor is observed (SD-6; ADR-0335, which amends ADR-0073, with ADR-0337 and ADR-0338)
 
