@@ -2,7 +2,7 @@
 # Decisions modelled: VD-2 (volume belongs to the workload, stop keeps it), VD-8 (launch waits for the claim, not the
 # process), VD-9 (the launch path ensures the volume: create-if-absent, activate), SD-1 to SD-5 as one decision (ADR-0334: a
 # launch observing the lane signal, raised by an operator stop/restart or by node shutdown, abandons its waits and
-# delivers nothing). VD-3 (backing) has no protocol rule. SD-6 (the restart generation, ADR-0335) is modelled by
+# delivers nothing). VD-3 (backing) has no protocol rule. The restart budget is the rule of restart-generation/restart_budget.qnt, imported. SD-6 (the restart generation, ADR-0335) is modelled by
 # specs/quint/restart-generation/, not here.
 # One hazard per decision. ci = true iff the check takes under two minutes; vol-safety-tlc is the one exhaustive check
 # outside CI. Runs on vol_conf (REC = true) are the #[quint_test] pins.
@@ -15,7 +15,9 @@ invariant = "Safety"
 backend = "tlc"
 expect = "holds"
 ci = false
-timeout_secs = 1500
+timeout_secs = 6600
+heap_mb = 16384
+workers = 16
 
 [[check]]
 name = "vol-live-start"
@@ -112,6 +114,15 @@ name = "vol-run-launch-bound-exceeded-fails-typed-and-charges-budget"
 spec = "node_volume.qnt"
 main = "vol_conf"
 run = "launch_bound_exceeded_fails_typed_and_charges_budget"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "vol-run-restart-of-failed-row-forgives-the-failure"
+spec = "node_volume.qnt"
+main = "vol_conf"
+run = "restart_of_failed_row_forgives_the_failure"
 backend = "evaluator"
 expect = "holds"
 ci = true

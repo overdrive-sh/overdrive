@@ -5258,6 +5258,7 @@ fn spawn_convergence_loop(
                 biased;
                 () = shutdown.cancelled(), if !admission_closed => {
                     admission_closed = true;
+                    state.runtime.supersede_all_lanes();
                     admitted_at_close = active.len();
                     completed_during_drain = 0;
                     drain_started = Some(clock.now());

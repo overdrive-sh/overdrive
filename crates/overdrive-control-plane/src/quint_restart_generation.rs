@@ -1467,9 +1467,6 @@ fn quint_rg_control_plane_crash_during_restart_launch_relaunches_once() -> impl 
     test = "second_restart_loses_launch_then_one_placement",
     max_samples = 1
 )]
-#[should_panic(
-    expected = "restart-generation divergence at step 10 LaunchLost: supersede_lane must raise the signal of the lane the held launch of allocation 2 is dispatching under"
-)]
 fn quint_rg_second_restart_loses_launch_then_one_placement() -> impl QuintDriver {
     RgDriver::new()
 }

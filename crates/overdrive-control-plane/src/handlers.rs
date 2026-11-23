@@ -85,6 +85,21 @@ fn enqueue_workload_lifecycle_eval(
     Ok(())
 }
 
+/// Raise the supersession signal of the workload's open convergence lane (ADR-0334).
+///
+/// Called by the two operator verbs after their intent commit and before the evaluation is
+/// enqueued: a commit whose signal finds the lane open cancels it, and a commit whose signal
+/// finds none precedes the next lane's open and so its hydration, which reads the commit.
+fn supersede_workload_lane(
+    state: &AppState,
+    workload_id: &WorkloadId,
+) -> Result<(), ControlPlaneError> {
+    let target = TargetResource::new(&format!("workload/{workload_id}"))
+        .map_err(|e| ControlPlaneError::internal("TargetResource::new(workload/<id>)", e))?;
+    state.runtime.supersede_lane(&target);
+    Ok(())
+}
+
 /// Parse a `WorkloadId` from a path parameter, attaching `field = Some("id")` to
 /// the validation error so HTTP clients can branch on the error origin.
 ///
@@ -887,6 +902,8 @@ pub async fn stop_workload(
         PutOutcome::KeyExists { .. } => StopOutcome::AlreadyStopped,
     };
 
+    supersede_workload_lane(&state, &workload_id)?;
+
     // A stop never evicts the workload's listener facts (R-76, ADR-0062
     // amendment 2026-11-10): they are evicted only on logical deletion, so the
     // `ServiceMapHydrator` still projects the stopped Service and emits the
@@ -986,6 +1003,7 @@ pub async fn restart_workload(
             TxnOp::Delete { key: Bytes::copy_from_slice(stop_key.as_bytes()) },
         ])
         .await?;
+    supersede_workload_lane(&state, &workload_id)?;
 
     // 4. Edge-triggered ingress per whitepaper §18: enqueue an evaluation
     //    for the workload-lifecycle reconciler so the convergence loop places a

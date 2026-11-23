@@ -102,10 +102,10 @@ impl EvaluationSubmission<'_> {
         match self {
             Self::Runtime(runtime) => match TargetResource::new(&format!("workload/{workload}")) {
                 Ok(target) => runtime.lane_supersession(&target),
-                Err(_) => Arc::new(crate::reconciler_runtime::UnraisedSupersession),
+                Err(_) => Arc::new(crate::reconciler_runtime::LaneSupersession::unraised()),
             },
             #[cfg(test)]
-            Self::Standalone(_) => Arc::new(crate::reconciler_runtime::UnraisedSupersession),
+            Self::Standalone(_) => Arc::new(crate::reconciler_runtime::LaneSupersession::unraised()),
         }
     }
 }

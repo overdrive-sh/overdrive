@@ -12,7 +12,7 @@ State 1: <Initial predicate>
   idFault |-> FALSE,
   capFull |-> FALSE ]
 
-State 2: <rg_bugRefusalCharged_restart_generation_Declare line 227, col 3 to line 231, col 44 of module rg_bugRefusalCharged>
+State 2: <rg_bugRefusalCharged_restart_generation_Declare line 273, col 3 to line 277, col 44 of module rg_bugRefusalCharged>
 /\ rg_bugRefusalCharged_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ rg_bugRefusalCharged_restart_generation_st = [ declared |-> TRUE,
   stopped |-> FALSE,
@@ -26,7 +26,7 @@ State 2: <rg_bugRefusalCharged_restart_generation_Declare line 227, col 3 to lin
   idFault |-> FALSE,
   capFull |-> FALSE ]
 
-State 3: <rg_bugRefusalCharged_restart_generation_WlStart line 893, col 3 to line 925, col 81 of module rg_bugRefusalCharged>
+State 3: <rg_bugRefusalCharged_restart_generation_WlStart line 923, col 3 to line 955, col 81 of module rg_bugRefusalCharged>
 /\ rg_bugRefusalCharged_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ rg_bugRefusalCharged_restart_generation_st = [ declared |-> TRUE,
   stopped |-> FALSE,
@@ -40,7 +40,7 @@ State 3: <rg_bugRefusalCharged_restart_generation_WlStart line 893, col 3 to lin
   idFault |-> FALSE,
   capFull |-> FALSE ]
 
-State 4: <rg_bugRefusalCharged_restart_generation_LaunchStartFail line 559, col 3 to line 582, col 57 of module rg_bugRefusalCharged>
+State 4: <rg_bugRefusalCharged_restart_generation_LaunchStartFail line 605, col 3 to line 628, col 57 of module rg_bugRefusalCharged>
 /\ rg_bugRefusalCharged_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ rg_bugRefusalCharged_restart_generation_st = [ declared |-> TRUE,
   stopped |-> FALSE,
@@ -54,7 +54,7 @@ State 4: <rg_bugRefusalCharged_restart_generation_LaunchStartFail line 559, col 
   idFault |-> FALSE,
   capFull |-> FALSE ]
 
-State 5: <rg_bugRefusalCharged_restart_generation_WlStart line 893, col 3 to line 925, col 81 of module rg_bugRefusalCharged>
+State 5: <rg_bugRefusalCharged_restart_generation_WlStart line 923, col 3 to line 955, col 81 of module rg_bugRefusalCharged>
 /\ rg_bugRefusalCharged_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ rg_bugRefusalCharged_restart_generation_st = [ declared |-> TRUE,
   stopped |-> FALSE,
@@ -68,7 +68,7 @@ State 5: <rg_bugRefusalCharged_restart_generation_WlStart line 893, col 3 to lin
   idFault |-> FALSE,
   capFull |-> FALSE ]
 
-State 6: <rg_bugRefusalCharged_restart_generation_LaunchStartFail line 559, col 3 to line 582, col 57 of module rg_bugRefusalCharged>
+State 6: <rg_bugRefusalCharged_restart_generation_LaunchStartFail line 605, col 3 to line 628, col 57 of module rg_bugRefusalCharged>
 /\ rg_bugRefusalCharged_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ rg_bugRefusalCharged_restart_generation_st = [ declared |-> TRUE,
   stopped |-> FALSE,
@@ -82,7 +82,7 @@ State 6: <rg_bugRefusalCharged_restart_generation_LaunchStartFail line 559, col 
   idFault |-> FALSE,
   capFull |-> FALSE ]
 
-State 7: <rg_bugRefusalCharged_restart_generation_WlStart line 893, col 3 to line 925, col 81 of module rg_bugRefusalCharged>
+State 7: <rg_bugRefusalCharged_restart_generation_WlStart line 923, col 3 to line 955, col 81 of module rg_bugRefusalCharged>
 /\ rg_bugRefusalCharged_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ rg_bugRefusalCharged_restart_generation_st = [ declared |-> TRUE,
   stopped |-> FALSE,
@@ -96,7 +96,7 @@ State 7: <rg_bugRefusalCharged_restart_generation_WlStart line 893, col 3 to lin
   idFault |-> FALSE,
   capFull |-> FALSE ]
 
-State 8: <rg_bugRefusalCharged_restart_generation_CapFill line 334, col 3 to line 339, col 44 of module rg_bugRefusalCharged>
+State 8: <rg_bugRefusalCharged_restart_generation_CapFill line 380, col 3 to line 385, col 44 of module rg_bugRefusalCharged>
 /\ rg_bugRefusalCharged_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ rg_bugRefusalCharged_restart_generation_st = [ declared |-> TRUE,
   stopped |-> FALSE,
@@ -110,7 +110,7 @@ State 8: <rg_bugRefusalCharged_restart_generation_CapFill line 334, col 3 to lin
   idFault |-> FALSE,
   capFull |-> TRUE ]
 
-State 9: <rg_bugRefusalCharged_restart_generation_LaunchRefused line 481, col 3 to line 503, col 57 of module rg_bugRefusalCharged>
+State 9: <rg_bugRefusalCharged_restart_generation_LaunchRefused line 527, col 3 to line 549, col 57 of module rg_bugRefusalCharged>
 /\ rg_bugRefusalCharged_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ rg_bugRefusalCharged_restart_generation_st = [ declared |-> TRUE,
   stopped |-> FALSE,

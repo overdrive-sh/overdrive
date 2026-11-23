@@ -35,7 +35,7 @@
 //! | `LaunchUnavailable(a)` / `LaunchCmdFail(a)` | the launch's dispatch returns the typed failure (the shim writes the `Failed` row, no VMM was created) / `SimVolumeBacking::fail_next_command`, then the same |
 //! | `LaunchCheck(a)` | `SimClock::tick` (one second at a time, inside the bound) until the launch observes `Free` and its `Vmm::create` is parked at the driver's create gate (`LP_FREE`) |
 //! | `LaunchPoll(a)` / `LaunchHeldFail(a)` | `SimClock::tick` by a poll step inside the bound / past the 30 s bound, the launch ends `VolumeUnavailable { Held }` |
-//! | `LaunchSuperseded(a)` | the held dispatch returns `Ok(())` after the lane signal raised by `OpStop`, `WorkloadRestart` or `Shutdown`: no row, `VmDriver::live_allocations` does not list the allocation, its VMM is gone |
+//! | abandonment (no model action) | a launch at an observation point (claim wait, create gate, boot wait) abandons in the step that raises the lane signal (`OpStop`, `WorkloadRestart`, `Shutdown`); a launch whose `ensure` was in flight abandons in `LaunchEnsureActivate`; a lane born after shutdown abandons in `WlStart`. The held dispatch returns `Ok(())`: no row, `VmDriver::live_allocations` does not list the allocation, its VMM is gone |
 //! | `VmmSpawn(a)` | the recording `Vmm`'s `VmConfig.volume` is the ensured device with serial `ovd-volume` (production attached it); the gate releases the parked `create`, then `SimVolumeBacking::hold_claim` (the VMM's open: `SimVmm::create` does not touch the pool) |
 //! | `GuestReady(a)` | the guest's READY through `SimBeaconIo`; the shim writes `Running` |
 //! | `VmmSpawnFail(a)` | `SimVmm::inject_create_failure` armed while the launch's `create` is parked at the gate, then the gate releases it: production classifies the refusal and the shim writes the charged `Failed` row; no VMM exists |
@@ -61,10 +61,10 @@
 //! **Documented blind spots.** (1) `alive` is projected for a booting launch from the recording
 //! `Vmm` double (`SimVmm`), the named arbiter of the VMM process (B-2): the owner does not hold it, so
 //! the read carries the `sim-arbiter-ok` marker and is paired with the Tier-3 test S-VOL-T3-13
-//! (`volume_survives.rs`, a stop during guest boot terminates the VMM and keeps the volume). (2) `charged` is model-only in the
-//! delta (the budget is the reconciler's private `restart_counts`); a charge is observed only through
-//! the typed `VmVolumeUnavailable` reason of the failed launch's row (asserted by the driver, below) and
-//! `BackoffExhausted` (`exhausted`). (3) `LaunchCheck` asserts the launch reached `Vmm::create`
+//! (`volume_survives.rs`, a stop during guest boot terminates the VMM and keeps the volume). (2) `charged`, `cnt` and `old` (the shared restart budget rule's
+//! inputs, `restart_budget.qnt`) are model-only in the delta (the budget is the reconciler's private
+//! `restart_counts`); the rule's outcome is observed through `BackoffExhausted` (`exhausted`, the spec's `exh`),
+//! and a charge through the typed `VmVolumeUnavailable` reason of the failed launch's row (asserted by the driver, below). (3) `LaunchCheck` asserts the launch reached `Vmm::create`
 //! after observing `Free`; no pinned owner accessor counts the claim observations. Fresh allocation ids are discovered for labelling only, from the
 //! reconciler view's issued ids, the rows and `live_allocations`.
 //!
@@ -183,9 +183,10 @@ placement!(host_pure);
 /// The conformance main and the module declaring the variables.
 const MAIN: &str = "vol_conf";
 const MODULE: &str = "node_volume";
-/// The conformance main's allocation ids (`NA`) and restart-budget limit (`LIMIT`, production's `RESTART_BACKOFF_CEILING` + 1: a chain fails ceiling + 1 times before `BackoffExhausted`).
+/// The conformance main's allocation ids (`NA`). Its restart-budget limit is the main's `LIMIT = 6`
+/// (production's `RESTART_BACKOFF_CEILING` + 1), applied by the imported rule in
+/// `specs/quint/restart-generation/restart_budget.qnt`.
 const NA: i64 = 6;
-const LIMIT: i64 = 6;
 /// The one workload of the model and its volume declaration.
 const WORKLOAD: &str = "vol-w";
 pub const DECLARATION: &str = r#"
@@ -870,7 +871,7 @@ impl NodeVolumeDriver {
             .rt
             .block_on(stop_workload(AxumState(serve.state.clone()), Path(WORKLOAD.to_owned())))
             .map_err(|error| DriverError::Production(format!("stop_workload: {error}")))?;
-        Ok(())
+        self.abandon_signalled_launches()
     }
 
     fn restart(
@@ -897,7 +898,7 @@ impl NodeVolumeDriver {
     /// lane opened afterwards is born raised).
     fn shutdown(&self) -> std::result::Result<(), DriverError> {
         self.serve("Shutdown")?.state.runtime.supersede_all_lanes();
-        self.pump("Shutdown")
+        self.abandon_signalled_launches()
     }
 
     fn wl_start(&mut self, a: i64) -> std::result::Result<(), DriverError> {
@@ -914,12 +915,19 @@ impl NodeVolumeDriver {
             .ok_or_else(|| not_enabled("WlStart", "the tick minted no allocation"))?;
         self.alloc_of.insert(fresh, a);
         // A launch that cannot provide the volume (no pool, no free extent) fails typed inside
-        // its first step: the placement and the failure are one model step. Either the launch
-        // parks after `ensure`'s create effect, or its `Failed` row lands.
-        self.settle("the launch parks after its create effect or fails typed", |driver| {
+        // its first step: the placement and the failure are one model step. A lane born after
+        // shutdown abandons before the volume step: the placement and the abandonment are one
+        // model step. Either the launch parks after `ensure`'s create effect, its `Failed` row
+        // lands, or its dispatch returns `Ok(())` with no row (abandoned without parking).
+        self.settle("the launch parks after its create effect, fails typed or is abandoned", |driver| {
             driver.node.as_ref().is_some_and(|node| node.backing.ensure_parked(&workload_id()))
                 || driver.state_of(a) == Some(AllocState::Failed)
+                || (driver.state_of(a).is_none()
+                    && matches!(driver.launch_view(a), LaunchView::Ended))
         })?;
+        if self.state_of(a).is_none() && matches!(self.launch_view(a), LaunchView::Ended) {
+            return self.verify_abandoned(a);
+        }
         if self.state_of(a) == Some(AllocState::Failed) {
             self.volume_launch_fails("WlStart", a)?;
             self.finalize_observed()?;
@@ -978,7 +986,7 @@ impl NodeVolumeDriver {
             self.run_tick_to_end("WorkloadRestart")?;
             self.await_state(a, AllocState::Terminated)?;
         }
-        Ok(())
+        self.abandon_signalled_launches()
     }
 
     fn ensure_create(&self, _a: i64) -> std::result::Result<(), DriverError> {
@@ -994,7 +1002,10 @@ impl NodeVolumeDriver {
         self.settle("the launch's ensure activates the volume", |driver| {
             driver.node.as_ref().is_some_and(|node| !node.backing.ensure_parked(&workload_id()))
                 && matches!(driver.claim(), Ok(Ok(ClaimState::Held | ClaimState::Free)))
-        })
+        })?;
+        // `ensure` ran to its end; a launch whose lane signal is up abandons at the observation
+        // point that follows it, in this same step.
+        self.abandon_signalled_launches()
     }
 
     /// The launch's typed failure: the spawned start returns, the shim writes the `Failed` row,
@@ -1077,19 +1088,56 @@ impl NodeVolumeDriver {
         self.volume_launch_fails("LaunchHeldFail", a)
     }
 
-    /// `LaunchSuperseded(a)`: the launch observed the lane signal the operator handler or the
-    /// shutdown raised: its dispatch returns `Ok(())`, no row is written, the driver no longer
-    /// lists the allocation and its VMM, if one was spawned, is gone.
-    fn launch_superseded(&self, a: i64) -> std::result::Result<(), DriverError> {
+    /// After the lane signal is up, or `ensure` returned: every held launch that is at an
+    /// observation point (not inside `ensure`, which is parked after its create effect) and has
+    /// no row abandons in the same model step. The launch's dispatch returns `Ok(())`.
+    fn abandon_signalled_launches(&self) -> std::result::Result<(), DriverError> {
+        let signalled = self
+            .serve("abandon")?
+            .state
+            .runtime
+            .lane_supersession(&target())
+            .is_superseded();
+        if !signalled {
+            return self.pump("abandon");
+        }
+        let ensure_in_flight = self
+            .node("abandon")?
+            .backing
+            .ensure_parked(&workload_id());
+        for a in self.launches.keys().copied() {
+            if ensure_in_flight
+                || self.state_of(a).is_some()
+                || !matches!(self.launch_view(a), LaunchView::Running)
+            {
+                continue;
+            }
+            self.await_abandoned(a)?;
+        }
+        Ok(())
+    }
+
+    /// The launch of `a` observed the lane signal: its dispatch returns `Ok(())`, no row is
+    /// written, the driver no longer lists the allocation and its VMM, if one was spawned, is
+    /// gone.
+    fn await_abandoned(&self, a: i64) -> std::result::Result<(), DriverError> {
         let alloc = self
             .alloc_id(a)
-            .ok_or_else(|| not_enabled("LaunchSuperseded", format!("{a} has no allocation")))?;
+            .ok_or_else(|| DriverError::Production(format!("{a} has no allocation")))?;
         // A create parked at the gate (`LP_FREE`) is past the production launch's last signal
         // observation: it proceeds, and the launch then abandons the VMM it created.
-        self.node("LaunchSuperseded")?.gate.release(&alloc);
+        self.node("abandon")?.gate.release(&alloc);
         self.settle("the superseded launch's dispatch returns", |driver| {
             !matches!(driver.launch_view(a), LaunchView::Running)
         })?;
+        self.verify_abandoned(a)
+    }
+
+    /// The abandoned launch's dispatch returned `Ok(())` and left nothing behind.
+    fn verify_abandoned(&self, a: i64) -> std::result::Result<(), DriverError> {
+        let alloc = self
+            .alloc_id(a)
+            .ok_or_else(|| DriverError::Production(format!("{a} has no allocation")))?;
         match self.launch_view(a) {
             LaunchView::Ended => {}
             LaunchView::Dropped => {
@@ -1099,7 +1147,9 @@ impl NodeVolumeDriver {
                 )));
             }
             LaunchView::Running | LaunchView::Unheld => {
-                return Err(not_enabled("LaunchSuperseded", format!("{a} holds no launch")));
+                return Err(DriverError::Production(format!(
+                    "the launch of {a} did not abandon at its observation point"
+                )));
             }
         }
         if self.rows()?.iter().any(|row| row.alloc_id == alloc) {
@@ -1107,7 +1157,7 @@ impl NodeVolumeDriver {
                 "the superseded launch of {a} wrote an allocation row"
             )));
         }
-        let serve = self.serve("LaunchSuperseded")?;
+        let serve = self.serve("abandon")?;
         if serve.driver.live_allocations().unwrap_or_default().contains(&alloc) {
             return Err(DriverError::Production(format!(
                 "the driver still lists the superseded launch of {a}"
@@ -1479,7 +1529,6 @@ impl Driver for NodeVolumeDriver {
             LaunchCheck(a: i64) => Self::at(n, "LaunchCheck", self.launch_check(a))?,
             LaunchPoll(a: i64) => Self::at(n, "LaunchPoll", self.launch_poll(a))?,
             LaunchHeldFail(a: i64) => Self::at(n, "LaunchHeldFail", self.launch_held_fail(a))?,
-            LaunchSuperseded(a: i64) => Self::at(n, "LaunchSuperseded", self.launch_superseded(a))?,
             GuestReady(a: i64) => Self::at(n, "GuestReady", self.guest_ready(a))?,
             VmmSpawn(a: i64) => Self::at(n, "VmmSpawn", self.vmm_spawn(a))?,
             VmmSpawnFail(a: i64) => Self::at(n, "VmmSpawnFail", self.vmm_spawn_fail(a))?,
@@ -1522,8 +1571,6 @@ impl NodeVolumeState {
         let alloc = quint_itf::int_map(quint_itf::field(st, "as")?, quint_itf::int)?;
         let phase = quint_itf::int_map(quint_itf::field(st, "ph")?, quint_itf::int)?;
         let alive = quint_itf::int_map(quint_itf::field(st, "alive")?, quint_itf::boolean)?;
-        let charged = quint_itf::int(quint_itf::field(st, "charged")?)?;
-        let non_terminal = alloc.values().any(|state| *state == 1 || *state == 2);
         let booting = phase
             .iter()
             .filter(|(a, ph)| **ph == LP_BOOT && alive.get(*a).copied().unwrap_or(false))
@@ -1534,8 +1581,9 @@ impl NodeVolumeState {
                 && quint_itf::boolean(quint_itf::field(st, "active")?)?,
             claimed: quint_itf::int(quint_itf::field(st, "claim")?)? != 0,
             alloc,
-            // The spec's `exhausted(s)`: the budget is spent and nothing runs.
-            exhausted: charged >= LIMIT && !non_terminal,
+            // The spec's `exhausted(s)`, materialised in `exh` by the spec's own commit: the shared restart
+            // budget rule (`restart_budget.qnt`) over the current row's count; the driver applies no rule.
+            exhausted: quint_itf::boolean(quint_itf::field(st, "exh")?)?,
             booting,
         })
     }
@@ -1730,9 +1778,6 @@ fn quint_vol_store_absent_fails_typed_and_never_attaches() -> impl Driver {
     test = "superseded_launch_result_discarded",
     max_samples = 1
 )]
-#[should_panic(
-    expected = "LaunchSuperseded: the step did not settle within the settle bound: the superseded launch's dispatch returns"
-)]
 fn quint_vol_superseded_launch_result_discarded() -> impl Driver {
     NodeVolumeDriver::new()
 }
@@ -1744,9 +1789,6 @@ fn quint_vol_superseded_launch_result_discarded() -> impl Driver {
     main = "vol_conf",
     test = "stop_during_boot_wait_terminates_vmm_and_keeps_volume",
     max_samples = 1
-)]
-#[should_panic(
-    expected = "LaunchSuperseded: the step did not settle within the settle bound: the superseded launch's dispatch returns"
 )]
 fn quint_vol_stop_during_boot_wait_terminates_vmm_and_keeps_volume() -> impl Driver {
     NodeVolumeDriver::new()
@@ -1760,9 +1802,6 @@ fn quint_vol_stop_during_boot_wait_terminates_vmm_and_keeps_volume() -> impl Dri
     test = "stop_during_ensure_lets_ensure_finish_then_abandons",
     max_samples = 1
 )]
-#[should_panic(
-    expected = "LaunchSuperseded: the step did not settle within the settle bound: the superseded launch's dispatch returns"
-)]
 fn quint_vol_stop_during_ensure_lets_ensure_finish_then_abandons() -> impl Driver {
     NodeVolumeDriver::new()
 }
@@ -1775,10 +1814,19 @@ fn quint_vol_stop_during_ensure_lets_ensure_finish_then_abandons() -> impl Drive
     test = "shutdown_abandons_every_launch_including_one_admitted_late",
     max_samples = 1
 )]
-#[should_panic(
-    expected = "LaunchSuperseded: the step did not settle within the settle bound: the superseded launch's dispatch returns"
-)]
 fn quint_vol_shutdown_abandons_every_launch_including_one_admitted_late() -> impl Driver {
+    NodeVolumeDriver::new()
+}
+
+/// Named run `restart_of_failed_row_forgives_the_failure`.
+/// CONTRACT_SHAPE: bounded-change.
+#[quint_test(
+    spec = "../../specs/quint/node-local-volume/node_volume.qnt",
+    main = "vol_conf",
+    test = "restart_of_failed_row_forgives_the_failure",
+    max_samples = 1
+)]
+fn quint_vol_restart_of_failed_row_forgives_the_failure() -> impl Driver {
     NodeVolumeDriver::new()
 }
 
@@ -1787,13 +1835,6 @@ fn quint_vol_shutdown_abandons_every_launch_including_one_admitted_late() -> imp
 /// The conformance main instantiates the spec's restart limit with production's
 /// `RESTART_BACKOFF_CEILING` + 1.
 /// CONTRACT_SHAPE: bounded-change.
-///
-/// Pending until step 05-02: quint-connect prints only the generic text for a
-/// state mismatch. The mismatch is `alloc[1]`: the spec holds PENDING (a lane
-/// born raised after Shutdown observes the signal before the volume check)
-/// while production fails it typed (FAILED), because the volume launch path
-/// does not yet observe the shutdown/supersession signal.
-#[should_panic(expected = "State invariant failed")]
 #[quint_run(
     spec = "../../specs/quint/node-local-volume/node_volume.qnt",
     main = "vol_conf",

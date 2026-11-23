@@ -17,10 +17,12 @@ State 1: <Initial predicate>
   ran |-> <<FALSE, FALSE, FALSE>>,
   ph |-> <<0, 0, 0>>,
   waited |-> <<0, 0, 0>>,
-  charged |-> 0,
   faults |-> 1,
   slow |-> FALSE,
   drainFail |-> FALSE,
+  old |-> <<FALSE, FALSE, FALSE>>,
+  cnt |-> <<0, 0, 0>>,
+  exh |-> FALSE,
   sup |-> <<FALSE, FALSE, FALSE>>,
   afterSup |-> <<0, 0, 0>>,
   delivered |-> <<FALSE, FALSE, FALSE>>,
@@ -29,7 +31,7 @@ State 1: <Initial predicate>
   dstart |-> 0 ]
 /\ vol_bugNoWait_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 
-State 2: <vol_bugNoWait_node_volume_Declare line 403, col 3 to line 407, col 44 of module vol_bugNoWait>
+State 2: <vol_bugNoWait_node_volume_Declare line 824, col 3 to line 828, col 44 of module vol_bugNoWait>
 /\ vol_bugNoWait_node_volume_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   storeUp |-> TRUE,
@@ -48,10 +50,12 @@ State 2: <vol_bugNoWait_node_volume_Declare line 403, col 3 to line 407, col 44 
   ran |-> <<FALSE, FALSE, FALSE>>,
   ph |-> <<0, 0, 0>>,
   waited |-> <<0, 0, 0>>,
-  charged |-> 0,
   faults |-> 1,
   slow |-> FALSE,
   drainFail |-> FALSE,
+  old |-> <<FALSE, FALSE, FALSE>>,
+  cnt |-> <<0, 0, 0>>,
+  exh |-> FALSE,
   sup |-> <<FALSE, FALSE, FALSE>>,
   afterSup |-> <<0, 0, 0>>,
   delivered |-> <<FALSE, FALSE, FALSE>>,
@@ -60,7 +64,7 @@ State 2: <vol_bugNoWait_node_volume_Declare line 403, col 3 to line 407, col 44 
   dstart |-> 0 ]
 /\ vol_bugNoWait_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 
-State 3: <vol_bugNoWait_node_volume_WlStart line 1415, col 3 to line 1457, col 69 of module vol_bugNoWait>
+State 3: <vol_bugNoWait_node_volume_WlStart line 1198, col 3 to line 1234, col 69 of module vol_bugNoWait>
 /\ vol_bugNoWait_node_volume_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   storeUp |-> TRUE,
@@ -79,10 +83,12 @@ State 3: <vol_bugNoWait_node_volume_WlStart line 1415, col 3 to line 1457, col 6
   ran |-> <<FALSE, FALSE, FALSE>>,
   ph |-> <<1, 0, 0>>,
   waited |-> <<0, 0, 0>>,
-  charged |-> 0,
   faults |-> 1,
   slow |-> FALSE,
   drainFail |-> FALSE,
+  old |-> <<FALSE, FALSE, FALSE>>,
+  cnt |-> <<0, 0, 0>>,
+  exh |-> FALSE,
   sup |-> <<FALSE, FALSE, FALSE>>,
   afterSup |-> <<0, 0, 0>>,
   delivered |-> <<FALSE, FALSE, FALSE>>,
@@ -91,7 +97,7 @@ State 3: <vol_bugNoWait_node_volume_WlStart line 1415, col 3 to line 1457, col 6
   dstart |-> 0 ]
 /\ vol_bugNoWait_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 
-State 4: <vol_bugNoWait_node_volume_LaunchEnsureCreate line 899, col 3 to line 949, col 80 of module vol_bugNoWait>
+State 4: <vol_bugNoWait_node_volume_LaunchEnsureCreate line 1298, col 3 to line 1343, col 80 of module vol_bugNoWait>
 /\ vol_bugNoWait_node_volume_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   storeUp |-> TRUE,
@@ -110,10 +116,12 @@ State 4: <vol_bugNoWait_node_volume_LaunchEnsureCreate line 899, col 3 to line 9
   ran |-> <<FALSE, FALSE, FALSE>>,
   ph |-> <<2, 0, 0>>,
   waited |-> <<0, 0, 0>>,
-  charged |-> 0,
   faults |-> 1,
   slow |-> FALSE,
   drainFail |-> FALSE,
+  old |-> <<FALSE, FALSE, FALSE>>,
+  cnt |-> <<0, 0, 0>>,
+  exh |-> FALSE,
   sup |-> <<FALSE, FALSE, FALSE>>,
   afterSup |-> <<0, 0, 0>>,
   delivered |-> <<FALSE, FALSE, FALSE>>,
@@ -122,7 +130,7 @@ State 4: <vol_bugNoWait_node_volume_LaunchEnsureCreate line 899, col 3 to line 9
   dstart |-> 0 ]
 /\ vol_bugNoWait_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 
-State 5: <vol_bugNoWait_node_volume_LaunchEnsureActivate line 955, col 3 to line 966, col 81 of module vol_bugNoWait>
+State 5: <vol_bugNoWait_node_volume_LaunchEnsureActivate line 1349, col 3 to line 1372, col 44 of module vol_bugNoWait>
 /\ vol_bugNoWait_node_volume_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   storeUp |-> TRUE,
@@ -141,10 +149,12 @@ State 5: <vol_bugNoWait_node_volume_LaunchEnsureActivate line 955, col 3 to line
   ran |-> <<FALSE, FALSE, FALSE>>,
   ph |-> <<3, 0, 0>>,
   waited |-> <<0, 0, 0>>,
-  charged |-> 0,
   faults |-> 1,
   slow |-> FALSE,
   drainFail |-> FALSE,
+  old |-> <<FALSE, FALSE, FALSE>>,
+  cnt |-> <<0, 0, 0>>,
+  exh |-> FALSE,
   sup |-> <<FALSE, FALSE, FALSE>>,
   afterSup |-> <<0, 0, 0>>,
   delivered |-> <<FALSE, FALSE, FALSE>>,
@@ -153,7 +163,7 @@ State 5: <vol_bugNoWait_node_volume_LaunchEnsureActivate line 955, col 3 to line
   dstart |-> 0 ]
 /\ vol_bugNoWait_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 
-State 6: <vol_bugNoWait_node_volume_LaunchCheck line 989, col 3 to line 1003, col 72 of module vol_bugNoWait>
+State 6: <vol_bugNoWait_node_volume_LaunchCheck line 1395, col 3 to line 1409, col 72 of module vol_bugNoWait>
 /\ vol_bugNoWait_node_volume_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   storeUp |-> TRUE,
@@ -172,10 +182,12 @@ State 6: <vol_bugNoWait_node_volume_LaunchCheck line 989, col 3 to line 1003, co
   ran |-> <<FALSE, FALSE, FALSE>>,
   ph |-> <<4, 0, 0>>,
   waited |-> <<0, 0, 0>>,
-  charged |-> 0,
   faults |-> 1,
   slow |-> FALSE,
   drainFail |-> FALSE,
+  old |-> <<FALSE, FALSE, FALSE>>,
+  cnt |-> <<0, 0, 0>>,
+  exh |-> FALSE,
   sup |-> <<FALSE, FALSE, FALSE>>,
   afterSup |-> <<0, 0, 0>>,
   delivered |-> <<FALSE, FALSE, FALSE>>,
@@ -184,7 +196,7 @@ State 6: <vol_bugNoWait_node_volume_LaunchCheck line 989, col 3 to line 1003, co
   dstart |-> 0 ]
 /\ vol_bugNoWait_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 
-State 7: <vol_bugNoWait_node_volume_VmmSpawn line 1316, col 3 to line 1346, col 69 of module vol_bugNoWait>
+State 7: <vol_bugNoWait_node_volume_VmmSpawn line 1463, col 3 to line 1493, col 69 of module vol_bugNoWait>
 /\ vol_bugNoWait_node_volume_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   storeUp |-> TRUE,
@@ -203,10 +215,12 @@ State 7: <vol_bugNoWait_node_volume_VmmSpawn line 1316, col 3 to line 1346, col 
   ran |-> <<TRUE, FALSE, FALSE>>,
   ph |-> <<5, 0, 0>>,
   waited |-> <<0, 0, 0>>,
-  charged |-> 0,
   faults |-> 1,
   slow |-> FALSE,
   drainFail |-> FALSE,
+  old |-> <<FALSE, FALSE, FALSE>>,
+  cnt |-> <<0, 0, 0>>,
+  exh |-> FALSE,
   sup |-> <<FALSE, FALSE, FALSE>>,
   afterSup |-> <<0, 0, 0>>,
   delivered |-> <<FALSE, FALSE, FALSE>>,
@@ -215,7 +229,7 @@ State 7: <vol_bugNoWait_node_volume_VmmSpawn line 1316, col 3 to line 1346, col 
   dstart |-> 0 ]
 /\ vol_bugNoWait_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 
-State 8: <vol_bugNoWait_node_volume_GuestReady line 1352, col 3 to line 1380, col 71 of module vol_bugNoWait>
+State 8: <vol_bugNoWait_node_volume_CpCrash line 1061, col 3 to line 1080, col 44 of module vol_bugNoWait>
 /\ vol_bugNoWait_node_volume_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   storeUp |-> TRUE,
@@ -227,26 +241,28 @@ State 8: <vol_bugNoWait_node_volume_GuestReady line 1352, col 3 to line 1380, co
   maxDv |-> 0,
   nCreated |-> 1,
   claim |-> 1,
-  as |-> <<2, 0, 0>>,
+  as |-> <<3, 0, 0>>,
   alive |-> <<TRUE, FALSE, FALSE>>,
-  orphan |-> <<FALSE, FALSE, FALSE>>,
-  why |-> <<0, 0, 0>>,
+  orphan |-> <<TRUE, FALSE, FALSE>>,
+  why |-> <<7, 0, 0>>,
   ran |-> <<TRUE, FALSE, FALSE>>,
   ph |-> <<0, 0, 0>>,
   waited |-> <<0, 0, 0>>,
-  charged |-> 0,
-  faults |-> 1,
+  faults |-> 0,
   slow |-> FALSE,
   drainFail |-> FALSE,
+  old |-> <<FALSE, FALSE, FALSE>>,
+  cnt |-> <<0, 0, 0>>,
+  exh |-> FALSE,
   sup |-> <<FALSE, FALSE, FALSE>>,
   afterSup |-> <<0, 0, 0>>,
-  delivered |-> <<TRUE, FALSE, FALSE>>,
+  delivered |-> <<FALSE, FALSE, FALSE>>,
   chg |-> <<0, 0, 0>>,
   down |-> FALSE,
   dstart |-> 0 ]
 /\ vol_bugNoWait_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 
-State 9: <vol_bugNoWait_node_volume_VmmSigkill line 569, col 3 to line 622, col 71 of module vol_bugNoWait>
+State 9: <vol_bugNoWait_node_volume_Reclaim line 1552, col 3 to line 1618, col 74 of module vol_bugNoWait>
 /\ vol_bugNoWait_node_volume_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   storeUp |-> TRUE,
@@ -261,23 +277,25 @@ State 9: <vol_bugNoWait_node_volume_VmmSigkill line 569, col 3 to line 622, col 
   as |-> <<3, 0, 0>>,
   alive |-> <<FALSE, FALSE, FALSE>>,
   orphan |-> <<FALSE, FALSE, FALSE>>,
-  why |-> <<1, 0, 0>>,
+  why |-> <<7, 0, 0>>,
   ran |-> <<TRUE, FALSE, FALSE>>,
   ph |-> <<0, 0, 0>>,
   waited |-> <<0, 0, 0>>,
-  charged |-> 1,
   faults |-> 0,
   slow |-> FALSE,
   drainFail |-> FALSE,
+  old |-> <<FALSE, FALSE, FALSE>>,
+  cnt |-> <<0, 0, 0>>,
+  exh |-> FALSE,
   sup |-> <<FALSE, FALSE, FALSE>>,
   afterSup |-> <<0, 0, 0>>,
-  delivered |-> <<TRUE, FALSE, FALSE>>,
-  chg |-> <<1, 0, 0>>,
+  delivered |-> <<FALSE, FALSE, FALSE>>,
+  chg |-> <<0, 0, 0>>,
   down |-> FALSE,
   dstart |-> 0 ]
 /\ vol_bugNoWait_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 
-State 10: <vol_bugNoWait_node_volume_WlStart line 1415, col 3 to line 1457, col 69 of module vol_bugNoWait>
+State 10: <vol_bugNoWait_node_volume_WlStart line 1198, col 3 to line 1234, col 69 of module vol_bugNoWait>
 /\ vol_bugNoWait_node_volume_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   storeUp |-> TRUE,
@@ -292,23 +310,25 @@ State 10: <vol_bugNoWait_node_volume_WlStart line 1415, col 3 to line 1457, col 
   as |-> <<3, 1, 0>>,
   alive |-> <<FALSE, FALSE, FALSE>>,
   orphan |-> <<FALSE, FALSE, FALSE>>,
-  why |-> <<1, 0, 0>>,
+  why |-> <<7, 0, 0>>,
   ran |-> <<TRUE, FALSE, FALSE>>,
   ph |-> <<0, 1, 0>>,
   waited |-> <<0, 0, 0>>,
-  charged |-> 1,
   faults |-> 0,
   slow |-> FALSE,
   drainFail |-> FALSE,
+  old |-> <<FALSE, FALSE, FALSE>>,
+  cnt |-> <<0, 0, 0>>,
+  exh |-> FALSE,
   sup |-> <<FALSE, FALSE, FALSE>>,
   afterSup |-> <<0, 0, 0>>,
-  delivered |-> <<TRUE, FALSE, FALSE>>,
-  chg |-> <<1, 0, 0>>,
+  delivered |-> <<FALSE, FALSE, FALSE>>,
+  chg |-> <<0, 0, 0>>,
   down |-> FALSE,
   dstart |-> 0 ]
 /\ vol_bugNoWait_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 
-State 11: <vol_bugNoWait_node_volume_LaunchEnsureCreate line 899, col 3 to line 949, col 80 of module vol_bugNoWait>
+State 11: <vol_bugNoWait_node_volume_LaunchEnsureCreate line 1298, col 3 to line 1343, col 80 of module vol_bugNoWait>
 /\ vol_bugNoWait_node_volume_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   storeUp |-> TRUE,
@@ -323,23 +343,25 @@ State 11: <vol_bugNoWait_node_volume_LaunchEnsureCreate line 899, col 3 to line 
   as |-> <<3, 1, 0>>,
   alive |-> <<FALSE, FALSE, FALSE>>,
   orphan |-> <<FALSE, FALSE, FALSE>>,
-  why |-> <<1, 0, 0>>,
+  why |-> <<7, 0, 0>>,
   ran |-> <<TRUE, FALSE, FALSE>>,
   ph |-> <<0, 2, 0>>,
   waited |-> <<0, 0, 0>>,
-  charged |-> 1,
   faults |-> 0,
   slow |-> FALSE,
   drainFail |-> FALSE,
+  old |-> <<FALSE, FALSE, FALSE>>,
+  cnt |-> <<0, 0, 0>>,
+  exh |-> FALSE,
   sup |-> <<FALSE, FALSE, FALSE>>,
   afterSup |-> <<0, 0, 0>>,
-  delivered |-> <<TRUE, FALSE, FALSE>>,
-  chg |-> <<1, 0, 0>>,
+  delivered |-> <<FALSE, FALSE, FALSE>>,
+  chg |-> <<0, 0, 0>>,
   down |-> FALSE,
   dstart |-> 0 ]
 /\ vol_bugNoWait_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 
-State 12: <vol_bugNoWait_node_volume_LaunchEnsureActivate line 955, col 3 to line 966, col 81 of module vol_bugNoWait>
+State 12: <vol_bugNoWait_node_volume_LaunchEnsureActivate line 1349, col 3 to line 1372, col 44 of module vol_bugNoWait>
 /\ vol_bugNoWait_node_volume_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   storeUp |-> TRUE,
@@ -354,23 +376,25 @@ State 12: <vol_bugNoWait_node_volume_LaunchEnsureActivate line 955, col 3 to lin
   as |-> <<3, 1, 0>>,
   alive |-> <<FALSE, FALSE, FALSE>>,
   orphan |-> <<FALSE, FALSE, FALSE>>,
-  why |-> <<1, 0, 0>>,
+  why |-> <<7, 0, 0>>,
   ran |-> <<TRUE, FALSE, FALSE>>,
   ph |-> <<0, 3, 0>>,
   waited |-> <<0, 0, 0>>,
-  charged |-> 1,
   faults |-> 0,
   slow |-> FALSE,
   drainFail |-> FALSE,
+  old |-> <<FALSE, FALSE, FALSE>>,
+  cnt |-> <<0, 0, 0>>,
+  exh |-> FALSE,
   sup |-> <<FALSE, FALSE, FALSE>>,
   afterSup |-> <<0, 0, 0>>,
-  delivered |-> <<TRUE, FALSE, FALSE>>,
-  chg |-> <<1, 0, 0>>,
+  delivered |-> <<FALSE, FALSE, FALSE>>,
+  chg |-> <<0, 0, 0>>,
   down |-> FALSE,
   dstart |-> 0 ]
 /\ vol_bugNoWait_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 
-State 13: <vol_bugNoWait_node_volume_LaunchCheck line 989, col 3 to line 1003, col 72 of module vol_bugNoWait>
+State 13: <vol_bugNoWait_node_volume_LaunchCheck line 1395, col 3 to line 1409, col 72 of module vol_bugNoWait>
 /\ vol_bugNoWait_node_volume_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   storeUp |-> TRUE,
@@ -385,23 +409,25 @@ State 13: <vol_bugNoWait_node_volume_LaunchCheck line 989, col 3 to line 1003, c
   as |-> <<3, 1, 0>>,
   alive |-> <<FALSE, FALSE, FALSE>>,
   orphan |-> <<FALSE, FALSE, FALSE>>,
-  why |-> <<1, 0, 0>>,
+  why |-> <<7, 0, 0>>,
   ran |-> <<TRUE, FALSE, FALSE>>,
   ph |-> <<0, 4, 0>>,
   waited |-> <<0, 0, 0>>,
-  charged |-> 1,
   faults |-> 0,
   slow |-> FALSE,
   drainFail |-> FALSE,
+  old |-> <<FALSE, FALSE, FALSE>>,
+  cnt |-> <<0, 0, 0>>,
+  exh |-> FALSE,
   sup |-> <<FALSE, FALSE, FALSE>>,
   afterSup |-> <<0, 0, 0>>,
-  delivered |-> <<TRUE, FALSE, FALSE>>,
-  chg |-> <<1, 0, 0>>,
+  delivered |-> <<FALSE, FALSE, FALSE>>,
+  chg |-> <<0, 0, 0>>,
   down |-> FALSE,
   dstart |-> 0 ]
 /\ vol_bugNoWait_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 
-State 14: <vol_bugNoWait_node_volume_VmmSpawnFail line 1105, col 3 to line 1118, col 73 of module vol_bugNoWait>
+State 14: <vol_bugNoWait_node_volume_VmmSpawnFail line 1533, col 3 to line 1546, col 73 of module vol_bugNoWait>
 /\ vol_bugNoWait_node_volume_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   storeUp |-> TRUE,
@@ -416,18 +442,20 @@ State 14: <vol_bugNoWait_node_volume_VmmSpawnFail line 1105, col 3 to line 1118,
   as |-> <<3, 3, 0>>,
   alive |-> <<FALSE, FALSE, FALSE>>,
   orphan |-> <<FALSE, FALSE, FALSE>>,
-  why |-> <<1, 4, 0>>,
+  why |-> <<7, 4, 0>>,
   ran |-> <<TRUE, FALSE, FALSE>>,
   ph |-> <<0, 0, 0>>,
   waited |-> <<0, 0, 0>>,
-  charged |-> 2,
   faults |-> 0,
   slow |-> FALSE,
   drainFail |-> TRUE,
+  old |-> <<FALSE, FALSE, FALSE>>,
+  cnt |-> <<0, 0, 0>>,
+  exh |-> FALSE,
   sup |-> <<FALSE, FALSE, FALSE>>,
   afterSup |-> <<0, 0, 0>>,
-  delivered |-> <<TRUE, FALSE, FALSE>>,
-  chg |-> <<1, 1, 0>>,
+  delivered |-> <<FALSE, FALSE, FALSE>>,
+  chg |-> <<0, 1, 0>>,
   down |-> FALSE,
   dstart |-> 0 ]
 /\ vol_bugNoWait_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]

@@ -513,9 +513,6 @@ async fn supersede_lane_with_no_open_lane_does_nothing() {
 /// PENDING (assumption A8, timing 2: after the lane opens and before hydration; edge): the lane is
 /// already open when the signal lands, and the signal is visible on it.
 #[tokio::test]
-#[should_panic(
-    expected = "a signal raised after the lane opens and before hydration must be visible on that lane"
-)]
 async fn a_signal_after_the_lane_opens_and_before_hydration_is_visible_on_the_lane() {
     let mut rig = Rig::new().await;
     rig.declare("lane-x").await;
@@ -534,7 +531,6 @@ async fn a_signal_after_the_lane_opens_and_before_hydration_is_visible_on_the_la
 
 /// PENDING (boundary 4a (e), edge): the signal for workload X never reaches workload Y's launch.
 #[tokio::test]
-#[should_panic(expected = "the signal for workload x must reach workload x's own launch")]
 async fn supersede_lane_for_one_workload_never_raises_another_workloads_lane() {
     let mut rig = Rig::new().await;
     rig.declare("lane-x").await;
@@ -563,9 +559,6 @@ async fn supersede_lane_for_one_workload_never_raises_another_workloads_lane() {
 /// PENDING (boundary 4a (h), edge): `supersede_lane` never cancels the shutdown token: a lane opened
 /// for another target after it still opens unraised.
 #[tokio::test]
-#[should_panic(
-    expected = "supersede_lane must raise the open lane of workload x before the shutdown-token check means anything"
-)]
 async fn supersede_lane_never_cancels_the_shutdown_token() {
     let mut rig = Rig::new().await;
     rig.declare("lane-x").await;
@@ -593,7 +586,6 @@ async fn supersede_lane_never_cancels_the_shutdown_token() {
 /// PENDING, seeded schedule (boundary 4a (h), edge): wherever `supersede_all_lanes` falls in a
 /// sequence of lane opens, every launch abandons. The position comes from the printed seed.
 #[tokio::test]
-#[should_panic(expected = "every lane must be raised wherever supersede_all_lanes falls")]
 async fn supersede_all_lanes_at_any_point_of_a_seeded_schedule_abandons_every_launch() {
     const LANES: u64 = 3;
     for seed in 0_u64..4 {
@@ -635,7 +627,6 @@ async fn supersede_all_lanes_at_any_point_of_a_seeded_schedule_abandons_every_la
 /// unraised, the next lane for the same target opens unraised, and another workload's lane stays
 /// registered and raisable.
 #[tokio::test]
-#[should_panic(expected = "the open lane must be raised before its entry removal can be observed")]
 async fn a_closing_lane_removes_only_its_own_entry_and_leaves_no_raised_signal_behind() {
     let mut rig = Rig::new().await;
     rig.declare("lane-x").await;
@@ -679,9 +670,6 @@ async fn a_closing_lane_removes_only_its_own_entry_and_leaves_no_raised_signal_b
 /// PENDING (boundary 4a, the `KeyExists` branch; edge): a repeated stop that finds the sentinel
 /// already present still raises the open lane.
 #[tokio::test]
-#[should_panic(
-    expected = "a repeated stop that finds the sentinel (KeyExists) must raise the open lane's signal too"
-)]
 async fn a_repeated_stop_that_finds_the_sentinel_raises_the_open_lane_too() {
     let mut rig = Rig::new().await;
     rig.declare("lane-x").await;
@@ -772,9 +760,6 @@ async fn evaluations_submitted_for_a_busy_target_never_raise_its_lane() {
 /// claim, the guest network lease and the SVID, and the dispatch returned `Ok(())`. No simulated clock
 /// advances.
 #[tokio::test]
-#[should_panic(
-    expected = "a restart recorded while a launch waits must end the launch at once with StartSuperseded"
-)]
 async fn a_restart_while_a_launch_waits_ends_it_at_once_and_charges_nothing() {
     let mut rig = Rig::new().await;
     rig.declare("lane-x").await;
@@ -824,9 +809,6 @@ async fn a_restart_while_a_launch_waits_ends_it_at_once_and_charges_nothing() {
 /// workload stays down: the stop's evaluation starts nothing, and only the next restart places a new
 /// launch.
 #[tokio::test]
-#[should_panic(
-    expected = "a stop recorded while a launch waits must end the launch at once with StartSuperseded"
-)]
 async fn a_stop_while_a_launch_waits_ends_it_and_the_workload_stays_down_until_the_next_restart() {
     let mut rig = Rig::new().await;
     rig.declare("lane-x").await;
@@ -862,9 +844,6 @@ async fn a_stop_while_a_launch_waits_ends_it_and_the_workload_stays_down_until_t
 /// running workload waits ends that launch: no successor row, the successor's lease, SVID and
 /// supervision claim released, and the exact-old predecessor cleanup ran. Nothing is charged.
 #[tokio::test]
-#[should_panic(
-    expected = "a restart recorded while the replacement launch waits must end it with StartSuperseded"
-)]
 async fn a_second_restart_while_the_replacement_launch_waits_runs_the_exact_old_cleanup() {
     let mut rig = Rig::new().await;
     rig.declare("lane-x").await;
@@ -877,6 +856,10 @@ async fn a_second_restart_while_the_replacement_launch_waits_runs_the_exact_old_
     let (park, tick) = rig.launch_held("lane-x", true).await;
     let counts_before = rig.restart_counts("lane-x");
     assert_eq!(rig.started().len(), 2, "setup: the replacement's start is held");
+    // The predecessor is already stopped once: the restart of a Running workload first ends it
+    // (`StopAllocation`), then the restart arm places the replacement.
+    let stops_before = rig.stopped();
+    assert_eq!(stops_before, vec![predecessor.clone()], "setup: only the predecessor was stopped");
     let successor = rig.started()[1].clone();
     assert_ne!(successor, predecessor, "setup: the replacement is a new allocation");
 
@@ -902,10 +885,13 @@ async fn a_second_restart_while_the_replacement_launch_waits_runs_the_exact_old_
         rig.supervision_releases().contains(&successor),
         "the successor's supervision claim is released"
     );
+    // ADR-0106: the restart arm's exact-old cleanup runs once per dispatch whatever the successor's
+    // outcome, and stopping the already-stopped predecessor is idempotent (`NotFound` is tolerated).
+    // So exactly one more stop lands, on the predecessor, and the abandoned successor is never stopped.
     assert_eq!(
         rig.stopped(),
-        vec![predecessor],
-        "the exact-old predecessor cleanup ran once, on the predecessor"
+        [stops_before, vec![predecessor]].concat(),
+        "the exact-old predecessor cleanup ran once, on the predecessor and nothing else"
     );
 }
 
@@ -992,25 +978,30 @@ async fn a_driver_that_ignores_the_signal_is_unchanged() {
     );
 }
 
-/// PENDING (boundary 4a (g), edge): a restart whose commit the evaluation already hydrated (the signal
+/// PENDING (ADR-0335; the lane table of ADR-0334 is built; boundary 4a (g), edge): a restart whose commit the evaluation already hydrated (the signal
 /// lands after the lane opens and before hydration) may see its own `Start` superseded once; the next
 /// evaluation relaunches, and the generation ends with one Running allocation, uncharged.
+///
+/// The workload is stopped when the restart lands (the operator resumes it): a Running predecessor
+/// would spend the signalled evaluation on `StopAllocation`, and the `Start` would come in the next
+/// evaluation under a fresh, unraised lane, so the scenario would never reach its own superseded start.
+/// Pending until the generation rule lands: the compat rule counts the superseded launch's generation
+/// as handled, so the next evaluation relaunches nothing.
 #[tokio::test]
-#[should_panic(
-    expected = "a restart whose commit the evaluation already hydrated must see its own start superseded once"
-)]
+#[should_panic(expected = "the generation ends with exactly one Running allocation")]
 async fn a_restart_the_evaluation_already_hydrated_sees_its_own_start_superseded_once() {
     let mut rig = Rig::new().await;
     rig.declare("lane-x").await;
     rig.next_evaluation("lane-x").await.expect("the first launch converges");
-    assert_eq!(running(&rig.rows_of("lane-x").await).len(), 1, "setup: a Running predecessor");
+    assert_eq!(rig.stop("lane-x").await, StopOutcome::Stopped);
+    rig.next_evaluation("lane-x").await.expect("the stop's evaluation ends the allocation");
+    assert!(running(&rig.rows_of("lane-x").await).is_empty(), "setup: the workload is stopped");
 
-    // The replacement's start is held; the evaluation's lane is open but it has not hydrated.
+    // The resumed launch's start is held; the evaluation's lane is open but it has not hydrated.
     let park = rig.sim.park_next_start(true);
     let (guard, tick) = rig.lane_held_before_hydration("lane-x").await;
-    assert_eq!(rig.restart("lane-x").await, RestartOutcome::Restarted);
+    assert_eq!(rig.restart("lane-x").await, RestartOutcome::Resumed);
     drop(guard);
-    let tick = rig.until_entered("lane-x", &park, tick).await;
     assert!(
         tick.ends().await,
         "a restart whose commit the evaluation already hydrated must see its own start superseded once"

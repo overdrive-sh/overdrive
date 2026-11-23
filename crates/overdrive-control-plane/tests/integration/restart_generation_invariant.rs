@@ -1261,9 +1261,6 @@ async fn run_cell(origin: Origin, interruption: Interruption, pre: Pre, label: &
 /// until the next restart, and that restart places once for the new generation.
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[should_panic(
-    expected = "the interruption must raise the supersession signal of the held launch's lane, ending it with StartSuperseded (ADR-0334)"
-)]
 async fn restart_of_a_running_workload_interrupted_by_stop_places_exactly_once() {
     run_cell(Origin::RunningRestart, Interruption::Stop, Pre::None, "running-restart/stop").await;
 }
@@ -1273,9 +1270,6 @@ async fn restart_of_a_running_workload_interrupted_by_stop_places_exactly_once()
 /// generation is placed once, the first generation is not relaunched.
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[should_panic(
-    expected = "the interruption must raise the supersession signal of the held launch's lane, ending it with StartSuperseded (ADR-0334)"
-)]
 async fn restart_of_a_running_workload_overridden_by_a_second_restart_places_exactly_once() {
     run_cell(
         Origin::RunningRestart,
@@ -1286,13 +1280,14 @@ async fn restart_of_a_running_workload_overridden_by_a_second_restart_places_exa
     .await;
 }
 
-/// PENDING (lane table, ADR-0334): a restart of a `Running` workload whose replacement launch is
-/// held is abandoned by node shutdown (`supersede_all_lanes`); the next boot relaunches the same
-/// generation once, uncharged.
+/// PENDING (ADR-0335; the lane table of ADR-0334 is built): a restart of a `Running` workload whose
+/// replacement launch is held is abandoned by node shutdown (`supersede_all_lanes`); the next boot
+/// relaunches the same generation once, uncharged. The signal ends the launch; the stamp-on-emit rule
+/// still counts the abandoned launch's generation as handled, so nothing is relaunched.
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]
 #[should_panic(
-    expected = "the interruption must raise the supersession signal of the held launch's lane, ending it with StartSuperseded (ADR-0334)"
+    expected = "the abandoned generation must be relaunched: after Shutdown the workload has no Running allocation for the committed generation 1"
 )]
 async fn restart_of_a_running_workload_abandoned_by_shutdown_is_relaunched_on_the_next_boot() {
     run_cell(Origin::RunningRestart, Interruption::Shutdown, Pre::None, "running-restart/shutdown")
@@ -1317,9 +1312,6 @@ async fn restart_of_a_running_workload_lost_with_the_control_plane_is_relaunched
 /// held is interrupted by `stop_workload`; the workload stays down until the next restart.
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[should_panic(
-    expected = "the interruption must raise the supersession signal of the held launch's lane, ending it with StartSuperseded (ADR-0334)"
-)]
 async fn resume_of_a_stopped_workload_interrupted_by_stop_places_exactly_once() {
     run_cell(Origin::StoppedResume, Interruption::Stop, Pre::None, "stopped-resume/stop").await;
 }
@@ -1328,9 +1320,6 @@ async fn resume_of_a_stopped_workload_interrupted_by_stop_places_exactly_once() 
 /// is overridden by a second `restart_workload`.
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[should_panic(
-    expected = "the interruption must raise the supersession signal of the held launch's lane, ending it with StartSuperseded (ADR-0334)"
-)]
 async fn resume_of_a_stopped_workload_overridden_by_a_second_restart_places_exactly_once() {
     run_cell(
         Origin::StoppedResume,
@@ -1341,12 +1330,13 @@ async fn resume_of_a_stopped_workload_overridden_by_a_second_restart_places_exac
     .await;
 }
 
-/// PENDING (lane table, ADR-0334): the resume of an operator-stopped workload whose launch is held
-/// is abandoned by node shutdown; the next boot relaunches it.
+/// PENDING (ADR-0335; the lane table of ADR-0334 is built): the resume of an operator-stopped
+/// workload whose launch is held is abandoned by node shutdown; the next boot relaunches it. The
+/// stamp-on-emit rule still counts the abandoned launch's generation as handled.
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]
 #[should_panic(
-    expected = "the interruption must raise the supersession signal of the held launch's lane, ending it with StartSuperseded (ADR-0334)"
+    expected = "the abandoned generation must be relaunched: after Shutdown the workload has no Running allocation for the committed generation 1"
 )]
 async fn resume_of_a_stopped_workload_abandoned_by_shutdown_is_relaunched_on_the_next_boot() {
     run_cell(Origin::StoppedResume, Interruption::Shutdown, Pre::None, "stopped-resume/shutdown")
@@ -1809,9 +1799,6 @@ async fn a_crash_restart_successor_lost_with_the_control_plane_is_relaunched_wit
 /// PENDING (lane table, ADR-0334): the same for a launch abandoned by node shutdown.
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[should_panic(
-    expected = "the interruption must raise the supersession signal of the held launch's lane, ending it with StartSuperseded (ADR-0334)"
-)]
 async fn a_crash_restart_successor_abandoned_by_shutdown_is_relaunched_with_the_same_count() {
     for seed in SEEDS {
         crash_restart_successor_abandoned(seed, Interruption::Shutdown, "crash-restart/shutdown")

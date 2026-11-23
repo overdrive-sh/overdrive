@@ -55,6 +55,7 @@ use overdrive_reconcilers::{
     restart_after_failure,
 };
 use parking_lot::Mutex;
+use tokio_util::sync::CancellationToken;
 
 use crate::AppState;
 use crate::action_shim;
@@ -144,18 +145,64 @@ struct RegistryEntry {
     views: Mutex<AnyViewMap>,
 }
 
-/// A supersession signal that is never raised (ADR-0334 scaffold: DELIVER
-/// replaces it with the lane's token).
-pub(crate) struct UnraisedSupersession;
+/// The production [`LaunchSupersession`]: a view of one lane's cancellation token (ADR-0334).
+/// Raised exactly when the token is cancelled, level-triggered and cancel-safe.
+pub(crate) struct LaneSupersession(CancellationToken);
+
+impl LaneSupersession {
+    /// A signal no lane owns: never raised.
+    pub(crate) fn unraised() -> Self {
+        Self(CancellationToken::new())
+    }
+}
 
 #[async_trait::async_trait]
-impl LaunchSupersession for UnraisedSupersession {
+impl LaunchSupersession for LaneSupersession {
     fn is_superseded(&self) -> bool {
-        false
+        self.0.is_cancelled()
     }
 
     async fn superseded(&self) {
-        std::future::pending::<()>().await;
+        self.0.cancelled().await;
+    }
+}
+
+/// The runtime's lane table (ADR-0334): one open convergence lane per target, each holding a
+/// token that is a child of the table's one shutdown token. Opening a lane is `child_token()` of
+/// that parent, so a lane opened at any instant around shutdown is either cancelled by the
+/// parent's cancel or born cancelled: the check and the act are one primitive.
+struct LaneTable {
+    shutdown: CancellationToken,
+    open: Mutex<BTreeMap<TargetResource, CancellationToken>>,
+}
+
+impl LaneTable {
+    fn new() -> Self {
+        Self { shutdown: CancellationToken::new(), open: Mutex::new(BTreeMap::new()) }
+    }
+
+    fn open_lane(&self, target: &TargetResource) {
+        self.open.lock().insert(target.clone(), self.shutdown.child_token());
+    }
+
+    fn close_lane(&self, target: &TargetResource) {
+        self.open.lock().remove(target);
+    }
+
+    fn lane_token(&self, target: &TargetResource) -> Option<CancellationToken> {
+        self.open.lock().get(target).cloned()
+    }
+}
+
+/// RAII handle on an open lane: removes its own table entry, by key, when the tick returns.
+struct LaneGuard<'a> {
+    table: &'a LaneTable,
+    target: &'a TargetResource,
+}
+
+impl Drop for LaneGuard<'_> {
+    fn drop(&mut self) {
+        self.table.close_lane(self.target);
     }
 }
 
@@ -178,6 +225,8 @@ pub struct ReconcilerRuntime {
     broker: parking_lot::Mutex<EvaluationBroker>,
     /// Stored, coalescing wake permit for the convergence loop (ADR-0273).
     submitted: tokio::sync::Notify,
+    /// Open convergence lanes and the one shutdown token they descend from (ADR-0334).
+    lanes: LaneTable,
 }
 
 /// Drain-side access to the runtime's evaluation broker.
@@ -265,6 +314,7 @@ impl ReconcilerRuntime {
             reconcilers: BTreeMap::new(),
             broker: parking_lot::Mutex::new(EvaluationBroker::new()),
             submitted: tokio::sync::Notify::new(),
+            lanes: LaneTable::new(),
         })
     }
 
@@ -579,28 +629,26 @@ impl ReconcilerRuntime {
     }
 
     /// Raise the open convergence lane's supersession signal for `target`
-    /// (ADR-0334). A target with no open lane is a no-op.
-    #[allow(clippy::unused_self, reason = "DISTILL RED scaffold: DELIVER's lane table reads self")]
+    /// (ADR-0334). A target with no open lane is a no-op. Idempotent; never cancels
+    /// the shutdown token.
     pub fn supersede_lane(&self, target: &TargetResource) {
-        // RED scaffold (ADR-0334): DELIVER owns the lane table.
-        let _ = target;
+        if let Some(token) = self.lanes.lane_token(target) {
+            token.cancel();
+        }
     }
 
-    /// Raise the supersession signal of every open lane (node shutdown,
-    /// ADR-0334).
-    #[allow(clippy::unused_self, reason = "DISTILL RED scaffold: DELIVER's lane table reads self")]
+    /// Raise the supersession signal of every open lane, and of every lane opened
+    /// afterwards (node shutdown, ADR-0334). Idempotent.
     pub fn supersede_all_lanes(&self) {
-        // RED scaffold (ADR-0334): DELIVER owns the lane table.
+        self.lanes.shutdown.cancel();
     }
 
     /// The open lane's supersession signal for `target`; with no open lane, an
     /// UNRAISED signal (total).
     #[must_use]
-    #[allow(clippy::unused_self, reason = "DISTILL RED scaffold: DELIVER's lane table reads self")]
     pub fn lane_supersession(&self, target: &TargetResource) -> Arc<dyn LaunchSupersession> {
-        // RED scaffold (ADR-0334): DELIVER owns the lane table.
-        let _ = target;
-        Arc::new(UnraisedSupersession)
+        let token = self.lanes.lane_token(target).unwrap_or_default();
+        Arc::new(LaneSupersession(token))
     }
 
     /// Look up the in-memory view for `(reconciler, target)` against
@@ -1537,6 +1585,12 @@ async fn run_convergence_tick_inner(
         );
         return Ok(());
     };
+
+    // Open this target's convergence lane BEFORE hydration (ADR-0334): a stop or restart
+    // committed from here on either cancels the open lane or precedes the hydration below,
+    // which reads the commit. Closed by key when the tick returns.
+    state.runtime.lanes.open_lane(target);
+    let _lane = LaneGuard { table: &state.runtime.lanes, target };
 
     // Construct the per-tick TickContext. The wall-clock `now_unix`
     // snapshot is taken from the SAME injected `Clock` the spawn loop

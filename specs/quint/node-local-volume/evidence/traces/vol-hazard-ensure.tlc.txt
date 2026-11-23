@@ -17,10 +17,12 @@ State 1: <Initial predicate>
   ran |-> <<FALSE, FALSE, FALSE>>,
   ph |-> <<0, 0, 0>>,
   waited |-> <<0, 0, 0>>,
-  charged |-> 0,
   faults |-> 1,
   slow |-> FALSE,
   drainFail |-> FALSE,
+  old |-> <<FALSE, FALSE, FALSE>>,
+  cnt |-> <<0, 0, 0>>,
+  exh |-> FALSE,
   sup |-> <<FALSE, FALSE, FALSE>>,
   afterSup |-> <<0, 0, 0>>,
   delivered |-> <<FALSE, FALSE, FALSE>>,
@@ -29,7 +31,7 @@ State 1: <Initial predicate>
   dstart |-> 0 ]
 /\ vol_bugRecreate_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 
-State 2: <vol_bugRecreate_node_volume_Declare line 403, col 3 to line 407, col 44 of module vol_bugRecreate>
+State 2: <vol_bugRecreate_node_volume_Declare line 889, col 3 to line 893, col 44 of module vol_bugRecreate>
 /\ vol_bugRecreate_node_volume_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   storeUp |-> TRUE,
@@ -48,10 +50,12 @@ State 2: <vol_bugRecreate_node_volume_Declare line 403, col 3 to line 407, col 4
   ran |-> <<FALSE, FALSE, FALSE>>,
   ph |-> <<0, 0, 0>>,
   waited |-> <<0, 0, 0>>,
-  charged |-> 0,
   faults |-> 1,
   slow |-> FALSE,
   drainFail |-> FALSE,
+  old |-> <<FALSE, FALSE, FALSE>>,
+  cnt |-> <<0, 0, 0>>,
+  exh |-> FALSE,
   sup |-> <<FALSE, FALSE, FALSE>>,
   afterSup |-> <<0, 0, 0>>,
   delivered |-> <<FALSE, FALSE, FALSE>>,
@@ -60,7 +64,7 @@ State 2: <vol_bugRecreate_node_volume_Declare line 403, col 3 to line 407, col 4
   dstart |-> 0 ]
 /\ vol_bugRecreate_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 
-State 3: <vol_bugRecreate_node_volume_WlStart line 1471, col 3 to line 1513, col 71 of module vol_bugRecreate>
+State 3: <vol_bugRecreate_node_volume_WlStart line 1273, col 3 to line 1309, col 71 of module vol_bugRecreate>
 /\ vol_bugRecreate_node_volume_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   storeUp |-> TRUE,
@@ -79,10 +83,12 @@ State 3: <vol_bugRecreate_node_volume_WlStart line 1471, col 3 to line 1513, col
   ran |-> <<FALSE, FALSE, FALSE>>,
   ph |-> <<1, 0, 0>>,
   waited |-> <<0, 0, 0>>,
-  charged |-> 0,
   faults |-> 1,
   slow |-> FALSE,
   drainFail |-> FALSE,
+  old |-> <<FALSE, FALSE, FALSE>>,
+  cnt |-> <<0, 0, 0>>,
+  exh |-> FALSE,
   sup |-> <<FALSE, FALSE, FALSE>>,
   afterSup |-> <<0, 0, 0>>,
   delivered |-> <<FALSE, FALSE, FALSE>>,
@@ -91,7 +97,7 @@ State 3: <vol_bugRecreate_node_volume_WlStart line 1471, col 3 to line 1513, col
   dstart |-> 0 ]
 /\ vol_bugRecreate_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 
-State 4: <vol_bugRecreate_node_volume_LaunchEnsureCreate line 909, col 3 to line 959, col 82 of module vol_bugRecreate>
+State 4: <vol_bugRecreate_node_volume_LaunchEnsureCreate line 1373, col 3 to line 1418, col 82 of module vol_bugRecreate>
 /\ vol_bugRecreate_node_volume_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   storeUp |-> TRUE,
@@ -110,10 +116,12 @@ State 4: <vol_bugRecreate_node_volume_LaunchEnsureCreate line 909, col 3 to line
   ran |-> <<FALSE, FALSE, FALSE>>,
   ph |-> <<2, 0, 0>>,
   waited |-> <<0, 0, 0>>,
-  charged |-> 0,
   faults |-> 1,
   slow |-> FALSE,
   drainFail |-> FALSE,
+  old |-> <<FALSE, FALSE, FALSE>>,
+  cnt |-> <<0, 0, 0>>,
+  exh |-> FALSE,
   sup |-> <<FALSE, FALSE, FALSE>>,
   afterSup |-> <<0, 0, 0>>,
   delivered |-> <<FALSE, FALSE, FALSE>>,
@@ -122,7 +130,7 @@ State 4: <vol_bugRecreate_node_volume_LaunchEnsureCreate line 909, col 3 to line
   dstart |-> 0 ]
 /\ vol_bugRecreate_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 
-State 5: <vol_bugRecreate_node_volume_LaunchCmdFail line 643, col 3 to line 656, col 76 of module vol_bugRecreate>
+State 5: <vol_bugRecreate_node_volume_LaunchCmdFail line 1117, col 3 to line 1130, col 76 of module vol_bugRecreate>
 /\ vol_bugRecreate_node_volume_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   storeUp |-> TRUE,
@@ -141,10 +149,12 @@ State 5: <vol_bugRecreate_node_volume_LaunchCmdFail line 643, col 3 to line 656,
   ran |-> <<FALSE, FALSE, FALSE>>,
   ph |-> <<0, 0, 0>>,
   waited |-> <<0, 0, 0>>,
-  charged |-> 1,
   faults |-> 0,
   slow |-> FALSE,
   drainFail |-> FALSE,
+  old |-> <<FALSE, FALSE, FALSE>>,
+  cnt |-> <<0, 0, 0>>,
+  exh |-> FALSE,
   sup |-> <<FALSE, FALSE, FALSE>>,
   afterSup |-> <<0, 0, 0>>,
   delivered |-> <<FALSE, FALSE, FALSE>>,
@@ -153,7 +163,7 @@ State 5: <vol_bugRecreate_node_volume_LaunchCmdFail line 643, col 3 to line 656,
   dstart |-> 0 ]
 /\ vol_bugRecreate_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 
-State 6: <vol_bugRecreate_node_volume_WlStart line 1471, col 3 to line 1513, col 71 of module vol_bugRecreate>
+State 6: <vol_bugRecreate_node_volume_WlStart line 1273, col 3 to line 1309, col 71 of module vol_bugRecreate>
 /\ vol_bugRecreate_node_volume_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   storeUp |-> TRUE,
@@ -172,10 +182,12 @@ State 6: <vol_bugRecreate_node_volume_WlStart line 1471, col 3 to line 1513, col
   ran |-> <<FALSE, FALSE, FALSE>>,
   ph |-> <<0, 1, 0>>,
   waited |-> <<0, 0, 0>>,
-  charged |-> 1,
   faults |-> 0,
   slow |-> FALSE,
   drainFail |-> FALSE,
+  old |-> <<FALSE, FALSE, FALSE>>,
+  cnt |-> <<0, 1, 0>>,
+  exh |-> FALSE,
   sup |-> <<FALSE, FALSE, FALSE>>,
   afterSup |-> <<0, 0, 0>>,
   delivered |-> <<FALSE, FALSE, FALSE>>,
@@ -184,7 +196,7 @@ State 6: <vol_bugRecreate_node_volume_WlStart line 1471, col 3 to line 1513, col
   dstart |-> 0 ]
 /\ vol_bugRecreate_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 
-State 7: <vol_bugRecreate_node_volume_LaunchEnsureCreate line 909, col 3 to line 959, col 82 of module vol_bugRecreate>
+State 7: <vol_bugRecreate_node_volume_LaunchEnsureCreate line 1373, col 3 to line 1418, col 82 of module vol_bugRecreate>
 /\ vol_bugRecreate_node_volume_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   storeUp |-> TRUE,
@@ -203,10 +215,12 @@ State 7: <vol_bugRecreate_node_volume_LaunchEnsureCreate line 909, col 3 to line
   ran |-> <<FALSE, FALSE, FALSE>>,
   ph |-> <<0, 2, 0>>,
   waited |-> <<0, 0, 0>>,
-  charged |-> 1,
   faults |-> 0,
   slow |-> FALSE,
   drainFail |-> FALSE,
+  old |-> <<FALSE, FALSE, FALSE>>,
+  cnt |-> <<0, 1, 0>>,
+  exh |-> FALSE,
   sup |-> <<FALSE, FALSE, FALSE>>,
   afterSup |-> <<0, 0, 0>>,
   delivered |-> <<FALSE, FALSE, FALSE>>,

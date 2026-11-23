@@ -21,7 +21,8 @@
  * for NO row (production writes none for them); `ig` is the View's issued-generation map, `dg` the
  * `workloads/<id>/generation` key, `og` a marker no production rule reads (the hazard's stamp on emit).
  *
- * Restart budget (user decision R-1 = option A, 2026-11-18): the model carries production's PER-ALLOCATION count
+ * Restart budget (user decision R-1 = option A, 2026-11-18): the rule is `restart_budget.qnt`, owned here and imported by
+ * specs/quint/node-local-volume/; the model carries production's PER-ALLOCATION count
  * `cnt[a]` (the View's `restart_counts` at issue): a first placement (no current row) issues with 0, a crash restart (the
  * current row is Failed, no generation pending) with the failed predecessor's count + 1, a generation replacement with the
  * predecessor's count UNCHANGED (`workload_lifecycle.rs:1311-1318`: `predecessor_attempts` for a replacement, `+ 1`
@@ -53,6 +54,7 @@ module restart_generation_conf {
 
 module restart_generation {
   import restart_generation_conf.ConfStep from "./restart_generation"
+  import restart_budget.* from "./restart_budget"   // the restart budget rule, shared with specs/quint/node-local-volume/
   const OFF: Set[str]   // rules off: "stampOnEmit" (ADR-0335), "prefailNoRow" (ADR-0337), "refusalCharged" (ADR-0338)
   const REC: bool       // true on the runs' main: conf_step records the action taken
   const OPS: Set[str]   // enabled operator / environment actions: "stop" "restart" "lost" "idFault" (toggles IdFaultOn/Off) "idFaultHeld" (idFault true from init, never toggled) "capFull" (toggles CapFill/CapDrain)
@@ -147,14 +149,10 @@ module restart_generation {
   // the failures counted against the budget, derived from the per-allocation count of the current row: a Failed current row
   // is one failure beyond its count at issue (R-1 = A)
   def charged(s: S): int =
-    if (curA(s) == 0) 0 else s.cnt.get(curA(s)) + (if (s.as.get(curA(s)) == FAILED) 1 else 0)
-  def exhausted(s: S): bool = charged(s) >= LIMIT and not(nonTerminal(s))
-  // the count the next issued allocation carries: 0 for a first placement, the predecessor's unchanged for a generation
-  // replacement, the predecessor's + 1 for a crash restart (workload_lifecycle.rs:1311-1318)
-  def startCnt(s: S): int =
-    if (curA(s) == 0) 0
-    else if (pendingGen(s)) s.cnt.get(curA(s))
-    else s.cnt.get(curA(s)) + 1
+    budgetCharged(curA(s), s.cnt, curA(s) != 0 and s.as.get(curA(s)) == FAILED)
+  def exhausted(s: S): bool = budgetExhausted(charged(s), LIMIT, nonTerminal(s))
+  // the count the next issued allocation carries (the shared rule, `restart_budget.qnt`)
+  def startCnt(s: S): int = budgetStartCnt(curA(s), s.cnt, pendingGen(s))
 
   // ---------------------------------------------------------------- operator and environment facts
   action Declare = all {
@@ -197,7 +195,7 @@ module restart_generation {
   def canStart(s: S, a: int): bool = and {
     s.declared, not(s.stopped), not(nonTerminal(s)), not(vetoed(s)),
     // a `workload restart` is a generation replacement, admitted whatever the attempt count (restart_decision(.., true))
-    charged(s) < LIMIT or pendingGen(s),
+    budgetMayRestart(charged(s), LIMIT, pendingGen(s)),
     // H1, RA11: a Job is placed once; any row ends it (its natural exit is finalised, never restarted, a pre-driver failure
     // included), so no crash or failure restarts it
     not(JOB) or curA(s) == 0,

@@ -232,9 +232,6 @@ impl Rig {
 /// so the body stops at `declare`; the assertions after it are the contract the launch path must
 /// meet once the parser and the lane table land.
 #[test]
-#[should_panic(
-    expected = "a stop recorded during a launch's claim wait must end the launch at once with StartSuperseded"
-)]
 fn a_stop_interrupts_the_start_and_its_result_is_never_used() {
     let mut rig = Rig::new();
     rig.declare();
@@ -493,9 +490,6 @@ mod loop_shutdown {
     /// `Driver::start`. The launch returns `StartSuperseded`, no row is written, the loop drains and
     /// exits, and the simulated clock never advances (the launch's own bound is never reached).
     #[tokio::test(flavor = "current_thread")]
-    #[should_panic(
-        expected = "shutdown must raise the signal of the lane a waiting launch is dispatching under"
-    )]
     async fn node_shutdown_ends_a_waiting_launch_with_no_row_and_the_loop_exits() {
         let rig = LoopRig::new().await;
         let park = rig.sim.park_next_start(true);

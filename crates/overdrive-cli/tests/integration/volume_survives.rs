@@ -312,6 +312,48 @@ fn cloud_hypervisor_pid(alloc: &str) -> i32 {
     panic!("no cloud-hypervisor process for {alloc}");
 }
 
+/// Whether a thread of `pid` is an io_uring worker blocked in a device flush (`submit_bio_wait`):
+/// the guest's `fsync` of the volume, punted to the VMM's io-wq and held by a suspended device.
+/// A plain in-flight write is held without blocking any thread and does not hang the VMM's exit;
+/// a held flush does (the thread cannot be killed, so the VMM's leader stays an unreapable zombie).
+fn flush_blocked_in_vmm(pid: i32) -> bool {
+    let Ok(tasks) = std::fs::read_dir(format!("/proc/{pid}/task")) else { return false };
+    tasks.flatten().any(|task| {
+        let path = task.path();
+        let Ok(stat) = std::fs::read_to_string(path.join("stat")) else { return false };
+        let Some((head, rest)) = stat.rsplit_once(')') else { return false };
+        head.contains("(iou-wrk")
+            && rest.trim_start().starts_with('D')
+            && std::fs::read_to_string(path.join("wchan")).is_ok_and(|w| w == "submit_bio_wait")
+    })
+}
+
+/// Suspends the volume device until the VMM `pid` has a flush held by it, so the kill that follows
+/// leaves the VMM unable to exit (the claim outlives it). Whether the guest's next request after a
+/// suspend is a write or a flush depends on where its write-then-fsync loop was, so a suspend that
+/// holds only a write is resumed and retried.
+async fn suspend_with_a_flush_held(name: &str, pid: i32) {
+    let dmsetup = |verb: &str| {
+        assert!(
+            Command::new("dmsetup").args([verb, name]).status().expect("dmsetup").success(),
+            "dmsetup {verb}"
+        );
+    };
+    for attempt in 0..60_u64 {
+        dmsetup("suspend");
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+        while tokio::time::Instant::now() < deadline {
+            if flush_blocked_in_vmm(pid) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        dmsetup("resume");
+        tokio::time::sleep(Duration::from_millis(100 + (attempt * 37) % 400)).await;
+    }
+    panic!("the suspended volume never held a flush of the VMM (pid {pid})");
+}
+
 fn kill(pid: i32) {
     assert!(
         Command::new("kill").args(["-KILL", &pid.to_string()]).status().expect("kill").success()
@@ -720,8 +762,8 @@ fn assert_nothing_failed_or_charged(
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[tokio::test]
 #[serial(cgroup)]
-// Pending until launch supersession (step 05-02): today the stopped launch waits out the claim
-// bound and writes a `Failed` row, which the first post-bound assertion names.
+// Pending on an unbounded reap wait after SIGKILL of a VMM blocked in uninterruptible I/O on the
+// suspended device (the predecessor row stays `Running`); lifts in the bounded-reap fix.
 #[should_panic(
     expected = "a superseded launch must neither fail nor start once the claim bound has elapsed"
 )]
@@ -740,9 +782,10 @@ async fn a_workload_stop_during_a_held_claim_returns_promptly_with_no_failed_row
             "dmsetup {verb}"
         );
     };
-    // The old writer's write is held: its claim outlives its process.
-    dmsetup("suspend");
-    kill(cloud_hypervisor_pid(&first_alloc));
+    // The old writer's flush is held: its claim outlives its process.
+    let old_vmm = cloud_hypervisor_pid(&first_alloc);
+    suspend_with_a_flush_held(&name, old_vmm).await;
+    kill(old_vmm);
     restart(RestartArgs { id: id.clone(), config_path: journey.cfg() })
         .await
         .expect("workload restart");
