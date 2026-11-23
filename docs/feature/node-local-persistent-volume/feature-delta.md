@@ -1,8 +1,8 @@
 # Feature delta: node-local persistent volume for VM workloads (GH #348)
 
-**Status:** the design is approved by the user; rulings run through 2026-11-19. The decision table (VD-1 to VD-10, SD-1 to SD-6, J-1, DE-1, D-1,
-H1, H2, W-1 to W-4, R-1, VB-1, B-1 to B-3, P-1 to P-3) and the scope-limitation table (L1 to L9) are owned by
-[`design/wave-decisions.md`](design/wave-decisions.md); each ADR (0310 to 0320, 0334 to 0338) holds one decision. This file owns the interface
+**Status:** the design is approved by the user; rulings run through 2026-11-23. The decision table (VD-1 to VD-10, SD-1 to SD-6, J-1, DE-1, D-1,
+H1, H2, W-1 to W-4, R-1, VB-1, VB-2, RB-1, B-1 to B-3, P-1 to P-3) and the scope-limitation table (L1 to L9) are owned by
+[`design/wave-decisions.md`](design/wave-decisions.md); each ADR (0310 to 0320, 0334 to 0338, 0348) holds one decision. This file owns the interface
 contracts, the boundary scenarios and the model's boundary. Executable test obligations, mutation targets and test re-sync lists are DISTILL's
 input in [`distill/upstream-issues.md`](distill/upstream-issues.md). The model is two Quint specs, `specs/quint/node-local-volume/` and
 `specs/quint/restart-generation/`; their verdicts are in each spec's `evidence/summary.md`, not in this document.
@@ -442,6 +442,108 @@ process death; it is unchanged. So an admitted launch that is waiting runs on to
 
 **Not changed:** `kill_for_test`; the convergence loop's drain of admitted evaluations to their result (ADR-0102 § Timing); admission closing;
 the broker; the `run_convergence_tick` and `spawn_convergence_loop` signatures.
+
+### A VMM kill's reap wait is bounded (RB-1; ADR-0348)
+
+**Today.** `CloudHypervisorVmm::terminate` (`crates/overdrive-host/src/vmm.rs:650-690`) notifies the reaper to kill, then awaits the reap with
+no bound (`rx.changed().await`, `:670` for zero grace, `:688` otherwise). A VMM with a thread blocked in uninterruptible I/O (a flush held on
+a suspended or failing dm device) never becomes reapable, so `VmDriver::stop` (`vm_driver.rs:2047-2212`) never returns, the shim's
+`StopAllocation` arm (`action_shim/mod.rs:2743`) never writes the terminal row, the row stays `Running` and the lane stays held. The
+`terminate` callers are `VmDriver::stop` (`:2128`, grace `VM_STOP_GRACE` = 10 s), the start-failure and boot-race cleanup (`:938`, `:1311`,
+zero grace) and the failed EXEC release (`:2315`, zero grace).
+
+**The contract (user ruling 2026-11-23, decision 11, option a).**
+
+1. **The outcome.** `overdrive_core::traits::vmm::VmTermination` gains one unit variant, `KilledNotReaped`: the kill was delivered and the
+   process was still not reaped when `VMM_REAP_BOUND` elapsed. It is an outcome, not a `VmmError`, because the substrate did not refuse
+   anything; `VmmError` keeps meaning "the kill or spawn itself failed". The variant carries no payload: the pid is the caller's
+   `VmControl`, and no exit exists to report. The existing variants are unchanged: `ExitedWithinGrace(VmmExit)`, and `Killed` for a process
+   reaped after the kill (and for an already-gone process).
+2. **The bound.** `pub const VMM_REAP_BOUND: Duration = Duration::from_secs(5)` in `overdrive-core::traits::vmm`, beside the trait, so every
+   adapter and test names one value. 5 s is about twice the held-flush drain measured in the spike (2.4 s, `design/wave-decisions.md` § Scope limitations), so a disk that is
+   draining and healthy reaps inside it and the new outcome stays the rare case; a reap after SIGKILL takes milliseconds when nothing is
+   stuck; and it is short enough that the worst case, a stop of an unreapable VMM, costs `VM_STOP_GRACE` + `VMM_REAP_BOUND` = 15 s of lane
+   time (a VMM already SIGKILLed from outside still waits out the grace first, since the grace wait ends only on the reap). It is a policy
+   value (ADR-0348 Consequences).
+3. **When the bound starts and what clock measures it.** The bound starts at the instant `terminate` requests the kill, on both the
+   grace-expired path and the zero-grace path. The wait is measured on the injected `Clock`: `SimVmm` takes an `Arc<dyn Clock>` as a required
+   constructor parameter and waits `VMM_REAP_BOUND` on it (`Clock::sleep`, which parks until the harness advances time), so seeded simulation
+   drives the bound. `CloudHypervisorVmm` is the host binding of the port and measures it on real time, as it already does for `grace`
+   (`tokio::time::sleep`); it takes no clock.
+4. **The `Vmm::terminate` rustdoc states** (each clause is part of the port contract and is covered by the equivalence test):
+   - *Postcondition on `Ok(Killed | ExitedWithinGrace)`:* the process is reaped. *On `Ok(KilledNotReaped)`:* SIGKILL has been delivered to the
+     process, no thread can run guest code again, and the process is not reaped; it releases every resource it holds (descriptors, the volume's
+     kernel claim, the vsock device, its cgroup membership) only when it is reaped.
+   - *The adapter keeps waiting for the process after returning `KilledNotReaped`.* A late reap runs the adapter's ordinary reap path
+     (its exit watch fires, its live record is dropped); it is not an error and changes nothing the caller wrote.
+   - *Edge cases:* a second `terminate` against a process that is killed and not yet reaped re-waits `VMM_REAP_BOUND` from its own call and may
+     return `KilledNotReaped` again (idempotent; it never re-sends a different outcome for a reaped process, which is `Killed`). `grace ==
+     Duration::ZERO` kills at once and then waits the bound. An already-gone or unknown pid is `Ok(Killed)` as today.
+   - *`Err(VmmError)`* only when the substrate refuses the kill, as today; never for a slow reap.
+5. **`SimVmm`.** It models a process that does not reap by scripted state: a test marks a process unreapable (the constructor and the scripting
+   method are DISTILL's), `terminate` on it marks the process killed, waits `VMM_REAP_BOUND` on the injected clock and returns
+   `KilledNotReaped`; the process keeps every resource it holds until the test reaps it (a scripted `exit_process`), exactly as the real
+   process does. Concretely its `device` entry (the vsock CID holder `vsock_device_holders` reports) is NOT released at `terminate` for an
+   unreapable process, but is released at the scripted reap; its exit sender fires only at the scripted reap. The reapable path is unchanged.
+6. **`VmDriver::stop` on `Ok(KilledNotReaped)`.** The outcome is a completed stop. The driver emits one `tracing` event
+   `vm.lifecycle.stop_not_reaped` (allocation id, pid), writes the beacon writer's `vmm_has_exited` as for any `terminate` completion, runs
+   `cleanup_driver_artifacts` in the same order (`cgroup.kill`, scope removal, run directory, clone then index link), treating a scope
+   removal that fails for the non-empty scope as the best effort it already is, and returns `Ok(())`. `status()` is `Err(NotFound)` (the
+   entry is `EndingInFlight`, as for every stop); the entry stays `EndingInFlight` until the shim's `release_supervision`. No new
+   `DriverError`: the return type of `Driver::stop` is unchanged. The `Driver::stop` contract says: on `Ok`, the VMM has been killed and is
+   reaped, or killed and not yet reaped (ADR-0348); the shim comment at `action_shim/mod.rs:2774` ("`Driver::stop` awaits process quiescence")
+   is corrected to that.
+7. **The other callers.** Start-failure and boot-race cleanup and the failed EXEC release ignore the outcome as they do today; a
+   `KilledNotReaped` there leaves the same leftovers, owned as in item 9, and the failure they were reporting is unchanged.
+8. **What the shim writes.** Nothing new. `StopAllocation` proceeds exactly as for a reaped VMM: `retire_guest_network_lease`,
+   `mtls_lifecycle.stop_alloc`, `teardown_for_dispatch`, then the `Terminated` row with `TransitionReason::Stopped { by: Reconciler }` and
+   the action's `terminal`, no `Failed` row, no restart-budget input, then `release_supervision`. A `Running` row therefore becomes
+   `Terminated` within `VM_STOP_GRACE + VMM_REAP_BOUND` plus the cleanup time. `restart` (`RestartAllocation`) stops its predecessor through
+   the same `Driver::stop` and is bounded the same way.
+9. **Who owns each leftover.**
+
+   | Leftover | Owner | Removed when |
+   |---|---|---|
+   | the hypervisor process | the adapter's reaper task (`CloudHypervisorVmm`) | it reaps the process, whenever that is; the adapter's live record is dropped then |
+   | the cgroup scope (non-empty while a thread is stuck) | `VmReclamation` | the first pass after `release_supervision` and after the process is reaped: terminal VM allocation with host artifacts and no driver claim emits `DiscardStrandedArtifacts` (`vm_reclamation.rs:161-171`); the pass runs at boot and every `VM_RECLAMATION_SWEEP_INTERVAL` (30 s). A pass that cannot remove it returns and the next pass retries |
+   | the run directory and the clone | `VmDriver::stop` (best effort, both are removable while the process is stuck); `VmReclamation` as the backstop | at stop; otherwise the same pass |
+   | the volume's kernel claim | the kernel | when the stuck I/O drains and the process exits; Overdrive neither releases nor fences it (ADR-0317). A replacement's claim wait covers it; past its bound the replacement fails typed `Held` (ADR-0317) |
+   | the vsock device and its CID | the kernel, at the process's exit | the same reap; the guest lease is retired by the shim at stop |
+
+10. **Not changed.** `Driver::stop`'s signature; the lane and supersession path (ADR-0334); the claim wait and its 30 s bound (ADR-0317);
+    `VM_STOP_GRACE`; the exit watcher (it finds `EndingInFlight` at a late reap and returns, as it does today for every stop); the reconcilers;
+    the observation row shapes; `kill_for_test`.
+
+**Lifecycle Gate Ownership.** This adds no gate. It changes the meaning of one existing state, recorded here and in ADR-0348: an allocation
+ended by a stop is `Terminated` once the VMM is killed and can run no guest code, not once its process is reaped. The kernel fact behind it:
+a fatal signal puts SIGKILL pending on every thread of the group and wakes it (`complete_signal`, `kernel/signal.c:1003-1025 @ v7.0`); a thread
+in an uninterruptible wait exits when the wait ends. The user approved this meaning with decision 11.
+
+**Boundary scenarios.** (1) The VMM reaps within the bound: `Killed` or `ExitedWithinGrace`, unchanged. (2) It does not:
+`KilledNotReaped`, the row `Terminated` `Stopped`, supervision released. (3) Unrelated allocations and other workloads' lanes are unaffected:
+the stuck stop releases its own lane at the end of its own wait. (4) Late reap after the stop: the exit watcher finds no `Live` entry, so no
+`ExitEvent` and no row write; the row stays as written. (5) A control-plane crash or node reboot while a process is unreapable: the process dies
+with the node on reboot; after a control-plane crash only, the boot sweep handles it as for any unsupervised VMM (M7). (6) A reapable VMM never
+sees the new outcome.
+
+**Tests this decision requires (for the acceptance designer; none is written here).**
+
+- Tier 3: S-VOL-T3-12 (`crates/overdrive-cli/tests/integration/volume_survives.rs:754`), already authored and pending on this defect. The
+  DELIVER step removes its `#[should_panic]` marker. It proves the real adapter, a real SIGKILL and a real held flush; it cannot be produced
+  by simulation.
+- Tier 1, seeded `overdrive-sim`, production `VmDriver::stop` over `SimVmm` with an unreapable process: (a) `stop` returns `Ok`, advancing the
+  `SimClock` by exactly `VMM_REAP_BOUND` after the grace, and the shim writes `Terminated`/`Stopped`, no `Failed`, no charge; (b) the
+  `SimVolumeBacking` claim is still `Held` and the `SimVmm` vsock holder still reports the CID after the stop, and both clear only at the
+  scripted reap; (c) the scripted late reap emits no `ExitEvent` and changes no row; (d) a replacement launch during the stuck window waits on
+  the claim, is not charged before its bound, and attaches after the scripted reap and drain.
+- A `Vmm` equivalence clause (`development.md` § "Trait definitions specify behavior"): `CloudHypervisorVmm` and `SimVmm` agree on the
+  idempotent second `terminate` and on the reapable outcomes.
+- `VmReclamation`: a pass over a terminal allocation whose scope cannot be removed returns without waiting and emits again on the next pass;
+  after the reap the next pass removes it.
+- Stop-totality: the existing `vm_driver_stop_totality.rs` doubles gain a `KilledNotReaped` case.
+
+**Open point carried to DELIVER, not a contract.** `VmHostState::kill_scope` (`vm_reclamation_boot.rs:5`) must return on a scope that rmdir
+refuses as busy rather than wait. The cell above covers it; the code is read when the step lands.
 
 ### Restart generation is handled when its successor is observed (SD-6; ADR-0335, which amends ADR-0073, with ADR-0337 and ADR-0338)
 
@@ -1030,7 +1132,7 @@ figure; `cargo xtask quint verify-evidence` is the authority on whether the reco
 | Invariants (`Safety`) | `I_SINGLE_WRITER`, `I_DATA_SURVIVES_RESTART`, `I_ENSURE_IDEMPOTENT_UNDER_CRASH`, `I_NO_DRAIN_FAILURE_CHARGES_BUDGET`, `I_STOP_KEEPS_VOLUME`, `I_SUPERSEDE_ABANDONS_WAITS`, `I_SUPERSEDED_LAUNCH_DELIVERS_NOTHING`, `I_SIGNAL_NEVER_LEAKS_ACROSS_ALLOCATIONS`; "a typed failure never attaches" and "shutdown signals every launch" are asserted by named runs, not invariants (2026-11-19) | `I_FINISHED_JOB_ISSUES_NO_ID`, `I_CAPACITY_WAIT_NEVER_EXHAUSTS` (`exhausted` implies the current row ended by a charged cause: `W_CRASH`, `W_STARTFAIL` or `W_PREFAIL`) |
 | Temporal | `EveryStartLiveness` | `RunIntentProgress`, `PreFailExhausts` |
 | Hazards, one per decision | `noWait` (VD-8), `recreate` (VD-9), `stopDeletes` (VD-2), `noInterrupt` (SD-1 to SD-5) | `stampOnEmit` (ADR-0335: the stamp on emit decides, violates `RunIntentProgress`), `prefailNoRow` (ADR-0337: a pre-driver failure writes no row, so an id is issued per tick, violates `PreFailExhausts`), `refusalCharged` (ADR-0338: an admission refusal is charged, so a node held at the cap exhausts a healthy workload's budget, violates `I_CAPACITY_WAIT_NEVER_EXHAUSTS`) |
-| Checks | `vol-safety-tlc` (~271 s, the only check outside CI, VB-1), `vol-live-start`, one `vol-hazard-*` per hazard, one `vol-run-*` per run | `rg-safety-tlc` (~65 s), `rg-live-replacement` (~29 s), `rg-live-prefail`, one `rg-hazard-*` per hazard, one `rg-run-*` per run; all `ci = true` under the two-minute rule |
+| Checks | `vol-safety-tlc` (the only check outside CI, VB-1; user ruling 2026-11-23, decision 10, VB-2: the exhaustive check is accepted at about 19 min, 16 workers and a 16 GB heap, `specs/quint/node-local-volume/checks.toml`, and stays `ci = false`; the earlier "~271 s" is superseded), `vol-live-start`, one `vol-hazard-*` per hazard, one `vol-run-*` per run | `rg-safety-tlc` (~65 s), `rg-live-replacement` (~29 s), `rg-live-prefail`, one `rg-hazard-*` per hazard, one `rg-run-*` per run; all `ci = true` under the two-minute rule |
 
 Boundary scenarios 3 (unrelated state) and 6 (feature disabled) are not protocol behaviour and have no model run: seeded simulation and Tier 3
 cover them. The runs are the ones DISTILL pins with `#[quint_test]`, each in the driver of its spec. The volume spec's identifiers (`storeUp`,
@@ -1095,6 +1197,7 @@ Assumptions of the volume spec and what discharges each:
 | A8 a signal raised after the intent commit reaches the lane, or the evaluation's hydration sees the commit | the open-before-hydrate ordering (§ Gate G-3 Ordering), a unit test that raises the signal before the lane opens, after it opens and before hydration, and during dispatch |
 | A9 a lane opened at any instant around `supersede_all_lanes` observes the signal | the lane table's own construction (every lane token is a child of the one shutdown token), a unit test of the table's use that runs `supersede_all_lanes` before, between and after concurrent lane opens; no test of the token library's semantics |
 | A10 after an abandoned launch the reconciler places a fresh allocation for the generation, once | the seeded invariant `restart_generation_is_placed_exactly_once_across_supersession_and_crash` (pending DISTILL) and the pure reconcile tests; the restart-generation spec models what follows from A10 and does not discharge it (RA2 is its premise); code facts: `reconciler_runtime.rs:1701-1771`, ADR-0102 admission |
+| A11 a VMM that was SIGKILLed but is not reaped (a thread in an uninterruptible wait) can never run guest code again, so an allocation `Terminated` by a stop while its claim is held is the model's `StopAlloc` (`alive` false, claim held until `Drain`) | `complete_signal`, `kernel/signal.c:1003-1025 @ v7.0` (SIGKILL pending on every thread); Tier-3 S-VOL-T3-12 (ADR-0348) |
 | M5 a launch with the lane signal abandons its waits and delivers nothing; `ensure` and the VMM create are never interrupted | boundary scenarios 4 and 4a (A7 to A9) |
 | M7 after a control-plane crash or a node reboot no new launch for the workload is minted while a VMM that survived the crash (including a mid-boot one) is alive: the boot reclamation sweep ends every such VMM before the reconcilers run | verified in code (the sweep kills every unsupervised VMM whatever its row; it completes before the convergence loop, the interest router and the HTTP listener start; `vm_reclamation_boot.rs:92-148`, `plan_reclamation` rows 1, 3, 4, `lib.rs:4530` before `:4813`, `:4861`, `:5032`); the DISTILL test `boot_reclamation_ends_a_mid_boot_vmm_before_any_launch_for_its_workload` |
 
