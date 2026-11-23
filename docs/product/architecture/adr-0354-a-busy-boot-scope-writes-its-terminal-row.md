@@ -11,7 +11,9 @@ implemented. The interface contract is in
 Boot reclamation kills each leftover VM's scope and, for a settled scope, writes the allocation's terminal row. A scope that stays populated at the
 bound (ADR-0349) holds a VMM that is killed but not reaped. ADR-0349's rule for a busy scope is that the caller writes no row and takes no further
 step, which is right for the steady-state reclamation tick (its row is already terminal when a scope is stuck after a stop). At boot the row may
-still read `Running`.
+still read `Running`. A launch's `Pending` row is not this case: boot closes it before the executors run
+([ADR-0355](adr-0355-a-launch-that-ends-before-running-ends-its-pending-row-with-a-terminal-row-that-names-why.md)), so the executor meets a terminal
+row.
 
 ## Decision
 
@@ -27,6 +29,6 @@ no row write"; the steady-state tick still writes none.
 
 ## Consequences
 
-- After `converge` returns on a busy scope the row is terminal and carries the address; after a tick meets the same busy scope the row is unchanged.
+- After `converge` returns on a busy scope the row is terminal and carries the address (a `Running` row by this decision, a `Pending` row by ADR-0355); after a tick meets the same busy scope the row is unchanged.
 - The scope, the run directory and the clone stay until `VmReclamation` removes them after the reap.
 - How the two callers of the reclaim executor differ is internal structure.

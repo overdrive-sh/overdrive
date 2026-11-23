@@ -2,8 +2,8 @@
 
 ## Status
 
-**Accepted** 2026-11-23 (decision RB-8 of the node-local persistent volume feature, GH #348; user ruling of 2026-11-23, N-4, option b). Not
-implemented. Amends ADR-0334 (implemented through its driver side; the amendment is explicit there). The interface contract is in
+**Accepted** 2026-11-23 (decision RB-8 of the node-local persistent volume feature, GH #348; user rulings of 2026-11-23: N-4, option b; RB-11, one
+reason for a launch lost with the control plane). Not implemented. Amends ADR-0334 (implemented through its driver side; the amendment is explicit there). The interface contract is in
 [`feature-delta.md`](../../feature/node-local-persistent-volume/feature-delta.md) § "Launches that end before running".
 
 ## Context
@@ -16,8 +16,10 @@ that ends must not leave that row behind, because nothing is completing it and a
 ## Decision
 
 **Every launch that ends before running ends its `Pending` row with a `Terminated` row, `terminal` absent, whose reason names why, and boot closes
-the `Pending` rows a crash left.** Two reasons name the causes: the launch was superseded (by a stop, a restart or node shutdown), or it was lost
-with the control plane. An abandoned launch charges nothing: it is classified as a platform reclamation, so it is not a natural exit, is exempt from
+every `Pending` row a crash left, first.** Two reasons name the causes: the launch was superseded (by a stop, a restart or node shutdown), or it was
+lost with the control plane. The boot step runs before boot reclamation observes or kills anything and ends every `Pending` row of the node with
+the one reason `LaunchLostWithControlPlane`, whether or not its VM left host artifacts, so the reclamation executors meet a terminal row and never
+write a second reason for the same fact. An abandoned launch charges nothing: it is classified as a platform reclamation, so it is not a natural exit, is exempt from
 the restart ceiling, and its relaunch carries the abandoned allocation's own count. `WorkloadLifecycle`'s choice of the current allocation is
 unchanged; the abandoned row is a restartable row it relaunches under the existing path. After a stop nothing is relaunched.
 
@@ -32,6 +34,8 @@ charge is stated in ADR-0335, item 4.
 - **Skip `Pending` rows when choosing the current allocation.** Rejected by the user (option a): a stale `Pending` row per abandoned launch stays in
   the allocation list, and the operator cannot tell a live launch from an abandoned one.
 - **Relaunch a `Pending` row after a timeout.** Rejected by the user (option c): a timer for a fact the convergence lane already gives.
+- **Close the `Pending` rows after the executors, leaving a `Pending` row whose VM left a scope to the executor's platform-reclaimed row.**
+  Rejected by the user: one fact, a launch lost with the control plane, would carry two reasons depending on whether the VM left artifacts.
 - **Write the abandoned row as `Failed`.** Rejected: it would charge the restart budget for a launch no fault ended and finalise a Job that never
   ran.
 
@@ -39,7 +43,7 @@ charge is stated in ADR-0335, item 4.
 
 - `TransitionReason` gains two fieldless variants appended at the tail; no envelope version changes (archived size unchanged).
 - The relaunch of an abandoned crash-restart successor is charged once, not twice.
-- A boot step after the executors closes every `Pending` row still `Pending`; a `Pending` row whose VM left a scope is closed by the executor's
-  ordinary platform-reclaimed row.
+- The first step of boot reclamation closes every `Pending` row; the executors then discard what a VM left behind (`DiscardStrandedArtifacts`
+  authors no row) and the reservation of a stuck VM reads its address from the closed row, which carries it.
 - The `restart-generation` and `node-local-volume` models read the abandoned launch as a terminal, uncharged row instead of "no row" (feature delta,
   § "Quint changes").

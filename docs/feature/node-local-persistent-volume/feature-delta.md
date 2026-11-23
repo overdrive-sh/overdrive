@@ -1,7 +1,7 @@
 # Feature delta: node-local persistent volume for VM workloads (GH #348)
 
 **Status:** the design is approved by the user; rulings run through 2026-11-23. The decision table (VD-1 to VD-10, SD-1 to SD-6, J-1, DE-1, D-1,
-H1, H2, W-1 to W-4, R-1, VB-1 to VB-3, RB-1 to RB-10, B-1 to B-3, P-1 to P-3) and the scope-limitation table (L1 to L9) are owned by
+H1, H2, W-1 to W-4, R-1, VB-1 to VB-3, RB-1 to RB-12, B-1 to B-3, P-1 to P-3, and P-6 awaiting a ruling) and the scope-limitation table (L1 to L9) are owned by
 [`design/wave-decisions.md`](design/wave-decisions.md); each ADR (0310 to 0320, 0334 to 0338, 0348 to 0355) holds one decision. This file owns the interface
 contracts, the boundary scenarios and the model's boundary. Executable test obligations, mutation targets and test re-sync lists are DISTILL's
 input in [`distill/upstream-issues.md`](distill/upstream-issues.md). The model is two Quint specs, `specs/quint/node-local-volume/` and
@@ -384,7 +384,7 @@ exactly what the existing start-failure path tears down, and returns `StartSuper
 | 2 | after `ensure` returns, whatever its result | return. `ensure` itself is never interrupted: the driver awaits it, and it returns by itself within the adapter-owned 30 s deadline (§ Port), an in-flight `lvm` command running to its own end; the ensured volume stays (VD-2). A deadline `Err` observed here with the signal raised is `StartSuperseded`, not a `Failed` row |
 | 3 | each claim-poll iteration: before `claim_state`, and while sleeping the poll interval (`select!` of `supersession.superseded()` against `Clock::sleep`, `biased`, superseded first) | return at once; the interval's remainder is not waited |
 | 4 | after the claim wait, before the first host artifact | return, nothing created |
-| – | `create_run_dir` ... `Vmm::create`, then `place_pid_in_scope` | **no observation point**: a bounded effect that runs to its end (the rootfs clone and the VMM spawn are not interruptible), so the VMM is always inside its scope when an abandonment finds it |
+| – | `create_run_dir` ... `Vmm::create` | **no observation point**: a bounded effect that runs to its end (the rootfs clone and the VMM spawn are not interruptible), so the VMM is always inside its scope when an abandonment finds it (ADR-0352: it is created there) |
 | 5 | the guest-boot race: `select!` over `biased; accept_ready, supersession.superseded(), exit.recv(), clock.sleep(VM_BOOT_DEADLINE)`; READY is polled first because a launch that won its boot race is an ordinary running allocation | `cleanup_after_start_failure` (terminate the VMM with zero grace, remove clone and link, kill and remove the scope, remove the run directory, clear the beacon record), then return |
 | 6 | the second `VM_BOOT_DEADLINE` wait on the beacon-error arm | same as 5 |
 
@@ -556,7 +556,7 @@ new launch. `GuestAddressPool::release` and `GuestNetworkProvisioner::teardown` 
 
 | # | Claim | Source |
 |---|---|---|
-| K1 | Every task of the VMM is a member of the scope from before the hypervisor executes | ADR-0352; `cgroup_procs_write_start` takes `current` for pid 0, `kernel/cgroup/cgroup.c:3056-3069` |
+| K1 | Every task of the VMM is a member of the scope from its first instruction | ADR-0352; `clone3` with `CLONE_INTO_CGROUP` links the child to the scope's css_set before it is woken (`cgroup_post_fork`, `kernel/cgroup/cgroup.c:6992-6993`; `wake_up_new_task`, `kernel/fork.c:2684`); `execve` does not change membership (`fs/exec.c:946-957`); § "A VMM is born inside its scope", C4 and C6 |
 | K2 | A task closes its descriptors before it leaves the scope. In `do_exit`: `exit_files` (`kernel/exit.c:971`) drops the last reference of the file table, `put_files_struct` (`fs/file.c:506-516`) runs `close_files` (`:474-504`) and `filp_close` (`fs/open.c:1478-1486`) per descriptor, `fput_close` (`fs/file_table.c:583-587`) queues the final `__fput` as task work on the exiting task (`__fput_deferred`, `:519-541`, `task_work_add` at `:528-531`; the add can fail only after `exit_task_work` has run). `exit_task_work` (`kernel/exit.c:976`) then runs `__fput` (`fs/file_table.c:443-483`), which calls the file's `release` (`:468-469`). The task leaves its css_set only afterwards, in `finish_task_switch` (`kernel/sched/core.c:5183-5193`, `cgroup_task_dead`; `do_cgroup_task_dead`, `kernel/cgroup/cgroup.c:7072-7102`, `css_task_move` at `:7082`) | as cited |
 | K3 | The vsock device's release is the last close of the VMM's device file: `vhost_vsock_dev_release`, `drivers/vhost/vsock.c:753-760`. The VMM is the only holder of it (ADR-0146); the launcher passes the VMM standard I/O and the TAP queue only (ADR-0129) | as cited |
 | K4 | The volume's claim ends in the file's release: `blkdev_release` (`block/fops.c:703-707`) calls `bdev_release` (`block/bdev.c:1124-1166`), which syncs the device when it is the last opener (`:1141-1142`; this is the held flush), then ends the claim (`bd_yield_claim`, `:1110-1122`, called at `:1147-1148`; `bd_end_claim`, `:689-`). The OFD lock is removed earlier in `__fput` (`locks_remove_file`, `fs/file_table.c:461`, before `release` at `:468`). The VMM opens the volume once (A3) and no other process holds a duplicate | as cited |
@@ -712,60 +712,137 @@ VMM that holds a vsock device outside an empty scope: boot reads `populated 0`, 
 refused `EADDRINUSE`. The stop path has the same hole. The wrapper chain (`prlimit`, `setpriv`, optionally `ip netns exec`) is one exec chain of
 one process, so enrolling only the first pid also left every thread and child created before the write outside the scope.
 
-**The contract (the user's instruction of 2026-11-23, review finding F1; the mechanism is proposed, ADR-0352).**
+**The contract (user ruling 2026-11-23, review finding F1; ADR-0352, accepted).**
 
-1. **The postcondition.** On `Ok`, `Vmm::create` has returned a VMM whose process was a member of `config.cgroup_scope` before it executed the
-   first program of the launch chain, so every process and thread of the VMM tree is a member from its first instruction. *Precondition:* the scope
-   directory exists and its `cgroup.procs` is writable by the caller (the driver creates the scope before `create`, today's order). On `Err` no
-   process remains. `Vmm::create`'s rustdoc and `VmConfig.cgroup_scope`'s rustdoc state this. No signature changes.
-2. **The mechanism.** The forked child writes `0` to the scope's `cgroup.procs` in the audited launch hook (ADR-0129, ADR-0143), as its first step,
-   before `close_range`, `no_new_privs` and the seccomp filter load. The descriptor is opened by the parent with `O_CLOEXEC` before the fork, so an
-   unwritable `cgroup.procs` fails `create` before any child exists and the descriptor never reaches the hypervisor. In the kernel, a write of `0`
-   attaches `current` (`cgroup_procs_write_start`, `kernel/cgroup/cgroup.c:3056-3069 @ v7.0`).
-3. **Evidence for the choice over `CLONE_INTO_CGROUP`.** Both attach the child before it executes user code in the target cgroup: `clone3` with
-   `CLONE_INTO_CGROUP` builds the child's css_set in `cgroup_css_set_fork` (`kernel/cgroup/cgroup.c:6769-6852`; the flag is accepted for `clone3`
-   only, `kernel/fork.c:2840`, `:2899`). The write form leaves a window between the fork and the write in which the child is not yet a member; the
-   child holds no vsock device in it, because the launcher passes no vsock descriptor and the hypervisor opens `/dev/vhost-vsock` itself after
-   `exec` (ADR-0146), and a child that fails the write returns from the hook with an error and never reaches `exec`. So no process that holds the
-   device or runs the hypervisor is ever outside the scope, whether or not `serve` is alive. `CLONE_INTO_CGROUP` needs a raw `clone3` plus `exec`,
-   its own child supervision and a second `unsafe` surface, since `std::process::Command` and `tokio::process::Command` cannot pass the flag; the
-   crate's only production `unsafe` site is the one audited hook. The write form adds three syscalls to that hook.
-4. **`CloudHypervisorVmm` needs the cgroup root** to resolve `CgroupPath` to a directory: `with_cgroup_root(PathBuf)`, a builder beside
+1. **The postcondition.** On `Ok`, `Vmm::create` has returned a VMM whose process was created inside `config.cgroup_scope`: its first instruction ran
+   as a member, so every process and thread of the VMM tree is a member from its first instruction. *Precondition:* the scope directory exists and
+   is a valid placement target for the caller (item 8). On `Err` no process remains. `Vmm::create`'s rustdoc and `VmConfig.cgroup_scope`'s rustdoc
+   state this. No signature changes.
+2. **The spawn primitive.** One private module of `overdrive-host`, `crates/overdrive-host/src/vmm/launch_clone.rs` (beside `launch_seccomp`), owns
+   the spawn. Its one safe entry point takes the prepared launch (program path, argv, the scope's directory descriptor, the seccomp program, the
+   stdio descriptors) and returns the child's pid, its pidfd and the read end of its stderr to the adapter; the other names in the
+   module are the crafter's. It performs a raw `clone3` with `CLONE_INTO_CGROUP | CLONE_PIDFD`, `cgroup` set to the scope's directory descriptor,
+   `pidfd` pointing at a parent-side `c_int`, `exit_signal = SIGCHLD`, no `CLONE_VM`, `CLONE_THREAD` or `CLONE_PARENT_SETTID`, `stack = 0`, and
+   `size` of at least `CLONE_ARGS_SIZE_VER2` (88). The child then `exec`s the existing launch chain. `std::process::Command` and
+   `tokio::process::Command` are not used for the VMM launch. `register_launch_child_hook` is deleted.
+   *Why a pidfd (CLONE_PIDFD):* it gives (a) a handle that names this process and no other, so the kill cannot hit a recycled pid; (b) exit
+   observation as a pollable descriptor (`pidfd_poll`, `fs/pidfs.c:278-299 @ v7.0`) that `tokio::io::unix::AsyncFd` waits on, with no blocking
+   thread and no ownership of `SIGCHLD`; (c) the reap through `waitid(P_PIDFD)` (`kernel/exit.c:1770-1779`) with the exit status; and (d) a kill
+   through `pidfd_send_signal`, whose default scope is the thread group (`kernel/signal.c:4100-4106`). The pidfd is `O_CLOEXEC`
+   (`kernel/fork.c:1894`) and is installed in the parent's table only (`:2248-2251`, `:2463`).
+3. **What the child does** (the audited hook of ADR-0129 and ADR-0143, now run in the clone child, in this order, and nothing else): set the
+   signal mask empty and `SIGPIPE` to its default disposition, as std's spawn does (the Rust runtime ignores `SIGPIPE`, and an ignored disposition
+   survives `exec`); `dup2` the stdio descriptors onto 0, 1 and 2; `close_range(3, ~0, CLOSE_RANGE_CLOEXEC)`; `prctl(PR_SET_NO_NEW_PRIVS, 1)`;
+   load the seccomp filter; `execve`. Any failing step writes its `errno` to the error pipe (item 4) and ends the child with `_exit`. The steps and
+   their order are those the hook runs today; the filter is the same `VmmLaunchSeccompFilter`.
+4. **Standard I/O, environment, argv, failure report.** Preserved exactly: stdin and stdout are `/dev/null`, stderr is a pipe whose read end is
+   the adapter's stderr capture (the bounded `VmmDiagnostics` capture of today), the environment is `serve`'s environment at the spawn with nothing
+   added or removed, the working directory is inherited, and the argv is the one `build_confined_command` builds today (wrapper prefix, hypervisor
+   binary, `--seccomp`, `--landlock` and the rules). Whether `build_confined_command` keeps returning a `Command` the primitive reads, or returns
+   the argv directly, is the crafter's. The program is resolved to an absolute path **before** the clone, by the search `execvp` performs, so the
+   child calls `execve` and never searches; an unresolvable wrapper is reported as `io::ErrorKind::NotFound`, which `classify_launch_spawn_error`
+   already maps to `ConfinementUnavailable`. Every descriptor the child dups from is at least 3. The parent opens an error pipe (`O_CLOEXEC`
+   both ends) before the clone and reads it to end after: end-of-file with no data means the child reached `exec`; four bytes are the child's
+   `errno`, in which case the parent reaps the child (`waitid(P_PIDFD)`), closes the descriptors and returns the error. Exec failure therefore
+   keeps the semantics std's spawn gives today.
+5. **Holding, waiting for and killing the child.** `HostVmm`'s reaper task owns the child: it holds the pidfd and the stderr reader and nothing
+   else holds a handle. Exit is `AsyncFd` readability of the pidfd followed by `waitid(P_PIDFD, WEXITED | WNOHANG)`, looped until it reports the
+   exit; the siginfo (`CLD_EXITED`, `CLD_KILLED`, `CLD_DUMPED`, `si_status`) yields the same `VmmExit { exit_code, signal }` as `classify_exit` does
+   today. The kill is `pidfd_send_signal(pidfd, SIGKILL)`; `ESRCH` is "already gone", not an error, as `let _ = child.start_kill()` is today. The
+   `live` map, `VmProcessState { kill_now, outcome }`, `terminate`, `VMM_REAP_BOUND`, `KilledNotReaped` and the late reap are unchanged (ADR-0348):
+   the pidfd is readable exactly when the thread group is dead and not held by a delayed leader, so a VMM with a thread stuck in uninterruptible
+   I/O is not reapable here either, and `terminate` returns `KilledNotReaped` at the bound as it does for `Child::wait` today. `cgroup.kill` is
+   still written only by `VmHostState::kill_scope` (ADR-0349, ADR-0351).
+6. **The unsafe surface.** `launch_clone.rs` is the crate's one production `#[allow(unsafe_code)]`. The waits, the signal, the pipe and the
+   descriptor handling around it use safe `rustix` wrappers, as the crate already does for `ioctl_ficlone`. The module states the safety argument:
+   - *After `clone3` the child is a single-threaded copy of a multithreaded parent.* A lock another thread held at the clone (an allocator arena, a
+     stdio lock, a tokio internal) stays held for ever in the child, so the child, from the instant `clone3` returns `0` until `execve`, allocates
+     nothing, takes no lock, runs no destructor and runs no code that can panic or unwind. It makes only direct system calls and the
+     async-signal-safe libc calls `dup2`, `sigprocmask`, `sigaction`, `write`, `execve` and `_exit`.
+   - *Everything the child needs is built before the clone:* the NUL-terminated absolute path, the argv and envp pointer arrays, the seccomp program,
+     the descriptor numbers and the error pipe. The child never returns to Rust code: it ends in `execve` or `_exit`.
+   - *Descriptors are opened `O_CLOEXEC` before the clone* (the scope directory as `O_PATH | O_DIRECTORY | O_CLOEXEC`; the kernel takes an `O_PATH`
+     descriptor of the directory, `kernel/cgroup/cgroup.c:6796`, `:6824-6837`), so a concurrent `exec` elsewhere in `serve` cannot inherit them;
+     the child's `close_range` marks everything from 3 up close-on-exec, as the hook does today.
+   - *Child kind.* `exit_signal = SIGCHLD` makes it an ordinary child that `waitid` reaps without `__WCLONE` (`eligible_child`,
+     `kernel/exit.c:1161`).
+7. **The kernel facts the placement rests on** (read at `v7.0`):
+
+   | # | Fact | Source |
+   |---|---|---|
+   | C1 | `CLONE_INTO_CGROUP` is accepted by `clone3` only; `cgroup` must not exceed `INT_MAX` and `size` must be at least 88 | `kernel/fork.c:2840-2842`, `:2899`; `include/uapi/linux/sched.h:109` |
+   | C2 | The target is a cgroup2 directory descriptor: an `O_PATH` descriptor is accepted, a `cgroup.procs` file is not; a non-cgroup or non-directory is `EBADF`, a v1 cgroup is `EBADF`, a removed cgroup is `ENODEV` | `kernel/cgroup/cgroup.c:6796-6813`, `:6824-6837`; `css_tryget_online_from_dir` `:7245-7248`; `cgroup_get_from_file` `:6745-6748` |
+   | C3 | Permission and delegation are the checks the `cgroup.procs` write makes: write permission on the target's `cgroup.procs` with the caller's credentials, write permission on the common ancestor of source and target, the namespace-visibility rule (`ENOENT`), `EOPNOTSUPP` for an invalid domain and `EBUSY` for a target with `subtree_control` set | `cgroup_may_write` `:5298-5312`, called at `:6820`; `cgroup_attach_permissions` `:5345-5364`, called at `:6838`; `cgroup_migrate_vet_dst` `:2800-2822`; the write form's own call `:5394-5397` |
+   | C4 | Placement is atomic with the child's creation: `copy_process` calls `cgroup_can_fork`, which takes `cgroup_mutex` and the threadgroup lock and builds the child's css_set; `cgroup_post_fork` links the child onto it; `kernel_clone` wakes the child only afterwards. A failure after `cgroup_can_fork` runs `cgroup_cancel_fork` and no process exists | `kernel/fork.c:2322`, `:2467`, `:2483`, `:2684`; `kernel/cgroup/cgroup.c:6777-6780`, `:6844`, `:6992-6993` |
+   | C5 | A `cgroup.kill` that lands between the css_set being built and the child being linked kills the child as soon as it is linked, so a clone in flight cannot escape a scope kill | `kernel/cgroup/cgroup.c:6785-6788`, `:7024`, `:7047-7049` |
+   | C6 | `execve` does not change cgroup membership: `fs/exec.c` names cgroup only to hold the threadgroup lock around `de_thread` | `fs/exec.c:946-957`, `:1011` |
+
+   The source and target of the placement are the same as for the write `place_pid_in_scope` makes today (the VMM was forked from `serve`, so it
+   starts in `serve`'s cgroup), so the delegation checks C3 are the ones the driver's write passes in every Tier-3 run now.
+8. **Failure.** A refusal at any of these points fails `create` and creates no process, the rootfs clone is removed (`launch-spawn` stage), and
+   the error is classified as every `create` error is; no `VmmError` variant is added:
+
+   | Refusal | Surfaces as |
+   |---|---|
+   | opening the scope directory fails (absent, no search permission) | `VmmError::Io` (open), before any clone |
+   | `clone3` returns `EBADF`, `ENODEV`, `EACCES`, `EPERM`, `EBUSY`, `EOPNOTSUPP`, `ENOENT`, `ENOMEM` | the primitive's `io::Error`, `VmmError::Create` through `classify_launch_spawn_error` |
+   | a child step (signal reset, `dup2`, `close_range`, `no_new_privs`, seccomp, `execve`) fails | the errno from the error pipe, the same classification; an unresolvable wrapper is `NotFound` and maps to `ConfinementUnavailable` |
+
+   `EINVAL` from an undersized `clone_args` is a programming error the Tier-3 launch test catches; it has no operator recovery.
+9. **`CloudHypervisorVmm` needs the cgroup root** to resolve `CgroupPath` to a directory: `with_cgroup_root(PathBuf)`, a builder beside
    `with_binary`, `with_image_dir` and `with_run_dir_root`, defaulting to the cgroup2 mount (`/sys/fs/cgroup`). The composition root passes the value
    it gives `CgroupManager`. With the default and no such scope the open fails typed, so a test that forgets it fails and does not touch another
-   cgroup. A failed enrolment is `VmmError::Io` (open) or the spawn error (write), and the driver classifies it as it classifies every `create`
-   error; no new `VmmError` variant.
-5. **`place_pid_in_scope` is deleted.** The driver's call and its failure branch (`vm_driver.rs:1848-1861`, the
-   `start_rejected_unclassified("place VMM pid in scope")`), `CgroupManager::place_pid_in_scope` and
-   `tests/acceptance/cgroup_manager/place_pid_in_scope.rs` go in the same change; it has no other caller. The resource limits
-   (`write_resource_limits`, `:1563`) are written before the spawn, so `memory.max` applies from the VMM's first instruction.
-6. **`SimVmm`.** `create` records the process as a member of `config.cgroup_scope` from its creation until the scripted reap; `SimVmHostState`
-   observes that one fact. A `SimVmm` with an unreapable process (ADR-0348) keeps its scope populated.
-7. **The contract shape.** `Vmm::create` is a bounded-change function: it creates one process tree and changes membership of exactly one scope.
-   The universe of what it may change is the allocation's run directory, one scope's `cgroup.procs` and one process tree.
+   cgroup.
+10. **`place_pid_in_scope` is deleted.** The driver's call and its failure branch (`vm_driver.rs:1848-1861`, the
+    `start_rejected_unclassified("place VMM pid in scope")`), `CgroupManager::place_pid_in_scope` and
+    `tests/acceptance/cgroup_manager/place_pid_in_scope.rs` go in the same change; it has no other caller. The resource limits
+    (`write_resource_limits`, `:1563`) are written before the spawn, so `memory.max` applies from the VMM's first instruction.
+11. **`SimVmm`.** `create` records the process as a member of `config.cgroup_scope` from its creation until the scripted reap; `SimVmHostState`
+    observes that one fact. A `SimVmm` with an unreapable process (ADR-0348) keeps its scope populated. A `SimVmm` whose scope is absent fails
+    `create` typed, as the host adapter does.
+12. **The launch probe exercises this primitive.** `RealVmmProbeSubstrate::check_launch_seccomp` runs `prlimit --version` through the same
+    `launch_clone` entry point, so the probe cannot pass on a path production no longer takes. Its scope is a scratch scope the probe creates
+    under the cgroup root and removes. *Proposed, awaiting the user's ruling (P-6): the scratch scope is a boot-time cgroup effect the probe did
+    not have.* The alternatives are none that keep the probe honest: leaving the probe on the deleted hook probes dead code, and dropping it
+    removes the Earned-Trust check of the seccomp install.
+13. **The contract shape.** `Vmm::create` is a bounded-change function: it creates one process tree and changes membership of exactly one scope.
+    The universe of what it may change is the allocation's run directory, one scope and one process tree.
 
-**Is it contract-shaping validation?** No. The port's postcondition (member before exec) holds for either mechanism, and the one adapter-visible
-choice, the cgroup root, is the same for both (`clone3` takes an open directory descriptor of the same path). The premises that could fail are
-adapter-internal and the first Tier 3 test below discharges them: that a forked child of a multi-threaded process, running as root under the
-guest's cgroup delegation, can write `0` to a scope's `cgroup.procs`; that the membership survives the `exec` chain `prlimit`, `setpriv`, the
-hypervisor; and that the write precedes the seccomp load. A falsification switches the adapter to `CLONE_INTO_CGROUP` without a change to the
-contract DISTILL pins. No spike is listed.
+**Is it contract-shaping validation?** No, and no spike is listed. The test is whether a falsified premise would change a contract DISTILL pins:
+the port's postcondition (created inside the scope), `VmControl { pid, api_socket }`, `VmmError` and the `Vmm` trait are the same under any
+placement mechanism, and the one adapter-visible choice, the cgroup root, is a builder. The premises are all kernel behaviour, and each is read in
+the source (C1 to C6 above) rather than assumed. The one a spike would otherwise settle, whether `serve` running as root under the guest's cgroup
+delegation may place a child in a workload scope, is answered by identity: C3 applies to `CLONE_INTO_CGROUP` the same permission checks it applies
+to the `cgroup.procs` write, with the same source and target, and that write succeeds in every run of the production launch today. A falsified
+premise would reject the mechanism the user ruled on, which returns to the user; it would not reshape what DISTILL pins. The first Tier-3 test
+below discharges the rest (membership survives the exec chain, C6; the child runs the confinement steps).
 
-**Boundary scenarios.** (1) A normal launch: the VMM tree is in the scope from its first instruction; `cgroup.procs` of the scope lists the wrapper
-pid at `create`'s return. (2) The scope cannot be written: `create` fails typed and no process exists. (3) `serve` dies between the fork and the
-`exec`: the child either completes the write and `exec` inside the scope, or fails and exits; no hypervisor process runs outside the scope. (4) A
-mesh VM (`ip netns exec` first): the same, the first program is `ip`.
+**Boundary scenarios.** (1) A normal launch: the VMM tree is in the scope from its first instruction; the scope's `cgroup.procs` lists the wrapper
+pid at `create`'s return. (2) The scope cannot be a target (removed, `subtree_control` set, not writable): `create` fails typed and no process
+exists. (3) `serve` dies at any instant of the launch: the child is either not yet created or a member of the scope from its first instruction;
+no hypervisor process runs outside the scope. (4) A mesh VM (`ip netns exec` first): the same, the first program is `ip`. (5) A `cgroup.kill` of
+the scope races a launch: a child created before the kill is killed, one created after is a member (C5). (6) The hypervisor binary is absent or
+the wrapper is not found: the error pipe reports it, the child is reaped, no process remains.
 
 **Tests.**
 
 - Tier 3 (real cgroupfs, a `cgroup-default` guest): the hypervisor stand-in supplied through the existing `with_binary` seam records its own
   `/proc/self/cgroup` as its first act; the record names the scope, for a plain and a mesh launch. The same test reads the `cgroup.procs` of the
-  scope after `create` returns and finds every process of the tree.
+  scope after `create` returns and finds every process of the tree, and reads the stand-in's `/proc/self/status` `Seccomp` and `NoNewPrivs`
+  fields (the confinement steps ran before `exec`), its stdio (stdin and stdout `/dev/null`, stderr the capture) and its signal disposition of
+  `SIGPIPE` (default).
 - Tier 3, serve crash: with the stand-in holding the launch just after `exec`, crash the in-process `serve` (the existing crash-and-restart
   fixture) and start a second `serve`: no process of the stand-in is outside a scope the boot step reclaims; and with the real hypervisor, a launch
   sweep after the boot never receives the CID the crashed VMM held and produces no `EADDRINUSE`.
-- Host adapter, unit: an unwritable `cgroup.procs` fails `create` with no spawned child; the descriptor is not inherited by the child.
-- `Vmm` equivalence: `CloudHypervisorVmm` and `SimVmm` agree that a created process is a member of `config.cgroup_scope` until reaped.
+- Tier 3, refusal: `create` against a scope removed before the call, and against a scope with `subtree_control` set, each fails typed with no
+  process created and the rootfs clone removed.
+- Tier 3, reap: the stand-in's exit is observed through the pidfd with the right `VmmExit` (a normal exit, a signal, a core dump); `terminate`
+  kills through the pidfd; a stand-in with a thread held in uninterruptible I/O returns `KilledNotReaped` at the bound (S-VOL-T3-12 covers the
+  real held flush).
+- Host adapter, unit: an unresolvable wrapper fails `create` with no spawned child and maps to `ConfinementUnavailable`; the scope, pidfd, error
+  and stdio descriptors are not inherited by the hypervisor.
+- `Vmm` equivalence: `CloudHypervisorVmm` and `SimVmm` agree that a created process is a member of `config.cgroup_scope` until reaped, that a
+  missing scope fails `create`, and on the `terminate` outcomes (ADR-0348).
 - Tier 1, production `VmDriver` over `SimVmm`: the driver makes no `place_pid` call (the method no longer exists) and a VM whose `create` fails
   leaves no scope member.
 
@@ -779,23 +856,37 @@ VM whose last task is stuck in exit would refuse the boot after the bound, on ev
 **The contract (user ruling 2026-11-23, decision 14, option c: "the node should not refuse to start just because of a dead vm").** `converge` keeps
 its signature (`async fn converge(state: &AppState) -> Result<(), ConvergeError>`). In order:
 
-1. **Observe.** The leftover VM scopes (`VmHostState::observe`) and the allocation rows (`alloc_status_rows`; the observation store opens in the
-   composition root before `run_server`, and `GuestAddressPool::new` at `lib.rs:4346` runs before `converge` at `:4552`). A scope maps to its
-   allocation by name, `<alloc_id>.scope` (`cgroup.rs:57-62`, `observe_scopes`, `vm_host_state.rs:123-143`).
-2. **Kill, in parallel.** The executors run for all scopes concurrently, each waiting at most `KILL_SCOPE_SETTLE_BOUND`, so boot waits one bound in
+1. **Close the lost launches.** Before anything else, every row of this node that is still `Pending` is ended with the one row of § "Launches that
+   end before running" (W4: `Terminated`, `LaunchLostWithControlPlane`, the row's `workload_addr` carried), whether or not its VM left a scope. A
+   boot process owns no launch from before the restart, so every `Pending` row belongs to a dead launch. The step reserves nothing and kills
+   nothing; it only makes the row terminal, so everything after it sees a terminal row for a launch lost with the control plane.
+2. **Observe.** The leftover VM scopes (`VmHostState::observe`) and the allocation rows (`alloc_status_rows`, read after step 1; the observation
+   store opens in the composition root before `run_server`, and `GuestAddressPool::new` at `lib.rs:4346` runs before `converge` at `:4552`). A scope
+   maps to its allocation by name, `<alloc_id>.scope` (`cgroup.rs:57-62`, `observe_scopes`, `vm_host_state.rs:123-143`).
+3. **Kill, in parallel.** The executors run for all scopes concurrently, each waiting at most `KILL_SCOPE_SETTLE_BOUND`, so boot waits one bound in
    the worst case and not one per stuck scope.
-3. **Reserve what is still busy.** Each scope whose `kill_scope` returned `ResourceBusy` is a VM still holding its device. For each, `converge`
+4. **Reserve what is still busy.** Each scope whose `kill_scope` returned `ResourceBusy` is a VM still holding its device. For each, `converge`
    reserves the guest-address offset named by the allocation's row `workload_addr` (§ "The guest address is on record before the VMM exists") in
-   `GuestAddressPool`, before the first `assign`. A scope that settled within the bound is removed and reserves nothing. A scope whose row carries
+   `GuestAddressPool`, before the first `assign`. The row is read as step 2 saw it: the row step 1 closed carries the address of the `Pending`
+   row it ended, so closing the row first loses nothing the reservation needs. A scope that settled within the bound is removed and reserves
+   nothing. A scope whose row carries
    no `workload_addr`, or which has no row, is not reserved: the address is on record before the VMM exists, so such a VMM cannot hold a CID (a
    scope with no row is a stranded artifact the planner already discards, row 5 of `plan_reclamation`). No assign runs between the kill and the
    reservation, because boot reclamation completes before the convergence loop dispatches anything (ADR-0102, `lib.rs:4530` before the loop).
-4. **A busy scope is not an error.** Any other executor error stays `ConvergeError::Reclamation` and refuses the boot: it is a substrate
+5. **A busy scope is not an error.** Any other executor error stays `ConvergeError::Reclamation` and refuses the boot: it is a substrate
    refusal, not a stuck VM. The row of a busy scope is § "A busy boot scope writes its terminal row".
-5. **Surface.** The existing surfaces carry it: the allocation's terminal row, the scope that stays in `VmHostState::observe()`, and the attachment
+6. **Surface.** The existing surfaces carry it: the allocation's terminal row, the scope that stays in `VmHostState::observe()`, and the attachment
    occupancy (`GuestAttachmentOccupancy` `held` and `retiring`) that `describe` already shows (ADR-0336). No new event, row, field or `describe`
    line.
-6. **Continue.** `converge` returns `Ok(())`; cleanup retries on every later pass.
+7. **Continue.** `converge` returns `Ok(())`; cleanup retries on every later pass.
+
+**The order is the contract (user ruling 2026-11-23, RB-11).** Step 1 precedes the observation and the executors; the reservation (step 4) follows
+the kill and precedes the first `assign`, which cannot run before `converge` returns (the convergence loop, the interest router and the HTTP
+listener start after it, `lib.rs:4530` before `:4813`, `:4861`, `:5032`). The executors never rewrite the reason of a row step 1 closed: the planner
+plans `ReclaimAllocation` only for a non-terminal row and `DiscardStrandedArtifacts`, which authors no row, for a terminal one
+(`plan_reclamation`, `vm_reclamation.rs:145-189`), and `execute_reclaim_allocation` refuses a terminal row as a no-op. Step 1 is idempotent: a
+crash between it and the executors leaves terminal rows, which the next boot's executors discard and whose busy scopes it reserves from the same
+carried address.
 
 **Pool API (crate-internal to `overdrive-control-plane`).** `GuestAddressPool::reserve_leftover(&self, alloc: &AllocationId, held: Ipv4Addr)`,
 with `held` the row's `workload_addr`; it returns nothing. The pool derives the offset as `held - GUEST_NODE_PREFIX.network()`, the inverse of the
@@ -820,7 +911,7 @@ every VM it could not remove, complete before the first `assign`".
 **Boundary scenarios.** (1) A leftover VM that settles within the bound: removed at boot, no reservation. (2) A stuck VM with a `Running` row: the
 row becomes terminal and carries the address, the offset is reserved, boot continues, no launch receives its CID. (3) A stuck VM with a terminal
 row carrying the address: reserved from that row. (4) A launch parked in guest boot at the crash: its `Pending` row carries the address; boot
-reserves from it. (5) The VM reaps later: `VmReclamation` removes the scope, the network-reclaim retry releases the reservation. (6) Several stuck
+closes it first (`LaunchLostWithControlPlane`, address carried), kills the VM, and reserves from the closed row. (5) The VM reaps later: `VmReclamation` removes the scope, the network-reclaim retry releases the reservation. (6) Several stuck
 VMs: one bound of boot delay, all reserved. (7) A busy scope never makes boot fail; a non-busy substrate error still does. (8) Reservations at the
 cap: a new launch is refused `AdmissionCapReached`. (9) A second crash in the stuck window: the next boot derives the reservation again from the
 rows. (10) The `Pending` write failed: no VMM exists, nothing to reserve.
@@ -833,7 +924,8 @@ rows. (10) The `Pending` write failed: no VMM exists, nothing to reserve.
   holder is the arbiter) and produces no `EADDRINUSE`. Tier 3: the same on a real guest with a held flush across a `serve` crash and restart.
 - **Boot reserves from a launch parked in guest boot.** Tier 1, seeded, production `converge` over `SimVmm`, `SimVmHostState` and a store holding
   only the launch's `Pending` row: the scope is held and the VMM unreaped; `converge` returns `Ok`, the pool holds the offset named by the row, a
-  launch sweep including a wrap never receives that CID, and the row is terminal and carries the address.
+  launch sweep including a wrap never receives that CID, and the row is `Terminated` with `LaunchLostWithControlPlane` and carries the address. The
+  store records no `Stopped { by: PlatformReclaimed }` write for it.
 - **The one release site (F3).** Tier 1, seeded, production shim, `WorkloadLifecycle` and `converge`, the scope held: repeated
   `ReclaimAllocationNetwork` attempts for the reserved allocation each return `Ok` promptly and the reservation stays held; after the scripted
   reap, a `VmReclamation` pass and one more attempt, the offset is assignable. A reservation with no plan passes `teardown_guest_network` without
@@ -905,7 +997,9 @@ below; `LogicalTimestamp::dominating` over the prior row (Start) and `dominating
 
 **The contract (user ruling 2026-11-23, N-3, option a).** When boot reclamation's `kill_scope` returns `ResourceBusy`, the kill is delivered and the
 VMM can run no guest code (ADR-0348), so the boot executor step writes the allocation's terminal row as for a settled scope: the platform-reclaimed
-row `execute_reclaim_allocation` writes (`Terminated`, `Stopped { by: PlatformReclaimed }`), carrying the prior row's `workload_addr`. It does not
+row `execute_reclaim_allocation` writes (`Terminated`, `Stopped { by: PlatformReclaimed }`), carrying the prior row's `workload_addr`. This is the
+case of a `Running` row; a `Pending` row is already `Terminated` with `LaunchLostWithControlPlane` (step 1 of § "Boot proceeds past a stuck VM"),
+so the executor meets a terminal row and writes none, busy or not. It does not
 discard artifacts (the scope, the run directory); `VmReclamation` emits `DiscardStrandedArtifacts` for a terminal VM allocation with host artifacts
 and retries each pass. The row makes the workload eligible for restart at once, its replacement waiting on the volume claim (ADR-0317).
 
@@ -963,7 +1057,7 @@ archived size changed, paragraph (2) of Persisted formats applies. `api/openapi.
 | W1 | `StartAllocation`, `driver.start` returns `Err(StartSuperseded)` | `action_shim/mod.rs:1955-1960`, after `release_superseded_launch`, `retire_guest_network_lease` and `teardown_for_dispatch` | `LaunchSuperseded` |
 | W2 | `RestartAllocation`, the successor's `StartSuperseded` | `action_shim/mod.rs:2470-2489`, before `finish_restart`; the row is the successor's | `LaunchSuperseded` |
 | W3 | `Err(other)` from `driver.start` (S8, R10) | the existing `Err(other)` arms | a `Failed` row, `DriverInternalError { detail }` (the S6 / R8 row and charge); the `Pending` row they would leave is ended |
-| W4 | boot, a `Pending` row still `Pending` after the executors | one step of `vm_reclamation_boot::converge`, after the executor loop (below) | `LaunchLostWithControlPlane` |
+| W4 | boot, every `Pending` row of this node | the first step of `vm_reclamation_boot::converge`, before the observation and the executors (below) | `LaunchLostWithControlPlane` |
 
 W1 and W2 rework the committed step 05-01 (the driver's observation points, the lane table and the producers of 05-02 are unchanged): the shim's
 "no-row `StartSuperseded` arm" writes the abandoned row after the existing releases; a teardown failure does not suppress the row and is returned
@@ -971,16 +1065,19 @@ after it; a failure of the row write itself is the typed `ShimError` (N-REC: the
 `emit_launch_superseded` message ("no allocation row written") is rewritten, and the shim tests and acceptance tests that assert `alloc_status_rows()`
 empty after a supersession assert the row instead. W1 and W2 land in the same DELIVER step as, or after, the `Pending` write. A launch whose
 `Pending` write failed has no `Pending` row and creates no VMM. A launch whose VMM is running when its `Running` write fails (S9, R11) is not a
-launch that ended before running; it keeps the existing N-REC exposure and boot ends it through the executors.
+launch that ended before running; it keeps the existing N-REC exposure, its `Pending` row stays until boot, and boot closes it with W4 (the
+VM's scope, if any, is then discarded by the executors).
 
-*Boot (W4).* `converge` keeps its signature and the planner is unchanged (it walks host surfaces). **The step after the executor loop is the one
-site that closes `Pending` rows at boot:** it reads `ObservationStore::alloc_status_rows()` and, for every row whose `state` is still `Pending` and
-whose `node_id` is this node, writes the W4 row. A `Pending` row whose VM left artifacts was already ended by the executor's ordinary
-platform-reclaimed row (the executor has no `Pending`-specific branch), so the step meets only the rows with no host artifact. A boot process owns
-no launch from before the restart and boot reclamation completes before the convergence loop dispatches anything, so every row still `Pending` at
-that point belongs to a dead launch. It is idempotent (the written row is terminal), makes no reservation (no scope, so no VMM holds a CID) and
-submits no evaluation: the boot resync pass and the interest router's List reach the closed rows. A read or write failure refuses the boot as any
-other `ConvergeError::Reclamation`.
+*Boot (W4; user ruling 2026-11-23, RB-11: one reason for a launch lost with the control plane).* `converge` keeps its signature and the planner is
+unchanged (it walks host surfaces). **The first step of `converge` is the one site that closes `Pending` rows at boot, and it runs before the
+observation and the reclamation executors:** it reads `ObservationStore::alloc_status_rows()` and, for every row whose `state` is `Pending` and
+whose `node_id` is this node, writes the W4 row, whether or not the row's VM left a scope, a run directory or a clone. Every `Pending` row a crash
+left therefore ends `Terminated` with `LaunchLostWithControlPlane`; the executors then see a terminal row (`DiscardStrandedArtifacts` for a VM
+with artifacts, which authors no row) and cannot rewrite the reason. The executor has no `Pending`-specific branch. A boot process owns no launch
+from before the restart and boot reclamation completes before the convergence loop dispatches anything, so every `Pending` row at that point
+belongs to a dead launch. The step is idempotent (the written row is terminal), makes no reservation and kills nothing (the reservation of a stuck
+VM is step 4 of § "Boot proceeds past a stuck VM", from the address the closed row carries) and submits no evaluation: the boot resync pass and
+the interest router's List reach the closed rows. A read or write failure refuses the boot as any other `ConvergeError::Reclamation`.
 
 **5. Readers.**
 
@@ -1001,9 +1098,16 @@ other `ConvergeError::Reclamation`.
 - After a restart commit, a shutdown and a boot, the workload is relaunched once with the abandoned allocation's count (Service and Job; the Job is
   not finalised); after a stop nothing is relaunched; the budget is never advanced by an abandoned launch (the carry assertion over seeds and
   schedules).
-- Boot: a `Pending` row with no artifacts is closed with `LaunchLostWithControlPlane` by the step after the executors; one whose VM left a scope is
-  closed by the executor as platform-reclaimed; a `Running` row is still platform-reclaimed; a second boot writes nothing; a busy scope (ADR-0354)
-  writes its row. The two-boot cell `mid_boot_volume_reclamation` asserts the row, not "no row".
+- **Every crash-left `Pending` row ends with `LaunchLostWithControlPlane`** (RB-11). Tier 1, seeded, production `converge` over `SimVmm`,
+  `SimVmHostState` and the production observation store, one case per kind of leftover: a `Pending` row with no host artifact; one whose VM left a
+  settled scope, a run directory and a clone; one whose VM left a busy scope (an unreaped `SimVmm` process). In each, the row ends `Terminated`,
+  reason `LaunchLostWithControlPlane`, `terminal: None`, the `Pending` row's `workload_addr` carried, and the store records no
+  `Stopped { by: PlatformReclaimed }` write for it. The executors run after the closing step: the sim records a `DiscardStrandedArtifacts` and no
+  `ReclaimAllocation` for these rows, the row's reason is unchanged after `converge` returns, and a busy scope's offset is reserved from the closed
+  row before the first `assign` (a launch sweep across the offset range, including a wrap, never receives that CID). A `Running` row is still
+  ended by the executor as platform-reclaimed, and a busy `Running` scope writes its row (ADR-0354). A second boot writes nothing. A seeded
+  crash between the closing step and the executors leaves terminal rows the next boot's executors discard, with the same reservation. The
+  two-boot cell `mid_boot_volume_reclamation` asserts the row, not "no row".
 - S8 and R10 write a `Failed` `DriverInternalError` row.
 - `is_platform_reclaimed` unit and mutation targets for the two reasons; the two schema-evolution fixtures; the `render::alloc_status` and
   `human_readable` goldens for both reasons; `api/openapi.yaml` regenerated.
@@ -1043,10 +1147,16 @@ The modeler edits the specs; none is edited here. `specs/quint/guest-flow-owner/
      `cid-lease-run-conf-ok-serve-crash-with-an-unreaped-vmm-blocks-assign-until-it-exits`: its premise (boot waits for the orphan) is removed by
      decision 14, and `ServeCrashDuringGuestBootReservesFromTheRecordedAddress` covers the crash, the reservation, the skip and the release. Do not
      add `ServeCrashWithAnUnreapedVmmReservesItsCidAndBoots` or a `bootWithoutReservation` hazard: with `Reclaim` filling `late`, that hazard's
-     counterexample is the one `assignBeforeReclaim` already finds (an unreaped orphan's offset is assignable).
+     counterexample is the one `assignBeforeReclaim` already finds (an unreaped orphan's offset is assignable). (User ruling 2026-11-23, RB-12:
+     `launchBeforeRecord` is kept and `bootWithoutReservation` is dropped.)
    - Keep hazards `releaseUnreapedAtStop` (decision 12), `removeScopeWhilePopulated` (decisions 16 and N-1), `launchBeforeRecord` (N-2) and
      `assignBeforeReclaim` (decision 14).
-5. **Validation budget (decision 15, user ruling 2026-11-23).** `lease_five` runs a CFG without `StopUnreaped`; it did not finish. The unreaped stop
+5. **No change for ADR-0352 or the boot ordering (RB-9, RB-11).** The models already say a VMM holds its device only while it is a member of its
+   scope (K-C8), which the `clone3` placement makes true from the first instruction and which no model action distinguishes from the write form.
+   The boot ordering changes no model: `cid_lease`'s `Reclaim` reads `recorded`, which the closed row still carries (the projection is still
+   `alloc_status_rows()`' `workload_addr`), and `node-local-volume`'s `Boot` already ends every `PENDING` allocation as `TERMINATED`/lost with no
+   distinction for a launch that left a scope. No hazard, run or check is added for either.
+6. **Validation budget (decision 15, user ruling 2026-11-23).** `lease_five` runs a CFG without `StopUnreaped`; it did not finish. The unreaped stop
    stays exhaustively checked on three offsets (`lease_ok` and its siblings), which reaches the pool-wrap case, and is covered on five offsets by
    the named runs and the randomized traces (`specs/quint/guest-flow-owner/`, commit `7f32d5b83`). The new hazards are added on three offsets only.
    Any further growth returns to the user.
@@ -1068,14 +1178,14 @@ The two independent design reviews of the stuck-VM design are resolved as follow
 
 | Finding | Resolution |
 |---|---|
-| F1 the VMM is born outside its scope | § "A VMM is born inside its scope"; ADR-0352 (proposed) |
+| F1 the VMM is born outside its scope | § "A VMM is born inside its scope"; ADR-0352 (accepted, `clone3` with `CLONE_INTO_CGROUP`) |
 | F2 `remove_workload_scope` has no caller | deleted with its tests; structural single-remover test; § "A VM scope has one remover"; ADR-0351 |
 | F3 one release site of a boot reservation | `teardown_guest_network`; a reservation has no plan; § "Boot proceeds past a stuck VM" and § "The guest-address lease outlives an unreaped VMM" |
 | F4 uncited kernel claims | the K1 to K5 table in § "The guest-address lease outlives an unreaped VMM" |
 | F6 start-failure cleanup after `KilledNotReaped` | the scope step is omitted in every cleanup; § "A VMM kill's reap wait is bounded", item 7 |
 | F5, A1, A2 one decision per ADR | ADR-0348 to ADR-0355, one decision each |
 | A3, B, E restated prose and history | contracts moved here; ADR text states the current decision only |
-| C1 one site closes `Pending` rows at boot | the step after the executors; the executor has no `Pending` branch |
+| C1 one site closes `Pending` rows at boot | the first step of boot, before the executors; the executor has no `Pending` branch |
 | C2 one predicate | `is_launch_abandoned` removed; `is_platform_reclaimed` covers both reasons |
 | C3, C4 boot reserves only busy scopes, as a `late` entry | § "Boot proceeds past a stuck VM"; § "Quint changes" item 2 |
 | C5 one hazard per decision | § "Quint changes" item 4 |
@@ -1504,7 +1614,7 @@ methods; the payload it submits is `Vm::to_payload` output.
 | `exhausted` | `alloc_status_rows()`: the current row (the highest id with a row, `current_alloc`) carries `terminal == BackoffExhausted { attempts }`, read after the evaluation that observes that row has run; the model's `exhausted(s)` must equal it at every step. It is the one comparison that checks the production ceiling against the model's `LIMIT` (= ceiling + 1) |
 | `why[a] == W_PREFAIL` | `alloc_status_rows()`: a `Failed` row for `a` whose `reason` is `MtlsInterceptInstallFailed { stage: "identity_issue", .. }` or `DriverInternalError { .. }`; `Driver::live_allocations()` does not list `a`; the dispatch result is `Ok(())` |
 | `why[a] == W_REFUSED` (D-1) | no row for `a`, `Driver::live_allocations()` does not list `a`, the dispatch result is `Err(ShimError::GuestNetwork(AdmissionCapReached { .. }))`, and `GuestAddressPool` occupancy is unchanged by `a` |
-| `why[a] == W_LOST`, now `as[a] == ABANDONED` (a launch that ended before running without a failure: superseded, or lost with the control plane; N-4) | `alloc_status_rows()` holds a `Terminated` row for `a` with `terminal == None` and `reason` `LaunchSuperseded` (the held tick completed with dispatch `Ok(())`) or `LaunchLostWithControlPlane` (after a rebuild, `CpCrash` or `NodeReboot`, and the boot `converge`; a `Pending` row whose VM left a scope is ended by the executor as `Stopped { by: PlatformReclaimed }`, which the same projection reads as `ABANDONED`); `Driver::live_allocations()` does not list `a` |
+| `why[a] == W_LOST`, now `as[a] == ABANDONED` (a launch that ended before running without a failure: superseded, or lost with the control plane; N-4) | `alloc_status_rows()` holds a `Terminated` row for `a` with `terminal == None` and `reason` `LaunchSuperseded` (the held tick completed with dispatch `Ok(())`) or `LaunchLostWithControlPlane` (after a rebuild, `CpCrash` or `NodeReboot`, and the boot `converge`, whose first step ends every `Pending` row this way whether or not its VM left a scope); `Driver::live_allocations()` does not list `a` |
 | `as[a] == PENDING` | the id is issued (`issued_generation_for_alloc` is `Some`), `alloc_status_rows()` holds the `Pending` row of `a` (N-2) and the `run_convergence_tick` future the driver holds at its seam has **not** completed (the production tick is awaiting the dispatch, holding the lane). The driver reads the future's completion, the owner's own behaviour, not a map it maintains; after a rebuild and boot `converge` no row is `Pending`, so a `PENDING` expectation after a rebuild fails |
 | `JOB` and `jobTerm(a)` | `JOB` is model-only (it selects the workload kind the driver submits). `jobTerm(a)` is `alloc_status_rows()` row `a` with `kind == WorkloadKind::Job` and `terminal.is_some()`, the test `generation_replacement_pending` and the shim's `allocation_attempt_transition` use |
 | `faults`, `declared`, `idFault`, `capFull`, `conf_step`, `og`, `gl` | model-only: `idFault` is armed on the sim CA, `capFull` by filling the sim pool, `declared` is the effect of `submit_workload`, `conf_step` records the action taken for the driver and is never compared, `og` has no production counterpart, `gl` is checked through the carry relation of `cnt` |
@@ -1643,7 +1753,7 @@ prove it.
    allocation and a non-launch evaluation are unaffected; `supersede_lane` never cancels the shutdown token.
 5. Disconnect/reconnect: control-plane crash between `ensure` and VMM spawn: the next launch's `ensure` finds the volume and proceeds; a
    surviving VMM is reclaimed, its claim drains, the wait covers it. A launch that died with the control plane leaves its `Pending` row (N-2); boot
-   ends it (ADR-0355, W4: `LaunchLostWithControlPlane`, or the executor's platform-reclaimed row when its VM left a scope) and the next evaluation relaunches it uncharged (§ Restart generation, "Relaunch"). A surviving VMM's run directory or clone is reaped by `VmReclamation` (`plan_reclamation`: `DiscardStrandedArtifacts`, or `ReclaimAllocation`
+   ends it (ADR-0355, W4: `LaunchLostWithControlPlane`, the first step of boot, whether or not its VM left a scope) and the next evaluation relaunches it uncharged (§ Restart generation, "Relaunch"). A surviving VMM's run directory or clone is reaped by `VmReclamation` (`plan_reclamation`: `DiscardStrandedArtifacts`, or `ReclaimAllocation`
    when a non-terminal row exists), booted by `vm_reclamation_boot::converge`. That sweep runs in `run_server` before the convergence loop, the
    interest router and the HTTP listener start (`lib.rs:4530` before `:4813`, `:4861`, `:5032`), fails the boot closed on error, and ends every
    VMM the restarted process does not supervise, whether or not its allocation has a row (`vm_reclamation_boot.rs:92-148`), so no launch for the
@@ -1825,7 +1935,7 @@ Exposures with a stated bound:
   (`reconciler_runtime.rs:1557-1561`); a fault confined to `observation.redb` is a node-fatal store fault and no row-based remedy applies.
   The same fault on the abandoned-row write (N-4, W1, W2) returns the typed error and leaves the launch's `Pending` row until the next boot closes it
   (W4); the workload is not relaunched in between. A launch whose VMM runs when its `Running` write fails keeps its `Pending` row until the next
-  boot reclaims it through the executors.
+  boot closes it (W4) and the executors reclaim its VM.
 - The single-cut greenfield upgrade (deleting the data directory) removes the intent store while the volume group keeps its volumes: a redeploy of
   the same workload id then attaches the old volume with its old data and size. The upgrade re-provisions the volume partition with the data
   directory (ADR-0313).

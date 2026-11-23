@@ -21,12 +21,15 @@ reservation of the offset removes it.
 
 ## Decision
 
-**Boot reclamation never refuses the boot because a leftover VM is stuck.** For each leftover scope it waits the bound (ADR-0349), in parallel
+**Boot reclamation never refuses the boot because a leftover VM is stuck.** It first ends every `Pending` row left by a crash
+([ADR-0355](adr-0355-a-launch-that-ends-before-running-ends-its-pending-row-with-a-terminal-row-that-names-why.md)), carrying the row's address.
+For each leftover scope it then waits the bound (ADR-0349), in parallel
 across scopes. For each scope still populated at the bound it reserves the guest-address offset the stuck VMM holds in `GuestAddressPool`, before the
 first `assign`, and the boot continues. Cleanup of the scope retries on later passes as for any scope. The reservation is a Retiring lease with no
 network; it is released by the one release site of every lease, once the scope has reported empty and been removed (ADR-0156, second amendment).
 
-The offset comes from the allocation's row ([ADR-0353](adr-0353-a-vms-guest-address-is-recorded-on-its-pending-row-before-the-vmm-exists.md)),
+The order is: close the `Pending` rows, observe, kill, reserve the offset of each scope still busy, and only then may any `assign` run. The offset
+comes from the allocation's row ([ADR-0353](adr-0353-a-vms-guest-address-is-recorded-on-its-pending-row-before-the-vmm-exists.md)),
 never from the VMM. The row of a busy scope is written by
 [ADR-0354](adr-0354-a-busy-boot-scope-writes-its-terminal-row.md).
 
