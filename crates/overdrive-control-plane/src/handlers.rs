@@ -47,6 +47,12 @@ use crate::api;
 use crate::error::ControlPlaneError;
 use overdrive_core::eval_broker::{Evaluation, EvaluationEligibility};
 
+/// The reconciler target of a workload: `workload/<id>`.
+fn workload_target(workload_id: &WorkloadId) -> Result<TargetResource, ControlPlaneError> {
+    TargetResource::new(&format!("workload/{workload_id}"))
+        .map_err(|e| ControlPlaneError::internal("TargetResource::new(workload/<id>)", e))
+}
+
 /// Enqueue a `(workload-lifecycle, workload/<id>)` evaluation onto the runtime
 /// broker. Called from `submit_workload` and `stop_workload` after the
 /// `IntentStore` write commits — the edge-triggered ingress half of
@@ -74,9 +80,7 @@ fn enqueue_workload_lifecycle_eval(
             e,
         )
     })?;
-    let target_string = format!("workload/{workload_id}");
-    let target = TargetResource::new(&target_string)
-        .map_err(|e| ControlPlaneError::internal("TargetResource::new(workload/<id>)", e))?;
+    let target = workload_target(workload_id)?;
     state.runtime.submit_evaluation(
         Evaluation { reconciler, target },
         state.clock.now(),
@@ -94,8 +98,7 @@ fn supersede_workload_lane(
     state: &AppState,
     workload_id: &WorkloadId,
 ) -> Result<(), ControlPlaneError> {
-    let target = TargetResource::new(&format!("workload/{workload_id}"))
-        .map_err(|e| ControlPlaneError::internal("TargetResource::new(workload/<id>)", e))?;
+    let target = workload_target(workload_id)?;
     state.runtime.supersede_lane(&target);
     Ok(())
 }
