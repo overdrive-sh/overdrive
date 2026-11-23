@@ -10,8 +10,8 @@ boot reads it from the row and never from the VMM), N-3 (a busy boot scope write
 explicit there) and replaces the fail-closed boot clause of ADR-0349 as first written. The interface contract is pinned in
 [`feature-delta.md`](../../feature/node-local-persistent-volume/feature-delta.md) § "Boot proceeds past a stuck VM".
 
-One detail of the mechanism is proposed and awaits the user's ruling (feature-delta, N-4): how the workload lifecycle reconciler treats a
-`Pending` row that no launch is completing.
+The user's ruling N-4 (2026-11-23, option b) closes the last open point: every launch that ends before running ends its `Pending` row with a
+terminal row that names why, and boot closes the `Pending` rows a crash left. It also amends ADR-0334 and ADR-0335 (below).
 
 ## Context
 
@@ -42,8 +42,18 @@ row by name, `<alloc_id>.scope`. The row is readable at boot: the observation st
 the pool is built before reclamation runs. The VMM's command line is never read.
 
 A `Pending` row is a launch record, not a placement: readers that act on a running allocation ignore it (ADR-0276's backend hydration gates on
-`Running`), and the workload lifecycle reconciler does not treat it as the workload's current allocation (feature-delta § "Boot proceeds past a
-stuck VM", the reader table).
+`Running`). A `Pending` row never outlives its launch: a launch that ends before running ends the row with a `Terminated` row, `terminal` absent,
+whose reason names why, and boot closes every `Pending` row a crash left, with host artifacts or without:
+
+- A launch superseded by a stop, a restart or node shutdown (ADR-0334) ends in reason `LaunchSuperseded`.
+- A launch lost with the control plane ends in reason `LaunchLostWithControlPlane`, written by the boot reclamation executor when the row has
+  host artifacts and by a step of `vm_reclamation_boot::converge` when it has none.
+- Neither charges the restart budget: the relaunch carries the abandoned allocation's own count, and an abandoned row is not a natural exit.
+
+`WorkloadLifecycle`'s choice of the current allocation is unchanged, and the abandoned row is a restartable row it relaunches under the existing
+path. Alternatives not taken: skipping `Pending` rows when choosing the current allocation (a stale `Pending` row per abandoned launch stays, and
+the operator cannot tell it from a live launch) and relaunching a `Pending` row after a timeout (a timer for a fact the convergence lane already
+gives). The row, reasons, write sites and readers are pinned in the feature delta § "Launches that end before running".
 
 **A busy scope writes its terminal row.** When the kill is delivered and the scope stays populated at the bound, the boot executor step writes
 the allocation's terminal row, carrying the address, as ADR-0348 does for an unreaped stop. The VMM is killed and can run no guest code, so the
@@ -81,5 +91,9 @@ to `VmReclamation`. This is the one exemption from ADR-0349's "busy means no row
 - ADR-0156's "boot reclamation completes before the first `assign`" becomes "boot reclamation, and the reservation of every VM it could not
   remove, complete before the first `assign`".
 - A pool reservation is process-local, as a lease is (ADR-0118). A later boot derives it again from the rows.
-- `VmHostState` gains no method. A `Pending` row left by a crash is ended by the existing paths: boot reclamation's reclaim executor for one
-  whose VM left artifacts, and the lifecycle reconciler for one that did not (feature-delta, same section).
+- `VmHostState` gains no method. A `Pending` row left by a crash is ended at boot: by boot reclamation's reclaim executor for one whose VM left
+  artifacts, and by one added step of `converge` for one that did not. Boot reads `alloc_status_rows()` for it and makes no reservation (no scope,
+  so no VMM holds a CID).
+- `TransitionReason` gains two fieldless variants; no envelope version changes (feature-delta § "Launches that end before running", item 3).
+- Amended by this decision, stated in the ADRs' own text: ADR-0334 (a superseded launch writes the abandoned row instead of no row) and ADR-0335
+  (the relaunch carries the abandoned row's count).

@@ -13,8 +13,8 @@ and the handling of an admission refusal ([ADR-0338](adr-0338-an-admission-refus
 `WorkloadLifecycle` places a restart's or a resume's replacement allocation, and it must decide on every evaluation whether the generation the
 operator committed (`workloads/<id>/generation`) has been handled. ADR-0073 answered with a marker the reconciler stamped on the tick that
 emitted the placement, and the runtime persists the View before it dispatches. A launch can end without writing an allocation row: it is
-superseded by a stop, a restart or node shutdown (ADR-0334), or it dies with the control plane (reachable on `main` today). The next evaluation
-then read the generation as handled beside the old operator-stopped or replaced row, the veto and the restartable filter emitted nothing,
+superseded by a stop, a restart or node shutdown (ADR-0334), or it dies with the control plane (reachable on `main` today). On `main` the next
+evaluation then read the generation as handled beside the old operator-stopped or replaced row, the veto and the restartable filter emitted nothing,
 and the workload stayed down while intent said run. The marker records what the reconciler emitted, not a fact about the resource it
 manages (`.claude/rules/reconcilers.md` § "A View decides when to act, never whether an effect is in place").
 
@@ -42,9 +42,13 @@ has an allocation row, and a generation that the shim cannot honour is not pendi
    decision keeps today's behaviour, and #301 changes it so that an operator restart of a stopped Job starts a new attempt while a Job that
    finished on its own is not re-run by crash replacement. The handler adds no answer for the no-op; the `restarted` answer it gives is #301's
    symptom.
-4. **A relaunch of an abandoned generation replacement charges nothing**, and a relaunch of an abandoned crash-restart successor re-assigns
-   the count its abandoned issue assigned, so it is not charged twice. The lane exclusivity of ADR-0102 and the dispatch awaited inside the
-   tick mean no launch is in flight when the next evaluation hydrates, so one generation is never launched twice.
+4. **A relaunch of an abandoned launch charges nothing.** An abandoned launch (superseded, or lost with the control plane) ends its row with a
+   `Terminated` row of reason `LaunchSuperseded` or `LaunchLostWithControlPlane` and no `terminal` (ADR-0350, ruling N-4). That row is the
+   allocation's row, so a generation whose issued id ended this way is handled and the relaunch runs through the ordinary restartable path, or
+   as a generation replacement when a newer generation is pending. The relaunch carries the abandoned row's own count and
+   `last_failure_seen_at` and adds nothing, so an abandoned crash-restart successor is charged once and not twice. An abandoned row is not a
+   natural exit and is exempt from the restart ceiling, like a platform-reclaimed row. The lane exclusivity of ADR-0102 and the dispatch awaited
+   inside the tick mean no launch is in flight when the next evaluation hydrates, so one generation is never launched twice.
 5. **Bounds.** The View's per-id entries are never pruned (true on `main` for `restart_counts`). An id is issued only when the observed state
    changed since the last issue: a launch that wrote a row, a supersession (one per operator commit or shutdown), an admission refusal
    (ADR-0338), a stale-dispatch fence (one per observed state change). No outcome issues an id on every tick while the observed state is
