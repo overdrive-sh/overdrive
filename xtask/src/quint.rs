@@ -673,14 +673,16 @@ pub fn typecheck() -> Result<()> {
 /// Resolve a spec's `from "<path>"` import against the importing file's path
 /// (both relative to the subsystem directory, `/`-separated). Quint omits the
 /// `.qnt` extension in imports.
-fn resolve_import(from_rel: &str, import: &str) -> String {
+pub(crate) fn resolve_import(from_rel: &str, import: &str) -> String {
     let mut parts: Vec<&str> = from_rel.split('/').collect();
     parts.pop();
     for part in import.split('/') {
         match part {
             "" | "." => {}
             ".." => {
-                if parts.pop().is_none() {
+                if parts.last().is_some_and(|last| *last != "..") {
+                    parts.pop();
+                } else {
                     parts.push("..");
                 }
             }

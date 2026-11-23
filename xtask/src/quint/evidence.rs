@@ -51,7 +51,7 @@ use sha2::{Digest, Sha256};
 use super::trace;
 use super::{
     Backend, CHECKS_FILE, Check, CheckFilter, CheckRecord, Expect, Job, Outcome, Property,
-    collect_qnt, judge, reachable_specs, spec_index,
+    collect_qnt, judge, reachable_specs, resolve_import, spec_index,
 };
 
 /// Evidence directory name inside a subsystem directory.
@@ -235,52 +235,96 @@ pub enum TraceRecordError {
     },
 }
 
-/// sha256 (hex) of `checks.toml` and every `.qnt` under `dir` (skipping
-/// hidden and `_`-prefixed directories and `evidence/`), keyed by the path
-/// relative to `dir` with `/` separators.
-pub fn hash_inputs(dir: &Path) -> Result<BTreeMap<String, String>> {
-    let mut files = Vec::new();
-    collect_qnt(dir, &mut files)?;
-    files.push(dir.join(CHECKS_FILE));
-    let mut out = BTreeMap::new();
-    for path in files {
-        let rel = path.strip_prefix(dir).wrap_err("input outside the subsystem dir")?;
-        if rel.components().next().is_some_and(|c| c.as_os_str() == EVIDENCE_DIR) {
-            continue;
-        }
-        let key = rel
-            .components()
-            .map(|c| c.as_os_str().to_string_lossy().into_owned())
-            .collect::<Vec<_>>()
-            .join("/");
-        let bytes = fs::read(&path).wrap_err_with(|| format!("reading {}", path.display()))?;
-        out.insert(key, hex::encode(Sha256::digest(&bytes)));
-    }
-    Ok(out)
+/// Slash-joined key of `path` relative to `dir`.
+fn rel_key(dir: &Path, path: &Path) -> Result<String> {
+    let rel = path.strip_prefix(dir).wrap_err("input outside the subsystem dir")?;
+    Ok(rel
+        .components()
+        .map(|c| c.as_os_str().to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
+        .join("/"))
 }
 
-/// Index every `.qnt` file under `dir`.
+/// Every spec file of the subsystem at `dir` plus every spec it imports from a
+/// sibling subsystem, transitively, with its source.
 ///
-/// Same selection and keys as [`hash_inputs`]. A file the lexer cannot index is left out: a check whose
-/// import closure reaches it then has no input key and counts as stale.
-pub fn index_specs(dir: &Path) -> Result<BTreeMap<String, spec_index::QntIndex>> {
+/// Own files (the selection of `collect_qnt`, minus `evidence/`) are keyed by
+/// the path relative to `dir`. A file imported from a sibling subsystem is
+/// keyed by the import's path relative to `dir` (`../<sibling>/<file>.qnt`),
+/// the form `reachable_specs` yields. An import that resolves outside the
+/// specs root (the parent of `dir`) is an error; an import of a file that does
+/// not exist is left out, so a check reaching it fails closed with no input
+/// key.
+fn spec_sources(dir: &Path) -> Result<BTreeMap<String, String>> {
     let mut paths = Vec::new();
     collect_qnt(dir, &mut paths)?;
     let mut out = BTreeMap::new();
     for path in paths {
-        let rel = path.strip_prefix(dir).wrap_err("spec outside the subsystem dir")?;
-        let key = rel
-            .components()
-            .map(|c| c.as_os_str().to_string_lossy().into_owned())
-            .collect::<Vec<_>>()
-            .join("/");
+        let key = rel_key(dir, &path)?;
+        if key.split('/').next() == Some(EVIDENCE_DIR) {
+            continue;
+        }
         let body =
             fs::read_to_string(&path).wrap_err_with(|| format!("reading {}", path.display()))?;
-        if let Ok(idx) = spec_index::index(&body) {
-            out.insert(key, idx);
+        out.insert(key, body);
+    }
+    let mut todo: Vec<String> = out.keys().cloned().collect();
+    while let Some(from) = todo.pop() {
+        let Some(body) = out.get(&from) else { continue };
+        let Ok(idx) = spec_index::index(body) else { continue };
+        for import in &idx.imports {
+            let key = resolve_import(&from, import);
+            if out.contains_key(&key) || !key.starts_with("../") {
+                continue;
+            }
+            // One `..` reaches the specs root; the sibling's own path follows.
+            if key.strip_prefix("../").is_some_and(|rest| rest.starts_with("..")) {
+                bail!(
+                    "`{from}` imports `{import}`, which resolves outside the specs root (`{}`)",
+                    dir.parent().unwrap_or(dir).display()
+                );
+            }
+            let path = dir.join(&key);
+            match fs::read_to_string(&path) {
+                Ok(src) => {
+                    out.insert(key.clone(), src);
+                    todo.push(key);
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                Err(e) => return Err(e).wrap_err_with(|| format!("reading {}", path.display())),
+            }
         }
     }
     Ok(out)
+}
+
+/// sha256 (hex) of the inputs of the subsystem at `dir`.
+///
+/// The inputs are `checks.toml`, every `.qnt` under `dir` (skipping hidden
+/// and `_`-prefixed directories and `evidence/`) and every spec those import
+/// from sibling subsystems, transitively. Own files are keyed by the path
+/// relative to `dir` with `/` separators; imported sibling files by the
+/// import's path relative to `dir` (`../<sibling>/<file>.qnt`).
+pub fn hash_inputs(dir: &Path) -> Result<BTreeMap<String, String>> {
+    let mut out = BTreeMap::new();
+    for (key, body) in spec_sources(dir)? {
+        out.insert(key, hex::encode(Sha256::digest(body.as_bytes())));
+    }
+    let manifest = dir.join(CHECKS_FILE);
+    let bytes = fs::read(&manifest).wrap_err_with(|| format!("reading {}", manifest.display()))?;
+    out.insert(CHECKS_FILE.to_owned(), hex::encode(Sha256::digest(&bytes)));
+    Ok(out)
+}
+
+/// Index every spec of [`hash_inputs`] except `checks.toml`.
+///
+/// A file the lexer cannot index is left out: a check whose import closure
+/// reaches it then has no input key and counts as stale.
+pub fn index_specs(dir: &Path) -> Result<BTreeMap<String, spec_index::QntIndex>> {
+    Ok(spec_sources(dir)?
+        .into_iter()
+        .filter_map(|(key, body)| spec_index::index(&body).ok().map(|idx| (key, idx)))
+        .collect())
 }
 
 /// The tool versions whose change invalidates every recorded check.
@@ -1577,6 +1621,52 @@ mod tests {
         );
         fs::write(tmp.path().join("a.qnt"), "module a { val x = 1 }").expect("write");
         assert_ne!(hash_inputs(tmp.path()).expect("hash")["a.qnt"], hashes["a.qnt"]);
+    }
+
+    #[test]
+    fn an_import_from_a_sibling_subsystem_is_hashed_and_keys_the_check() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        for (p, body) in [
+            ("own/checks.toml", "x"),
+            ("own/a.qnt", "module A { import L.* from \"../lib/shared\" }"),
+            ("lib/shared.qnt", "module L { import M.* from \"./deep/more\" }"),
+            ("lib/deep/more.qnt", "module M {}"),
+            ("lib/unrelated.qnt", "module U {}"),
+        ] {
+            let path = root.join(p);
+            fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
+            fs::write(&path, body).expect("write");
+        }
+        let dir = root.join("own");
+        let hashes = hash_inputs(&dir).expect("hash");
+        assert_eq!(
+            hashes.keys().collect::<Vec<_>>(),
+            ["../lib/deep/more.qnt", "../lib/shared.qnt", "a.qnt", "checks.toml"]
+        );
+        let files = index_specs(&dir).expect("index");
+        let c = check_on("c", "a.qnt");
+        let key =
+            |h: &BTreeMap<String, String>| check_input_key(&c, h, &files, &tools()).expect("keyed");
+        let before = key(&hashes);
+        // A change to a transitively imported sibling file changes the key.
+        fs::write(root.join("lib/deep/more.qnt"), "module M { val x = 1 }").expect("write");
+        let after = hash_inputs(&dir).expect("hash");
+        assert_ne!(key(&after), before);
+        // A sibling file nothing imports is not an input.
+        fs::write(root.join("lib/unrelated.qnt"), "module U { val y = 2 }").expect("write");
+        assert_eq!(hash_inputs(&dir).expect("hash"), after);
+    }
+
+    #[test]
+    fn an_import_that_leaves_the_specs_root_is_rejected() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path().join("own");
+        fs::create_dir_all(&dir).expect("mkdir");
+        fs::write(dir.join("checks.toml"), "x").expect("write");
+        fs::write(dir.join("a.qnt"), "module A { import Z.* from \"../../z\" }").expect("write");
+        let err = hash_inputs(&dir).expect_err("outside the specs root");
+        assert!(err.to_string().contains("outside the specs root"), "{err}");
     }
 
     #[test]
