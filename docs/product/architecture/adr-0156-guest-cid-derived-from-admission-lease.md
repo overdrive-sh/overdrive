@@ -93,7 +93,12 @@ holds no file table (`kernel/vhost_task.c:130 @ v7.0`).
   removal, is a validation item of the feature delta's validation plan
   (V-RECLAIM).
 
-## Amendment 2026-11-23 — the lease outlives an unreaped VMM (proposed, pending the user's approval)
+## Amendment 2026-11-23 — the lease outlives an unreaped VMM (accepted 2026-11-23)
+
+Approved by the user on 2026-11-23 as decision 12 of GH #348 (option a): a
+guest-address lease is released only once the allocation's cgroup scope is
+observed absent; while the scope is present the lease is retired and held, and
+the stop still completes.
 
 Amended by ADR-0348 (decision 11 of GH #348). ADR-0348 makes a stop whose
 VMM is killed but not yet reaped a completed stop. The text above is kept as

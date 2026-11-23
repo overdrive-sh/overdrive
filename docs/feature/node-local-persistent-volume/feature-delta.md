@@ -1,8 +1,8 @@
 # Feature delta: node-local persistent volume for VM workloads (GH #348)
 
 **Status:** the design is approved by the user; rulings run through 2026-11-23. The decision table (VD-1 to VD-10, SD-1 to SD-6, J-1, DE-1, D-1,
-H1, H2, W-1 to W-4, R-1, VB-1, VB-2, RB-1, B-1 to B-3, P-1 to P-3) and the scope-limitation table (L1 to L9) are owned by
-[`design/wave-decisions.md`](design/wave-decisions.md); each ADR (0310 to 0320, 0334 to 0338, 0348) holds one decision. This file owns the interface
+H1, H2, W-1 to W-4, R-1, VB-1, VB-2, RB-1 to RB-3, B-1 to B-3, P-1 to P-3) and the scope-limitation table (L1 to L9) are owned by
+[`design/wave-decisions.md`](design/wave-decisions.md); each ADR (0310 to 0320, 0334 to 0338, 0348, 0349) holds one decision. This file owns the interface
 contracts, the boundary scenarios and the model's boundary. Executable test obligations, mutation targets and test re-sync lists are DISTILL's
 input in [`distill/upstream-issues.md`](distill/upstream-issues.md). The model is two Quint specs, `specs/quint/node-local-volume/` and
 `specs/quint/restart-generation/`; their verdicts are in each spec's `evidence/summary.md`, not in this document.
@@ -517,7 +517,8 @@ zero grace) and the failed EXEC release (`:2315`, zero grace).
     `VM_STOP_GRACE`; the exit watcher (it finds `EndingInFlight` at a late reap and returns, as it does today for every stop); the reconcilers;
     the observation row shapes; `kill_for_test`; the `GuestAddressPool` methods and their signatures; `GuestNetworkProvisioner`'s signatures;
     the `DiscardStrandedArtifacts` action and its executor; `VmHostState`'s signatures.
-11. **The guest-address lease is released only once the VMM is reaped (amends ADR-0156).** No public API.
+11. **The guest-address lease is released only once the VMM is reaped (amends ADR-0156; RB-2, user ruling 2026-11-23, decision 12, option a).** No
+    public API.
     - *The fact.* A guest's CID is `GUEST_CID_BASE` plus its lease offset (ADR-0156). The kernel unhashes a CID at the last close of the device
       file (`vhost_vsock_dev_release`, `drivers/vhost/vsock.c:753-760 @ v7.0`), and a launch whose CID is still hashed fails
       `-EADDRINUSE` (`vhost_vsock_set_cid`, `:804-813 @ v7.0`). A killed-not-reaped VMM still holds the file, so freeing its offset would let
@@ -546,9 +547,15 @@ zero grace) and the failed EXEC release (`:2315`, zero grace).
     - *Boot.* A lease is process-local and not persisted (ADR-0118): after a restart there is no Retiring lease to settle. The invariant
       across a restart is boot reclamation's: `vm_reclamation_boot::converge` removes every unsupervised VMM's scope, and so completes only
       after those VMMs have exited, before the first `assign`. A VMM that stays unreaped across a `serve` crash is the `kill_scope` busy case
-      (Open point below), not a lease case.
+      (§ "A scope kill's settle wait is bounded", below), not a lease case.
     - *Cost.* One `observe()` (a bounded directory walk) per teardown, which is not a hot path. One attachment slot per unreaped VMM until
       the reap, counted as Retiring against the cap; at the cap a new launch is refused `AdmissionCapReached`, typed, as for any held lease.
+      The cap is node-wide (`at_cap`), so enough unreaped VMMs stall every launch and every restart's successor on the node until they reap.
+      Accepted with decision 12.
+    - *Facts verified in the code.* The network-reclaim retry has no attempt ceiling: it retries a constant 1 s backoff indefinitely while a
+      terminal row holds a lease (`workload_lifecycle.rs:520-549`, `:89-91`), and terminal rows stay in `managed_targets`, so the 30 s resync
+      pass revisits them. The restart path does not mark the predecessor handled: once the successor row exists the predecessor's lease is
+      reclaim-eligible.
 
 **Lifecycle Gate Ownership.** This adds no gate. It changes the meaning of one existing state, recorded here and in ADR-0348: an allocation
 ended by a stop is `Terminated` once the VMM is killed and can run no guest code, not once its process is reaped. The kernel fact behind it:
@@ -603,18 +610,79 @@ lease is released after the reap, not before. (8) Observing the scope fails at t
   `ReclaimAllocationNetwork`; `late` and the lease are projected from `GuestAddressPool::observe` and `snapshot` (already pinned for
   `lease`), and `dev` from `SimVmm::vsock_device_holders` (the existing marked arbiter read).
 
-**Open point carried to DELIVER, not a contract.** `VmHostState::kill_scope` (`vm_reclamation_boot.rs:5`) must return on a scope that rmdir
-refuses as busy rather than wait. The cell above covers it; the code is read when the step lands.
+### A scope kill's settle wait is bounded (RB-3; ADR-0349)
 
-**Open questions (surfaced, not decided here).**
-- `kill_scope`'s port rustdoc says it retries removal until the scope settles, with no bound. For a scope held by an unreaped VMM that never
-  returns, which stalls `VmReclamation`'s single `node/<id>` target for every VM and, at boot, `converge`. Item 11 depends on `Ok` meaning
-  "scope removed". Bounding the settle wait and returning a busy `io::ErrorKind` (no new type) changes the `VmHostState` port contract, so it
-  needs the user's ruling before DELIVER. The pre-existing open point above is the same question.
-- Network-reclaim pacing (`backoff_for_attempt`) has no attempt ceiling in the code read here (`reclaim_attempts` is kept while the lease
-  exists). DELIVER confirms there is none, since a ceiling would strand the lease; the late release depends on it.
-- A stopped allocation whose operator restart is pending is its workload's restart owner until the successor row is observed
-  (`pending_restart_owner`), so its late reclaim is deferred until then. DELIVER confirms the lease still releases after the successor row.
+**Today.** `RealVmHostState::kill_scope` (`crates/overdrive-host/src/vm_host_state.rs:229-257`) writes `cgroup.kill` and then retries
+`tokio::fs::remove_dir` up to 150 times at 20 ms (3 s), returning the last error whatever its kind. Each attempt is a blocking `rmdir` on the
+blocking pool. `rmdir` returns `-EBUSY` while a task of the scope is visible (`cgroup_drain_dying`, `kernel/cgroup/cgroup.c:6254-6272 @ v7.0`),
+but when every remaining task is already exiting it sleeps `TASK_UNINTERRUPTIBLE` until the last passes `cgroup_task_dead`
+(`:6274-6297 @ v7.0`, the lock is released before the sleep). That attempt never returns, so the attempt count is no bound: `kill_scope`,
+`VmReclamation`'s `node/<id>` target and boot `converge` stall behind a VMM held in the close of a suspended device. The port rustdoc
+(`overdrive-core/src/traits/vm_host_state.rs:138-165`) states the settle contract with no bound.
+
+**The contract (user ruling 2026-11-23, decision 13, option a).**
+
+1. **The outcome.** No signature change: `async fn kill_scope(&self, scope: &CgroupPath) -> std::io::Result<()>`. `Err` whose
+   `kind() == io::ErrorKind::ResourceBusy` means the kill was delivered and the scope is not yet removed. No new type, no new variant. Every
+   other `Err` kind is a substrate refusal, returned at once and never retried (today's "retry whatever the error" is removed).
+2. **The bound.** `pub const KILL_SCOPE_SETTLE_BOUND: Duration = Duration::from_secs(3)` in `overdrive_core::traits::vm_host_state`, beside the
+   trait, as `VMM_REAP_BOUND` sits beside `Vmm`. 3 s is today's 150 x 20 ms: an ordinary scope settles in milliseconds, a stop has already
+   waited `VMM_REAP_BOUND` for the reap, and boot reclamation pays the bound once per stuck scope in series. It is a policy value (ADR-0349
+   Consequences). The 20 ms poll interval stays private to the host adapter.
+3. **What the bound covers and what clock measures it.** It starts when `kill_scope` is entered and covers the whole call, including a blocked
+   `rmdir`. `RealVmHostState` measures it on real time (`tokio::time`), as `CloudHypervisorVmm` does for `grace`; it takes no clock. The
+   adapter runs each removal on the blocking pool under that deadline and returns `ResourceBusy` at the bound, leaving a removal still in
+   flight to finish by itself. It holds an in-flight claim per scope (`ClaimSet`, `rust.md` § "Check-and-act must be atomic"), so there is at
+   most one removal in flight per scope; while one is, a call does not start another, it polls whether the scope directory is gone at the same
+   interval and returns `Ok(())` if so, `ResourceBusy` at the deadline otherwise. A busy return therefore always takes the full bound.
+4. **`VmHostState::kill_scope` rustdoc states** (each clause is part of the port contract and is covered by the equivalence test):
+   - *Postcondition on `Ok`:* the scope directory is absent (removed, or `NotFound`). A following `observe()` does not report it.
+   - *On `Err(ResourceBusy)`:* `cgroup.kill` was written, the scope is still present, and it is the bound that ended the call. The scope may report
+     an empty `pids` in a following `observe()` (tasks that are exiting are not listed). The call returns within `KILL_SCOPE_SETTLE_BOUND`
+     plus scheduling latency, never earlier than the bound, and never waits on the process.
+   - *Edge cases:* idempotent as before (an absent scope is `Ok`); a second call for a scope that is still busy is `ResourceBusy` again after
+     its own bound; a scope that settles during the wait returns `Ok` without waiting out the bound; a non-`ResourceBusy` error is returned
+     at once.
+   - *Errors:* `ResourceBusy` is the only kind a caller retries; any other kind is a refusal (`PermissionDenied`, `EIO`).
+5. **`SimVmHostState`.** It does not wait and measures no time: the bound is a property of the host adapter's retry, not of the state a sim
+   models. It models busy by scripted state: a test holds an allocation's scope (the holding method is DISTILL's), `observe()` keeps reporting
+   the scope, `kill_scope` on a held scope returns `Err(ResourceBusy)` at once, changes nothing and does not consume the scripted-failure queue,
+   and the scope leaves only when the hold is cleared. The hold and `SimVmm`'s unreaped process share one fact, the reap (the item 11
+   obligation), so the scripted reap clears both. The existing `script_kill_scope_failure(ErrorKind::ResourceBusy)` remains a one-call busy.
+6. **Callers.**
+
+   | Caller | On `ResourceBusy` |
+   |---|---|
+   | `execute_reclaim_allocation`, `execute_discard_stranded_artifacts` (`action_shim/reclamation.rs:239`, `:338`) | return `ReclamationError::Host(err)` as for any substrate failure: no `discard_artifacts`, no terminal row, no evaluation submitted. Unchanged code; one `tracing` event `vm.reclamation.scope_busy` (allocation id) at info level, since a busy scope is expected while a VMM is unreaped. The tick requeues the target (`reconciler_runtime.rs:1648-1655`, `:1764-1770`) and the 30 s resync pass is the backstop; the busy wait is the pacing. `dispatch` records the first error and continues with the tick's other actions (`action_shim/mod.rs:951-957`) |
+   | `vm_reclamation_boot::converge` | unchanged contract: any executor error is `ConvergeError::Reclamation` and refuses the boot (fail-closed), after at most `KILL_SCOPE_SETTLE_BOUND` per stuck scope instead of never. The supervisor's restart retries the boot. See the open question below |
+   | the shim's lease release (item 11) | the release is gated on `observe()` reporting the scope absent, so a busy scope keeps its lease held; nothing is added |
+
+7. **Not changed.** The `VmHostState` signatures, `RealVmHostState::new`'s parameters, `observe`, `probe`, `discard_artifacts`, the
+   `ReclamationError` and `ConvergeError` variants, the planner, `VmReclamation`'s View and the tick's requeue.
+
+**Tests this decision requires (for the acceptance designer; none is written here).**
+
+- Host adapter, real cgroupfs (Tier 3, native metal or a guest): `kill_scope` on a scope with a thread blocked in a held flush returns
+  `ResourceBusy` within the bound; on a scope whose last tasks are exiting and held (the `rmdir` sleep, not `EBUSY`) it returns `ResourceBusy`
+  within the bound, and the scope is removed after the drain; repeated calls leave one blocked removal per scope, not one per call.
+- `VmHostState` equivalence (`vm_host_state_equivalence.rs`): both adapters agree on `Ok` implies absent, on `ResourceBusy` leaving the scope
+  present and observed, on idempotence, and on a non-busy error returning at once without retry.
+- Host adapter, unit: a `PermissionDenied` removal is returned on the first attempt; a scope that settles mid-wait returns `Ok` early.
+- Tier 1, seeded, production `VmReclamation` tick over `SimVmHostState` with a held scope: the tick returns busy without discarding, writing a
+  row or advancing the lease; other allocations' actions in the same tick still run; after the hold clears the next tick removes the scope.
+- Tier 1, production boot `converge` over a held scope: refuses with `ConvergeError::Reclamation` carrying `ResourceBusy`; after the hold
+  clears the next boot succeeds.
+- The boot-reclamation test double (`vm_reclamation_boot.rs:821`) gains the busy case.
+
+**Quint impact.** None beyond item 11's already-required edit to `specs/quint/guest-flow-owner/cid_lease.qnt`. A refused boot is the model's
+`Reclaim` not being enabled while an orphan is unreaped, and the run `ServeCrashWithAnUnreapedVmmBlocksAssignUntilItExits` is that scenario;
+its liveness progress (an unreaped orphan eventually exits, then `Reclaim` completes) covers the retry. No new action, run or hazard: the
+decision is covered by the hazard `assignBeforeReclaim`. `node-local-volume` (`Drain`, `Reclaim(a)`) needs no change: `Reclaim` there is the
+VMM's death, and the busy period is the held claim until `Drain`.
+
+**Open question carried to the user.** At boot, a busy scope refuses the boot (above). Letting boot proceed past a busy scope would need the
+unreaped VMM's CID to stay unassignable across a restart, which no lease records (ADR-0118), and would amend ADR-0156's "reclamation completes
+before the first assign". The design keeps the refusal.
 
 ### Restart generation is handled when its successor is observed (SD-6; ADR-0335, which amends ADR-0073, with ADR-0337 and ADR-0338)
 

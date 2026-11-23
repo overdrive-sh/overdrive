@@ -40,7 +40,9 @@ scope is absent, which the kernel permits only once every task of the VMM has ex
 existing network-reclaim path, which retries a finished allocation that still holds a lease until it is released. The lease costs one
 attachment slot until the reap, the same cost this decision already accepts for the scope.
 
-(The lease clause is proposed pending the user's approval, 2026-11-23; it works out decision 11 and changes no other decision.)
+(The lease clause is approved: user ruling 2026-11-23, decision 12 of GH #348, option a: the lease is released only once the allocation's
+cgroup scope is observed absent; while the scope is present the lease is retired and held, and the stop still completes. It works out
+decision 11 and changes no other decision.)
 
 ## Alternatives considered
 
@@ -71,11 +73,17 @@ attachment slot until the reap, the same cost this decision already accepts for 
   released by the kernel at exit; neither is released by Overdrive. The guest-address lease that names the device's CID is held, Retiring,
   for the same time, and is released only after the scope is gone.
 - A Retiring lease of an unreaped VMM counts against the attachment cap until the reap. If the process never reaps, the slot stays consumed
-  until the node reboots (the lease is process-local and not persisted, ADR-0118).
+  until the node reboots (the lease is process-local and not persisted, ADR-0118). The cap is node-wide, so enough unreaped VMMs refuse every
+  new launch and every restart's successor on the node (`AdmissionCapReached`) until they reap. This is the same class of cost as the scope
+  the decision already accepts, and it is accepted with decision 12.
 - Release latency after a late reap is the sum of two existing periods: the `VmReclamation` pass that removes the scope, then the next
   network-reclaim attempt (its backoff). Neither is on a hot path.
 - Across a `serve` restart no lease exists: the pool is empty, and boot reclamation completes only after every unsupervised VMM's scope is
   removed, before the first assign (ADR-0156).
+- Once the successor row exists, the predecessor's lease is eligible for network reclaim: the restart path does not mark the predecessor
+  handled, and the network-reclaim retry has a constant backoff and no attempt ceiling, so a lease held for an unreaped VMM is retried until
+  the scope is gone. Terminal rows stay in `VmReclamation`'s managed targets, so the resync pass keeps revisiting them.
+- The scope removal that releases the lease is bounded by [ADR-0349](adr-0349-a-scope-kill-waits-a-bounded-time-for-the-scope-to-settle-and-reports-a-scope-that-is-busy.md).
 - Leftovers (the scope) persist until the process is reaped; `VmReclamation` retries each pass. A stuck process that is never reaped leaves
   one scope per such allocation until the node reboots. There is no operator to remove it, and none is needed for correctness.
 - The bound is a policy value, revisited if a production `KilledNotReaped` is observed for a healthy disk.
