@@ -21,10 +21,8 @@
 //! No test overlaps two ticks of one target (ADR-0102 admits one lane per target). The seeded schedule
 //! test prints its seeds.
 //!
-//! Status: every test marked PENDING in its own doc is proven RED by `#[should_panic(expected = ...)]`
-//! on the assertion that fails while the lane table is a scaffold (`supersede_lane` /
-//! `supersede_all_lanes` are no-ops and `lane_supersession` is a never-raised signal). A GUARD passes
-//! today and keeps passing once the lane table lands.
+//! Status: a test marked PENDING in its own doc is proven RED by `#[should_panic(expected = ...)]`
+//! on the assertion that fails today.
 
 #![allow(
     clippy::expect_used,
@@ -510,7 +508,7 @@ async fn supersede_lane_with_no_open_lane_does_nothing() {
     assert_eq!(running(&rig.rows_of("lane-x").await).len(), 1, "the launch ended Running");
 }
 
-/// PENDING (assumption A8, timing 2: after the lane opens and before hydration; edge): the lane is
+/// Assumption A8, timing 2 (after the lane opens and before hydration; edge): the lane is
 /// already open when the signal lands, and the signal is visible on it.
 #[tokio::test]
 async fn a_signal_after_the_lane_opens_and_before_hydration_is_visible_on_the_lane() {
@@ -529,7 +527,7 @@ async fn a_signal_after_the_lane_opens_and_before_hydration_is_visible_on_the_la
     let _ = tick.join().await;
 }
 
-/// PENDING (boundary 4a (e), edge): the signal for workload X never reaches workload Y's launch.
+/// Boundary 4a (e), edge: the signal for workload X never reaches workload Y's launch.
 #[tokio::test]
 async fn supersede_lane_for_one_workload_never_raises_another_workloads_lane() {
     let mut rig = Rig::new().await;
@@ -556,7 +554,7 @@ async fn supersede_lane_for_one_workload_never_raises_another_workloads_lane() {
     assert!(rig.rows_of("lane-x").await.is_empty());
 }
 
-/// PENDING (boundary 4a (h), edge): `supersede_lane` never cancels the shutdown token: a lane opened
+/// Boundary 4a (h), edge: `supersede_lane` never cancels the shutdown token: a lane opened
 /// for another target after it still opens unraised.
 #[tokio::test]
 async fn supersede_lane_never_cancels_the_shutdown_token() {
@@ -583,7 +581,7 @@ async fn supersede_lane_never_cancels_the_shutdown_token() {
     ty.join().await.expect("workload y's launch completes");
 }
 
-/// PENDING, seeded schedule (boundary 4a (h), edge): wherever `supersede_all_lanes` falls in a
+/// Seeded schedule (boundary 4a (h), edge): wherever `supersede_all_lanes` falls in a
 /// sequence of lane opens, every launch abandons. The position comes from the printed seed.
 #[tokio::test]
 async fn supersede_all_lanes_at_any_point_of_a_seeded_schedule_abandons_every_launch() {
@@ -622,7 +620,7 @@ async fn supersede_all_lanes_at_any_point_of_a_seeded_schedule_abandons_every_la
     }
 }
 
-/// PENDING (boundary 4a, the lane guard removes its entry by key): a closing lane removes only its
+/// Boundary 4a (the lane guard removes its entry by key): a closing lane removes only its
 /// own entry and leaves no raised signal behind. A raised lane that closes leaves the target's signal
 /// unraised, the next lane for the same target opens unraised, and another workload's lane stays
 /// registered and raisable.
@@ -667,7 +665,7 @@ async fn a_closing_lane_removes_only_its_own_entry_and_leaves_no_raised_signal_b
 // C. The handlers
 // ---------------------------------------------------------------------------
 
-/// PENDING (boundary 4a, the `KeyExists` branch; edge): a repeated stop that finds the sentinel
+/// Boundary 4a (the `KeyExists` branch; edge): a repeated stop that finds the sentinel
 /// already present still raises the open lane.
 #[tokio::test]
 async fn a_repeated_stop_that_finds_the_sentinel_raises_the_open_lane_too() {
@@ -755,7 +753,7 @@ async fn evaluations_submitted_for_a_busy_target_never_raise_its_lane() {
 // D. Boundary 4 and 4a through the tick
 // ---------------------------------------------------------------------------
 
-/// PENDING (boundary 4, normal): a restart while the first launch waits ends it at once with
+/// Boundary 4, normal: a restart while the first launch waits ends it at once with
 /// `StartSuperseded`: no allocation row, no restart-budget change, the shim released the supervision
 /// claim, the guest network lease and the SVID, and the dispatch returned `Ok(())`. No simulated clock
 /// advances.
@@ -805,7 +803,7 @@ async fn a_restart_while_a_launch_waits_ends_it_at_once_and_charges_nothing() {
     assert_eq!(rig.sim.live_count(), 0, "the driver supervises nothing for the superseded launch");
 }
 
-/// PENDING (boundary 4, normal): a stop while a launch waits likewise ends it at once, and the
+/// Boundary 4, normal: a stop while a launch waits likewise ends it at once, and the
 /// workload stays down: the stop's evaluation starts nothing, and only the next restart places a new
 /// launch.
 #[tokio::test]
@@ -840,7 +838,7 @@ async fn a_stop_while_a_launch_waits_ends_it_and_the_workload_stays_down_until_t
     assert_eq!(rig.started().len(), 2);
 }
 
-/// PENDING (boundary 4, restart arm; normal): a second restart while the replacement launch of a
+/// Boundary 4, restart arm; normal: a second restart while the replacement launch of a
 /// running workload waits ends that launch: no successor row, the successor's lease, SVID and
 /// supervision claim released, and the exact-old predecessor cleanup ran. Nothing is charged.
 #[tokio::test]
@@ -978,7 +976,7 @@ async fn a_driver_that_ignores_the_signal_is_unchanged() {
     );
 }
 
-/// PENDING (ADR-0335; the lane table of ADR-0334 is built; boundary 4a (g), edge): a restart whose commit the evaluation already hydrated (the signal
+/// PENDING (ADR-0335; boundary 4a (g), edge): a restart whose commit the evaluation already hydrated (the signal
 /// lands after the lane opens and before hydration) may see its own `Start` superseded once; the next
 /// evaluation relaunches, and the generation ends with one Running allocation, uncharged.
 ///

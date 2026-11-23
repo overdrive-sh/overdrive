@@ -1256,7 +1256,7 @@ async fn run_cell(origin: Origin, interruption: Interruption, pre: Pre, label: &
 // Matrix tests, a Service with a healthy CA
 // ---------------------------------------------------------------------------
 
-/// PENDING (lane table, ADR-0334): a restart of a `Running` workload whose replacement launch is
+/// ADR-0334: a restart of a `Running` workload whose replacement launch is
 /// held is interrupted by `stop_workload`. The signal ends the launch, the workload stays down
 /// until the next restart, and that restart places once for the new generation.
 /// Contract shape: bounded-change.
@@ -1265,7 +1265,7 @@ async fn restart_of_a_running_workload_interrupted_by_stop_places_exactly_once()
     run_cell(Origin::RunningRestart, Interruption::Stop, Pre::None, "running-restart/stop").await;
 }
 
-/// PENDING (lane table, ADR-0334): a restart of a `Running` workload whose replacement launch is
+/// ADR-0334: a restart of a `Running` workload whose replacement launch is
 /// held is overridden by a second `restart_workload`: the first launch is abandoned, the new
 /// generation is placed once, the first generation is not relaunched.
 /// Contract shape: bounded-change.
@@ -1280,7 +1280,7 @@ async fn restart_of_a_running_workload_overridden_by_a_second_restart_places_exa
     .await;
 }
 
-/// PENDING (ADR-0335; the lane table of ADR-0334 is built): a restart of a `Running` workload whose
+/// PENDING (ADR-0335): a restart of a `Running` workload whose
 /// replacement launch is held is abandoned by node shutdown (`supersede_all_lanes`); the next boot
 /// relaunches the same generation once, uncharged. The signal ends the launch; the stamp-on-emit rule
 /// still counts the abandoned launch's generation as handled, so nothing is relaunched.
@@ -1308,7 +1308,7 @@ async fn restart_of_a_running_workload_lost_with_the_control_plane_is_relaunched
     run_cell(Origin::RunningRestart, Interruption::Crash, Pre::None, "running-restart/crash").await;
 }
 
-/// PENDING (lane table, ADR-0334): the resume of an operator-stopped workload whose launch is
+/// ADR-0334: the resume of an operator-stopped workload whose launch is
 /// held is interrupted by `stop_workload`; the workload stays down until the next restart.
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]
@@ -1316,7 +1316,7 @@ async fn resume_of_a_stopped_workload_interrupted_by_stop_places_exactly_once() 
     run_cell(Origin::StoppedResume, Interruption::Stop, Pre::None, "stopped-resume/stop").await;
 }
 
-/// PENDING (lane table, ADR-0334): the resume of an operator-stopped workload whose launch is held
+/// ADR-0334: the resume of an operator-stopped workload whose launch is held
 /// is overridden by a second `restart_workload`.
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]
@@ -1330,7 +1330,7 @@ async fn resume_of_a_stopped_workload_overridden_by_a_second_restart_places_exac
     .await;
 }
 
-/// PENDING (ADR-0335; the lane table of ADR-0334 is built): the resume of an operator-stopped
+/// PENDING (ADR-0335): the resume of an operator-stopped
 /// workload whose launch is held is abandoned by node shutdown; the next boot relaunches it. The
 /// stamp-on-emit rule still counts the abandoned launch's generation as handled.
 /// Contract shape: bounded-change.
@@ -1796,7 +1796,7 @@ async fn a_crash_restart_successor_lost_with_the_control_plane_is_relaunched_wit
     }
 }
 
-/// PENDING (lane table, ADR-0334): the same for a launch abandoned by node shutdown.
+/// ADR-0334: the same for a launch abandoned by node shutdown.
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]
 async fn a_crash_restart_successor_abandoned_by_shutdown_is_relaunched_with_the_same_count() {

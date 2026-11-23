@@ -623,6 +623,9 @@ struct NodeVolumeDriver {
     node: Option<Node>,
     serve: Option<Serve>,
     boots: u32,
+    /// Whether the current `serve` process was told to begin shutdown (the model's `down`). A
+    /// lane closes with its launch, so the signal is not readable after the abandonment.
+    shut_down: bool,
     /// The launch tick of each model allocation. It survives a rebuild: the future of a tick the
     /// rebuild dropped never completes, which is how a lost launch shows.
     launches: BTreeMap<i64, HeldTick>,
@@ -646,6 +649,7 @@ impl NodeVolumeDriver {
             node: None,
             serve: None,
             boots: 0,
+            shut_down: false,
             launches: BTreeMap::new(),
             alloc_of: BTreeMap::new(),
             next_beacon_port: BEACON_PORT_BASE,
@@ -896,9 +900,15 @@ impl NodeVolumeDriver {
 
     /// `Shutdown`: the node begins graceful shutdown; the runtime raises every open lane (and a
     /// lane opened afterwards is born raised).
-    fn shutdown(&self) -> std::result::Result<(), DriverError> {
+    fn shutdown(&mut self) -> std::result::Result<(), DriverError> {
         self.serve("Shutdown")?.state.runtime.supersede_all_lanes();
+        self.shut_down = true;
         self.abandon_signalled_launches()
+    }
+
+    /// The launch of `a` ended (its dispatch returned) and wrote no row.
+    fn is_abandoned(&self, a: i64) -> bool {
+        self.state_of(a).is_none() && matches!(self.launch_view(a), LaunchView::Ended)
     }
 
     fn wl_start(&mut self, a: i64) -> std::result::Result<(), DriverError> {
@@ -919,14 +929,27 @@ impl NodeVolumeDriver {
         // shutdown abandons before the volume step: the placement and the abandonment are one
         // model step. Either the launch parks after `ensure`'s create effect, its `Failed` row
         // lands, or its dispatch returns `Ok(())` with no row (abandoned without parking).
-        self.settle("the launch parks after its create effect, fails typed or is abandoned", |driver| {
-            driver.node.as_ref().is_some_and(|node| node.backing.ensure_parked(&workload_id()))
-                || driver.state_of(a) == Some(AllocState::Failed)
-                || (driver.state_of(a).is_none()
-                    && matches!(driver.launch_view(a), LaunchView::Ended))
-        })?;
-        if self.state_of(a).is_none() && matches!(self.launch_view(a), LaunchView::Ended) {
-            return self.verify_abandoned(a);
+        self.settle(
+            "the launch parks after its create effect, fails typed or is abandoned",
+            |driver| {
+                driver.node.as_ref().is_some_and(|node| node.backing.ensure_parked(&workload_id()))
+                    || driver.state_of(a) == Some(AllocState::Failed)
+                    || driver.is_abandoned(a)
+            },
+        )?;
+        if self.is_abandoned(a) {
+            // A launch that ended with no row is an abandonment only when its lane was born after
+            // shutdown; a launch that ended silently for another reason fails the step.
+            let signalled = self.shut_down;
+            if !signalled {
+                return Err(DriverError::Production(format!(
+                    "the launch of {a} ended with no row and the node is not shutting down"
+                )));
+            }
+            let alloc = self
+                .alloc_id(a)
+                .ok_or_else(|| DriverError::Production(format!("{a} has no allocation")))?;
+            return self.verify_abandoned(a, &alloc);
         }
         if self.state_of(a) == Some(AllocState::Failed) {
             self.volume_launch_fails("WlStart", a)?;
@@ -1092,24 +1115,16 @@ impl NodeVolumeDriver {
     /// observation point (not inside `ensure`, which is parked after its create effect) and has
     /// no row abandons in the same model step. The launch's dispatch returns `Ok(())`.
     fn abandon_signalled_launches(&self) -> std::result::Result<(), DriverError> {
-        let signalled = self
-            .serve("abandon")?
-            .state
-            .runtime
-            .lane_supersession(&target())
-            .is_superseded();
+        let signalled =
+            self.serve("abandon")?.state.runtime.lane_supersession(&target()).is_superseded();
         if !signalled {
             return self.pump("abandon");
         }
-        let ensure_in_flight = self
-            .node("abandon")?
-            .backing
-            .ensure_parked(&workload_id());
+        if self.node("abandon")?.backing.ensure_parked(&workload_id()) {
+            return Ok(());
+        }
         for a in self.launches.keys().copied() {
-            if ensure_in_flight
-                || self.state_of(a).is_some()
-                || !matches!(self.launch_view(a), LaunchView::Running)
-            {
+            if self.state_of(a).is_some() || !matches!(self.launch_view(a), LaunchView::Running) {
                 continue;
             }
             self.await_abandoned(a)?;
@@ -1130,14 +1145,15 @@ impl NodeVolumeDriver {
         self.settle("the superseded launch's dispatch returns", |driver| {
             !matches!(driver.launch_view(a), LaunchView::Running)
         })?;
-        self.verify_abandoned(a)
+        self.verify_abandoned(a, &alloc)
     }
 
     /// The abandoned launch's dispatch returned `Ok(())` and left nothing behind.
-    fn verify_abandoned(&self, a: i64) -> std::result::Result<(), DriverError> {
-        let alloc = self
-            .alloc_id(a)
-            .ok_or_else(|| DriverError::Production(format!("{a} has no allocation")))?;
+    fn verify_abandoned(
+        &self,
+        a: i64,
+        alloc: &AllocationId,
+    ) -> std::result::Result<(), DriverError> {
         match self.launch_view(a) {
             LaunchView::Ended => {}
             LaunchView::Dropped => {
@@ -1152,18 +1168,18 @@ impl NodeVolumeDriver {
                 )));
             }
         }
-        if self.rows()?.iter().any(|row| row.alloc_id == alloc) {
+        if self.rows()?.iter().any(|row| row.alloc_id == *alloc) {
             return Err(DriverError::Production(format!(
                 "the superseded launch of {a} wrote an allocation row"
             )));
         }
         let serve = self.serve("abandon")?;
-        if serve.driver.live_allocations().unwrap_or_default().contains(&alloc) {
+        if serve.driver.live_allocations().unwrap_or_default().contains(alloc) {
             return Err(DriverError::Production(format!(
                 "the driver still lists the superseded launch of {a}"
             )));
         }
-        if self.vmm_live(&alloc)? {
+        if self.vmm_live(alloc)? {
             return Err(DriverError::Production(format!(
                 "the VMM of the superseded launch of {a} was not terminated"
             )));
@@ -1414,6 +1430,7 @@ impl NodeVolumeDriver {
     /// composition are dropped, and the node's view store is freed.
     fn crash_serve(&mut self) -> std::result::Result<(), DriverError> {
         self.serve = None;
+        self.shut_down = false;
         if let Some(node) = &self.node {
             node.gate.clear();
         }

@@ -248,11 +248,10 @@ module node_volume {
     canWlStart(cur, a),
     if (cur.down and not(OFF.contains("noInterrupt")))
       commit(abandon({ ...place(cur, a), dstart: cur.dstart + 1 }, a), variant("WlStart", { a: a }))
-    else if (unavailAtStart(cur) and not(cur.down))
+    else if (unavailAtStart(cur))
       commit(failLaunch(place(cur, a), a, W_UNAVAIL, false), variant("WlStart", { a: a }))
     else
-      commit({ ...place(cur, a), ph: cur.ph.set(a, LP_SUP), sup: cur.sup.set(a, cur.down),
-               dstart: cur.dstart + (if (cur.down) 1 else 0) }, variant("WlStart", { a: a })),
+      commit({ ...place(cur, a), ph: cur.ph.set(a, LP_SUP), sup: cur.sup.set(a, false) }, variant("WlStart", { a: a })),
   }
   // operator stop, or a pending generation, ends a Running allocation (production emits StopAllocation only for Running rows); the VMM dies, the
   // claim lingers until Drain. The volume stays (VD-2). A Pending allocation (a launch holds the lane) is ended by its

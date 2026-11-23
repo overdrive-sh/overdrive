@@ -15,8 +15,8 @@ invariant = "Safety"
 backend = "tlc"
 expect = "holds"
 ci = false
-timeout_secs = 6600
-heap_mb = 16384
+timeout_secs = 2400
+heap_mb = 10240
 workers = 16
 
 [[check]]

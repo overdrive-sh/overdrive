@@ -64,7 +64,7 @@ State 2: <vol_bugRecreate_node_volume_Declare line 889, col 3 to line 893, col 4
   dstart |-> 0 ]
 /\ vol_bugRecreate_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 
-State 3: <vol_bugRecreate_node_volume_WlStart line 1273, col 3 to line 1309, col 71 of module vol_bugRecreate>
+State 3: <vol_bugRecreate_node_volume_WlStart line 1273, col 3 to line 1302, col 71 of module vol_bugRecreate>
 /\ vol_bugRecreate_node_volume_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   storeUp |-> TRUE,
@@ -97,7 +97,7 @@ State 3: <vol_bugRecreate_node_volume_WlStart line 1273, col 3 to line 1309, col
   dstart |-> 0 ]
 /\ vol_bugRecreate_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 
-State 4: <vol_bugRecreate_node_volume_LaunchEnsureCreate line 1373, col 3 to line 1418, col 82 of module vol_bugRecreate>
+State 4: <vol_bugRecreate_node_volume_LaunchEnsureCreate line 1366, col 3 to line 1411, col 82 of module vol_bugRecreate>
 /\ vol_bugRecreate_node_volume_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   storeUp |-> TRUE,
@@ -130,7 +130,7 @@ State 4: <vol_bugRecreate_node_volume_LaunchEnsureCreate line 1373, col 3 to lin
   dstart |-> 0 ]
 /\ vol_bugRecreate_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 
-State 5: <vol_bugRecreate_node_volume_LaunchCmdFail line 1117, col 3 to line 1130, col 76 of module vol_bugRecreate>
+State 5: <vol_bugRecreate_node_volume_CpCrash line 1136, col 3 to line 1155, col 44 of module vol_bugRecreate>
 /\ vol_bugRecreate_node_volume_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   storeUp |-> TRUE,
@@ -145,7 +145,7 @@ State 5: <vol_bugRecreate_node_volume_LaunchCmdFail line 1117, col 3 to line 113
   as |-> <<3, 0, 0>>,
   alive |-> <<FALSE, FALSE, FALSE>>,
   orphan |-> <<FALSE, FALSE, FALSE>>,
-  why |-> <<3, 0, 0>>,
+  why |-> <<7, 0, 0>>,
   ran |-> <<FALSE, FALSE, FALSE>>,
   ph |-> <<0, 0, 0>>,
   waited |-> <<0, 0, 0>>,
@@ -158,12 +158,12 @@ State 5: <vol_bugRecreate_node_volume_LaunchCmdFail line 1117, col 3 to line 113
   sup |-> <<FALSE, FALSE, FALSE>>,
   afterSup |-> <<0, 0, 0>>,
   delivered |-> <<FALSE, FALSE, FALSE>>,
-  chg |-> <<1, 0, 0>>,
+  chg |-> <<0, 0, 0>>,
   down |-> FALSE,
   dstart |-> 0 ]
 /\ vol_bugRecreate_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 
-State 6: <vol_bugRecreate_node_volume_WlStart line 1273, col 3 to line 1309, col 71 of module vol_bugRecreate>
+State 6: <vol_bugRecreate_node_volume_WlStart line 1273, col 3 to line 1302, col 71 of module vol_bugRecreate>
 /\ vol_bugRecreate_node_volume_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   storeUp |-> TRUE,
@@ -178,7 +178,7 @@ State 6: <vol_bugRecreate_node_volume_WlStart line 1273, col 3 to line 1309, col
   as |-> <<3, 1, 0>>,
   alive |-> <<FALSE, FALSE, FALSE>>,
   orphan |-> <<FALSE, FALSE, FALSE>>,
-  why |-> <<3, 0, 0>>,
+  why |-> <<7, 0, 0>>,
   ran |-> <<FALSE, FALSE, FALSE>>,
   ph |-> <<0, 1, 0>>,
   waited |-> <<0, 0, 0>>,
@@ -186,17 +186,17 @@ State 6: <vol_bugRecreate_node_volume_WlStart line 1273, col 3 to line 1309, col
   slow |-> FALSE,
   drainFail |-> FALSE,
   old |-> <<FALSE, FALSE, FALSE>>,
-  cnt |-> <<0, 1, 0>>,
+  cnt |-> <<0, 0, 0>>,
   exh |-> FALSE,
   sup |-> <<FALSE, FALSE, FALSE>>,
   afterSup |-> <<0, 0, 0>>,
   delivered |-> <<FALSE, FALSE, FALSE>>,
-  chg |-> <<1, 0, 0>>,
+  chg |-> <<0, 0, 0>>,
   down |-> FALSE,
   dstart |-> 0 ]
 /\ vol_bugRecreate_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 
-State 7: <vol_bugRecreate_node_volume_LaunchEnsureCreate line 1373, col 3 to line 1418, col 82 of module vol_bugRecreate>
+State 7: <vol_bugRecreate_node_volume_LaunchEnsureCreate line 1366, col 3 to line 1411, col 82 of module vol_bugRecreate>
 /\ vol_bugRecreate_node_volume_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   storeUp |-> TRUE,
@@ -211,7 +211,7 @@ State 7: <vol_bugRecreate_node_volume_LaunchEnsureCreate line 1373, col 3 to lin
   as |-> <<3, 1, 0>>,
   alive |-> <<FALSE, FALSE, FALSE>>,
   orphan |-> <<FALSE, FALSE, FALSE>>,
-  why |-> <<3, 0, 0>>,
+  why |-> <<7, 0, 0>>,
   ran |-> <<FALSE, FALSE, FALSE>>,
   ph |-> <<0, 2, 0>>,
   waited |-> <<0, 0, 0>>,
@@ -219,12 +219,12 @@ State 7: <vol_bugRecreate_node_volume_LaunchEnsureCreate line 1373, col 3 to lin
   slow |-> FALSE,
   drainFail |-> FALSE,
   old |-> <<FALSE, FALSE, FALSE>>,
-  cnt |-> <<0, 1, 0>>,
+  cnt |-> <<0, 0, 0>>,
   exh |-> FALSE,
   sup |-> <<FALSE, FALSE, FALSE>>,
   afterSup |-> <<0, 0, 0>>,
   delivered |-> <<FALSE, FALSE, FALSE>>,
-  chg |-> <<1, 0, 0>>,
+  chg |-> <<0, 0, 0>>,
   down |-> FALSE,
   dstart |-> 0 ]
 /\ vol_bugRecreate_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
