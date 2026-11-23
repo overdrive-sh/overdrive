@@ -50,6 +50,9 @@ uses to observe the process's exit and to deliver the kill.
 - A new `unsafe` surface replaces the audited `pre_exec` hook: one private module of `overdrive-host`, the crate's only production
   `#[allow(unsafe_code)]`. `std` and `tokio` child supervision are replaced by a pidfd for exit observation and kill, so the adapter keeps its
   bounded-reap behaviour (ADR-0348) on the new handle.
-- The launch's confinement steps run in the clone child, and the probe that exercises them exercises this primitive.
+- The launch's confinement steps run in the clone child. The boot probe that exercised the seccomp step through the deleted `pre_exec` hook
+  (`check_launch_seccomp`) is dropped and not ported (user ruling 2026-11-23, P-6): the filter is part of every launch, so one the kernel cannot
+  load fails the first launch with its own error, and Overdrive ships its own appliance OS with a pinned kernel (ADR-0068). Whether `serve`'s
+  other startup checks are needed is #376.
 - `CloudHypervisorVmm` needs the cgroup root, and the driver's `place_pid_in_scope` call, the cgroup manager's method and its test are deleted.
 - The mechanism needs the kernel's `CLONE_INTO_CGROUP`, which the pinned appliance kernel provides (ADR-0068; `kernel/fork.c:2840`, `:2899 @ v7.0`).

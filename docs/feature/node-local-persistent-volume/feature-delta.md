@@ -1,7 +1,7 @@
 # Feature delta: node-local persistent volume for VM workloads (GH #348)
 
 **Status:** the design is approved by the user; rulings run through 2026-11-23. The decision table (VD-1 to VD-10, SD-1 to SD-6, J-1, DE-1, D-1,
-H1, H2, W-1 to W-4, R-1, VB-1 to VB-3, RB-1 to RB-12, B-1 to B-3, P-1 to P-3, and P-6 awaiting a ruling) and the scope-limitation table (L1 to L9) are owned by
+H1, H2, W-1 to W-4, R-1, VB-1 to VB-3, RB-1 to RB-12, B-1 to B-3, P-1 to P-6) and the scope-limitation table (L1 to L9) are owned by
 [`design/wave-decisions.md`](design/wave-decisions.md); each ADR (0310 to 0320, 0334 to 0338, 0348 to 0355) holds one decision. This file owns the interface
 contracts, the boundary scenarios and the model's boundary. Executable test obligations, mutation targets and test re-sync lists are DISTILL's
 input in [`distill/upstream-issues.md`](distill/upstream-issues.md). The model is two Quint specs, `specs/quint/node-local-volume/` and
@@ -800,11 +800,24 @@ one process, so enrolling only the first pid also left every thread and child cr
 11. **`SimVmm`.** `create` records the process as a member of `config.cgroup_scope` from its creation until the scripted reap; `SimVmHostState`
     observes that one fact. A `SimVmm` with an unreapable process (ADR-0348) keeps its scope populated. A `SimVmm` whose scope is absent fails
     `create` typed, as the host adapter does.
-12. **The launch probe exercises this primitive.** `RealVmmProbeSubstrate::check_launch_seccomp` runs `prlimit --version` through the same
-    `launch_clone` entry point, so the probe cannot pass on a path production no longer takes. Its scope is a scratch scope the probe creates
-    under the cgroup root and removes. *Proposed, awaiting the user's ruling (P-6): the scratch scope is a boot-time cgroup effect the probe did
-    not have.* The alternatives are none that keep the probe honest: leaving the probe on the deleted hook probes dead code, and dropping it
-    removes the Earned-Trust check of the seccomp install.
+12. **The launch seccomp boot probe is dropped (P-6, user ruling 2026-11-23).** The probe ran through the `pre_exec` hook this change deletes
+    and is not ported to `launch_clone`; the real launch is the check. Overdrive ships its own appliance OS with a pinned kernel (ADR-0068), and
+    the seccomp filter is part of every launch, so a filter the kernel cannot load fails the first launch (item 8). Whether `serve`'s other
+    startup checks are needed is #376. Deleted in the same change:
+    - `VmmProbeSubstrate::check_launch_seccomp` and its `RealVmmProbeSubstrate` implementation (`overdrive-host/src/vmm.rs`), and the test
+      double's `launch-seccomp` stage;
+    - the call site, the `launch-seccomp` stage of `CloudHypervisorVmm::probe`, and the stage-order expectation that names it (the probe's other
+      stages and their order are unchanged);
+    - its tests: the stage-order and typed-error cases for the launch-seccomp stage, `the_startup_probe_installs_the_exact_launch_program`
+      (S-ND295-43), and the probe half of `launch_on_a_target_without_a_program_is_refused_before_any_effect` (S-ND295-44; the half asserting
+      `create` refuses before any effect stays);
+    - the boot-refusal causes only the probe returned: `VmmProbeError::LaunchSeccompUnsupportedArch`, `LaunchSeccompInstall` and
+      `LaunchSeccompProbeExit`, their constructors, and the `Vmm::probe` rustdoc sentence naming them (`overdrive-core/src/traits/vmm.rs`).
+    A seccomp failure at launch surfaces at the first launch, not at boot: an architecture with no filter program fails `create` before any
+    effect as `VmmError::ConfinementUnavailable { control: Seccomp }` (unchanged, `create`'s own check); a filter the kernel refuses to load
+    is a child-step failure of item 8, whose `errno` comes back through the error pipe, the child ends with `_exit`, and `create` fails as
+    `VmmError::Create` through `classify_launch_spawn_error`, never an unconfined run. The error pipe carries the `errno` only, so the
+    `VmmError::Create` text names the launch executable and the `errno` and does not name the seccomp step; no `VmmError` variant is added here.
 13. **The contract shape.** `Vmm::create` is a bounded-change function: it creates one process tree and changes membership of exactly one scope.
     The universe of what it may change is the allocation's run directory, one scope and one process tree.
 
