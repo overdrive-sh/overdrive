@@ -648,7 +648,7 @@ device. So today's `kill_scope` can return `Ok` for a scope whose VMM is not gon
    | the lease gate | § "The guest-address lease outlives an unreaped VMM": a busy scope keeps its lease |
 
 7. **Not changed.** The `VmHostState` signatures, `RealVmHostState::new`'s parameters, `observe`, `probe`, `discard_artifacts`, the
-   `ReclamationError` and `ConvergeError` variants, the planner, `VmReclamation`'s View and the tick's requeue.
+   existing `ReclamationError` and `ConvergeError` variants (`ReclamationError` gains `CorruptLeftoverRow`, § "Pool API"), the planner, `VmReclamation`'s View and the tick's requeue.
 
 **Cost.** A stuck scope costs the `VmReclamation` target one bound of waiting per tick until the process is reaped; actions for other allocations
 in the same tick are delayed by up to that bound for each stuck scope. A stuck scope costs one open file and one waiter, no blocked thread.
@@ -699,7 +699,8 @@ under a live task. The lease gate needs every removal of a VM scope to be the po
    scope path) and the `CgroupFs` adapters' own startup probes, which remove the probe directory they created: the host probe
    (`overdrive-host/src/cgroup_fs.rs:169`, and its `best_effort_remove_dir` helper at `:195-196`) and the sim adapter's probe
    (`overdrive-sim/src/adapters/cgroup_fs.rs:451`, `:483`, `:496`). The port method's definition and the adapters' `remove_dir` bodies are
-   not calls. It is the lease gate's structural defence: a second remover cannot be added unseen.
+   not calls. **Decided under this design's authority:** the allow-list includes the `CgroupFs` adapters' own probe removals, because they remove
+   a directory the probe itself created, never a VM scope. It is the lease gate's structural defence: a second remover cannot be added unseen.
    **Stale comments rewritten in the same change** (they describe a `remove_workload_scope` and a `cgroup_kill` that no longer exist):
    `overdrive-sim/src/adapters/cgroup_fs.rs:413-415` (`cleanup_after_start_failure` "always issues `cgroup_kill` immediately before
    `remove_workload_scope`"), and `overdrive-core/src/traits/cgroup_fs.rs:152` (the "cgroup manager's `remove_workload_scope` wrapper swallows
@@ -806,7 +807,8 @@ one process, so enrolling only the first pid also left every thread and child cr
    takes no lock); that task waits for readability and `waitid`s, with the bounded reap and late reap of ADR-0348, so a killed child is never
    left a zombie. `HostVmm` takes the guard out of its `Option` into the reaper (item 5) only after `create`'s own success path has passed;
    a guard dropped on any earlier path (an error-pipe failure, the `create` future dropped while the blocking call runs and its output
-   discarded) therefore kills and reaps the VMM and leaves no process. Test: a `create` future dropped while the launch is in `spawn_blocking`
+   discarded) therefore kills and reaps the VMM and leaves no process. **Decided under this design's authority:** the kill-and-reap-on-drop
+   guard is the contract of the hand-off, not an option left to the crafter; a launch that is dropped never leaves a running VMM. Test: a `create` future dropped while the launch is in `spawn_blocking`
    leaves no process of the stand-in and no zombie (Tier 3, below).
 6. **The unsafe surface.** `launch_clone.rs` is the crate's one production `#[allow(unsafe_code)]`. The waits, the signal, the pipe and the
    descriptor handling around it use safe `rustix` wrappers, as the crate already does for `ioctl_ficlone`. The module states the safety argument:
@@ -1004,17 +1006,39 @@ crash between it and the executors leaves terminal rows, which the next boot's e
 carried address.
 
 **Pool API (crate-internal to `overdrive-control-plane`).** `GuestAddressPool::reserve_leftover(&self, alloc: &AllocationId, held: Ipv4Addr)`,
-with `held` the row's `workload_addr`; it returns nothing. The pool derives the offset as `held - GUEST_NODE_PREFIX.network()`, the inverse of the
+with `held` the row's `workload_addr`; it returns `Result<(), CorruptLeftoverRow>` (the corrupt-row case below, and nothing else). The pool derives the offset as `held - GUEST_NODE_PREFIX.network()`, the inverse of the
 one derivation `assign` uses, so the CID is still computed in one place. It inserts a **Retiring lease** for `alloc` at that offset: the existing
 lease type in the state a stuck VMM's lease already has (ADR-0156), so the held bitmap, `leases`, the occupancy counts and the attachment cap stay
 one source of truth, and a reservation counts toward the cap. A reservation carries no `GuestNetworkPlan`: no network or flow ports exist for it, and
 `snapshot()` does not list it (`observe` does). `assign` for the same allocation id returns the existing `LeaseRetiring`. An address outside the
 prefix, or an offset already held by another allocation, is **corrupt persisted data, not a structurally impossible path**: the address is read from
 a row at boot, and a row can be damaged or written by another build, so `reserve_leftover` never panics on it (`unreachable!` is wrong here, `rust.md`
-§ "Logically unreachable"). `reserve_leftover` returns the failure and `converge` refuses the boot with the existing `ConvergeError::Reclamation`,
-naming the allocation and the row's address in its detail; no variant is added to `ConvergeError`, `ReclamationError` or `GuestNetworkError`
-(`reserve_leftover` returns the failure as an `io::Error` of kind `InvalidData` that names the allocation and the address, and `converge`
-carries it in the existing `ReclamationError::Host(io::Error)`). This is the intent-store rule that corrupt persisted data refuses
+§ "Logically unreachable"). `reserve_leftover` returns the failure and `converge` refuses the boot with `ConvergeError::Reclamation`, naming the allocation and the row's address.
+A corrupt row is its own failure mode and has its own typed variant (`rust.md` § "Errors": distinct failure modes get distinct variants);
+`ReclamationError::Host` stays the `VmHostState` substrate failure and is not reused for it.
+
+*Contract* (`overdrive-control-plane`, `action_shim::reclamation`, beside `ReclamationError`):
+
+- `ReclamationError` gains `CorruptLeftoverRow(#[from] CorruptLeftoverRow)`, a pass-through embedding (`rust.md` § "Errors", pass-through not
+  duplication), with `#[error("{0}")]` so its text is the inner `Display`.
+- `CorruptLeftoverRow` is a `pub` `thiserror` enum, `Debug`, with two variants, each naming the allocation:
+  `AddressOutsidePrefix { allocation: AllocationId, address: Ipv4Addr }` and
+  `OffsetAlreadyHeld { allocation: AllocationId, address: Ipv4Addr, held_by: AllocationId }`.
+- Constructors, one per variant: `CorruptLeftoverRow::address_outside_prefix(allocation, address)` and
+  `CorruptLeftoverRow::offset_already_held(allocation, address, held_by)`.
+- `Display`: `AddressOutsidePrefix` is `leftover row for allocation {allocation} is corrupt: address {address} is outside the guest prefix
+  {GUEST_NODE_PREFIX}`; `OffsetAlreadyHeld` is `leftover row for allocation {allocation} is corrupt: address {address} is an offset already
+  held by allocation {held_by}`.
+- `converge` maps it to `ConvergeError::Reclamation(ReclamationError::CorruptLeftoverRow(..))` unchanged (the existing `#[from]` on
+  `ConvergeError::Reclamation`; no variant is added to `ConvergeError` or `GuestNetworkError`, no `io::Error` is involved, and the busy test of
+  item 3 is unaffected because the kind is not `ResourceBusy`). Boot refuses and the error text names the row; the ordering of item 5 holds.
+- **API surface.** `ReclamationError` is `pub` in a `pub mod`, and `ConvergeError` embeds it and is itself embedded in
+  `ControlPlaneError::VmReclamationBoot` (`error.rs:749`), so both are public API of `overdrive-control-plane`, reachable by downstream crates.
+  The new variant and the new type are public additions to that surface; neither enum is `#[non_exhaustive]`, so an exhaustive downstream
+  `match` on `ReclamationError` adds an arm. Inside the workspace, the CLI renders these errors through `Display` and matches none.
+  `reserve_leftover` and `GuestAddressPool` stay crate-internal.
+
+This is the intent-store rule that corrupt persisted data refuses
 boot (ADR-0048 § 3). It is corruption of a record, not a dead VM: ruling 14c ("never refuse boot for a dead VM", step 5 above) is unaffected,
 because a stuck VM whose row is sound still reserves and boots. Two live VMMs cannot hold one CID (`EADDRINUSE`,
 `drivers/vhost/vsock.c:804-813 @ v7.0`), so a duplicate offset is a damaged row, never two real VMs. Test: a leftover row with an address outside

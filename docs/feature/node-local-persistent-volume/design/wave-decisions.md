@@ -85,11 +85,16 @@ no decision changes.**
    probes, `overdrive-host/src/cgroup_fs.rs:169`), and lists the stale comments rewritten in the same change
    (`overdrive-sim/src/adapters/cgroup_fs.rs:413`, `overdrive-core/src/traits/cgroup_fs.rs:152`).
 4. `reserve_leftover` does not `unreachable!` on persisted data: an address outside the prefix or an offset already held is a corrupt row, and
-   boot refuses with the existing `ConvergeError::Reclamation` (an `InvalidData` `io::Error` in `ReclamationError::Host`) naming the allocation.
-   No variant is added. This is corruption, not a dead VM; ruling 14c is unaffected.
+   boot refuses with `ConvergeError::Reclamation` carrying a distinct typed variant, `ReclamationError::CorruptLeftoverRow(CorruptLeftoverRow)`
+   (`AddressOutsidePrefix` or `OffsetAlreadyHeld`, each naming the allocation), mapped unchanged by `converge`. `ReclamationError::Host` stays the
+   `VmHostState` failure (`rust.md` § "Errors"). Both types are public API of `overdrive-control-plane`; `reserve_leftover` stays crate-internal.
+   This is corruption, not a dead VM; ruling 14c is unaffected.
 5. `converge` collects the busy signal as `Err(ReclamationError::Host(err))` with `ErrorKind::ResourceBusy` (the ADR-0354 Running case
    included), runs every executor to completion, reserves every busy scope, and only then refuses with the first non-busy error, so no
    scope's reservation is lost. The cost budget of the design is added to the feature delta; model-check times are pending the modeler.
+
+Two choices are made under this design's authority: the `LaunchedChild` guard kills and hands the pidfd to a reaper on drop, and the
+single-remover scan's allow-list includes the `CgroupFs` adapters' own probe removals.
 
 Placement pinning, growth and the relation to #97 bind no code in this slice: answers 6 to 8 of the feature delta, with the directions carried by
 L2 and L3.
