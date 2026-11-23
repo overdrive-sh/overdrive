@@ -33,10 +33,11 @@ uses to observe the process's exit and to deliver the kill.
 ## Alternatives considered
 
 - **The child writes `0` to the scope's `cgroup.procs` as the first step of the launch hook.** Rejected by the user. The child exists, runnable and
-  charged to `serve`'s cgroup, between the fork and the write: it is outside its scope for that interval, and the resource it consumes in it (page
-  tables and the copied address space of the forked process, the hook's own work) is accounted to `serve`'s cgroup and not the allocation's. The
-  guarantee that no process holding the device is outside the scope then rests on the interval being harmless, an argument about what the child does
-  and does not hold in it, not a property the kernel gives.
+  in `serve`'s cgroup, between the fork and the write: it is outside its scope for that interval. The guarantee that no process holding the device
+  is outside the scope then rests on the interval being harmless, an argument about what the child does and does not hold in it, not a property
+  the kernel gives. The reason is membership from the first instruction with no window; it is not accounting. `clone3` charges the copy of
+  `serve`'s address space to `serve`'s cgroup too (`copy_mm`, `kernel/fork.c:2223`, runs before `cgroup_can_fork`, `:2322 @ v7.0`), so only
+  the charges made after `exec` land in the scope under either mechanism.
 - **The driver writes the VMM's pid to `cgroup.procs` after the spawn (the earlier behaviour).** Rejected: the same window, longer and with the VMM
   already running; the write places only the one pid, so every thread and child created before it stays outside the scope; and a `serve` crash
   between the spawn and the write leaves a vsock-holding VMM outside an empty scope.
