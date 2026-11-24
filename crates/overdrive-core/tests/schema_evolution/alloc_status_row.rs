@@ -217,3 +217,63 @@ fn print_stopped_by_fixtures() {
         println!("{name} = \"{}\"", hex::encode(bytes.as_ref()));
     }
 }
+
+// ---------------------------------------------------------------------------
+// Launch-ended reasons in the archived `reason` (ADR-0355). `LaunchSuperseded` and
+// `LaunchLostWithControlPlane` are fieldless variants appended after
+// `VmVolumeUnavailable`, so neither mints an envelope version: the archived size and
+// the envelope discriminant offset are unchanged.
+// ---------------------------------------------------------------------------
+
+/// A launch that ended before it ran: `Terminated`, no terminal claim, never started,
+/// the `Pending` row's address carried.
+fn payload_launch_abandoned(reason: TransitionReason) -> AllocStatusRowLatest {
+    AllocStatusRowV1 {
+        state: AllocState::Terminated,
+        reason: Some(reason),
+        detail: None,
+        stderr_tail: None,
+        terminal: None,
+        started_at: None,
+        ..canonical_v1_payload()
+    }
+}
+
+const CURRENT_LAYOUT_ALLOC_STATUS_V1_LAUNCH_SUPERSEDED: &str = "616c6c6f632d746573742d30317376632d7061796d656e74730000000000000000000000000000008d000000d8ffffff8c000000ddffffff6e6f64652d303031040000000000000001000000000000006e6f64652d303031010000000000000016000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000042ffffff00000000000000000000000000000000000000000000000000000000010a630006000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+const CURRENT_LAYOUT_ALLOC_STATUS_V1_LAUNCH_LOST_WITH_CONTROL_PLANE: &str = "616c6c6f632d746573742d30317376632d7061796d656e74730000000000000000000000000000008d000000d8ffffff8c000000ddffffff6e6f64652d303031040000000000000001000000000000006e6f64652d303031010000000000000017000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000042ffffff00000000000000000000000000000000000000000000000000000000010a630006000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+
+/// CONTRACT_SHAPE: pure-function.
+#[test]
+fn alloc_status_row_launch_superseded_decodes_through_current_envelope() {
+    assert_envelope_v_roundtrip::<AllocStatusRowEnvelope>(
+        CURRENT_LAYOUT_ALLOC_STATUS_V1_LAUNCH_SUPERSEDED,
+        &payload_launch_abandoned(TransitionReason::LaunchSuperseded),
+    );
+}
+
+/// CONTRACT_SHAPE: pure-function.
+#[test]
+fn alloc_status_row_launch_lost_with_control_plane_decodes_through_current_envelope() {
+    assert_envelope_v_roundtrip::<AllocStatusRowEnvelope>(
+        CURRENT_LAYOUT_ALLOC_STATUS_V1_LAUNCH_LOST_WITH_CONTROL_PLANE,
+        &payload_launch_abandoned(TransitionReason::LaunchLostWithControlPlane),
+    );
+}
+
+#[test]
+#[ignore = "fixture regeneration tool — run on demand when the archived launch-ended layout changes"]
+#[allow(clippy::print_stdout, reason = "fixture regeneration output")]
+fn print_launch_abandoned_fixtures() {
+    for (name, reason) in [
+        ("CURRENT_LAYOUT_ALLOC_STATUS_V1_LAUNCH_SUPERSEDED", TransitionReason::LaunchSuperseded),
+        (
+            "CURRENT_LAYOUT_ALLOC_STATUS_V1_LAUNCH_LOST_WITH_CONTROL_PLANE",
+            TransitionReason::LaunchLostWithControlPlane,
+        ),
+    ] {
+        let envelope = AllocStatusRowEnvelope::latest(payload_launch_abandoned(reason));
+        let bytes =
+            rkyv::to_bytes::<rkyv::rancor::Error>(&envelope).expect("archive allocation status");
+        println!("{name} = \"{}\"", hex::encode(bytes.as_ref()));
+    }
+}

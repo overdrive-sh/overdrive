@@ -321,6 +321,7 @@ async fn vm_driver(
         intake,
         guest_listener_board,
         None,
+        std::sync::Arc::new(overdrive_sim::SimVmHostState::new()),
     );
     (driver, beacon_port)
 }
@@ -333,7 +334,7 @@ impl FlowsBeaconDriver {
             .expect("current-thread runtime");
         let tmp = TempDir::new().expect("tmpdir");
         stage_artifacts(tmp.path());
-        let vmm = SimVmm::new();
+        let vmm = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
         let io = Arc::new(SimBeaconIo::stepped(vmm.clone()));
         let (driver, beacon_port) = runtime.block_on(vm_driver(tmp.path(), &vmm, &io));
         Self {

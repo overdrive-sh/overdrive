@@ -3853,6 +3853,28 @@ components:
             type: string
             enum:
             - vm_volume_unavailable
+      - type: object
+        description: |-
+          A launch ended before it ran because a stop, a restart or node
+          shutdown superseded it (ADR-0355). Not a start failure.
+        required:
+        - kind
+        properties:
+          kind:
+            type: string
+            enum:
+            - launch_superseded
+      - type: object
+        description: |-
+          A launch ended before it ran because the control plane that began it
+          was lost (ADR-0355). Not a start failure.
+        required:
+        - kind
+        properties:
+          kind:
+            type: string
+            enum:
+            - launch_lost_with_control_plane
       description: |-
         Structured reason for a lifecycle transition.
 
@@ -3887,6 +3909,8 @@ components:
         | `VmGuestExitUnreported { vmm_exit_code, vmm_signal }` | cause | `VmDriver` — boot-race VMM-exit arm | yes |
         | `VmGuestCommandDispatchFailed { detail }` | cause | `VmDriver` — post-READY `EXEC` write failure | yes |
         | `VmVolumeUnavailable { cause }` | cause | `TransitionReason::from(&DriverStartFailure)` maps a `VmStartFailure::VolumeUnavailable` start failure | NO — no driver constructs that failure yet |
+        | `LaunchSuperseded` | progress | action shim — a launch superseded by a stop, a restart or node shutdown (ADR-0355) | NO — emit site is a later step |
+        | `LaunchLostWithControlPlane` | progress | boot reclamation — a `Pending` row left by a lost control plane (ADR-0355) | NO — emit site is a later step |
 
         **Phase 2 emit-deferred variants**: `NoCapacity` is deferred until
         capacity accounting exists, and until 2026-08-11

@@ -121,7 +121,7 @@ struct Node {
 
 impl Node {
     fn new() -> Self {
-        let vmm = SimVmm::new();
+        let vmm = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
         let beacon = Arc::new(SimBeaconIo::new(vmm.clone()));
         Self {
             tmp: TempDir::new().expect("tempdir"),

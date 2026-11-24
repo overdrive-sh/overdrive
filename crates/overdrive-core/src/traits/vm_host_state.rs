@@ -23,12 +23,18 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use thiserror::Error;
 
 use crate::AllocationId;
 use crate::cgroup::CgroupPath;
+
+/// How long [`VmHostState::kill_scope`] waits for the scope to report
+/// `populated 0` before it returns `Err(ResourceBusy)`. A policy value: an
+/// ordinary scope settles in milliseconds.
+pub const KILL_SCOPE_SETTLE_BOUND: Duration = Duration::from_secs(3);
 
 /// Per-scope facts [`VmHostState::observe`] reports for one cgroup scope
 /// under `overdrive.slice/workloads.slice/`. **NOT VM-exclusive** — exec
@@ -135,33 +141,37 @@ pub trait VmHostState: Send + Sync + 'static {
     /// substrate failure while enumerating any of the three roots.
     async fn observe(&self) -> std::io::Result<VmHostObservation>;
 
-    /// Write `cgroup.kill`, then remove the scope directory.
+    /// Write `cgroup.kill`, wait for the scope to report empty, then remove
+    /// the scope directory.
     ///
     /// # Preconditions
     /// - `scope` names a cgroup scope this adapter's cgroup root is
     ///   expected to resolve.
     ///
-    /// # Postconditions on Ok
-    /// - **Does NOT return until the scope directory's removal has
-    ///   succeeded or returned `NotFound`.** This settle contract is a
-    ///   postcondition of the port, not a rule the caller must remember
-    ///   — a boot-time read of the same tree treats a mid-deletion scope as
-    ///   a hard error that refuses the boot (`brief.md` §105a.5 / ADR-0083
-    ///   §D7).
+    /// # Postconditions
+    /// - **On `Ok`:** `populated 0` was observed for the scope and the
+    ///   directory is absent (removed, or `NotFound`), so no task of the
+    ///   scope is left and every descriptor of its VMM is closed. A
+    ///   following [`VmHostState::observe`] does not report it.
+    /// - **On `Err(ResourceBusy)`:** `cgroup.kill` was written, the scope
+    ///   is present and was not removed, and [`KILL_SCOPE_SETTLE_BOUND`]
+    ///   ended the call. A following `observe()` may report an empty
+    ///   `pids` (exiting tasks are not listed): an empty `pids` is not
+    ///   emptiness. The call returns within the bound plus scheduling
+    ///   latency, never earlier.
     ///
     /// # Edge cases
-    /// - **Idempotent.** An already-absent scope: `cgroup.kill` write and
-    ///   removal both resolve as success (`NotFound` is not an error
-    ///   here).
-    /// - A scope whose `cgroup.procs` still drains asynchronously after
-    ///   `cgroup.kill` (kernel-side SIGKILL delivery + reap is NOT
-    ///   synchronous with the write): the adapter retries removal until
-    ///   it settles — this is what makes the postcondition true.
+    /// - **Idempotent.** An already-absent scope is `Ok`.
+    /// - A second call for a still-busy scope is `ResourceBusy` again
+    ///   after its own bound.
+    /// - A scope that empties during the wait returns `Ok` without
+    ///   waiting out the bound.
+    /// - A non-`ResourceBusy` error is returned at once.
     ///
     /// # Errors
-    /// The underlying [`std::io::Error`] if the substrate genuinely
-    /// refuses (e.g. `PermissionDenied`) rather than merely not-yet-
-    /// settled.
+    /// `Err` with `kind() == std::io::ErrorKind::ResourceBusy` is the only
+    /// kind a caller retries. Any other kind is a substrate refusal
+    /// (`PermissionDenied`, `EIO`), never retried.
     async fn kill_scope(&self, scope: &CgroupPath) -> std::io::Result<()>;
 
     /// Remove this allocation's run directory and per-launch rootfs

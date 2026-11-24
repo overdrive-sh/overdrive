@@ -486,7 +486,7 @@ impl Node {
     fn new() -> Self {
         let tmp = TempDir::new().expect("tmpdir");
         stage_artifacts(tmp.path());
-        let vmm = SimVmm::new();
+        let vmm = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
         Self {
             host: SimVmmHost::new(vmm.clone(), true),
             vmm,
@@ -597,6 +597,7 @@ fn compose(node: &Node, boot: u32) -> Composed {
             intake,
             guest_listener_board,
             None,
+            std::sync::Arc::new(overdrive_sim::SimVmHostState::new()),
         );
         // D-21: every composition reopens the node's stores from disk
         // through the composition root's open (`StoreAdapters::open` over
@@ -862,7 +863,7 @@ impl CidLeaseDriver {
         leases
             .iter()
             .filter(|(alloc, _)| self.alloc_of.get(*alloc) == Some(&a))
-            .map(|(alloc, view)| (alloc.clone(), view.cid, view.state))
+            .map(|(alloc, view)| (alloc.clone(), view.cid(), view.state()))
             .collect()
     }
 
@@ -1112,7 +1113,8 @@ impl CidLeaseDriver {
             let held = self.placement.get(&b).and_then(|alloc| leases.get(alloc));
             match held {
                 Some(view)
-                    if view.cid == expected && view.state == GuestAttachmentLease::Admitted => {}
+                    if view.cid() == expected && view.state() == GuestAttachmentLease::Admitted => {
+                }
                 other => {
                     return Err(not_enabled(
                         action,
@@ -1221,8 +1223,8 @@ impl CidLeaseDriver {
             .lease_observation()
             .leases
             .get(&alloc)
-            .map(|view| (view.cid, view.launch))
-            .ok_or_else(|| not_enabled("Launch", format!("{alloc} holds no lease")))?;
+            .and_then(|view| view.launch().map(|launch| (view.cid(), launch)))
+            .ok_or_else(|| not_enabled("Launch", format!("{alloc} holds no launched lease")))?;
         if !self.serve("Launch")?.provisioner.release(Held::Provision, &alloc) {
             return Err(not_enabled("Launch", format!("{alloc}'s dispatch is not held")));
         }
@@ -1696,7 +1698,7 @@ impl CidLeaseDriver {
                 .inst
                 .offset_of(*cid)
                 .ok_or_else(|| DriverError::NoPreImage(format!("held CID {}", cid.get())))?;
-            let holder = match leases.iter().find(|(_, view)| view.cid == *cid) {
+            let holder = match leases.iter().find(|(_, view)| view.cid() == *cid) {
                 // conformance-lint: sim-arbiter-ok QPROJ-7 the simulated host's VM scopes (which launch a holder VMM belongs to), Tier-3 pair V-30 Q2c / Q2d and V-RECLAIM
                 Some((alloc, _)) if self.node.host.pids_of(alloc).contains(pid) => *self
                     .alloc_of
@@ -1717,13 +1719,13 @@ impl CidLeaseDriver {
             // O QPROJ-2: the live pool, read in one snapshot.
             let observation = self.pool.lease_observation();
             for (alloc, view) in &observation.leases {
-                if self.inst.is_background(view.cid) {
+                if self.inst.is_background(view.cid()) {
                     continue;
                 }
                 let o = self
                     .inst
-                    .offset_of(view.cid)
-                    .ok_or_else(|| DriverError::NoPreImage(format!("CID {}", view.cid.get())))?;
+                    .offset_of(view.cid())
+                    .ok_or_else(|| DriverError::NoPreImage(format!("CID {}", view.cid().get())))?;
                 let a = *self
                     .alloc_of
                     .get(alloc)

@@ -19,7 +19,8 @@ use overdrive_core::traits::driver::{AllocationSpec, DriverPayload};
 use overdrive_core::traits::intent_store::TxnOp;
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, ObservationRowKind};
 use overdrive_core::transition_reason::{
-    ServiceFailureReason, StoppedBy, TerminalCondition, TransitionReason, is_platform_reclaimed,
+    ServiceFailureReason, StoppedBy, TerminalCondition, TransitionReason, is_launch_abandoned,
+    is_platform_reclaimed,
 };
 use overdrive_core::wall_clock::UnixInstant;
 
@@ -1502,6 +1503,19 @@ pub fn current_alloc<'a>(allocs: &[&'a AllocStatusRow]) -> Option<&'a AllocStatu
         .filter_map(|row| alloc_attempt_index(&row.alloc_id).map(|attempt| (attempt, *row)))
         .max_by_key(|(attempt, _)| *attempt)
         .map(|(_, row)| row)
+}
+
+/// The count basis (ADR-0355, RB-13): the newest row that ran, i.e.
+/// [`current_alloc`] over the rows for which
+/// [`overdrive_core::transition_reason::is_launch_abandoned`] is false.
+///
+/// `None` when no row ran (no rows, or every row is an abandoned launch).
+/// It names no reason itself; `current_alloc` is unchanged and still returns
+/// the newest row, abandoned or not.
+pub fn last_ran_alloc<'a>(allocs: &[&'a AllocStatusRow]) -> Option<&'a AllocStatusRow> {
+    let ran: Vec<&'a AllocStatusRow> =
+        allocs.iter().copied().filter(|row| !is_launch_abandoned(row)).collect();
+    current_alloc(&ran)
 }
 
 /// service-vip-allocator step 03-01 — pure helper for the Service-arm

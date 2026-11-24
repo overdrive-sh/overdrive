@@ -7,7 +7,7 @@
 //! volume launch path and `SimVolumeBacking` land, so the default catalogue and `cargo dst` are
 //! unchanged and `--only` cannot name them yet. The evaluators drive `VmDriver::start` over
 //! `SimVmm`, `SimClock` and a stepped `SimBeaconIo`, with the pool reaching the driver through
-//! `SimVolumePoolProbe::probe` and `VmDriver::new(.., volumes)`; the faults are `SimVolumeBacking`
+//! `SimVolumePoolProbe::probe` and `VmDriver::new(.., volumes, std::sync::Arc::new(overdrive_sim::SimVmHostState::new()))`; the faults are `SimVolumeBacking`
 //! scripting (a claim held until a drain, a crash between the create and the attach, a failing
 //! command, a node reboot) and `SimClock`. The seed names the run: it is printed on every run and
 //! the failure carries it with the schedule, so `Harness::new().only(<invariant>).run(<seed>)`

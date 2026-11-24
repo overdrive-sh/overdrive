@@ -184,7 +184,7 @@ async fn vmm_equivalence_sim_vmm() {
     let fixture = VmFixture::provision(&staging_root).expect("fixture provisions on this host");
     let run_root = staging_root.join("run-sim");
 
-    let vmm = SimVmm::new();
+    let vmm = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
     drive_shared_sequence(&vmm, &fixture, &run_root).await;
 
     // create() removes its clone if the spawn fails -- SimVmm's injection
@@ -351,7 +351,7 @@ async fn vmm_live_console_tail_is_coherent_with_final_exit_stderr_tail_for_both_
 
     // --- SimVmm: scripted output, observed live and then finally. ---
     let sim_run_root = staging_root.join("run-sim-tail");
-    let sim = SimVmm::new();
+    let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
     let scripted = "cloud-hypervisor: warn: vsock ready\ncloud-hypervisor: fatal: giving up";
     sim.inject_console_output(scripted.as_bytes().to_vec());
     sim.inject_exit(Some(3), None);
@@ -407,7 +407,7 @@ async fn vmm_early_exit_preserves_code_signal_and_stderr_tail_for_both_adapters(
 
     // --- SimVmm: a scripted ending with an exact code and signal. ---
     let sim_run_root = staging_root.join("run-sim-early");
-    let sim = SimVmm::new();
+    let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
     sim.inject_console_output(b"cloud-hypervisor: fatal: bad disk".to_vec());
     sim.inject_exit(Some(101), Some(11));
 

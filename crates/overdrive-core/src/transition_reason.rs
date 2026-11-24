@@ -70,6 +70,8 @@ use crate::volume::VolumeUnavailableCause;
 /// | `VmGuestExitUnreported { vmm_exit_code, vmm_signal }` | cause | `VmDriver` — boot-race VMM-exit arm | yes |
 /// | `VmGuestCommandDispatchFailed { detail }` | cause | `VmDriver` — post-READY `EXEC` write failure | yes |
 /// | `VmVolumeUnavailable { cause }` | cause | `TransitionReason::from(&DriverStartFailure)` maps a `VmStartFailure::VolumeUnavailable` start failure | NO — no driver constructs that failure yet |
+/// | `LaunchSuperseded` | progress | action shim — a launch superseded by a stop, a restart or node shutdown (ADR-0355) | NO — emit site is a later step |
+/// | `LaunchLostWithControlPlane` | progress | boot reclamation — a `Pending` row left by a lost control plane (ADR-0355) | NO — emit site is a later step |
 ///
 /// **Phase 2 emit-deferred variants**: `NoCapacity` is deferred until
 /// capacity accounting exists, and until 2026-08-11
@@ -265,6 +267,12 @@ pub enum TransitionReason {
     VmGuestCommandDispatchFailed { detail: String },
     /// The workload's volume could not be attached (ADR-0317, ADR-0318).
     VmVolumeUnavailable { cause: VolumeUnavailableCause },
+    /// A launch ended before it ran because a stop, a restart or node
+    /// shutdown superseded it (ADR-0355). Not a start failure.
+    LaunchSuperseded,
+    /// A launch ended before it ran because the control plane that began it
+    /// was lost (ADR-0355). Not a start failure.
+    LaunchLostWithControlPlane,
 }
 
 /// The total, pure driver-start conversion (ADR-0032 §4, ADR-0083 §D5).
@@ -1005,6 +1013,12 @@ impl TransitionReason {
                 format!("VM guest command dispatch failed: {detail}")
             }
             Self::VmVolumeUnavailable { cause } => volume_unavailable_wording(cause),
+            Self::LaunchSuperseded => {
+                "launch abandoned: superseded by a stop, a restart or node shutdown".to_owned()
+            }
+            Self::LaunchLostWithControlPlane => {
+                "launch abandoned: lost with the control plane".to_owned()
+            }
         }
     }
 
@@ -1025,7 +1039,10 @@ impl TransitionReason {
             | Self::Starting
             | Self::Started
             | Self::BackoffPending { .. }
-            | Self::Stopped { .. } => false,
+            | Self::Stopped { .. }
+            // A launch that ended before it ran is not a start failure (ADR-0355).
+            | Self::LaunchSuperseded
+            | Self::LaunchLostWithControlPlane => false,
             // Cause-class failures.
             Self::DriverInternalError { .. }
             | Self::RestartBudgetExhausted { .. }
@@ -1047,6 +1064,19 @@ impl TransitionReason {
             | Self::VmVolumeUnavailable { .. } => true,
         }
     }
+}
+
+/// True iff this row is a launch that ended before it ran (ADR-0355):
+/// `Terminated` with [`TransitionReason::LaunchSuperseded`] or
+/// [`TransitionReason::LaunchLostWithControlPlane`]. The one place the two
+/// reasons are named as a set; no other site enumerates them.
+#[must_use]
+pub fn is_launch_abandoned(row: &AllocStatusRow) -> bool {
+    row.state == AllocState::Terminated
+        && matches!(
+            row.reason,
+            Some(TransitionReason::LaunchSuperseded | TransitionReason::LaunchLostWithControlPlane)
+        )
 }
 
 /// True iff this terminal row is a Platform Reclamation (DD-1): the platform

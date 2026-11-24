@@ -3387,6 +3387,7 @@ pub async fn run_server(
         guest_network_exec.gate(),
         vm,
         volumes,
+        Arc::clone(&boot.vm_host_state),
         config.vsock_ports.beacon(),
     )
     .await
@@ -3627,6 +3628,7 @@ async fn compose_vm_driver(
     guest_network_exec: Arc<overdrive_core::guest_network::GuestNetworkExecGate>,
     vm: VmAdapters,
     volumes: Option<Arc<dyn overdrive_core::traits::volume_backing::VolumeBacking>>,
+    vm_host_state: Arc<dyn overdrive_core::traits::vm_host_state::VmHostState>,
     beacon_port: overdrive_core::guest_transport::VsockListenPort,
 ) -> std::result::Result<
     (overdrive_worker::vm_driver::VmDriver, overdrive_core::vm::config::VsockPort),
@@ -3778,6 +3780,7 @@ async fn compose_vm_driver(
             beacon,
             guest_listener_board,
             volumes,
+            vm_host_state,
         ),
         bound,
     ))
@@ -5823,7 +5826,8 @@ mod tests {
 
         #[tokio::test]
         async fn injected_vmm_probe_failure_is_refused_with_typed_probe_variant() {
-            let sim_vmm = SimVmm::new();
+            let sim_vmm =
+                SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
             sim_vmm.inject_probe_failure(SimVmmProbeFault::LandlockLsmAbsent);
 
             // `.err()` rather than binding the raw `Result`: the `Ok`
@@ -5856,6 +5860,7 @@ mod tests {
                     volume_pool: Arc::new(overdrive_sim::SimVolumePoolProbe::absent()),
                 },
                 None,
+                Arc::new(overdrive_sim::SimVmHostState::new()),
                 VsockListenPort::KernelAssigned,
             )
             .await
@@ -5903,7 +5908,8 @@ mod tests {
         /// carrying the same typed cause `Required` refuses with.
         #[tokio::test]
         async fn optional_capability_classifies_the_probe_failure_as_not_available() {
-            let sim_vmm = SimVmm::new();
+            let sim_vmm =
+                SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
             sim_vmm.inject_probe_failure(SimVmmProbeFault::LandlockLsmAbsent);
 
             let (probe_runner, guest_listener_board) = test_probe_runner();
@@ -5931,6 +5937,7 @@ mod tests {
                     volume_pool: Arc::new(overdrive_sim::SimVolumePoolProbe::absent()),
                 },
                 None,
+                Arc::new(overdrive_sim::SimVmHostState::new()),
                 VsockListenPort::KernelAssigned,
             )
             .await
@@ -5953,7 +5960,8 @@ mod tests {
         async fn injected_cgroup_accounting_probe_failure_is_refused_with_typed_variant() {
             // No fault injected on `sim_vmm` — its `.probe()` succeeds,
             // so control reaches `cgroup_accounting.probe()`.
-            let sim_vmm = SimVmm::new();
+            let sim_vmm =
+                SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
             let sim_cgroup_accounting = SimCgroupAccounting::new();
             sim_cgroup_accounting
                 .inject_probe_substrate_error(std::io::ErrorKind::PermissionDenied);
@@ -5983,6 +5991,7 @@ mod tests {
                     volume_pool: Arc::new(overdrive_sim::SimVolumePoolProbe::absent()),
                 },
                 None,
+                Arc::new(overdrive_sim::SimVmHostState::new()),
                 VsockListenPort::KernelAssigned,
             )
             .await

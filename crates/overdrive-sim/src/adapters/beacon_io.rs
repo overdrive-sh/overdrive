@@ -596,7 +596,9 @@ mod tests {
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
     async fn bind_is_idempotent() {
-        let io = SimBeaconIo::new(SimVmm::new());
+        let io = SimBeaconIo::new(SimVmm::new(std::sync::Arc::new(
+            crate::adapters::clock::SimClock::new(),
+        )));
         assert!(!io.is_bound());
         io.bind(VsockListenPort::KernelAssigned).await.expect("first bind");
         io.bind(VsockListenPort::KernelAssigned)
@@ -608,7 +610,9 @@ mod tests {
     /// CONTRACT_SHAPE: unbounded-preservation.
     #[tokio::test]
     async fn a_scripted_bind_failure_binds_nothing_and_is_one_shot() {
-        let io = SimBeaconIo::new(SimVmm::new());
+        let io = SimBeaconIo::new(SimVmm::new(std::sync::Arc::new(
+            crate::adapters::clock::SimClock::new(),
+        )));
         io.fail_next_bind(io::ErrorKind::AddrInUse);
         let err =
             io.bind(VsockListenPort::KernelAssigned).await.expect_err("the scripted bind fails");
@@ -621,7 +625,9 @@ mod tests {
     /// CONTRACT_SHAPE: unbounded-preservation.
     #[tokio::test]
     async fn accept_before_bind_is_refused() {
-        let io = SimBeaconIo::new(SimVmm::new());
+        let io = SimBeaconIo::new(SimVmm::new(std::sync::Arc::new(
+            crate::adapters::clock::SimClock::new(),
+        )));
         let err = io.accept().await.expect_err("accept on an unbound listener");
         assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
     }
@@ -630,7 +636,9 @@ mod tests {
     #[tokio::test]
     #[should_panic(expected = "another adapter issued")]
     async fn a_handle_another_adapter_issued_is_unreachable() {
-        let io = SimBeaconIo::new(SimVmm::new());
+        let io = SimBeaconIo::new(SimVmm::new(std::sync::Arc::new(
+            crate::adapters::clock::SimClock::new(),
+        )));
         let foreign = BeaconSocket::from_raw(0);
         let _ = io.read_line(&foreign).await;
     }
@@ -638,7 +646,7 @@ mod tests {
     /// CONTRACT_SHAPE: unbounded-preservation.
     #[tokio::test]
     async fn a_guest_cannot_connect_before_the_listener_is_bound() {
-        let vmm = SimVmm::new();
+        let vmm = SimVmm::new(std::sync::Arc::new(crate::adapters::clock::SimClock::new()));
         let io = SimBeaconIo::new(vmm.clone());
         let pid = vmm.spawn_bare_process().pid;
         let err = io.queue_connection(key(1, 50_000), pid, &[]).expect_err("refused");
@@ -649,7 +657,7 @@ mod tests {
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
     async fn a_queued_ready_is_observed_then_accepted_and_read() {
-        let vmm = SimVmm::new();
+        let vmm = SimVmm::new(std::sync::Arc::new(crate::adapters::clock::SimClock::new()));
         let io = bound(&vmm).await;
         let pid = vmm.spawn_bare_process().pid;
         let k = key(1, 50_000);
@@ -679,7 +687,7 @@ mod tests {
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
     async fn a_queued_connection_with_nothing_buffered_or_no_valid_token_projects_none() {
-        let vmm = SimVmm::new();
+        let vmm = SimVmm::new(std::sync::Arc::new(crate::adapters::clock::SimClock::new()));
         let io = bound(&vmm).await;
         let pid = vmm.spawn_bare_process().pid;
         io.queue_connection(key(1, 1), pid, &[]).expect("connect");
@@ -696,7 +704,7 @@ mod tests {
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
     async fn an_accepted_connection_whose_vm_died_fails_its_next_io() {
-        let vmm = SimVmm::new();
+        let vmm = SimVmm::new(std::sync::Arc::new(crate::adapters::clock::SimClock::new()));
         let io = bound(&vmm).await;
         let control = vmm.spawn_bare_process();
         let k = key(4, 7);
@@ -719,7 +727,7 @@ mod tests {
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
     async fn a_parked_read_fails_when_its_vm_dies() {
-        let vmm = SimVmm::new();
+        let vmm = SimVmm::new(std::sync::Arc::new(crate::adapters::clock::SimClock::new()));
         let io = Arc::new(bound(&vmm).await);
         let control = vmm.spawn_bare_process();
         io.queue_connection(key(5, 7), control.pid, &[]).expect("connect");
@@ -745,7 +753,7 @@ mod tests {
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
     async fn a_queued_connection_whose_vm_died_delivers_its_buffered_ready() {
-        let vmm = SimVmm::new();
+        let vmm = SimVmm::new(std::sync::Arc::new(crate::adapters::clock::SimClock::new()));
         let io = bound(&vmm).await;
         let control = vmm.spawn_bare_process();
         let k = key(6, 9);
@@ -768,7 +776,7 @@ mod tests {
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
     async fn a_line_over_4096_bytes_is_invalid_data_and_the_connection_stays() {
-        let vmm = SimVmm::new();
+        let vmm = SimVmm::new(std::sync::Arc::new(crate::adapters::clock::SimClock::new()));
         let io = bound(&vmm).await;
         let pid = vmm.spawn_bare_process().pid;
         let k = key(7, 1);
@@ -786,7 +794,7 @@ mod tests {
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
     async fn the_guest_closing_is_end_of_stream_after_its_buffer() {
-        let vmm = SimVmm::new();
+        let vmm = SimVmm::new(std::sync::Arc::new(crate::adapters::clock::SimClock::new()));
         let io = bound(&vmm).await;
         let pid = vmm.spawn_bare_process().pid;
         let k = key(8, 1);
@@ -802,7 +810,7 @@ mod tests {
     /// CONTRACT_SHAPE: unbounded-preservation.
     #[tokio::test]
     async fn dropped_calls_lose_no_connection_and_no_line() {
-        let vmm = SimVmm::new();
+        let vmm = SimVmm::new(std::sync::Arc::new(crate::adapters::clock::SimClock::new()));
         let io = bound(&vmm).await;
         let pid = vmm.spawn_bare_process().pid;
         let k = key(9, 1);
@@ -822,7 +830,7 @@ mod tests {
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
     async fn stepped_mode_holds_every_delivery_until_granted() {
-        let vmm = SimVmm::new();
+        let vmm = SimVmm::new(std::sync::Arc::new(crate::adapters::clock::SimClock::new()));
         let io = Arc::new(SimBeaconIo::stepped(vmm.clone()));
         io.bind(VsockListenPort::KernelAssigned).await.expect("bind");
         let pid = vmm.spawn_bare_process().pid;

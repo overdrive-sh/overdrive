@@ -191,6 +191,7 @@ async fn build_driver(
         beacon.intake().await,
         guest_listener_board,
         None,
+        std::sync::Arc::new(overdrive_sim::SimVmHostState::new()),
     );
     (driver, clock, beacon)
 }
@@ -282,7 +283,7 @@ async fn no_clone_index_link_implies_no_clone_at_every_interruption_point() {
 
     // === Part A — CREATION ordering: link strictly precedes the clone. ===
     let recorder: Arc<Mutex<Option<(bool, bool)>>> = Arc::new(Mutex::new(None));
-    let sim = SimVmm::new();
+    let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
     let vmm = RecordsFsAtCreate { inner: sim.clone(), at_create: recorder.clone() };
     let (driver, clock, beacon) = build_driver(&sim, Arc::new(vmm), layout.clone()).await;
 
@@ -417,7 +418,7 @@ async fn stop_keeps_the_index_link_when_the_clone_removal_fails() {
     let staging_dir = layout.clone_staging_dir.clone();
     let master = operator_rootfs_path(&tmp);
     let master_bytes = std::fs::metadata(&master).expect("stat master").len();
-    let sim = SimVmm::new();
+    let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
     let (driver, clock, beacon) = build_driver(&sim, Arc::new(sim.clone()), layout.clone()).await;
 
     let alloc = AllocationId::new("alloc-clone-index-stuck").expect("valid alloc id");

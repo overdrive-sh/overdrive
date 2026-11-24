@@ -227,7 +227,7 @@ impl Node {
         let mut header = vec![0_u8; KERNEL_MAGIC_WINDOW];
         header[..4].copy_from_slice(b"\x7fELF");
         std::fs::write(root.join("vmlinuz"), &header).expect("stage the synthetic kernel image");
-        let vmm = SimVmm::new();
+        let vmm = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
         let recorder = Arc::new(RecordingVmm {
             inner: vmm.clone(),
             pool: pool.clone(),
@@ -312,6 +312,7 @@ impl Node {
             intake,
             board,
             volumes,
+            std::sync::Arc::new(overdrive_sim::SimVmHostState::new()),
         )
     }
 

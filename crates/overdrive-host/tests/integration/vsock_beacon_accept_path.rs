@@ -143,7 +143,7 @@ async fn the_beacon_listeners_accept_path_matches_the_sim_per_connection() {
     })
     .await;
 
-    let vmm = SimVmm::new();
+    let vmm = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
     let control = vmm.spawn_bare_process();
     let sim = SimBeaconIo::new(vmm.clone());
     sim.bind(VsockListenPort::KernelAssigned).await.expect("bind");

@@ -4,7 +4,7 @@
 //!
 //! Driving port: `VmDriver::start` (through the `Driver` trait) over `SimVmm` and a
 //! stepped `SimBeaconIo`, composed exactly as the node composes it: the pool arrives
-//! through `SimVolumePoolProbe::probe` and `VmDriver::new(.., volumes)`. Faults enter
+//! through `SimVolumePoolProbe::probe` and `VmDriver::new(.., volumes, std::sync::Arc::new(overdrive_sim::SimVmHostState::new()))`. Faults enter
 //! only at driven ports: `SimVolumeBacking` (no space, command failure, a failing `claim_state`,
 //! a stalled command, a claim held until it drains, a node reboot) and `SimClock`.
 //! Every observation is the start's result or the recording `Vmm` double's view of the
@@ -168,7 +168,7 @@ impl Node {
         let mut header = vec![0_u8; KERNEL_MAGIC_WINDOW];
         header[..4].copy_from_slice(b"\x7fELF");
         std::fs::write(root.join("vmlinuz"), &header).expect("stage the synthetic kernel image");
-        let vmm = SimVmm::new();
+        let vmm = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
         let recorder = Arc::new(RecordingVmm {
             inner: vmm.clone(),
             pool: pool.clone(),
@@ -239,6 +239,7 @@ impl Node {
             intake,
             board,
             volumes,
+            std::sync::Arc::new(overdrive_sim::SimVmHostState::new()),
         )
     }
 

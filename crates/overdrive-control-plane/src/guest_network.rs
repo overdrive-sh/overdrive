@@ -23,6 +23,8 @@ use overdrive_core::traits::{
 };
 use overdrive_netlink::NetlinkError;
 
+use crate::action_shim::reclamation::CorruptLeftoverRow;
+
 use overdrive_core::guest_transport::forwarder::{ForwarderError, ForwarderGeneration};
 
 mod dial;
@@ -449,7 +451,11 @@ struct GuestAddressPoolState {
 
 #[derive(Debug)]
 struct PoolLease {
-    plan: GuestNetworkPlan,
+    /// The leased offset (`workload_addr - node_prefix.network()`).
+    offset: u32,
+    /// `None` for a reservation made by [`GuestAddressPool::reserve_leftover`]:
+    /// a stuck VMM's lease carries no network or flow ports.
+    plan: Option<GuestNetworkPlan>,
     state: GuestAttachmentLease,
 }
 
@@ -559,8 +565,13 @@ impl GuestAddressPool {
                 );
                 return Err(GuestNetworkError::LeaseRetiring { alloc });
             }
-            Some(PoolLease { plan, state: GuestAttachmentLease::Admitted }) => {
+            Some(PoolLease { plan: Some(plan), state: GuestAttachmentLease::Admitted, .. }) => {
                 return Ok(plan.clone());
+            }
+            // An Admitted lease always carries its plan: only `reserve_leftover`
+            // makes a plan-less lease, and it makes it Retiring.
+            Some(PoolLease { plan: None, state: GuestAttachmentLease::Admitted, .. }) => {
+                unreachable!("an Admitted lease carries its plan")
             }
             None => {}
         }
@@ -611,9 +622,10 @@ impl GuestAddressPool {
         };
         state.next_fit = self.cursor_after(offset);
         state.hold_offset(offset);
-        state
-            .leases
-            .insert(alloc, PoolLease { plan: plan.clone(), state: GuestAttachmentLease::Admitted });
+        state.leases.insert(
+            alloc,
+            PoolLease { offset, plan: Some(plan.clone()), state: GuestAttachmentLease::Admitted },
+        );
         drop(state);
         Ok(plan)
     }
@@ -648,9 +660,7 @@ impl GuestAddressPool {
                 if lease.state == GuestAttachmentLease::Retiring {
                     state.retiring -= 1;
                 }
-                let offset = u32::from(lease.plan.assignment().workload_addr())
-                    - u32::from(self.node_prefix.network());
-                state.release_offset(offset);
+                state.release_offset(lease.offset);
             }
         }
     }
@@ -660,8 +670,69 @@ impl GuestAddressPool {
             .lock()
             .leases
             .iter()
-            .map(|(alloc, lease)| (alloc.clone(), lease.plan.clone()))
+            .filter_map(|(alloc, lease)| lease.plan.clone().map(|plan| (alloc.clone(), plan)))
             .collect()
+    }
+
+    /// Reserve the guest address a stuck VM left behind (ADR-0350): insert a
+    /// Retiring lease for `alloc` at the offset of `held`, the `workload_addr`
+    /// its row recorded. The lease counts toward the cap, makes
+    /// [`Self::assign`] for `alloc` return `LeaseRetiring`, is reported by
+    /// [`Self::observe`] and omitted from [`Self::snapshot`] (it carries no
+    /// plan). The CID follows from the offset exactly as `assign` derives it.
+    ///
+    /// A corrupt row never panics: an address outside the leased range, or an
+    /// offset another lease (or this allocation at another offset) already
+    /// holds, is returned as [`CorruptLeftoverRow`]. A repeat for the same
+    /// allocation and address changes nothing.
+    #[expect(
+        dead_code,
+        reason = "no caller until boot reclamation reserves a stuck VM's address (ADR-0350)"
+    )]
+    pub(crate) fn reserve_leftover(
+        &self,
+        alloc: &AllocationId,
+        held: Ipv4Addr,
+    ) -> std::result::Result<(), CorruptLeftoverRow> {
+        let Some(offset) = self.leased_offset(held) else {
+            return Err(CorruptLeftoverRow::address_outside_prefix(alloc.clone(), held));
+        };
+        let mut state = self.held.lock();
+        if let Some(existing) = state.leases.get(alloc) {
+            return if existing.offset == offset {
+                Ok(())
+            } else {
+                Err(CorruptLeftoverRow::offset_already_held(alloc.clone(), held, alloc.clone()))
+            };
+        }
+        if state.offset_is_held(offset) {
+            let Some((holder, _)) = state.leases.iter().find(|(_, lease)| lease.offset == offset)
+            else {
+                unreachable!("a held offset belongs to a lease")
+            };
+            let holder = holder.clone();
+            return Err(CorruptLeftoverRow::offset_already_held(alloc.clone(), held, holder));
+        }
+        state.hold_offset(offset);
+        state.retiring += 1;
+        state.leases.insert(
+            alloc.clone(),
+            PoolLease { offset, plan: None, state: GuestAttachmentLease::Retiring },
+        );
+        drop(state);
+        Ok(())
+    }
+
+    /// The offset of `address` when the pool leases it: inside the node
+    /// prefix, within the usable offset range, and not the gateway.
+    fn leased_offset(&self, address: Ipv4Addr) -> Option<u32> {
+        let (first, last) = (self.first_usable_offset?, self.last_usable_offset?);
+        let offset = u32::from(address).checked_sub(u32::from(self.node_prefix.network()))?;
+        let leased = self.node_prefix.contains(&address)
+            && (first..=last).contains(&offset)
+            && u32::from(self.gateway).checked_sub(u32::from(self.node_prefix.network()))
+                != Some(offset);
+        leased.then_some(offset)
     }
 
     /// Move an Admitted lease to Retiring; `true` only for that transition.

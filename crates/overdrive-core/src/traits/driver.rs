@@ -724,6 +724,16 @@ pub trait Driver: Send + Sync + 'static {
     /// Default: async no-op (drivers with no watcher or deferred reply).
     async fn release_for_exit_emission(&self, _handle: &AllocationHandle) {}
 
+    /// Stop the allocation.
+    ///
+    /// # Postconditions on Ok
+    /// - The workload has been killed and its process is reaped, **or**
+    ///   killed and not yet reaped (a VMM that ended
+    ///   `VmTermination::KilledNotReaped` after the kill was delivered). In
+    ///   the second case the process releases its resources when it is
+    ///   reaped and the allocation's host artifacts are removed by
+    ///   `VmReclamation` after that; the stop is complete and the
+    ///   allocation is stopped.
     async fn stop(&self, handle: &AllocationHandle) -> Result<(), DriverError>;
 
     /// Pre-existing observation surface — retained for tests and

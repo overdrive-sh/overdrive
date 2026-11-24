@@ -247,7 +247,9 @@ async fn failed_vm_cleanup_hands_only_stranded_vm_artifacts_to_disposal() {
         layout.clone(),
         BeaconIntake::bind(
             Arc::new(overdrive_sim::adapters::SimBeaconIo::new(
-                overdrive_sim::adapters::SimVmm::new(),
+                overdrive_sim::adapters::SimVmm::new(std::sync::Arc::new(
+                    overdrive_sim::adapters::clock::SimClock::new(),
+                )),
             )),
             overdrive_core::guest_transport::VsockListenPort::KernelAssigned,
         )
@@ -255,6 +257,7 @@ async fn failed_vm_cleanup_hands_only_stranded_vm_artifacts_to_disposal() {
         .expect("the node beacon intake binds over the sim"),
         guest_listener_board,
         None,
+        std::sync::Arc::new(overdrive_sim::SimVmHostState::new()),
     ));
     let obs = Arc::new(SimObservationStore::single_peer(node.clone(), 0));
     let owner = Arc::new(SimSharedGuestNetworkOwner::default());

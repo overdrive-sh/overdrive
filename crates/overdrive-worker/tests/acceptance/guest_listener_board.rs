@@ -137,7 +137,7 @@ impl Harness {
         let mut header = vec![0_u8; KERNEL_MAGIC_WINDOW];
         header[..4].copy_from_slice(b"\x7fELF");
         std::fs::write(root.join("vmlinuz"), &header).expect("stage the synthetic kernel image");
-        let vmm = SimVmm::new();
+        let vmm = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
         let io = Arc::new(SimBeaconIo::stepped(vmm.clone()));
         let intake = BeaconIntake::bind(
             Arc::clone(&io) as Arc<dyn BeaconIo>,
@@ -182,6 +182,7 @@ impl Harness {
             intake,
             Arc::clone(&board),
             None,
+            std::sync::Arc::new(overdrive_sim::SimVmHostState::new()),
         );
         let exits = driver.take_exit_receiver().expect("the exit receiver is taken once");
         Self { _tmp: tmp, root, vmm, io, driver, board, exits, next: 0 }

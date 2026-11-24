@@ -2194,7 +2194,7 @@ async fn host_that_cannot_confine_refuses_the_workload_and_never_starts_unconfin
     // The Vmm port, bound to a SimVmm that fails create CLOSED because the host
     // cannot supply the Landlock control (the "no --landlock below the version
     // floor" case). `.probe()` stays clean, so the node boots normally.
-    let vmm = SimVmm::new();
+    let vmm = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
     vmm.inject_persistent_confinement_unavailable(
         ConfinementControl::Landlock,
         "sim-injected: cloud-hypervisor below the --landlock version floor",

@@ -150,7 +150,7 @@ pub async fn serve_with_volume_pool(
 
 /// Boots `serve` with the fixture's VM ports (`Required` capability) and `volume_pool` as the
 /// node's volume pool probe: the two driven ports a volume composition test replaces, so the
-/// production `compose_volume_backing` and `VmDriver::new(volumes)` path runs over a simulated pool
+/// production `compose_volume_backing` and `VmDriver::new(volumes, std::sync::Arc::new(overdrive_sim::SimVmHostState::new()))` path runs over a simulated pool
 /// and VMM.
 ///
 /// # Errors

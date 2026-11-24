@@ -32,9 +32,12 @@
 //! steady-state tick reaches both executors via
 //! `action_shim::dispatch_single`.
 
+use std::net::Ipv4Addr;
+
 use overdrive_core::AllocationId;
 use overdrive_core::TransitionReason;
 use overdrive_core::eval_broker::{Evaluation, EvaluationEligibility};
+use overdrive_core::guest_transport::GUEST_NODE_PREFIX;
 use overdrive_core::id::NodeId;
 use overdrive_core::reconcilers::TargetResource;
 use overdrive_core::traits::clock::Clock;
@@ -97,6 +100,48 @@ pub enum ReclamationError {
     /// failure.
     #[error("ObservationStore operation failed: {0}")]
     Observation(#[from] ObservationStoreError),
+    /// A leftover row's recorded guest address cannot be reserved: corrupt
+    /// persisted data, not a dead VM (ADR-0350).
+    #[error("{0}")]
+    CorruptLeftoverRow(#[from] CorruptLeftoverRow),
+}
+
+/// A leftover row whose recorded guest address cannot be reserved in the
+/// guest-address pool (ADR-0350). Corrupt persisted data: the address is
+/// read from a row at boot, and a row can be damaged or written by another
+/// build. Each variant names the allocation.
+#[derive(Debug, thiserror::Error)]
+pub enum CorruptLeftoverRow {
+    /// The row's address is not an address the pool leases: outside the
+    /// guest prefix.
+    #[error(
+        "leftover row for allocation {allocation} is corrupt: address {address} is outside the guest prefix {}",
+        GUEST_NODE_PREFIX
+    )]
+    AddressOutsidePrefix { allocation: AllocationId, address: Ipv4Addr },
+    /// The row's address is an offset another allocation already holds.
+    #[error(
+        "leftover row for allocation {allocation} is corrupt: address {address} is an offset already held by allocation {held_by}"
+    )]
+    OffsetAlreadyHeld { allocation: AllocationId, address: Ipv4Addr, held_by: AllocationId },
+}
+
+impl CorruptLeftoverRow {
+    /// The row's `address` lies outside the guest prefix.
+    #[must_use]
+    pub const fn address_outside_prefix(allocation: AllocationId, address: Ipv4Addr) -> Self {
+        Self::AddressOutsidePrefix { allocation, address }
+    }
+
+    /// The row's `address` is an offset `held_by` already holds.
+    #[must_use]
+    pub const fn offset_already_held(
+        allocation: AllocationId,
+        address: Ipv4Addr,
+        held_by: AllocationId,
+    ) -> Self {
+        Self::OffsetAlreadyHeld { allocation, address, held_by }
+    }
 }
 
 /// Canonical `ReconcilerName`s for the three evaluations

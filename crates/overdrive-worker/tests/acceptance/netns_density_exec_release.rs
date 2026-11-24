@@ -100,7 +100,7 @@ async fn driver(
     wiring: &GuestNetworkExecWiring,
 ) -> (VmDriver, BeaconHarness, SimVmm) {
     let layout = layout(tmp);
-    let vmm = SimVmm::new();
+    let vmm = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
     let beacon = BeaconHarness::new(&vmm);
     let guest_listener_board = Arc::new(overdrive_worker::GuestListenerBoard::new());
     let driver = VmDriver::new(
@@ -114,6 +114,7 @@ async fn driver(
         beacon.intake().await,
         guest_listener_board,
         None,
+        std::sync::Arc::new(overdrive_sim::SimVmHostState::new()),
     );
     (driver, beacon, vmm)
 }

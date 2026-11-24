@@ -298,7 +298,9 @@ async fn a_deployed_volume_workload_launches_through_the_composed_volume_pool() 
         args,
         super::serve_fixture::VmPorts {
             vmm: Arc::new(VolumeRecordingVmm {
-                inner: SimVmm::new(),
+                inner: SimVmm::new(std::sync::Arc::new(
+                    overdrive_sim::adapters::clock::SimClock::new(),
+                )),
                 attached: Arc::clone(&attached),
             }),
             beacon: Arc::new(overdrive_host::VsockBeaconIo::new()),

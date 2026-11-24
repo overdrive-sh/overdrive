@@ -160,8 +160,9 @@ async fn guest(
     .await
     .expect("the allocation's VMM is created");
     let lease = pool.lease_observation().leases.get(alloc).cloned().expect("the lease is held");
-    let key = BeaconConnKey { peer_cid: lease.cid, peer_port: VsockPort::new(49_152) };
-    let ready = format!("READY pid=1 port=8080 launch={}", lease.launch);
+    let key = BeaconConnKey { peer_cid: lease.cid(), peer_port: VsockPort::new(49_152) };
+    let ready =
+        format!("READY pid=1 port=8080 launch={}", lease.launch().expect("the lease was launched"));
     io.queue_connection(key, pid, &[ready.as_str()]).expect("the beacon listener is bound");
     tokio::time::timeout(Duration::from_secs(10), async {
         loop {
@@ -218,7 +219,7 @@ async fn drive(seed: u64) {
     let clock = Arc::new(SimClock::new());
     let obs = Arc::new(SimObservationStore::single_peer(node.clone(), seed));
     let vmm = Arc::new(RecordedVmm {
-        inner: SimVmm::new(),
+        inner: SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new())),
         controls: Mutex::new(vec![]),
         scopes: Mutex::new(vec![]),
         host: SimVmHostState::new(),
@@ -266,6 +267,7 @@ async fn drive(seed: u64) {
         intake,
         guest_listener_board,
         None,
+        std::sync::Arc::new(overdrive_sim::SimVmHostState::new()),
     ));
     let pool = Arc::new(GuestAddressPool::new(
         "100.95.0.0/16".parse().expect("static guest prefix"),

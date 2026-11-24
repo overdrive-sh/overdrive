@@ -40,15 +40,16 @@
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::time::Duration;
 
 use async_trait::async_trait;
 use overdrive_core::guest_transport::GuestCid;
+use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::driver::ConfinementControl;
 use overdrive_core::traits::vmm::{
-    Result, VmControl, VmExitWatch, VmProcess, VmTermination, Vmm, VmmDiagnostics, VmmError,
-    VmmExit, VmmProbeError,
+    Result, VMM_REAP_BOUND, VmControl, VmExitWatch, VmProcess, VmTermination, Vmm, VmmDiagnostics,
+    VmmError, VmmExit, VmmProbeError,
 };
 use overdrive_core::vm::config::VmConfig;
 use parking_lot::Mutex;
@@ -75,6 +76,14 @@ struct SimProcessEntry {
     /// double's established default (an un-beaconed process settles as
     /// `Killed`, signal 9).
     scripted_exit: Option<ScriptedEnding>,
+    /// This process will be killed by `terminate` but never reaped: the
+    /// SIGKILL is delivered, the exit watch never fires and the device stays
+    /// held until [`SimVmm::exit_process`] ends it. Armed by
+    /// [`SimVmm::inject_unreapable_process`].
+    unreapable: bool,
+    /// The process has been killed and is not reaped: `terminated` is set,
+    /// `device` is still held and `exit_tx` is still unfired.
+    unreaped: bool,
 }
 
 /// One injected process ending: `(exit_code, signal)`, mirroring
@@ -153,7 +162,7 @@ pub enum SimVmmProbeFault {
 ///
 /// ```
 /// use overdrive_sim::SimVmm;
-/// let sim = SimVmm::new();
+/// let sim = SimVmm::new(std::sync::Arc::new(crate::adapters::clock::SimClock::new()));
 /// ```
 ///
 /// # Clone semantics
@@ -163,6 +172,8 @@ pub enum SimVmmProbeFault {
 /// harness and another to the system under test.
 #[derive(Clone)]
 pub struct SimVmm {
+    /// The injected clock the reap bound is waited on (ADR-0348).
+    clock: Arc<dyn Clock>,
     state: Arc<Mutex<State>>,
     next_pid: Arc<AtomicU32>,
     /// The armed [`Vmm::create`] refusal, if any — see [`CreateFault`]
@@ -185,27 +196,29 @@ pub struct SimVmm {
     /// `create`, mirroring [`Self::inject_create_failure`]'s one-shot
     /// style.
     scripted_exit: Arc<Mutex<Option<ScriptedEnding>>>,
-}
-
-impl Default for SimVmm {
-    fn default() -> Self {
-        Self::new()
-    }
+    /// Armed by [`Self::inject_unreapable_process`]; consumed by the NEXT
+    /// `create`.
+    unreapable_next: Arc<AtomicBool>,
 }
 
 impl SimVmm {
     /// Construct an empty `SimVmm` — no live processes, no pending fault
     /// injection. Pids are minted from a base far above real-world PIDs
     /// so a test can never confuse a sim pid for a real one.
+    ///
+    /// `clock` is required: seeded simulation drives the reap bound
+    /// ([`overdrive_core::traits::vmm::VMM_REAP_BOUND`]) on it.
     #[must_use]
-    pub fn new() -> Self {
+    pub fn new(clock: Arc<dyn Clock>) -> Self {
         Self {
+            clock,
             state: Arc::new(Mutex::new(State::default())),
             next_pid: Arc::new(AtomicU32::new(1_000_000)),
             create_fault: Arc::new(Mutex::new(None)),
             probe_fault: Arc::new(Mutex::new(None)),
             scripted_console: Arc::new(Mutex::new(None)),
             scripted_exit: Arc::new(Mutex::new(None)),
+            unreapable_next: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -225,6 +238,22 @@ impl SimVmm {
     /// double's default `Killed`-with-signal-9 settle.
     pub fn inject_exit(&self, exit_code: Option<i32>, signal: Option<u8>) {
         *self.scripted_exit.lock() = Some((exit_code, signal));
+    }
+
+    /// **TEST-HOOK-ONLY.** The NEXT created process cannot be reaped:
+    /// [`Vmm::terminate`] on it marks it killed, does not fire its exit
+    /// sender, waits [`VMM_REAP_BOUND`] on the injected clock and returns
+    /// [`VmTermination::KilledNotReaped`]. While it is unreaped
+    /// [`Self::vsock_device_holders`] keeps reporting its CID. One-shot,
+    /// like [`Self::inject_exit`].
+    pub fn inject_unreapable_process(&self) {
+        self.unreapable_next.store(true, Ordering::SeqCst);
+    }
+
+    /// **TEST-HOOK-ONLY.** `true` iff `pid` was killed and is not yet reaped.
+    #[must_use]
+    pub fn is_unreaped(&self, pid: u32) -> bool {
+        self.state.lock().processes.get(&pid).is_some_and(|entry| entry.unreaped)
     }
 
     /// Arm a one-shot failure for the NEXT [`Vmm::create`] call — fires
@@ -355,6 +384,8 @@ impl SimVmm {
                 exit_tx: None,
                 diagnostics,
                 scripted_exit: None,
+                unreapable: false,
+                unreaped: false,
             },
         );
         VmControl { pid, api_socket: std::path::PathBuf::from(format!("/sim/vm-{pid}/api.sock")) }
@@ -375,7 +406,7 @@ impl SimVmm {
             .lock()
             .processes
             .iter()
-            .filter(|(_, entry)| !entry.terminated)
+            .filter(|(_, entry)| !entry.terminated || entry.unreaped)
             .filter_map(|(pid, entry)| entry.device.map(|cid| (cid, *pid)))
             .collect()
     }
@@ -394,8 +425,9 @@ impl SimVmm {
     }
 
     /// **TEST-HOOK-ONLY.** Process `pid` exits by itself with `exit_code` /
-    /// `signal` (a VMM crash). Its device is released. `false` when `pid` is
-    /// not a live process.
+    /// `signal` (a VMM crash). Its device is released. On an unreaped process
+    /// it is the late reap: the unreaped state clears and the exit watch
+    /// fires once. `false` when `pid` is neither live nor unreaped.
     pub fn exit_process(&self, pid: u32, exit_code: Option<i32>, signal: Option<u8>) -> bool {
         self.end_process(pid, (exit_code, signal))
     }
@@ -430,10 +462,11 @@ impl SimVmm {
             let Some(entry) = state.processes.get_mut(&pid) else {
                 return false;
             };
-            if entry.terminated {
+            if entry.terminated && !entry.unreaped {
                 return false;
             }
             entry.terminated = true;
+            entry.unreaped = false;
             entry.device = None;
             let taken = (entry.exit_tx.take(), entry.diagnostics.clone());
             drop(state);
@@ -532,6 +565,7 @@ impl Vmm for SimVmm {
             writer.append(&scripted);
         }
         let scripted_exit = self.scripted_exit.lock().take();
+        let unreapable = self.unreapable_next.swap(false, Ordering::SeqCst);
 
         // CID-NOCLAIM: the VMM opens its CID's device itself. A device another
         // live process holds refuses the open, and the VMM exits before any
@@ -541,7 +575,7 @@ impl Vmm for SimVmm {
             let held = state
                 .processes
                 .values()
-                .any(|entry| !entry.terminated && entry.device == Some(cid));
+                .any(|entry| (!entry.terminated || entry.unreaped) && entry.device == Some(cid));
             state.processes.insert(
                 pid,
                 SimProcessEntry {
@@ -550,6 +584,8 @@ impl Vmm for SimVmm {
                     exit_tx: Some(exit_tx),
                     diagnostics: diagnostics.clone(),
                     scripted_exit,
+                    unreapable,
+                    unreaped: false,
                 },
             );
             drop(state);
@@ -570,7 +606,8 @@ impl Vmm for SimVmm {
     async fn terminate(&self, control: &VmControl, _grace: Duration) -> Result<VmTermination> {
         // Scoped tightly: the lock is held only long enough to flip
         // `terminated` and take the (already-live) exit sender back out
-        // -- the actual `send` happens after the guard drops.
+        // -- the actual `send` (and any reap-bound wait) happens after the
+        // guard drops.
         let taken = {
             let mut state = self.state.lock();
             let Some(entry) = state.processes.get_mut(&control.pid) else {
@@ -578,18 +615,31 @@ impl Vmm for SimVmm {
                 // a second adapter instance). Idempotent Killed.
                 return Ok(VmTermination::Killed);
             };
-            if entry.terminated {
+            let outcome = if entry.unreaped {
+                // Killed, never reaped: another bound wait, same outcome.
+                None
+            } else if entry.terminated {
                 // §D6: "already gone" -- ALWAYS Killed, idempotently.
                 return Ok(VmTermination::Killed);
-            }
-            entry.terminated = true;
-            // The simulated VMM exits: its device is released with it.
-            entry.device = None;
-            let taken = (entry.exit_tx.take(), entry.diagnostics.clone(), entry.scripted_exit);
+            } else if entry.unreapable {
+                // SIGKILL delivered; the process is never reaped: the exit
+                // sender stays unfired and the device stays held.
+                entry.terminated = true;
+                entry.unreaped = true;
+                None
+            } else {
+                entry.terminated = true;
+                // The simulated VMM exits: its device is released with it.
+                entry.device = None;
+                Some((entry.exit_tx.take(), entry.diagnostics.clone(), entry.scripted_exit))
+            };
             drop(state);
-            taken
+            outcome
         };
-        let (exit_tx, diagnostics, scripted_exit) = taken;
+        let Some((exit_tx, diagnostics, scripted_exit)) = taken else {
+            self.clock.sleep(VMM_REAP_BOUND).await;
+            return Ok(VmTermination::KilledNotReaped);
+        };
         // Absent an injected script, nothing in this double ever exits "on
         // its own" within grace (see module doc) -- every live process
         // settles as Killed, the same outcome a real un-beaconed
@@ -658,7 +708,7 @@ mod tests {
     #[tokio::test]
     async fn a_launch_holds_its_cid_device_until_terminate() {
         let root = tempfile::tempdir().expect("tempdir");
-        let sim = SimVmm::new();
+        let sim = SimVmm::new(std::sync::Arc::new(crate::adapters::clock::SimClock::new()));
         assert!(sim.vsock_device_holders().is_empty(), "precondition: no device held");
 
         let process = sim.create(&config(root.path(), "dev-a"), cid(2)).await.expect("create");
@@ -679,7 +729,7 @@ mod tests {
     #[tokio::test]
     async fn a_launch_on_a_held_cid_exits_before_ready_and_the_holder_is_unaffected() {
         let root = tempfile::tempdir().expect("tempdir");
-        let sim = SimVmm::new();
+        let sim = SimVmm::new(std::sync::Arc::new(crate::adapters::clock::SimClock::new()));
         let holder = sim.create(&config(root.path(), "dev-holder"), cid(3)).await.expect("create");
 
         let mut clash = sim.create(&config(root.path(), "dev-clash"), cid(3)).await.expect("spawn");
@@ -703,7 +753,7 @@ mod tests {
     #[tokio::test]
     async fn a_guest_reset_ends_the_vmm_and_frees_its_cid() {
         let root = tempfile::tempdir().expect("tempdir");
-        let sim = SimVmm::new();
+        let sim = SimVmm::new(std::sync::Arc::new(crate::adapters::clock::SimClock::new()));
         let mut first =
             sim.create(&config(root.path(), "dev-reset"), cid(4)).await.expect("create");
 
@@ -723,7 +773,7 @@ mod tests {
     #[tokio::test]
     async fn an_orphan_keeps_its_device_until_killed() {
         let root = tempfile::tempdir().expect("tempdir");
-        let sim = SimVmm::new();
+        let sim = SimVmm::new(std::sync::Arc::new(crate::adapters::clock::SimClock::new()));
         let pid = {
             let process =
                 sim.create(&config(root.path(), "dev-orphan"), cid(5)).await.expect("create");

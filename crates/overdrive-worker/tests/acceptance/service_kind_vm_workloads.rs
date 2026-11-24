@@ -155,7 +155,7 @@ async fn shared_vm_driver() -> (VmDriver, Arc<ProbeRunner>) {
     };
     let wiring = overdrive_core::guest_network::GuestNetworkExecWiring::new(clock.clone());
     assert!(wiring.supervisor().open_after_boot());
-    let sim = SimVmm::new();
+    let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
     let beacon = super::support::BeaconHarness::new(&sim);
     let intake = beacon.intake().await;
     let driver = VmDriver::new(
@@ -169,6 +169,7 @@ async fn shared_vm_driver() -> (VmDriver, Arc<ProbeRunner>) {
         intake,
         guest_listener_board,
         None,
+        std::sync::Arc::new(overdrive_sim::SimVmHostState::new()),
     );
     (driver, probe_runner)
 }

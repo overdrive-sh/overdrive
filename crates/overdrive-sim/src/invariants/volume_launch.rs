@@ -15,7 +15,7 @@
 //!
 //! The composition is the production one at the driver boundary: `VmDriver::start` over `SimVmm`, a
 //! stepped `SimBeaconIo`, `SimClock`, and the pool reaching the driver through
-//! `SimVolumePoolProbe::probe` and `VmDriver::new(.., volumes)`. Faults enter only at driven ports:
+//! `SimVolumePoolProbe::probe` and `VmDriver::new(.., volumes, std::sync::Arc::new(crate::SimVmHostState::new()))`. Faults enter only at driven ports:
 //! `SimVolumeBacking` (a claim held until a drain, a command failure, a crash between the create
 //! and the activation, a node reboot) and `SimClock`. The only observations are each start's result
 //! and the recording `Vmm` double's view of the `VmConfig` it was asked to create; no row, claim or
@@ -189,7 +189,7 @@ impl Rig {
         let mut header = vec![0_u8; KERNEL_MAGIC_WINDOW];
         header[..4].copy_from_slice(b"\x7fELF");
         std::fs::write(root.join("vmlinuz"), &header).map_err(|e| format!("stage kernel: {e}"))?;
-        let vmm = SimVmm::new();
+        let vmm = SimVmm::new(std::sync::Arc::new(crate::adapters::clock::SimClock::new()));
         let pool = SimVolumeBacking::with_capacity(volume_size_gib(1024));
         let recorder = Arc::new(RecordingVmm {
             inner: vmm.clone(),
@@ -272,6 +272,7 @@ impl Rig {
             intake,
             board,
             volumes,
+            std::sync::Arc::new(crate::SimVmHostState::new()),
         ))
     }
 

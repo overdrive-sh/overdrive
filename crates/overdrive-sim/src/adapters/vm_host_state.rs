@@ -45,6 +45,17 @@ fn alloc_from_scope(scope: &CgroupPath) -> Option<AllocationId> {
         .and_then(|s| AllocationId::from_str(s).ok())
 }
 
+/// A scope hold predicate: while it returns `true`, `kill_scope` on the scope
+/// is refused with `ResourceBusy`. Wrapped so `Inner` keeps its `Debug`.
+#[derive(Clone)]
+struct ScopeHold(Arc<dyn Fn() -> bool + Send + Sync>);
+
+impl std::fmt::Debug for ScopeHold {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("ScopeHold(..)")
+    }
+}
+
 #[derive(Debug, Default)]
 struct Inner {
     scopes: BTreeMap<AllocationId, ScopeFacts>,
@@ -57,6 +68,11 @@ struct Inner {
     /// FIFO of failures for [`VmHostState::discard_artifacts`]; see
     /// [`SimVmHostState::script_discard_artifacts_failure`].
     discard_artifacts_failures: VecDeque<io::ErrorKind>,
+    /// FIFO of failures for [`VmHostState::observe`]; see
+    /// [`SimVmHostState::script_observe_failure`].
+    observe_failures: VecDeque<io::ErrorKind>,
+    /// Per-allocation scope holds; see [`SimVmHostState::hold_scope_while`].
+    scope_holds: BTreeMap<AllocationId, ScopeHold>,
 }
 
 /// **TEST-HOOK-ONLY** interleaving seam for [`VmHostState::observe`]
@@ -178,6 +194,41 @@ impl SimVmHostState {
         self.inner.lock().discard_artifacts_failures.push_back(kind);
     }
 
+    /// **TEST-HOOK-ONLY**. Queue a failure for the next
+    /// [`VmHostState::observe`] call. FIFO: each call pops the front entry
+    /// and returns it as `Err(..)`; once the queue is empty calls proceed
+    /// normally.
+    pub fn script_observe_failure(&self, kind: io::ErrorKind) {
+        self.inner.lock().observe_failures.push_back(kind);
+    }
+
+    /// **TEST-HOOK-ONLY**. While `held()` is true, `kill_scope` on `alloc`'s
+    /// scope returns `ResourceBusy` at once, changes nothing and does not pop
+    /// the [`Self::script_kill_scope_failure`] queue. `held()` is read on
+    /// every call; the hold never removes the scope.
+    ///
+    /// # Panics
+    ///
+    /// If `alloc`'s scope was not seeded with [`Self::set_scope`].
+    pub fn hold_scope_while(
+        &self,
+        alloc: &AllocationId,
+        held: impl Fn() -> bool + Send + Sync + 'static,
+    ) {
+        let mut inner = self.inner.lock();
+        assert!(
+            inner.scopes.contains_key(alloc),
+            "hold_scope_while: scope for {alloc} was not seeded with set_scope"
+        );
+        inner.scope_holds.insert(alloc.clone(), ScopeHold(Arc::new(held)));
+    }
+
+    /// **TEST-HOOK-ONLY**. Drops the hold [`Self::hold_scope_while`] set on
+    /// `alloc`'s scope. A no-op when none is set.
+    pub fn release_scope_hold(&self, alloc: &AllocationId) {
+        self.inner.lock().scope_holds.remove(alloc);
+    }
+
     /// **TEST-HOOK-ONLY**. Whether `alloc`'s cgroup scope is still
     /// present in this sim's in-memory state.
     #[must_use]
@@ -223,7 +274,10 @@ impl VmHostState for SimVmHostState {
             barrier.entered.notify_one();
             barrier.release.notified().await;
         }
-        let inner = self.inner.lock();
+        let mut inner = self.inner.lock();
+        if let Some(kind) = inner.observe_failures.pop_front() {
+            return Err(io::Error::from(kind));
+        }
         Ok(VmHostObservation {
             scopes: inner.scopes.clone(),
             run_dirs: inner.run_dirs.clone(),
@@ -232,6 +286,14 @@ impl VmHostState for SimVmHostState {
     }
 
     async fn kill_scope(&self, scope: &CgroupPath) -> std::io::Result<()> {
+        // A held scope refuses before anything else: nothing changes and the
+        // scripted-failure queue is not consumed. The predicate runs outside
+        // the lock.
+        let hold = alloc_from_scope(scope)
+            .and_then(|alloc| self.inner.lock().scope_holds.get(&alloc).cloned());
+        if hold.is_some_and(|hold| (hold.0)()) {
+            return Err(io::Error::from(io::ErrorKind::ResourceBusy));
+        }
         let scripted = self.inner.lock().kill_scope_failures.pop_front();
         if let Some(kind) = scripted {
             return Err(io::Error::from(kind));

@@ -100,7 +100,9 @@ async fn process() -> Process {
     ));
     let wiring = overdrive_core::guest_network::GuestNetworkExecWiring::new(clock.clone());
     assert!(wiring.supervisor().open_after_boot());
-    let vmm = overdrive_sim::SimVmm::new();
+    let vmm = overdrive_sim::SimVmm::new(std::sync::Arc::new(
+        overdrive_sim::adapters::clock::SimClock::new(),
+    ));
     let beacon = BeaconIntake::bind(
         Arc::new(overdrive_sim::adapters::beacon_io::SimBeaconIo::new(vmm.clone())),
         overdrive_core::guest_transport::VsockListenPort::KernelAssigned,
@@ -128,6 +130,7 @@ async fn process() -> Process {
         beacon,
         guest_listener_board,
         None,
+        std::sync::Arc::new(overdrive_sim::SimVmHostState::new()),
     );
     Process { driver, runner, clock, obs, tcp }
 }

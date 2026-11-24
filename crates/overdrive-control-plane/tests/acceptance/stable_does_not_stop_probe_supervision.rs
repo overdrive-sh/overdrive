@@ -188,7 +188,9 @@ async fn harness() -> Harness {
 
     let wiring = overdrive_core::guest_network::GuestNetworkExecWiring::new(sim_clock.clone());
     assert!(wiring.supervisor().open_after_boot());
-    let sim_vmm = overdrive_sim::SimVmm::new();
+    let sim_vmm = overdrive_sim::SimVmm::new(std::sync::Arc::new(
+        overdrive_sim::adapters::clock::SimClock::new(),
+    ));
     let beacon = overdrive_worker::BeaconIntake::bind(
         Arc::new(overdrive_sim::adapters::beacon_io::SimBeaconIo::new(sim_vmm.clone())),
         overdrive_core::guest_transport::VsockListenPort::KernelAssigned,
@@ -216,6 +218,7 @@ async fn harness() -> Harness {
         beacon,
         Arc::new(overdrive_worker::GuestListenerBoard::new()),
         None,
+        std::sync::Arc::new(overdrive_sim::SimVmHostState::new()),
     ));
     let mut ports = VmDispatchPorts::sim(Arc::clone(&driver));
     ports.obs = Arc::clone(&obs);

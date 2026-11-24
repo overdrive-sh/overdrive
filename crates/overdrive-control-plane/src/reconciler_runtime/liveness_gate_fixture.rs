@@ -311,7 +311,7 @@ impl LivenessWorld {
             Arc::clone(&clock) as Arc<dyn Clock>
         );
         assert!(wiring.supervisor().open_after_boot());
-        let vmm = SimVmm::new();
+        let vmm = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
         let beacon = Arc::new(SimBeaconIo::new(vmm.clone()));
         let beacon_intake = BeaconIntake::bind(
             Arc::clone(&beacon) as Arc<dyn overdrive_core::vm::beacon::BeaconIo>,
@@ -341,6 +341,7 @@ impl LivenessWorld {
             beacon_intake,
             Arc::clone(&board),
             None,
+            std::sync::Arc::new(overdrive_sim::SimVmHostState::new()),
         ));
 
         let allocator = crate::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
@@ -569,9 +570,11 @@ impl LivenessWorld {
             let leases = self.state.guest_pool.lease_observation().leases;
             let fresh = leases.iter().find(|(alloc, _)| !self.placed.contains(alloc));
             if let Some((alloc, lease)) = fresh
-                && let Some(pid) = self.vmm.vsock_device_holders().get(&lease.cid).copied()
+                && let Some(pid) = self.vmm.vsock_device_holders().get(&lease.cid()).copied()
             {
-                break (alloc.clone(), lease.cid, lease.launch, pid);
+                let launch =
+                    lease.launch().expect("a placed instance's lease is launched, never Reserved");
+                break (alloc.clone(), lease.cid(), launch, pid);
             }
             assert!(
                 !tick.is_finished(),

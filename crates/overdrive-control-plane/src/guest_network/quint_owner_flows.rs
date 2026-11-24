@@ -116,9 +116,9 @@ use super::owner_acceptance::support::{Composition, Lease, paused_runtime, vip_r
 use super::quint_itf::{self, ItfError, Qualified};
 use super::{
     CidPhase, DialPhase, ForwardingActivation, GuestAddressPool, GuestAdmission, GuestConnKey,
-    GuestFlowPhase, GuestNetworkError, GuestNetworkOperation, GuestNetworkProvisioner,
-    GuestOwnerObservation, HostSharedGuestNetworkOwner, QuiescenceHold, RequestRead,
-    SharedGuestNetworkOwner,
+    GuestFlowPhase, GuestLeaseView, GuestNetworkError, GuestNetworkOperation,
+    GuestNetworkProvisioner, GuestOwnerObservation, HostSharedGuestNetworkOwner, QuiescenceHold,
+    RequestRead, SharedGuestNetworkOwner,
 };
 
 use overdrive_testing::placement;
@@ -304,6 +304,14 @@ enum DriverError {
 
 fn not_playable(action: &'static str, why: impl Into<String>) -> anyhow::Error {
     DriverError::NotPlayable { action, why: why.into() }.into()
+}
+
+/// The launch token of a pool lease this projection models: it models only
+/// launched leases, so a `Reserved` view is rejected rather than omitted.
+fn launched_view_token(view: &GuestLeaseView) -> Result<LaunchToken> {
+    view.launch().ok_or_else(|| {
+        anyhow::anyhow!("the pool reports a Reserved lease where only launched leases are modelled")
+    })
 }
 
 pub(super) struct OwnerFlowsDriver {
@@ -1038,24 +1046,26 @@ impl OwnerFlowsDriver {
                         self.validate_retiring_cleanup_tombstone(lease, &observed)?;
                     }
                 }
-                Some(view) if view.state == GuestAttachmentLease::Retiring => {
-                    if view.cid != lease.cid || view.launch != lease.launch {
+                Some(view) if view.state() == GuestAttachmentLease::Retiring => {
+                    let launch = launched_view_token(view)?;
+                    if view.cid() != lease.cid || launch != lease.launch {
                         anyhow::bail!("the Retiring pool lease differs from the driver's lease");
                     }
                     state.alloc = "Retiring".to_owned();
-                    state.lease_gen = Some(self.relabel_launch(view.launch)?);
-                    if observed.cids.contains_key(&view.cid) {
+                    state.lease_gen = Some(self.relabel_launch(launch)?);
+                    if observed.cids.contains_key(&view.cid()) {
                         self.validate_retiring_cleanup_tombstone(lease, &observed)?;
                     }
                 }
                 Some(view) => {
-                    if view.cid != lease.cid || view.launch != lease.launch {
+                    let launch = launched_view_token(view)?;
+                    if view.cid() != lease.cid || launch != lease.launch {
                         anyhow::bail!("the Admitted pool lease differs from the driver's lease");
                     }
-                    let cid = observed.cids.get(&view.cid).ok_or_else(|| {
+                    let cid = observed.cids.get(&view.cid()).ok_or_else(|| {
                         anyhow::anyhow!("an Admitted lease the owner does not report")
                     })?;
-                    if cid.alloc != lease.alloc || cid.launch != view.launch {
+                    if cid.alloc != lease.alloc || cid.launch != launch {
                         anyhow::bail!("the Admitted lease and owner row identities differ");
                     }
                     state.alloc = match cid.phase {
@@ -1066,7 +1076,7 @@ impl OwnerFlowsDriver {
                         }
                     }
                     .to_owned();
-                    state.lease_gen = Some(self.relabel_launch(view.launch)?);
+                    state.lease_gen = Some(self.relabel_launch(launch)?);
                     if let Some(holder) = cid.session {
                         state.claim = self.relabel_session(holder)?;
                     }

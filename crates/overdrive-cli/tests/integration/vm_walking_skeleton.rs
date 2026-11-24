@@ -1953,7 +1953,7 @@ async fn spawn_vm_server_with_vmm_override(
 #[tokio::test]
 #[serial(cgroup)]
 async fn vm_capability_flag_probe_failure_injected_via_vmm_override_refuses_boot() {
-    let sim_vmm = SimVmm::new();
+    let sim_vmm = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
     sim_vmm.inject_probe_failure(SimVmmProbeFault::LandlockLsmAbsent);
 
     let beacon = std::sync::Arc::new(overdrive_sim::adapters::SimBeaconIo::new(sim_vmm.clone()));

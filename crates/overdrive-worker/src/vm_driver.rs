@@ -1202,6 +1202,10 @@ pub struct VmDriver {
     guest_listener_board: Arc<crate::GuestListenerBoard>,
     /// The node's probed volume pool; `None` when no pool is composed (GH #348).
     volumes: Option<Arc<dyn overdrive_core::traits::volume_backing::VolumeBacking>>,
+    /// The node's host-state port: the one remover of a VM's cgroup scope
+    /// (`kill_scope`) the driver's artifact cleanup calls (ADR-0351).
+    #[expect(dead_code, reason = "no reader until the scope has one remover (ADR-0351)")]
+    host_state: Arc<dyn overdrive_core::traits::vm_host_state::VmHostState>,
     live: Arc<LiveMap>,
     exit_tx: mpsc::Sender<ExitEvent>,
     exit_rx: Arc<Mutex<Option<mpsc::Receiver<ExitEvent>>>>,
@@ -1232,6 +1236,7 @@ impl VmDriver {
         beacon: BeaconIntake,
         guest_listener_board: Arc<crate::GuestListenerBoard>,
         volumes: Option<Arc<dyn overdrive_core::traits::volume_backing::VolumeBacking>>,
+        host_state: Arc<dyn overdrive_core::traits::vm_host_state::VmHostState>,
     ) -> Self {
         let (exit_tx, exit_rx) = mpsc::channel(EXIT_CHANNEL_CAPACITY);
         let cgroup_manager = CgroupManager::new(layout.cgroup_root.clone(), fs);
@@ -1248,6 +1253,7 @@ impl VmDriver {
             beacon_state,
             guest_listener_board,
             volumes,
+            host_state,
             live: Arc::new(Mutex::new(BTreeMap::new())),
             exit_tx,
             exit_rx: Arc::new(Mutex::new(Some(exit_rx))),
@@ -2815,7 +2821,9 @@ mod tests {
     /// The node beacon intake over a simulated beacon listener (DG-4).
     async fn test_beacon_intake() -> BeaconIntake {
         BeaconIntake::bind(
-            Arc::new(SimBeaconIo::new(SimVmm::new())),
+            Arc::new(SimBeaconIo::new(SimVmm::new(std::sync::Arc::new(
+                overdrive_sim::adapters::clock::SimClock::new(),
+            )))),
             VsockListenPort::KernelAssigned,
         )
         .await
@@ -2994,6 +3002,7 @@ mod tests {
             test_beacon_intake().await,
             guest_listener_board,
             None,
+            std::sync::Arc::new(overdrive_sim::SimVmHostState::new()),
         )
         .with_guest_console_reader(reader.clone());
         (driver, spec, reader, terminate_calls, rootfs, run_dir)
@@ -3086,6 +3095,7 @@ mod tests {
             test_beacon_intake().await,
             guest_listener_board,
             None,
+            std::sync::Arc::new(overdrive_sim::SimVmHostState::new()),
         );
         let alloc = AllocationId::new("alloc-cleanup-partitions").expect("valid allocation");
         driver.live.lock().insert(alloc.clone(), VmSupervision::Starting);
@@ -3279,7 +3289,7 @@ mod tests {
     async fn test_beacon_writer()
     -> (Arc<BeaconWriter>, Weak<BeaconWriter>, mpsc::Receiver<std::io::Result<Option<String>>>)
     {
-        let vmm = SimVmm::new();
+        let vmm = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
         let io = Arc::new(SimBeaconIo::new(vmm.clone()));
         overdrive_core::vm::beacon::BeaconIo::bind(&*io, VsockListenPort::KernelAssigned)
             .await

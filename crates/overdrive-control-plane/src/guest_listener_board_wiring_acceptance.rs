@@ -150,7 +150,7 @@ impl Node {
             ..ServerConfig::new()
         };
 
-        let vmm = SimVmm::new();
+        let vmm = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
         let beacon = Arc::new(SimBeaconIo::new(vmm.clone()));
         let flow_io = SimGuestFlowIo::new(0x0503_0010);
         flow_io.auto_release(SimEffectKind::ProbeForwarder);

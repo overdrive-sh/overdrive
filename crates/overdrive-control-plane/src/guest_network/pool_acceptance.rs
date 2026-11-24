@@ -117,8 +117,12 @@ fn assert_plan_identity(prefix: Ipv4Net, plan: &GuestNetworkPlan, view: &GuestLe
     let offset = offset_of(prefix, assignment.workload_addr());
     assert_eq!(assignment.cid().get(), GUEST_CID_BASE + offset, "CID = GUEST_CID_BASE + offset");
     assert_eq!(assignment.gateway(), GATEWAY, "the node's gateway");
-    assert_eq!(view.cid, assignment.cid(), "the observation names the plan's CID");
-    assert_eq!(view.launch, assignment.launch(), "the observation names the plan's launch token");
+    assert_eq!(view.cid(), assignment.cid(), "the observation names the plan's CID");
+    assert_eq!(
+        view.launch(),
+        Some(assignment.launch()),
+        "the observation names the plan's launch token"
+    );
 }
 
 /// One generated pool operation.
@@ -284,7 +288,11 @@ fn observed_leases(
     observation
         .leases
         .iter()
-        .map(|(alloc, view)| (alloc.clone(), (view.cid, view.state, view.launch)))
+        .map(|(alloc, view)| {
+            let launch =
+                view.launch().expect("a pool lease assign made is launched, never Reserved");
+            (alloc.clone(), (view.cid(), view.state(), launch))
+        })
         .collect()
 }
 
@@ -307,7 +315,7 @@ proptest! {
             apply_and_compare(prefix, &pool, &mut model, op)?;
             let observation = pool.lease_observation();
             prop_assert_eq!(observed_leases(&observation), model_leases(&model));
-            let cids = observation.leases.values().map(|view| view.cid).collect::<BTreeSet<_>>();
+            let cids = observation.leases.values().map(GuestLeaseView::cid).collect::<BTreeSet<_>>();
             prop_assert_eq!(cids.len(), observation.leases.len(), "CidUnique");
         }
     }
@@ -388,14 +396,14 @@ proptest! {
         prop_assert_eq!(&pool.lease_observation(), &before, "refused replays change nothing");
         for (alloc, view) in &before.leases {
             let original = &admitted_view.leases[alloc];
-            prop_assert_eq!(view.cid, original.cid, "retirement keeps the CID");
-            prop_assert_eq!(view.launch, original.launch, "retirement keeps the token");
+            prop_assert_eq!(view.cid(), original.cid(), "retirement keeps the CID");
+            prop_assert_eq!(view.launch(), original.launch(), "retirement keeps the token");
             let expected = if retiring.contains(alloc) {
                 GuestAttachmentLease::Retiring
             } else {
                 GuestAttachmentLease::Admitted
             };
-            prop_assert_eq!(view.state, expected);
+            prop_assert_eq!(view.state(), expected);
         }
         prop_assert_eq!(
             pool.observe(&held).occupancy,
@@ -412,7 +420,7 @@ proptest! {
             prop_assert_eq!(after_release.leases.len(), usize::from(admitted) - 1);
             pool.assign(released.clone(), &[], test_owner_flow_ports()).expect("a released id takes the normal path");
             prop_assert_eq!(
-                pool.lease_observation().leases.get(&released).map(|view| view.state),
+                pool.lease_observation().leases.get(&released).map(GuestLeaseView::state),
                 Some(GuestAttachmentLease::Admitted)
             );
         }
@@ -473,8 +481,8 @@ proptest! {
             .find(|index| !(retired.contains(index) || (*index == below_cap && retire_the_last_admitted)));
         if let Some(index) = admitted_replay {
             let replay = pool.assign(ids[index].clone(), &[], test_owner_flow_ports()).expect("an Admitted replay at the cap");
-            prop_assert_eq!(replay.assignment().cid(), before.leases[&ids[index]].cid, "equal replay");
-            prop_assert_eq!(replay.assignment().launch(), before.leases[&ids[index]].launch);
+            prop_assert_eq!(replay.assignment().cid(), before.leases[&ids[index]].cid(), "equal replay");
+            prop_assert_eq!(Some(replay.assignment().launch()), before.leases[&ids[index]].launch());
         }
         prop_assert_eq!(pool.lease_observation(), before, "no refusal or replay changes the leases");
     }
@@ -533,7 +541,7 @@ fn the_first_assign_admits_the_first_usable_offset_and_the_observation_gains_exa
     assert_eq!(plan.listen_ports(), &ports[..], "the plan carries the declared TCP ports");
     assert_eq!(after.leases.len(), 1, "exactly one lease was added");
     let view = &after.leases[&alloc(1)];
-    assert_eq!(view.state, GuestAttachmentLease::Admitted);
+    assert_eq!(view.state(), GuestAttachmentLease::Admitted);
     assert_plan_identity(prefix, &plan, view);
     assert_ne!(after.next_fit, fresh.next_fit, "the cursor moved past the taken offset");
     assert_eq!(

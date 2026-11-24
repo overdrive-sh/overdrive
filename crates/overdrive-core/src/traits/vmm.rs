@@ -176,21 +176,33 @@ pub trait Vmm: Send + Sync + 'static {
     ///   same adapter instance.
     ///
     /// # Postconditions on Ok
-    /// - The hypervisor process named by `control.pid` is no longer
-    ///   running.
+    /// - On `Ok(Killed | ExitedWithinGrace)`: the process is reaped.
+    /// - On `Ok(KilledNotReaped)`: SIGKILL has been delivered, no thread
+    ///   can run guest code again, and the process is not reaped; it
+    ///   releases every resource it holds (descriptors, the volume's
+    ///   kernel claim, the vsock device, its cgroup membership) only
+    ///   when it is reaped.
+    /// - The adapter keeps waiting for the process after returning
+    ///   `KilledNotReaped`. A late reap runs the adapter's ordinary reap
+    ///   path (its exit watch fires, its live record is dropped); it is
+    ///   not an error and changes nothing the caller wrote.
+    /// - The reap wait is bounded by [`VMM_REAP_BOUND`], starting at the
+    ///   instant `terminate` requests the kill.
     ///
     /// # Edge cases
     /// - The VMM is already gone (process exited, or was killed by
     ///   something else, before this call): `Ok(VmTermination::Killed)`.
     ///   Idempotent — a second `terminate` against the same `control`
     ///   is not an error.
-    /// - `grace == Duration::ZERO`: kill immediately, with no await.
+    /// - `grace == Duration::ZERO`: kill at once, then wait
+    ///   [`VMM_REAP_BOUND`] for the reap.
     ///
     /// # Errors
     /// Returns [`VmmError`] only when the substrate refuses the
     /// terminate/kill operation itself (e.g. a permission failure
     /// signalling the process) — never for "the process was already
-    /// dead," which is the `Ok(VmTermination::Killed)` case above.
+    /// dead," which is the `Ok(VmTermination::Killed)` case above, and
+    /// never for a slow reap, which is `Ok(VmTermination::KilledNotReaped)`.
     async fn terminate(&self, control: &VmControl, grace: Duration) -> Result<VmTermination>;
 }
 
@@ -212,6 +224,11 @@ pub struct VmProcess {
     pub exit: VmExitWatch,
     pub diagnostics: VmmDiagnostics,
 }
+
+/// How long [`Vmm::terminate`] waits for the reap after it requests the
+/// kill, before it returns [`VmTermination::KilledNotReaped`]. A policy
+/// value: a reap after SIGKILL takes milliseconds when nothing is stuck.
+pub const VMM_REAP_BOUND: Duration = Duration::from_secs(5);
 
 /// Upper bound on RETAINED capture bytes, independent of the line bound
 /// (ADR-0082 §D1.1). Whichever bound binds first applies, so a single
@@ -388,8 +405,12 @@ pub struct VmmExit {
 pub enum VmTermination {
     /// The process exited on its own within `grace`.
     ExitedWithinGrace(VmmExit),
-    /// The process did not exit within `grace` and was killed.
+    /// The process did not exit within `grace` and was killed, and was
+    /// reaped after the kill (or was already gone).
     Killed,
+    /// The kill was delivered and the process was still not reaped when
+    /// [`VMM_REAP_BOUND`] elapsed.
+    KilledNotReaped,
 }
 
 // -----------------------------------------------------------------------

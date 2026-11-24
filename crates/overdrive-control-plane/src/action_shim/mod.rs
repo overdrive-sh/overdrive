@@ -105,7 +105,9 @@ impl EvaluationSubmission<'_> {
                 Err(_) => Arc::new(crate::reconciler_runtime::LaneSupersession::unraised()),
             },
             #[cfg(test)]
-            Self::Standalone(_) => Arc::new(crate::reconciler_runtime::LaneSupersession::unraised()),
+            Self::Standalone(_) => {
+                Arc::new(crate::reconciler_runtime::LaneSupersession::unraised())
+            }
         }
     }
 }

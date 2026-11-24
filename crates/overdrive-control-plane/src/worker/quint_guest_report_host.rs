@@ -307,7 +307,7 @@ fn build_world() -> std::result::Result<World, DriverError> {
         .enable_all()
         .build()
         .expect("current-thread runtime");
-    let vmm = SimVmm::new();
+    let vmm = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
     let host = SimVmmHost::new(vmm.clone(), true);
     let clock = Arc::new(SimClock::new());
     let obs = Arc::new(SimObservationStore::single_peer(
@@ -357,6 +357,7 @@ fn build_world() -> std::result::Result<World, DriverError> {
             intake,
             Arc::clone(&board),
             None,
+            std::sync::Arc::new(overdrive_sim::SimVmHostState::new()),
         );
         let mut runtime = ReconcilerRuntime::new_with_redb_view_store_for_test(&root)
             .expect("the reconciler runtime over the node's view store");
@@ -470,8 +471,8 @@ fn build_world() -> std::result::Result<World, DriverError> {
         .lease_observation()
         .leases
         .get(&alloc)
-        .map(|view| (view.cid, view.launch))
-        .ok_or_else(|| not_enabled("init", "the shim took no lease"))?;
+        .and_then(|view| view.launch().map(|launch| (view.cid(), launch)))
+        .ok_or_else(|| not_enabled("init", "the shim took no launched lease"))?;
     world.pid = world
         .host
         .pids_of(&alloc)

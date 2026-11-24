@@ -298,7 +298,10 @@ impl ShimFixture {
 
     /// The lease the pool holds for `alloc`: its CID and launch token.
     fn lease(&self, alloc: &AllocationId) -> Option<(GuestCid, LaunchToken)> {
-        self.pool.lease_observation().leases.get(alloc).map(|lease| (lease.cid, lease.launch))
+        self.pool.lease_observation().leases.get(alloc).map(|lease| {
+            let launch = lease.launch().expect("a lease assign made is launched, never Reserved");
+            (lease.cid(), launch)
+        })
     }
 
     /// Wait until the concurrent start has provisioned and started the VM but

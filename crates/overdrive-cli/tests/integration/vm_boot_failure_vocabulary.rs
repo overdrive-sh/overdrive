@@ -1356,7 +1356,7 @@ async fn deploy_against_unclassifiable_vmm(
     diagnostic: &str,
     after_compose: impl FnOnce(),
 ) -> (WorkloadDescribeOutput, ServeHandle, TempDir) {
-    let vmm = SimVmm::new();
+    let vmm = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
     vmm.inject_persistent_create_failure(diagnostic);
     let (handle, server_tmp) = spawn_vm_server_with_vmm(Arc::new(vmm)).await;
     let cfg = config_path(server_tmp.path());

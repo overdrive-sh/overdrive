@@ -871,14 +871,19 @@ impl GuestAddressPool {
             .leases
             .iter()
             .map(|(alloc, lease)| {
-                (
-                    alloc.clone(),
-                    GuestLeaseView {
-                        cid: lease.plan.assignment().cid(),
+                let cid =
+                    GuestCid::new(overdrive_core::guest_transport::GUEST_CID_BASE + lease.offset)
+                        .unwrap_or_else(|_| unreachable!("a held lease is at a leased CID offset"));
+                // A `reserve_leftover` reservation has a CID and no plan, so no
+                // launch token: it is `Reserved`, never a `Launched` view.
+                let view = lease.plan.as_ref().map_or(GuestLeaseView::Reserved { cid }, |plan| {
+                    GuestLeaseView::Launched {
+                        cid,
                         state: lease.state,
-                        launch: lease.plan.assignment().launch(),
-                    },
-                )
+                        launch: plan.assignment().launch(),
+                    }
+                });
+                (alloc.clone(), view)
             })
             .collect();
         GuestLeaseObservation { next_fit: state.next_fit, leases }
@@ -896,12 +901,53 @@ pub struct GuestLeaseObservation {
 }
 
 /// One lease in a [`GuestLeaseObservation`].
+///
+/// A lease `assign` made is `Launched` and carries its launch token
+/// (ATTR-TOKEN). A lease `reserve_leftover` made is `Reserved`: it has a CID,
+/// is Retiring by construction and has no launch token, so a reservation with
+/// a launch token is unrepresentable.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GuestLeaseView {
-    /// `GUEST_CID_BASE + lease offset`.
-    pub cid: GuestCid,
-    /// The existing lease state: Admitted | Retiring.
-    pub state: GuestAttachmentLease,
-    /// The lease's launch token (ATTR-TOKEN).
-    pub launch: LaunchToken,
+pub enum GuestLeaseView {
+    /// A lease `assign` made. `state` is Admitted or Retiring.
+    Launched {
+        /// `GUEST_CID_BASE + lease offset`.
+        cid: GuestCid,
+        /// The existing lease state: Admitted | Retiring.
+        state: GuestAttachmentLease,
+        /// The lease's launch token (ATTR-TOKEN).
+        launch: LaunchToken,
+    },
+    /// A lease `reserve_leftover` made: Retiring, with no launch token.
+    Reserved {
+        /// `GUEST_CID_BASE + lease offset`.
+        cid: GuestCid,
+    },
+}
+
+impl GuestLeaseView {
+    /// `GUEST_CID_BASE + lease offset`, for either variant.
+    #[must_use]
+    pub const fn cid(&self) -> GuestCid {
+        match self {
+            Self::Launched { cid, .. } | Self::Reserved { cid } => *cid,
+        }
+    }
+
+    /// The lease state; a `Reserved` lease is Retiring.
+    #[must_use]
+    pub const fn state(&self) -> GuestAttachmentLease {
+        match self {
+            Self::Launched { state, .. } => *state,
+            Self::Reserved { .. } => GuestAttachmentLease::Retiring,
+        }
+    }
+
+    /// The launch token: `Some` for `Launched`, `None` for `Reserved`.
+    #[must_use]
+    pub const fn launch(&self) -> Option<LaunchToken> {
+        match self {
+            Self::Launched { launch, .. } => Some(*launch),
+            Self::Reserved { .. } => None,
+        }
+    }
 }

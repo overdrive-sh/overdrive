@@ -10,7 +10,7 @@
 //! tick, the action shim, and the production `VmDriver` over a `SimVmm`,
 //! whose volume pool is composed through the pinned seam
 //! `SimVolumePoolProbe::composed(SimVolumeBacking)` → `probe()` →
-//! `VmDriver::new(.., volumes)`. The production exit observer writes the
+//! `VmDriver::new(.., volumes, std::sync::Arc::new(overdrive_sim::SimVmHostState::new()))`. The production exit observer writes the
 //! terminal rows. The driver writes no row, intent or sim state the
 //! production path writes itself. Spec identifiers keep their earlier
 //! "store" spelling (`storeUp`, `StoreAbsentBoot`); the contract's word is
@@ -393,7 +393,7 @@ impl Node {
     pub(crate) fn new() -> Self {
         let tmp = TempDir::new().expect("tmpdir");
         stage_artifacts(tmp.path());
-        let vmm = SimVmm::new();
+        let vmm = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
         Self {
             host: SimVmmHost::new(vmm.clone(), true),
             vmm,
@@ -523,6 +523,7 @@ pub fn boot_serve(node: &Node, boot: u32) -> (Serve, Arc<ReconcilerRuntime>) {
             intake,
             guest_listener_board,
             volumes,
+            std::sync::Arc::new(overdrive_sim::SimVmHostState::new()),
         );
         // Every composition reopens the node's stores from disk.
         let config = crate::ServerConfig { data_dir: root.clone(), ..crate::ServerConfig::new() };
@@ -1262,8 +1263,8 @@ impl NodeVolumeDriver {
             .lease_observation()
             .leases
             .get(&alloc)
-            .map(|view| (view.cid, view.launch))
-            .ok_or_else(|| not_enabled("GuestReady", format!("{alloc} holds no lease")))?;
+            .and_then(|view| view.launch().map(|launch| (view.cid(), launch)))
+            .ok_or_else(|| not_enabled("GuestReady", format!("{alloc} holds no launched lease")))?;
         let key = BeaconConnKey { peer_cid: view.0, peer_port: VsockPort::new(port) };
         let ready = format!("READY pid=1 port={} launch={}", serve.beacon_port, view.1);
         serve

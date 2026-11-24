@@ -11,7 +11,7 @@
 //! `overdrive-worker/src/vm_driver/quint_flows_beacon.rs`); these bodies are
 //! its example cells.
 //!
-//! Driving ports: `BeaconIntake::bind`, `VmDriver::new(.., beacon)`,
+//! Driving ports: `BeaconIntake::bind`, `VmDriver::new(.., beacon, std::sync::Arc::new(overdrive_sim::SimVmHostState::new()))`,
 //! `VmDriver::start` / `stop`, `VmDriver::beacon_observation`. Driven port:
 //! `BeaconIo`, supplied by `SimBeaconIo` (the QPROJ-7 arbiter of the beacon
 //! accept queue and of the connections the driver closed), coupled to a
@@ -92,7 +92,7 @@ fn layout(root: &Path) -> VmHostLayout {
 }
 
 /// A `VmDriver` over sim ports whose beacon intake is bound over `io`
-/// (DG-2 row 15: `VmDriver::new(.., beacon)`).
+/// (DG-2 row 15: `VmDriver::new(.., beacon, std::sync::Arc::new(overdrive_sim::SimVmHostState::new()))`).
 async fn driver_over(vmm: &SimVmm, io: &Arc<SimBeaconIo>, root: &Path) -> VmDriver {
     driver_over_vmm(Arc::new(vmm.clone()), io, root).await.0
 }
@@ -137,6 +137,7 @@ async fn driver_over_vmm(
         beacon,
         guest_listener_board,
         None,
+        std::sync::Arc::new(overdrive_sim::SimVmHostState::new()),
     );
     (driver, beacon_port)
 }
@@ -228,7 +229,7 @@ impl Node {
         let mut header = vec![0_u8; KERNEL_MAGIC_WINDOW];
         header[..4].copy_from_slice(b"\x7fELF");
         std::fs::write(root.join("vmlinuz"), &header).expect("stage the synthetic kernel image");
-        let vmm = SimVmm::new();
+        let vmm = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
         let io = Arc::new(SimBeaconIo::stepped(vmm.clone()));
         let driver = driver_over(&vmm, &io, &root).await;
         Self { _tmp: tmp, root, vmm, io, driver }
@@ -323,7 +324,7 @@ impl Node {
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
 async fn binding_the_intake_binds_the_beacon_listener() {
-    let vmm = SimVmm::new();
+    let vmm = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
     let io = sim_beacon(&vmm);
     assert!(!io.is_bound(), "precondition: nothing bound");
 
@@ -347,7 +348,7 @@ async fn binding_the_intake_binds_the_beacon_listener() {
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test]
 async fn a_bind_failure_is_typed_and_binds_nothing() {
-    let vmm = SimVmm::new();
+    let vmm = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
     let io = sim_beacon(&vmm);
     io.fail_next_bind(std::io::ErrorKind::AddrInUse);
 
@@ -396,7 +397,10 @@ fn the_bind_refusal_renders_its_pinned_message() {
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[tokio::test]
 async fn a_fresh_driver_reports_an_empty_beacon_observation() {
-    let driver = fresh_driver(SimVmm::new()).await;
+    let driver = fresh_driver(SimVmm::new(std::sync::Arc::new(
+        overdrive_sim::adapters::clock::SimClock::new(),
+    )))
+    .await;
     let first = driver.beacon_observation();
     assert_eq!(
         first,
@@ -690,7 +694,7 @@ async fn the_launch_token_names_the_bound_beacon_and_the_assignments_flow_ports(
     let mut header = vec![0_u8; KERNEL_MAGIC_WINDOW];
     header[..4].copy_from_slice(b"\x7fELF");
     std::fs::write(root.join("vmlinuz"), &header).expect("stage the synthetic kernel image");
-    let vmm = SimVmm::new();
+    let vmm = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
     let io = Arc::new(SimBeaconIo::new(vmm.clone()));
     let cmdlines = Arc::new(parking_lot::Mutex::new(Vec::new()));
     let recorder = Arc::new(RecordsCmdline { inner: vmm.clone(), cmdlines: Arc::clone(&cmdlines) });

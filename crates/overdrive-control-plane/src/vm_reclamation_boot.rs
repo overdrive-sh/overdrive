@@ -967,6 +967,7 @@ pub(crate) mod sim_vm_host {
             intake,
             guest_listener_board,
             None,
+            std::sync::Arc::new(overdrive_sim::SimVmHostState::new()),
         );
         let pool =
             Arc::new(GuestAddressPool::new(prefix, GATEWAY, Arc::new(SimEntropy::new(seed))));
@@ -1095,13 +1096,13 @@ mod boot_reclamation_before_assign {
     async fn boot_reclamation_ends_the_previous_processs_vmm_before_the_first_assign() {
         let tmp = TempDir::new().expect("tmpdir");
         let prefix: Ipv4Net = PREFIX.parse().expect("prefix");
-        let vmm = SimVmm::new();
+        let vmm = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
         let host = SimVmmHost::new(vmm.clone(), false);
 
         let crashed = compose(&tmp.path().join("serve-1"), &vmm, &host, prefix, 1).await;
         let (orphan, launched, start) = lease_and_launch(&crashed, &vmm, "orphan-0").await;
         assert!(launched, "precondition: the first process's VMM holds its device");
-        let orphan_cid = crashed.pool.lease_observation().leases[&alloc("orphan-0")].cid;
+        let orphan_cid = crashed.pool.lease_observation().leases[&alloc("orphan-0")].cid();
         // `serve` crashes: its tasks and composition die; its VMM does not.
         start.abort();
         drop(crashed);
@@ -1124,7 +1125,7 @@ mod boot_reclamation_before_assign {
         assert!(!vmm.is_live(orphan));
 
         let (fresh, launched, _start) = lease_and_launch(&restarted, &vmm, "fresh-0").await;
-        let fresh_cid = restarted.pool.lease_observation().leases[&alloc("fresh-0")].cid;
+        let fresh_cid = restarted.pool.lease_observation().leases[&alloc("fresh-0")].cid();
         assert_eq!(fresh_cid, orphan_cid, "the first assign takes the reclaimed CID again");
         assert!(launched, "the new VMM opened the reclaimed CID's device: no clash");
         assert_eq!(vmm.vsock_device_holders(), BTreeMap::from([(fresh_cid, fresh)]));
@@ -1140,7 +1141,7 @@ mod boot_reclamation_before_assign {
     async fn one_boot_reclamation_kills_every_orphan_before_the_first_assign() {
         let tmp = TempDir::new().expect("tmpdir");
         let prefix: Ipv4Net = PREFIX.parse().expect("prefix");
-        let vmm = SimVmm::new();
+        let vmm = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
         let host = SimVmmHost::new(vmm.clone(), false);
 
         let crashed = compose(&tmp.path().join("serve-1"), &vmm, &host, prefix, 1).await;
@@ -1150,7 +1151,8 @@ mod boot_reclamation_before_assign {
             lease_and_launch(&crashed, &vmm, "orphan-1").await;
         assert!(launched_first && launched_second, "precondition: both VMMs hold their devices");
         let orphans = crashed.pool.lease_observation();
-        let cids = [orphans.leases[&alloc("orphan-0")].cid, orphans.leases[&alloc("orphan-1")].cid];
+        let cids =
+            [orphans.leases[&alloc("orphan-0")].cid(), orphans.leases[&alloc("orphan-1")].cid()];
         start_first.abort();
         start_second.abort();
         drop(crashed);
@@ -1170,7 +1172,7 @@ mod boot_reclamation_before_assign {
             lease_and_launch(&restarted, &vmm, "fresh-1").await;
         let fresh = restarted.pool.lease_observation();
         assert_eq!(
-            [fresh.leases[&alloc("fresh-0")].cid, fresh.leases[&alloc("fresh-1")].cid],
+            [fresh.leases[&alloc("fresh-0")].cid(), fresh.leases[&alloc("fresh-1")].cid()],
             cids,
             "the first assigns take the reclaimed CIDs again (next-fit from a fresh cursor)"
         );
@@ -1190,12 +1192,12 @@ mod boot_reclamation_before_assign {
     async fn a_launch_on_an_orphans_cid_before_reclamation_fails_at_device_setup() {
         let tmp = TempDir::new().expect("tmpdir");
         let prefix: Ipv4Net = PREFIX.parse().expect("prefix");
-        let vmm = SimVmm::new();
+        let vmm = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
         let host = SimVmmHost::new(vmm.clone(), false);
 
         let crashed = compose(&tmp.path().join("serve-1"), &vmm, &host, prefix, 1).await;
         let (orphan, _, start) = lease_and_launch(&crashed, &vmm, "orphan-0").await;
-        let orphan_cid = crashed.pool.lease_observation().leases[&alloc("orphan-0")].cid;
+        let orphan_cid = crashed.pool.lease_observation().leases[&alloc("orphan-0")].cid();
         start.abort();
         drop(crashed);
 
@@ -1232,7 +1234,7 @@ mod boot_reclamation_before_assign {
     async fn boot_reclamation_leaves_a_supervised_vmm_running() {
         let tmp = TempDir::new().expect("tmpdir");
         let prefix: Ipv4Net = PREFIX.parse().expect("prefix");
-        let vmm = SimVmm::new();
+        let vmm = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
         let host = SimVmmHost::new(vmm.clone(), false);
 
         let composition = compose(&tmp.path().join("serve-1"), &vmm, &host, prefix, 1).await;
@@ -1573,7 +1575,8 @@ mod mid_boot_volume_reclamation {
         fn new() -> Self {
             let artifacts = TempDir::new().expect("tmpdir");
             stage_artifacts(artifacts.path());
-            let sim_vmm = SimVmm::new();
+            let sim_vmm =
+                SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
             Self {
                 composed: ComposedNode::fresh(),
                 host: SimVmmHost::new(sim_vmm.clone(), false),
@@ -1654,6 +1657,7 @@ mod mid_boot_volume_reclamation {
                 intake,
                 guest_listener_board,
                 Some(probed),
+                std::sync::Arc::new(overdrive_sim::SimVmHostState::new()),
             );
             let driver = Arc::new(StartRecordingDriver {
                 inner: vm_driver,

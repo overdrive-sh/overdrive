@@ -202,6 +202,7 @@ async fn build_driver(
         beacon.intake().await,
         guest_listener_board,
         None,
+        std::sync::Arc::new(overdrive_sim::SimVmHostState::new()),
     );
     (driver, clock, beacon)
 }
@@ -242,6 +243,7 @@ async fn build_driver_with_cgroup_fs(
         beacon.intake().await,
         guest_listener_board,
         None,
+        std::sync::Arc::new(overdrive_sim::SimVmHostState::new()),
     );
     (driver, clock, cgroup_fs, beacon)
 }
@@ -418,7 +420,7 @@ async fn create_failure_retains_disposition_claim_and_cleans_up_run_directory() 
     let run_dir_root = layout.run_dir_root.clone();
     let rootfs_master = fixture_rootfs_path(&tmp);
     let cgroup_root = layout.cgroup_root.clone();
-    let sim = SimVmm::new();
+    let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
     sim.inject_create_failure();
     let (driver, _clock, cgroup_fs, _beacon) =
         build_driver_with_cgroup_fs(&sim, std::sync::Arc::new(sim.clone()), layout).await;
@@ -500,7 +502,7 @@ async fn vmm_exits_before_beacon_retains_disposition_claim_and_cleans_up() {
     let run_dir_root = layout.run_dir_root.clone();
     let rootfs_master = fixture_rootfs_path(&tmp);
     let cgroup_root = layout.cgroup_root.clone();
-    let sim = SimVmm::new();
+    let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
     let dies_before_beacon = DiesBeforeBeacon { inner: sim.clone() };
     let (driver, _clock, cgroup_fs, _beacon) =
         build_driver_with_cgroup_fs(&sim, std::sync::Arc::new(dies_before_beacon), layout).await;
@@ -577,7 +579,7 @@ async fn vmm_exits_before_beacon_retains_disposition_claim_and_cleans_up() {
 async fn accepted_connection_close_before_ready_preserves_exact_unreported_vmm_exit() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
-    let sim = SimVmm::new();
+    let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
     sim.inject_exit(Some(78), Some(15));
     let (created_tx, created_rx) = tokio::sync::oneshot::channel();
     let exposed = ExposesCreatedControl {
@@ -636,7 +638,7 @@ async fn boot_deadline_elapses_retains_disposition_claim_and_cleans_up() {
     let run_dir_root = layout.run_dir_root.clone();
     let rootfs_master = fixture_rootfs_path(&tmp);
     let cgroup_root = layout.cgroup_root.clone();
-    let sim = SimVmm::new();
+    let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
     let (driver, clock, cgroup_fs, _beacon) =
         build_driver_with_cgroup_fs(&sim, std::sync::Arc::new(sim.clone()), layout).await;
 
@@ -744,7 +746,7 @@ async fn boot_deadline_elapses_retains_disposition_claim_and_cleans_up() {
 async fn guest_exit_report_is_authoritative_over_subsequent_vmm_teardown() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
-    let sim = SimVmm::new();
+    let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
     let (driver, _clock, beacon) =
         build_driver(&sim, std::sync::Arc::new(sim.clone()), layout).await;
 
@@ -817,7 +819,7 @@ async fn guest_exit_report_is_authoritative_over_subsequent_vmm_teardown() {
 async fn start_defers_exec_message_until_the_running_gate_is_released() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
-    let sim = SimVmm::new();
+    let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
     let (driver, _clock, beacon) =
         build_driver(&sim, std::sync::Arc::new(sim.clone()), layout).await;
 
@@ -938,7 +940,7 @@ impl<V: Vmm> Vmm for SignalsOnceLive<V> {
 async fn stop_sequence_a_pre_beacon_stop_skips_write_and_terminates() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
-    let sim = SimVmm::new();
+    let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
     let (live_tx, live_rx) = tokio::sync::oneshot::channel();
     let vmm = SignalsOnceLive {
         inner: sim.clone(),
@@ -1007,7 +1009,7 @@ async fn stop_sequence_a_pre_beacon_stop_skips_write_and_terminates() {
 async fn stop_sequence_b_writer_and_vmm_waits_begin_together() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
-    let sim = SimVmm::new();
+    let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
     let (driver, clock, beacon) =
         build_driver(&sim, std::sync::Arc::new(sim.clone()), layout).await;
 
@@ -1055,7 +1057,7 @@ async fn stop_sequence_b_writer_and_vmm_waits_begin_together() {
 async fn backpressured_exec_release_cannot_delay_stop_deadline() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
-    let sim = SimVmm::new();
+    let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
     let (driver, clock, beacon) =
         build_driver(&sim, std::sync::Arc::new(sim.clone()), layout).await;
 
@@ -1333,7 +1335,7 @@ impl Vmm for HoldsFirstTermination {
 async fn cancelling_backpressured_release_cannot_leave_an_exec_sender_running() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
-    let sim = SimVmm::new();
+    let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
     let (held_termination, termination_control) = HoldsFirstTermination::new(sim.clone());
     let (driver, _clock, beacon) =
         build_driver(&sim, std::sync::Arc::new(held_termination), layout).await;
@@ -1437,7 +1439,7 @@ async fn cancelling_backpressured_release_cannot_leave_an_exec_sender_running() 
 async fn stop_sequence_c_already_dead_vmm_returns_ok() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
-    let sim = SimVmm::new();
+    let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
     let (driver, clock, beacon) =
         build_driver(&sim, std::sync::Arc::new(sim.clone()), layout).await;
 
@@ -1489,7 +1491,7 @@ async fn stop_sequence_d_double_stop_is_idempotent_and_never_panics() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
     let run_dir_root = layout.run_dir_root.clone();
-    let sim = SimVmm::new();
+    let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
     let (driver, clock, beacon) =
         build_driver(&sim, std::sync::Arc::new(sim.clone()), layout).await;
 
@@ -1588,7 +1590,7 @@ impl Vmm for NeverSignalsExit {
 async fn stop_ok_then_status_reports_not_found() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
-    let sim = SimVmm::new();
+    let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
     let never_signals_exit = NeverSignalsExit { inner: sim.clone() };
     let (driver, clock, beacon) =
         build_driver(&sim, std::sync::Arc::new(never_signals_exit), layout).await;
@@ -1626,7 +1628,7 @@ async fn stop_ok_then_status_reports_not_found() {
 async fn live_allocations_reports_membership_and_release_supervision_is_idempotent() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
-    let sim = SimVmm::new();
+    let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
     let (driver, _clock, beacon) =
         build_driver(&sim, std::sync::Arc::new(sim.clone()), layout).await;
 
@@ -1699,7 +1701,7 @@ async fn live_allocations_reports_membership_and_release_supervision_is_idempote
 async fn resize_rejects_with_resize_unsupported_naming_gh_92() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
-    let sim = SimVmm::new();
+    let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
     let (driver, _clock, beacon) =
         build_driver(&sim, std::sync::Arc::new(sim.clone()), layout).await;
 
@@ -1786,7 +1788,7 @@ async fn exit_event_is_gated_until_running_confirmed_release() {
     let layout = build_layout(&tmp);
     let run_dir_root = layout.run_dir_root.clone();
     let cgroup_root = layout.cgroup_root.clone();
-    let sim = SimVmm::new();
+    let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
 
     let alloc = AllocationId::new("alloc-running-gate").expect("valid alloc id");
     let spec = build_spec(&alloc, &tmp);
@@ -1811,6 +1813,7 @@ async fn exit_event_is_gated_until_running_confirmed_release() {
         beacon.intake().await,
         guest_listener_board,
         None,
+        std::sync::Arc::new(overdrive_sim::SimVmHostState::new()),
     );
 
     // Drain the driver's `ExitEvent` channel — the exit observer's role.
@@ -1914,7 +1917,7 @@ async fn completed_shutdown_write_has_no_two_second_floor() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
     let run_dir_root = layout.run_dir_root.clone();
-    let sim = SimVmm::new();
+    let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
     let (driver, clock, beacon) =
         build_driver(&sim, std::sync::Arc::new(sim.clone()), layout).await;
     let alloc = AllocationId::new("alloc-responsive-stop").expect("valid allocation");
@@ -1964,7 +1967,7 @@ async fn writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed
         let layout = build_layout(&tmp);
         let run_dir_root = layout.run_dir_root.clone();
         let cgroup_root = layout.cgroup_root.clone();
-        let sim = SimVmm::new();
+        let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
         let vmm = RecordsTermination::new(sim.clone(), true);
         let (driver, _clock, cgroup_fs, beacon) =
             build_driver_with_cgroup_fs(&sim, std::sync::Arc::new(vmm.clone()), layout).await;
@@ -2008,7 +2011,7 @@ async fn writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed
         let layout = build_layout(&tmp);
         let run_dir_root = layout.run_dir_root.clone();
         let cgroup_root = layout.cgroup_root.clone();
-        let sim = SimVmm::new();
+        let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
         let vmm = RecordsTermination::new(sim.clone(), true);
         let (driver, _clock, cgroup_fs, beacon) =
             build_driver_with_cgroup_fs(&sim, std::sync::Arc::new(vmm.clone()), layout).await;
@@ -2044,7 +2047,7 @@ async fn writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed
         let layout = build_layout(&tmp);
         let run_dir_root = layout.run_dir_root.clone();
         let cgroup_root = layout.cgroup_root.clone();
-        let sim = SimVmm::new();
+        let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
         let vmm = RecordsTermination::new(sim.clone(), true);
         let (driver, _clock, cgroup_fs, beacon) =
             build_driver_with_cgroup_fs(&sim, std::sync::Arc::new(vmm.clone()), layout).await;
@@ -2085,7 +2088,7 @@ async fn writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed
         let layout = build_layout(&tmp);
         let run_dir_root = layout.run_dir_root.clone();
         let cgroup_root = layout.cgroup_root.clone();
-        let sim = SimVmm::new();
+        let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
         let vmm = RecordsTermination::new(sim.clone(), true);
         let (live_tx, live_rx) = tokio::sync::oneshot::channel();
         let signals_live = SignalsOnceLive {
@@ -2133,7 +2136,7 @@ async fn writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed
         let layout = build_layout(&tmp);
         let run_dir_root = layout.run_dir_root.clone();
         let cgroup_root = layout.cgroup_root.clone();
-        let sim = SimVmm::new();
+        let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
         let vmm = RecordsTermination::new(sim.clone(), true);
         let (driver, clock, cgroup_fs, beacon) =
             build_driver_with_cgroup_fs(&sim, std::sync::Arc::new(vmm.clone()), layout).await;
@@ -2184,7 +2187,7 @@ async fn writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed
         let layout = build_layout(&tmp);
         let run_dir_root = layout.run_dir_root.clone();
         let cgroup_root = layout.cgroup_root.clone();
-        let sim = SimVmm::new();
+        let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
         let vmm = RecordsTermination::new(sim.clone(), false);
         let (driver, _clock, cgroup_fs, beacon) =
             build_driver_with_cgroup_fs(&sim, std::sync::Arc::new(vmm.clone()), layout).await;
@@ -2253,7 +2256,7 @@ struct StopAwaitingGuestExit {
 async fn stop_with_shutdown_delivered(name: &str) -> StopAwaitingGuestExit {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
-    let sim = SimVmm::new();
+    let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
     let vmm = RecordsTermination::new(sim.clone(), true);
     let (driver, _clock, beacon) =
         build_driver(&sim, std::sync::Arc::new(vmm.clone()), layout).await;

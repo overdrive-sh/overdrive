@@ -62,6 +62,9 @@ const DEFAULT_IMAGE_DIR: &str = "/srv/vm";
 /// creatable/bindable) — overridable via
 /// [`CloudHypervisorVmm::with_run_dir_root`].
 const DEFAULT_RUN_DIR_ROOT: &str = "/run/overdrive/vm";
+/// Default cgroup2 mount a `CgroupPath` resolves under — overridable via
+/// [`CloudHypervisorVmm::with_cgroup_root`].
+const DEFAULT_CGROUP_ROOT: &str = "/sys/fs/cgroup";
 /// `/dev/kvm`'s well-known path — named once so the probe and its
 /// diagnostics never drift.
 const KVM_DEVICE_PATH: &str = "/dev/kvm";
@@ -174,6 +177,8 @@ pub struct CloudHypervisorVmm {
     image_dir: PathBuf,
     /// Probe target for §D5 scenario 5.
     run_dir_root: PathBuf,
+    /// The cgroup2 mount a `CgroupPath` resolves under.
+    cgroup_root: PathBuf,
     /// Live spawned processes, keyed by pid. See [`VmProcessState`].
     live: Arc<Mutex<BTreeMap<u32, Arc<VmProcessState>>>>,
     /// Production boundary for the external operations composed by
@@ -197,6 +202,7 @@ impl CloudHypervisorVmm {
             binary: PathBuf::from("cloud-hypervisor"),
             image_dir: PathBuf::from(DEFAULT_IMAGE_DIR),
             run_dir_root: PathBuf::from(DEFAULT_RUN_DIR_ROOT),
+            cgroup_root: PathBuf::from(DEFAULT_CGROUP_ROOT),
             live: Arc::new(Mutex::new(BTreeMap::new())),
             probe_substrate: Arc::new(RealVmmProbeSubstrate),
         }
@@ -225,6 +231,15 @@ impl CloudHypervisorVmm {
     #[must_use]
     pub fn with_run_dir_root(mut self, dir: PathBuf) -> Self {
         self.run_dir_root = dir;
+        self
+    }
+
+    /// Override the cgroup2 mount a `CgroupPath` resolves under (default
+    /// `/sys/fs/cgroup`). The composition root passes the value it gives
+    /// `CgroupManager`.
+    #[must_use]
+    pub fn with_cgroup_root(mut self, root: PathBuf) -> Self {
+        self.cgroup_root = root;
         self
     }
 

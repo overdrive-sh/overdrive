@@ -1803,15 +1803,15 @@ async fn node_wide_admission(seed: u64) {
     let mut cids = BTreeMap::new();
     let mut clashes = Vec::new();
     for (alloc, view) in &observation.leases {
-        if let Some(other) = cids.insert(view.cid, alloc.clone()) {
-            clashes.push((view.cid, other, alloc.clone()));
+        if let Some(other) = cids.insert(view.cid(), alloc.clone()) {
+            clashes.push((view.cid(), other, alloc.clone()));
         }
     }
     // The /16 prefix's usable host offsets: 0 is the network, 1 the gateway,
     // 65,535 the broadcast address.
     let usable = 2..u32::from(u16::MAX);
     let in_range = observation.leases.values().all(|view| {
-        usable.contains(&(view.cid.get() - overdrive_core::guest_transport::GUEST_CID_BASE))
+        usable.contains(&(view.cid().get() - overdrive_core::guest_transport::GUEST_CID_BASE))
     });
     report.verdict(
         &node,
