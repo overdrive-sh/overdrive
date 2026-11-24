@@ -72,7 +72,6 @@ fn assert_boot_deadline(result: &Result<(), DriverError>) {
 /// Oracle: the seeded scope is gone from the host-state port after the stop.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[should_panic(expected = "a reaped stop must remove the VM scope through VmHostState::kill_scope")]
 async fn a_reaped_stop_removes_the_scope_through_the_host_state_port() {
     let node = Node::new().await;
     let spec = node.spec("alloc-remover-stop", 2, false);
@@ -93,9 +92,6 @@ async fn a_reaped_stop_removes_the_scope_through_the_host_state_port() {
 /// ADR-0351. A start-failure cleanup removes the VM scope through `VmHostState::kill_scope`.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[should_panic(
-    expected = "a start-failure cleanup must remove the VM scope through VmHostState::kill_scope"
-)]
 async fn a_start_failure_cleanup_removes_the_scope_through_the_host_state_port() {
     let node = Node::new().await;
     let (_pid, result) =
@@ -117,7 +113,6 @@ async fn a_start_failure_cleanup_removes_the_scope_through_the_host_state_port()
 /// remover). Oracle: the entry stays in `SimCgroupFs`.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[should_panic(expected = "the VM driver removed the scope directory itself")]
 async fn the_driver_never_removes_a_scope_directory_through_the_cgroup_port() {
     let node = Node::new().await;
     let spec = node.spec("alloc-remover-only", 2, false);
@@ -144,7 +139,6 @@ async fn the_driver_never_removes_a_scope_directory_through_the_cgroup_port() {
 /// Oracle: the busy failure was consumed by a driver call, with the stop still completed.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[should_panic(expected = "the stop must call VmHostState::kill_scope for the scope")]
 async fn a_busy_scope_leaves_the_stop_outcome_and_the_other_cleanup_steps_unchanged() {
     let node = Node::new().await;
     let spec = node.spec("alloc-remover-busy-stop", 2, false);
@@ -169,7 +163,6 @@ async fn a_busy_scope_leaves_the_stop_outcome_and_the_other_cleanup_steps_unchan
 /// stays the boot deadline (no cleanup-failure composite), the run directory and clone are removed.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[should_panic(expected = "the start-failure cleanup must call VmHostState::kill_scope")]
 async fn a_busy_scope_leaves_the_reported_start_failure_unchanged() {
     let node = Node::new().await;
     let mut scope = None;

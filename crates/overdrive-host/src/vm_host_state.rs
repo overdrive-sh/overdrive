@@ -14,13 +14,15 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::time::Duration;
+use std::os::unix::fs::FileExt as _;
 
 use async_trait::async_trait;
+use tokio::io::Interest;
+use tokio::io::unix::AsyncFd;
 use overdrive_core::AllocationId;
 use overdrive_core::cgroup::CgroupPath;
 use overdrive_core::traits::vm_host_state::{
-    ScopeFacts, VmHostObservation, VmHostState, VmHostStateProbeError,
+    KILL_SCOPE_SETTLE_BOUND, ScopeFacts, VmHostObservation, VmHostState, VmHostStateProbeError,
 };
 
 /// The fixed relative path segment every workload cgroup scope lives
@@ -38,14 +40,6 @@ const WORKLOADS_SLICE: &str = "overdrive.slice/workloads.slice";
 /// ADR-0083 §§D3f-D3h): `.overdrive-vm-rootfs-<alloc>.img`.
 const CLONE_PREFIX: &str = ".overdrive-vm-rootfs-";
 const CLONE_SUFFIX: &str = ".img";
-
-/// Bound on `kill_scope`'s settle retry loop — the kernel's SIGKILL
-/// delivery + reap after `cgroup.kill` is asynchronous, so a `rmdir`
-/// immediately after the write can race a still-draining
-/// `cgroup.procs`. 150 attempts * 20ms = 3s ceiling, comfortably above
-/// an ordinary process's reap latency.
-const KILL_SCOPE_SETTLE_MAX_ATTEMPTS: u32 = 150;
-const KILL_SCOPE_SETTLE_RETRY_INTERVAL: Duration = Duration::from_millis(20);
 
 /// Production [`VmHostState`] binding.
 ///
@@ -236,24 +230,20 @@ impl VmHostState for RealVmHostState {
             Err(e) => return Err(e),
         }
 
-        // SETTLE: does not return until the rmdir has succeeded or
-        // returned NotFound. The kernel's SIGKILL delivery + reap after
-        // `cgroup.kill` is asynchronous, so an immediate `rmdir` can
-        // race a still-draining `cgroup.procs` -- retry until it
-        // settles.
-        for attempt in 0..KILL_SCOPE_SETTLE_MAX_ATTEMPTS {
-            match tokio::fs::remove_dir(&path).await {
-                Ok(()) => return Ok(()),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
-                Err(e) if attempt + 1 == KILL_SCOPE_SETTLE_MAX_ATTEMPTS => return Err(e),
-                Err(_not_yet_settled) => {
-                    tokio::time::sleep(KILL_SCOPE_SETTLE_RETRY_INTERVAL).await;
-                }
-            }
+        // POPULATED FIRST (ADR-0349, ADR-0351). `populated 0` is the only
+        // reading that says no task of the scope is left; an `rmdir` of a
+        // scope whose last task is held in exit succeeds while the task is
+        // alive (spike findings-cgroup-events.md), so the removal waits for
+        // the reading and is never the thing that detects emptiness.
+        wait_until_unpopulated(&path).await?;
+
+        // The scope is empty: `rmdir` is expected to succeed at once. Any
+        // failure is a real error returned at once, never retried.
+        match tokio::fs::remove_dir(&path).await {
+            Ok(()) => Ok(()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(e) => Err(e),
         }
-        // Unreachable: the loop above always returns on its last
-        // iteration (Ok, NotFound-as-Ok, or the final Err).
-        Ok(())
     }
 
     async fn discard_artifacts(&self, alloc: &AllocationId) -> std::io::Result<()> {
@@ -300,4 +290,47 @@ impl VmHostState for RealVmHostState {
 
         Ok(())
     }
+}
+
+/// Waits for the scope's `cgroup.events` to report `populated 0`, bounded by
+/// [`KILL_SCOPE_SETTLE_BOUND`]; at the bound returns `ResourceBusy`.
+///
+/// A scope with no `cgroup.events` (absent, or a directory that is not a
+/// cgroup) has nothing to wait for and returns `Ok`. The wait is a readiness
+/// wait on the file's `POLLPRI`, so no thread is blocked in the kernel and the
+/// bound's timer cancels it: `populated` changes call `cgroup_file_notify`
+/// (`kernel/cgroup/cgroup.c:864 @ v7.0`), whose `kernfs_notify` wakes pollers
+/// and makes `kernfs_fop_poll` report `EPOLLPRI | EPOLLERR` while the reader's
+/// event counter is stale (`fs/kernfs/file.c:855-865 @ v7.0`). The file is
+/// read after arming, tested, then awaited, so a change between the read and
+/// the wait is not lost.
+async fn wait_until_unpopulated(scope_dir: &Path) -> std::io::Result<()> {
+    let file = match tokio::fs::File::open(scope_dir.join("cgroup.events")).await {
+        Ok(file) => file.into_std().await,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    let events = AsyncFd::with_interest(file, Interest::PRIORITY)?;
+    let settled = async {
+        loop {
+            if !is_populated(events.get_ref())? {
+                return Ok(());
+            }
+            let mut ready = events.ready(Interest::PRIORITY).await?;
+            ready.clear_ready();
+        }
+    };
+    match tokio::time::timeout(KILL_SCOPE_SETTLE_BOUND, settled).await {
+        Ok(outcome) => outcome,
+        Err(_bound_elapsed) => Err(std::io::Error::from(std::io::ErrorKind::ResourceBusy)),
+    }
+}
+
+/// Reads `cgroup.events` from its start and returns its `populated` flag.
+/// A file with no `populated` line reads as not populated.
+fn is_populated(events: &std::fs::File) -> std::io::Result<bool> {
+    let mut buffer = [0_u8; 256];
+    let read = events.read_at(&mut buffer, 0)?;
+    let text = String::from_utf8_lossy(buffer.get(..read).unwrap_or_default());
+    Ok(text.lines().any(|line| line.trim() == "populated 1"))
 }

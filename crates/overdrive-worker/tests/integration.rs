@@ -34,16 +34,11 @@ mod integration {
     // movement via cgroup.procs). Proves SimCgroupFs's
     // non-replacement contract is honest.
     mod real_cgroup_fs {
-        mod cgroup_kill_terminates_pids;
         mod controller_validation;
         mod probe_success;
         mod probe_with_custom_root;
         mod procs_pid_movement;
         mod pseudo_file_synthesis;
-        // GH #295 E23 (user decision 2 of 2026-09-30): a kill write whose
-        // write path cannot get an OS thread returns the refusal as an
-        // `io::Error`, never a panic/abort.
-        mod refused_thread_kill;
         mod rmdir_auto_reap;
         mod subtree_control_ebusy;
     }
@@ -65,8 +60,6 @@ mod integration {
     // above; retirement of those is a follow-on DELIVER decision
     // once this scenario is green.
     mod cgroup_manager {
-        mod cgroup_kill_propagates_real_io_error;
-        mod remove_workload_scope_propagates_real_io_error;
         mod write_to_readonly_cgroup_file;
     }
 

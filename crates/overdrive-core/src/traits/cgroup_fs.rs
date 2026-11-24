@@ -148,8 +148,8 @@ pub trait CgroupFs: Send + Sync + 'static {
     /// # Edge cases
     /// - `path` does not exist: returns
     ///   `Err(io::ErrorKind::NotFound)`. Callers responsible for
-    ///   `NotFound` tolerance (the cgroup manager's
-    ///   `remove_workload_scope` wrapper swallows `NotFound` as Ok).
+    ///   `NotFound` tolerance (`VmHostState::kill_scope`, the one remover
+    ///   of a VM scope, treats an absent scope as `Ok`).
     /// - `path` non-empty: `Err(DirectoryNotEmpty)` on Real. On real
     ///   cgroupfs this does NOT happen for workload scopes — the
     ///   kernel-managed pseudo-files inside a scope are reaped

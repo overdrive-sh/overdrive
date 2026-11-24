@@ -446,8 +446,7 @@ enum StartCleanupStage {
     VmmTerminate,
     RootfsCloneRemove,
     RootfsIndexRemove,
-    CgroupKill,
-    CgroupRemove,
+    ScopeKill,
     RunDirectoryRemove,
 }
 
@@ -457,8 +456,7 @@ impl StartCleanupStage {
             Self::VmmTerminate => "VMM terminate",
             Self::RootfsCloneRemove => "rootfs clone remove",
             Self::RootfsIndexRemove => "rootfs index remove",
-            Self::CgroupKill => "cgroup kill",
-            Self::CgroupRemove => "cgroup remove",
+            Self::ScopeKill => "cgroup scope kill",
             Self::RunDirectoryRemove => "run directory remove",
         }
     }
@@ -1204,7 +1202,6 @@ pub struct VmDriver {
     volumes: Option<Arc<dyn overdrive_core::traits::volume_backing::VolumeBacking>>,
     /// The node's host-state port: the one remover of a VM's cgroup scope
     /// (`kill_scope`) the driver's artifact cleanup calls (ADR-0351).
-    #[expect(dead_code, reason = "no reader until the scope has one remover (ADR-0351)")]
     host_state: Arc<dyn overdrive_core::traits::vm_host_state::VmHostState>,
     live: Arc<LiveMap>,
     exit_tx: mpsc::Sender<ExitEvent>,
@@ -1322,11 +1319,13 @@ impl VmDriver {
             remove_clone_then_index_link_for_start(rootfs, &mut failures).await;
         }
         if let Some(scope) = scope {
-            if let Err(err) = self.cgroup_manager.cgroup_kill(scope).await {
-                failures.push(StartCleanupFailure::new(StartCleanupStage::CgroupKill, err));
-            }
-            if let Err(err) = self.cgroup_manager.remove_workload_scope(scope).await {
-                failures.push(StartCleanupFailure::new(StartCleanupStage::CgroupRemove, err));
+            // `ResourceBusy` is the cleanup's best effort: the scope is left
+            // to `VmReclamation` and the failure being reported stays
+            // unchanged (ADR-0349, ADR-0351).
+            if let Err(err) = self.host_state.kill_scope(scope).await
+                && err.kind() != io::ErrorKind::ResourceBusy
+            {
+                failures.push(StartCleanupFailure::new(StartCleanupStage::ScopeKill, err));
             }
         }
         match tokio::fs::remove_dir_all(run_dir.path()).await {
@@ -1711,7 +1710,7 @@ impl VmDriver {
     ) {
         let watcher_live = Arc::clone(&self.live);
         let watcher_tx = self.exit_tx.clone();
-        let watcher_cgroup_manager = self.cgroup_manager.clone();
+        let watcher_host_state = Arc::clone(&self.host_state);
         let watcher_cgroup_accounting = Arc::clone(&self.cgroup_accounting);
         let watcher_cgroup_root = self.layout.cgroup_root.clone();
         let watcher_beacon_state = Arc::clone(&self.beacon_state);
@@ -1722,7 +1721,7 @@ impl VmDriver {
                 exit_lines,
                 watcher_live,
                 watcher_tx,
-                watcher_cgroup_manager,
+                watcher_host_state,
                 watcher_cgroup_accounting,
                 watcher_cgroup_root,
                 scope,
@@ -1739,9 +1738,13 @@ impl VmDriver {
 /// Await the existing driver-owned artifact cleanup sequence in its required
 /// order. Best-effort result handling is unchanged; completion means every
 /// cleanup call has returned, not that each artifact's absence was verified.
-async fn cleanup_driver_artifacts(cgroup_manager: &CgroupManager, live_vm: &LiveVm) {
-    let _ = cgroup_manager.cgroup_kill(&live_vm.scope).await;
-    let _ = cgroup_manager.remove_workload_scope(&live_vm.scope).await;
+async fn cleanup_driver_artifacts(
+    host_state: &Arc<dyn overdrive_core::traits::vm_host_state::VmHostState>,
+    live_vm: &LiveVm,
+) {
+    // The scope's one remover (ADR-0351). A busy scope is left to
+    // `VmReclamation`; no other failure changes the cleanup either.
+    let _ = host_state.kill_scope(&live_vm.scope).await;
     let _ = tokio::fs::remove_dir_all(live_vm.run_dir.path()).await;
     remove_clone_then_index_link(&live_vm.rootfs).await;
 }
@@ -2206,7 +2209,7 @@ impl Driver for VmDriver {
         // `VmDriver::stop` still removes the clone DIRECTLY (it holds this
         // allocation's own `RootfsPlan`); the sweep is the backstop for the
         // without-stop endings, not a replacement for this.
-        cleanup_driver_artifacts(&self.cgroup_manager, &live_vm).await;
+        cleanup_driver_artifacts(&self.host_state, &live_vm).await;
 
         tracing::info!(
             name: "vm.lifecycle.cleanup_calls_finished",
@@ -2547,7 +2550,7 @@ async fn run_exit_watcher(
     exit_lines: mpsc::Receiver<io::Result<Option<String>>>,
     live: Arc<LiveMap>,
     exit_tx: mpsc::Sender<ExitEvent>,
-    cgroup_manager: CgroupManager,
+    host_state: Arc<dyn overdrive_core::traits::vm_host_state::VmHostState>,
     cgroup_accounting: Arc<dyn CgroupAccounting>,
     cgroup_root: PathBuf,
     scope: CgroupPath,
@@ -2615,7 +2618,7 @@ async fn run_exit_watcher(
         // session's Live entry. The guard's Drop still covers transition 4.
         return;
     };
-    cleanup_driver_artifacts(&cgroup_manager, &live_vm).await;
+    cleanup_driver_artifacts(&host_state, &live_vm).await;
     tracing::info!(
         name: "vm.lifecycle.cleanup_calls_finished",
         alloc = %alloc,
@@ -2668,7 +2671,7 @@ mod tests {
     use overdrive_sim::adapters::clock::SimClock;
     use overdrive_sim::adapters::observation_store::SimObservationStore;
     use overdrive_sim::adapters::probers::{SimHttpProber, SimTcpProber};
-    use overdrive_sim::{SimCgroupFs, SimOp, SimVmm};
+    use overdrive_sim::{SimCgroupFs, SimVmm};
 
     use super::*;
 
@@ -3080,6 +3083,8 @@ mod tests {
             ),
         };
         let fs = SimCgroupFs::new();
+        let host_state = Arc::new(overdrive_sim::SimVmHostState::new());
+        host_state.script_kill_scope_failure(std::io::ErrorKind::PermissionDenied);
         let clock: Arc<dyn Clock> = Arc::new(SimClock::new());
         let wiring = overdrive_core::guest_network::GuestNetworkExecWiring::new(clock.clone());
         assert!(wiring.supervisor().open_after_boot());
@@ -3095,18 +3100,11 @@ mod tests {
             test_beacon_intake().await,
             guest_listener_board,
             None,
-            std::sync::Arc::new(overdrive_sim::SimVmHostState::new()),
+            host_state,
         );
         let alloc = AllocationId::new("alloc-cleanup-partitions").expect("valid allocation");
         driver.live.lock().insert(alloc.clone(), VmSupervision::Starting);
         let scope = CgroupPath::for_alloc(&alloc);
-        let scope_dir = scope.resolve(&layout.cgroup_root);
-        fs.inject_error(
-            SimOp::Write,
-            scope_dir.join("cgroup.kill"),
-            std::io::ErrorKind::PermissionDenied,
-        );
-        fs.inject_error(SimOp::RemoveDir, scope_dir.clone(), std::io::ErrorKind::DirectoryNotEmpty);
         let master = temp.path().join("master.img");
         std::fs::write(&master, b"master").expect("write master");
         let rootfs = RootfsPlan::for_alloc(
@@ -3155,8 +3153,7 @@ mod tests {
             "VMM terminate:",
             "terminate residue",
             "rootfs clone remove:",
-            "cgroup kill:",
-            "cgroup remove:",
+            "cgroup scope kill:",
             "run directory remove:",
         ];
         let mut prior = 0;
@@ -3173,10 +3170,6 @@ mod tests {
         );
         assert!(rootfs.clone_dest().is_dir(), "clone residue remains indexed");
         assert!(rootfs.index_link().is_symlink(), "failed clone removal retains its index");
-        assert!(
-            !fs.snapshot().contains_key(&scope_dir),
-            "later cgroup stages are attempted even though their injected operations fail once",
-        );
         driver.release_supervision(&alloc);
         assert_eq!(driver.live_allocations(), Some(Vec::new()));
     }
@@ -3260,7 +3253,7 @@ mod tests {
                 line_rx,
                 Arc::clone(&live),
                 exit_tx,
-                CgroupManager::new(PathBuf::from("/sys/fs/cgroup"), Arc::new(SimCgroupFs::new())),
+                Arc::new(overdrive_sim::SimVmHostState::new()),
                 cgroup_accounting,
                 PathBuf::from("/sys/fs/cgroup"),
                 CgroupPath::for_alloc(&alloc),

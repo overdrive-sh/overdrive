@@ -189,7 +189,7 @@ async fn alloc_scope_has_writable_cpu_weight_and_memory_max() {
         "memory.max must match the spec's memory",
     );
 
-    manager.remove_workload_scope(&scope).await.expect("alloc scope removal succeeds");
+    tokio::fs::remove_dir(scope.resolve(cgroup_root)).await.expect("alloc scope removal succeeds");
 }
 
 /// AC3 — companion regression: the WARN log line "cgroup
@@ -230,7 +230,7 @@ async fn alloc_start_does_not_emit_resource_limit_warning() {
 
     manager.create_workload_scope(&scope).await.expect("alloc scope creation succeeds");
     manager.write_resource_limits_warn_on_error(&scope, &resources).await;
-    manager.remove_workload_scope(&scope).await.expect("alloc scope removal succeeds");
+    tokio::fs::remove_dir(scope.resolve(cgroup_root)).await.expect("alloc scope removal succeeds");
 
     let captured = events.lock().expect("events mutex").clone();
     assert!(

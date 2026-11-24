@@ -212,7 +212,6 @@ fn workspace_removers() -> BTreeSet<Remover> {
 /// CONTRACT_SHAPE: pure-function. Universe: the set of removers in the
 /// workspace's production source.
 #[test]
-#[should_panic(expected = "a second remover of a VM scope exists")]
 fn a_vm_scope_is_removed_only_by_the_populated_first_scope_kill() {
     let offenders: Vec<Remover> = workspace_removers()
         .into_iter()

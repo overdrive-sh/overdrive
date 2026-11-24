@@ -4,10 +4,10 @@
 //! Tier 3, real-io. Requires Lima sudo.
 //!
 //! Exercises ADR-0054 § D3 row 5 and pins the assumption baked into
-//! `cgroup_manager::remove_workload_scope`'s rustdoc: "the
+//! `VmHostState::kill_scope`'s removal of a workload scope: the
 //! kernel-managed virtual files inside a workload scope cannot be
 //! `unlink`ed individually and are reaped automatically by
-//! `rmdir(2)`."
+//! `rmdir(2)`.
 //!
 //! As of the 01-07 review D2 closure, `SimCgroupFs`'s `remove_dir`
 //! ALSO models this auto-reap for controller-interface pseudo-files —

@@ -408,11 +408,10 @@ impl CgroupFs for SimCgroupFs {
             // out-of-scope KERNEL-side effect for this byte-store-only
             // port — and modeling it would require ALSO modeling
             // `cgroup.kill`'s mass-kill effect on `cgroup.procs`
-            // (equally out of scope, same Scope section), since
-            // production's `cleanup_after_start_failure` always issues
-            // `cgroup_kill` immediately before `remove_workload_scope`
-            // and relies on the kernel reaping the killed process
-            // before `rmdir` runs.
+            // (equally out of scope, same Scope section). The VM scope is
+            // removed only by `VmHostState::kill_scope`, which writes
+            // `cgroup.kill` and waits for `populated 0` before it removes
+            // the directory.
             let has_child_subdir = state.iter().any(|(k, (child_entry, _))| {
                 k != path && k.starts_with(path) && matches!(child_entry, SimEntry::Dir)
             });

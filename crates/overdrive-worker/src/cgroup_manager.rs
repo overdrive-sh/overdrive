@@ -261,41 +261,6 @@ impl CgroupManager {
         }
     }
 
-    /// Mass-kill every process in the workload cgroup via the kernel's
-    /// `cgroup.kill` interface (cgroup v2, kernel 5.14+) — writes
-    /// `1\n` to `<scope>/cgroup.kill`.
-    ///
-    /// Idempotent — `NotFound` (scope already gone) is reported as
-    /// `Ok`. Invalid-argument writes (a path that exists but is not a
-    /// v2 cgroup) surface to the caller.
-    ///
-    /// # Errors
-    /// Returns the underlying `std::io::Error` if the write fails for
-    /// a reason other than the scope being absent.
-    pub async fn cgroup_kill(&self, scope: &CgroupPath) -> Result<(), std::io::Error> {
-        let path = scope.resolve(&self.cgroup_root).join("cgroup.kill");
-        match self.fs.write(&path, b"1\n").await {
-            Ok(()) => Ok(()),
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(err) => Err(err),
-        }
-    }
-
-    /// Remove the workload scope directory after process reap.
-    /// Idempotent — succeeds when the directory is already gone.
-    ///
-    /// # Errors
-    /// Returns the underlying `std::io::Error` if `rmdir` fails for a
-    /// reason other than the directory being absent.
-    pub async fn remove_workload_scope(&self, scope: &CgroupPath) -> Result<(), std::io::Error> {
-        let dir = scope.resolve(&self.cgroup_root);
-        match self.fs.remove_dir(&dir).await {
-            Ok(()) => Ok(()),
-            Err(err) if err.kind() == std::io::ErrorKind::NotFound => Ok(()),
-            Err(err) => Err(err),
-        }
-    }
-
     /// Bootstrap the workload-bearing slice.
     ///
     /// Creates `overdrive.slice/workloads.slice` under the configured

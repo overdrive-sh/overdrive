@@ -245,9 +245,6 @@ fn eventually(max: Duration, condition: impl Fn() -> bool) -> bool {
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[test]
 #[serial(cgroup)]
-#[should_panic(
-    expected = "kill_scope returns ResourceBusy while the scope's last task is held in exit"
-)]
 fn kill_scope_never_removes_a_scope_whose_last_task_is_held_in_exit() {
     let device = Device::new("held");
     let id = alloc("ksk-held-0");

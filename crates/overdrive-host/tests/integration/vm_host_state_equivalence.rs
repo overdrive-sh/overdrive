@@ -510,7 +510,6 @@ async fn a_refused_cgroup_kill_write_returns_its_kind_at_once_and_leaves_the_sco
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(host_pure)]
 #[tokio::test]
-#[should_panic(expected = "a removal failure that is not busy must return at once")]
 async fn a_failed_removal_with_a_non_busy_kind_returns_at_once_without_retry() {
     let alloc = AllocationId::new("vmhosteq-remove-a").expect("valid alloc id");
     let (_root, real, scope_dir) = real_host_over_tempdir(&alloc);
