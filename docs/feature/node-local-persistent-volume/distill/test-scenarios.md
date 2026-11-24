@@ -530,6 +530,82 @@ first step that lands it (or by a DISTILL pass after it), per `.claude/rules/tes
 | ADR-0354: the steady-state `VmReclamation` tick that meets a busy scope leaves the row unchanged; a busy boot executor step does not discard artifacts and the next pass discards them after the hold clears | the `SimVmHostState` hold | ADR-0354 Tests |
 | Tier 3: the node boots with a held-flush VM left over after a `serve` crash and does not reuse its CID (S-VOL-T3-12's boot variant); ADR-0352's serve-crash test | a crash facility on the CLI's `ServeHandle` (`ServerHandle::kill_for_test` exists in the control plane, not on the CLI handle) | ADR-0350 Tests, ADR-0352 Tests |
 
+#### Sim test-support surface for the stuck-VM tests
+
+Pinned by DISTILL (test support is DISTILL's to shape, per the feature delta items "A VMM kill's reap wait is bounded" 5 and "A scope kill's settle wait is
+bounded" 5). All four are `TEST-HOOK-ONLY` methods on the existing sim adapters, in the style of `inject_exit`, `script_kill_scope_failure` and
+`SimVolumeBacking::hold_claim_while_live`. No production surface and no new type.
+
+**1. `SimVmm`: script a process as unreapable** (`crates/overdrive-sim/src/adapters/vmm.rs`)
+
+```rust
+/// One-shot, consumed by the NEXT `create` (as `inject_exit` is).
+pub fn inject_unreapable_process(&self)
+/// Whether `pid` was killed by `terminate` and has not been reaped.
+#[must_use]
+pub fn is_unreaped(&self, pid: u32) -> bool
+```
+
+`terminate` on the armed process marks it killed, does not fire its exit sender, waits `VMM_REAP_BOUND` on the injected clock and returns
+`Ok(VmTermination::KilledNotReaped)`. While unreaped the process keeps everything it holds: `vsock_device_holders()` still reports its CID, and its
+scope membership stays. `is_live(pid)` is `false` and `live_pids()` omits it from the kill on (it is killed); `is_unreaped(pid)` is `true` from the kill
+until the reap. A second `terminate` on it waits the bound again and returns `KilledNotReaped` again. A process not armed behaves as today.
+
+**2. `SimVmm`: the scripted reap** (no new method)
+
+```rust
+pub fn exit_process(&self, pid: u32, exit_code: Option<i32>, signal: Option<u8>) -> bool   // existing signature
+```
+
+On an unreaped process `exit_process` is the reap, as the feature delta says ("a scripted `exit_process`"): it clears the unreaped state, releases the
+device entry, fires the exit sender once with the given ending, and returns `true`. On a live process it behaves as today. It returns `false` for an
+unknown pid or one already reaped or exited. `end_process` accepts an unreaped entry; today it refuses any `terminated` one.
+
+**3. `SimVmHostState`: hold a scope, release the hold** (`crates/overdrive-sim/src/adapters/vm_host_state.rs`)
+
+```rust
+/// The scope of `alloc` is held while `held()` is true.
+/// # Panics
+/// If `alloc` has no scope (`set_scope` first), or already has a hold.
+pub fn hold_scope_while(&self, alloc: &AllocationId, held: impl Fn() -> bool + Send + Sync + 'static)
+/// Clears the hold of `alloc`, whatever its closure says. A no-op when none.
+pub fn release_scope_hold(&self, alloc: &AllocationId)
+```
+
+While held, `observe()` keeps reporting the scope (pids as `set_scope` seeded them; the hold never edits them), and `kill_scope` on it returns
+`Err(io::Error::from(ErrorKind::ResourceBusy))` at once, changes nothing, takes no time and does not pop the `script_kill_scope_failure` queue. When
+`held()` is false or the hold was released, `kill_scope` takes the ordinary path (queue first, then idempotent removal). The hold never removes the scope
+by itself; the scope leaves through `kill_scope`, as a real empty scope does after the reap. `held()` is read at each `kill_scope` call, never cached.
+
+**How the reap couples the two.** The one shared fact is `SimVmm`'s unreaped state of the process (`is_unreaped(pid)`). The hold reads it through its
+closure, so `exit_process` clears both with no second call:
+
+```rust
+let vmm = SimVmm::new(clock.clone());
+let host = SimVmHostState::new();
+vmm.inject_unreapable_process();
+let ctl = /* create the VMM through the driver or vmm.create */;
+host.set_scope(alloc.clone(), BTreeSet::from([ctl.pid]));
+host.hold_scope_while(&alloc, { let vmm = vmm.clone(); let pid = ctl.pid; move || vmm.is_unreaped(pid) });
+// stop: terminate -> KilledNotReaped; vsock_device_holders() still has the CID; kill_scope -> ResourceBusy
+vmm.exit_process(ctl.pid, None, Some(9));   // the reap: CID released, exit sender fires, the hold is over
+// the next kill_scope returns Ok and removes the scope
+```
+
+`SimVmm` is `Clone` over shared state, so the closure sees the same process table. A hold with no process behind it (boot, pool and reclamation tests)
+is `hold_scope_while(&alloc, || true)` ended by `release_scope_hold`.
+
+**4. `SimVmHostState`: a scripted `observe` failure**
+
+```rust
+/// Queue a failure for the next `VmHostState::observe` call. FIFO, as `script_kill_scope_failure`.
+pub fn script_observe_failure(&self, kind: io::ErrorKind)
+```
+
+Each `observe()` call pops the front entry and returns `Err(io::Error::from(kind))`, reading and changing nothing; with the queue empty it proceeds as
+today. An armed `arm_observe_barrier` is honoured first (the call signals `entered` and waits for release, then fails). It does not touch the
+`inject_probe_fault` slot.
+
 ### N4. Delta to § K (this pass only)
 
 | Tier | Tests added | Tests changed (now pending) | Guards added |
