@@ -1,0 +1,69 @@
+State 1: <Initial predicate>
+/\ rg_bugAbandonedRowCounts_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
+/\ rg_bugAbandonedRowCounts_restart_generation_st = [ declared |-> FALSE,
+  stopped |-> FALSE,
+  as |-> <<0, 0, 0, 0>>,
+  why |-> <<0, 0, 0, 0>>,
+  faults |-> 1,
+  dg |-> 0,
+  ig |-> <<0, 0, 0, 0>>,
+  cnt |-> <<0, 0, 0, 0>>,
+  og |-> 0,
+  idFault |-> FALSE,
+  capFull |-> FALSE ]
+
+State 2: <rg_bugAbandonedRowCounts_restart_generation_Declare line 307, col 3 to line 311, col 44 of module rg_bugAbandonedRowCounts>
+/\ rg_bugAbandonedRowCounts_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
+/\ rg_bugAbandonedRowCounts_restart_generation_st = [ declared |-> TRUE,
+  stopped |-> FALSE,
+  as |-> <<0, 0, 0, 0>>,
+  why |-> <<0, 0, 0, 0>>,
+  faults |-> 1,
+  dg |-> 0,
+  ig |-> <<0, 0, 0, 0>>,
+  cnt |-> <<0, 0, 0, 0>>,
+  og |-> 0,
+  idFault |-> FALSE,
+  capFull |-> FALSE ]
+
+State 3: <rg_bugAbandonedRowCounts_restart_generation_WlStart line 1042, col 3 to line 1075, col 61 of module rg_bugAbandonedRowCounts>
+/\ rg_bugAbandonedRowCounts_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
+/\ rg_bugAbandonedRowCounts_restart_generation_st = [ declared |-> TRUE,
+  stopped |-> FALSE,
+  as |-> <<1, 0, 0, 0>>,
+  why |-> <<0, 0, 0, 0>>,
+  faults |-> 1,
+  dg |-> 0,
+  ig |-> <<0, 0, 0, 0>>,
+  cnt |-> <<0, 0, 0, 0>>,
+  og |-> 0,
+  idFault |-> FALSE,
+  capFull |-> FALSE ]
+
+State 4: <rg_bugAbandonedRowCounts_restart_generation_LaunchLost line 362, col 3 to line 388, col 61 of module rg_bugAbandonedRowCounts>
+/\ rg_bugAbandonedRowCounts_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
+/\ rg_bugAbandonedRowCounts_restart_generation_st = [ declared |-> TRUE,
+  stopped |-> FALSE,
+  as |-> <<5, 0, 0, 0>>,
+  why |-> <<7, 0, 0, 0>>,
+  faults |-> 1,
+  dg |-> 0,
+  ig |-> <<0, 0, 0, 0>>,
+  cnt |-> <<0, 0, 0, 0>>,
+  og |-> 0,
+  idFault |-> FALSE,
+  capFull |-> FALSE ]
+
+State 5: <rg_bugAbandonedRowCounts_restart_generation_WlStart line 1042, col 3 to line 1075, col 61 of module rg_bugAbandonedRowCounts>
+/\ rg_bugAbandonedRowCounts_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
+/\ rg_bugAbandonedRowCounts_restart_generation_st = [ declared |-> TRUE,
+  stopped |-> FALSE,
+  as |-> <<5, 1, 0, 0>>,
+  why |-> <<7, 0, 0, 0>>,
+  faults |-> 1,
+  dg |-> 0,
+  ig |-> <<0, 0, 0, 0>>,
+  cnt |-> <<0, 1, 0, 0>>,
+  og |-> 0,
+  idFault |-> FALSE,
+  capFull |-> FALSE ]

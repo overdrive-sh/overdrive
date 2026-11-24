@@ -31,7 +31,7 @@ State 1: <Initial predicate>
   dstart |-> 0 ]
 /\ vol_bugNoInterrupt_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 
-State 2: <vol_bugNoInterrupt_node_volume_Declare line 927, col 3 to line 931, col 44 of module vol_bugNoInterrupt>
+State 2: <vol_bugNoInterrupt_node_volume_Declare line 965, col 3 to line 969, col 44 of module vol_bugNoInterrupt>
 /\ vol_bugNoInterrupt_node_volume_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   storeUp |-> TRUE,
@@ -64,7 +64,7 @@ State 2: <vol_bugNoInterrupt_node_volume_Declare line 927, col 3 to line 931, co
   dstart |-> 0 ]
 /\ vol_bugNoInterrupt_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 
-State 3: <vol_bugNoInterrupt_node_volume_WlStart line 1319, col 3 to line 1350, col 74 of module vol_bugNoInterrupt>
+State 3: <vol_bugNoInterrupt_node_volume_WlStart line 1357, col 3 to line 1388, col 74 of module vol_bugNoInterrupt>
 /\ vol_bugNoInterrupt_node_volume_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   storeUp |-> TRUE,
@@ -97,7 +97,7 @@ State 3: <vol_bugNoInterrupt_node_volume_WlStart line 1319, col 3 to line 1350, 
   dstart |-> 0 ]
 /\ vol_bugNoInterrupt_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 
-State 4: <vol_bugNoInterrupt_node_volume_OpStop line 937, col 3 to line 944, col 43 of module vol_bugNoInterrupt>
+State 4: <vol_bugNoInterrupt_node_volume_OpStop line 975, col 3 to line 982, col 43 of module vol_bugNoInterrupt>
 /\ vol_bugNoInterrupt_node_volume_st = [ declared |-> TRUE,
   stopped |-> TRUE,
   storeUp |-> TRUE,
@@ -130,7 +130,7 @@ State 4: <vol_bugNoInterrupt_node_volume_OpStop line 937, col 3 to line 944, col
   dstart |-> 0 ]
 /\ vol_bugNoInterrupt_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 
-State 5: <vol_bugNoInterrupt_node_volume_LaunchEnsureCreate line 1416, col 3 to line 1464, col 49 of module vol_bugNoInterrupt>
+State 5: <vol_bugNoInterrupt_node_volume_LaunchEnsureCreate line 1454, col 3 to line 1502, col 49 of module vol_bugNoInterrupt>
 /\ vol_bugNoInterrupt_node_volume_st = [ declared |-> TRUE,
   stopped |-> TRUE,
   storeUp |-> TRUE,
@@ -163,7 +163,7 @@ State 5: <vol_bugNoInterrupt_node_volume_LaunchEnsureCreate line 1416, col 3 to 
   dstart |-> 0 ]
 /\ vol_bugNoInterrupt_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 
-State 6: <vol_bugNoInterrupt_node_volume_LaunchEnsureActivate line 1470, col 3 to line 1498, col 49 of module vol_bugNoInterrupt>
+State 6: <vol_bugNoInterrupt_node_volume_LaunchEnsureActivate line 1508, col 3 to line 1536, col 49 of module vol_bugNoInterrupt>
 /\ vol_bugNoInterrupt_node_volume_st = [ declared |-> TRUE,
   stopped |-> TRUE,
   storeUp |-> TRUE,
@@ -196,7 +196,7 @@ State 6: <vol_bugNoInterrupt_node_volume_LaunchEnsureActivate line 1470, col 3 t
   dstart |-> 0 ]
 /\ vol_bugNoInterrupt_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 
-State 7: <vol_bugNoInterrupt_node_volume_LaunchCheck line 1527, col 3 to line 1543, col 77 of module vol_bugNoInterrupt>
+State 7: <vol_bugNoInterrupt_node_volume_LaunchCheck line 1565, col 3 to line 1581, col 77 of module vol_bugNoInterrupt>
 /\ vol_bugNoInterrupt_node_volume_st = [ declared |-> TRUE,
   stopped |-> TRUE,
   storeUp |-> TRUE,

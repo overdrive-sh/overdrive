@@ -1,0 +1,17 @@
+# rg-hazard-abandoned-row-counts: counterexample, 5 state(s) (from the TLC trace)
+
+State 1
+  conf_step = [Init |-> [tag |-> "UNIT"]]
+  st = [ declared |-> FALSE, stopped |-> FALSE, as |-> <<0, 0, 0, 0>>, why |-> <<0, 0, 0, 0>>, faults |-> 1, dg |-> 0, ig |-> <<0, 0, 0, 0>>, cnt |-> <<0, 0, 0, 0>>, og |-> 0, idFault |-> FALSE, capFull |-> FALSE ]
+
+State 2 [Declare]
+  st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<0, 0, 0, 0>>, why |-> <<0, 0, 0, 0>>, faults |-> 1, dg |-> 0, ig |-> <<0, 0, 0, 0>>, cnt |-> <<0, 0, 0, 0>>, og |-> 0, idFault |-> FALSE, capFull |-> FALSE ]
+
+State 3 [WlStart]
+  st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<1, 0, 0, 0>>, why |-> <<0, 0, 0, 0>>, faults |-> 1, dg |-> 0, ig |-> <<0, 0, 0, 0>>, cnt |-> <<0, 0, 0, 0>>, og |-> 0, idFault |-> FALSE, capFull |-> FALSE ]
+
+State 4 [LaunchLost]
+  st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<5, 0, 0, 0>>, why |-> <<7, 0, 0, 0>>, faults |-> 1, dg |-> 0, ig |-> <<0, 0, 0, 0>>, cnt |-> <<0, 0, 0, 0>>, og |-> 0, idFault |-> FALSE, capFull |-> FALSE ]
+
+State 5 [WlStart]
+  st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<5, 1, 0, 0>>, why |-> <<7, 0, 0, 0>>, faults |-> 1, dg |-> 0, ig |-> <<0, 0, 0, 0>>, cnt |-> <<0, 1, 0, 0>>, og |-> 0, idFault |-> FALSE, capFull |-> FALSE ]
