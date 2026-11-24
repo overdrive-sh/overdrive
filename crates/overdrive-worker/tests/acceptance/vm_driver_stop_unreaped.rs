@@ -549,9 +549,12 @@ async fn guard_a_replacement_waits_on_the_claim_and_attaches_after_the_reap() {
 /// Item 6, stop. After `KilledNotReaped` the stop does not call `VmHostState::kill_scope` (the
 /// scope is known to be populated), while the run directory and the clone are removed. The scope
 /// stays for reclamation.
-/// A GUARD: the call count is read from the scripted-failure queue (see the module doc).
+/// PENDING: RED until the driver omits the scope kill after `KilledNotReaped` (ADR-0348 item 6). Since
+/// ADR-0351 the driver calls `kill_scope` on every cleanup, so this guard no longer holds today. The
+/// call count is read from the scripted-failure queue (see the module doc).
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
+#[should_panic(expected = "no VmHostState::kill_scope call may follow KilledNotReaped in a stop")]
 async fn guard_a_stop_makes_no_scope_kill_after_a_vmm_that_is_not_reaped() {
     let node = Node::new().await;
     node.sim.inject_unreapable_process();
@@ -583,9 +586,14 @@ async fn guard_a_stop_makes_no_scope_kill_after_a_vmm_that_is_not_reaped() {
 /// Item 6, start-failure cleanup. A launch whose guest never beacons ends at the boot deadline;
 /// its cleanup terminates the VMM, which is not reaped. No `kill_scope` call follows, the run
 /// directory and the clone are removed, and the reported failure stays the boot deadline.
-/// A GUARD: the call count is read from the scripted-failure queue (see the module doc).
+/// PENDING: RED until the driver omits the scope kill after `KilledNotReaped` (ADR-0348 item 6). Since
+/// ADR-0351 the driver calls `kill_scope` on every cleanup, so this guard no longer holds today. The
+/// call count is read from the scripted-failure queue (see the module doc).
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
+#[should_panic(
+    expected = "no VmHostState::kill_scope call may follow KilledNotReaped in a start-failure cleanup"
+)]
 async fn guard_a_start_failure_cleanup_makes_no_scope_kill_after_a_vmm_that_is_not_reaped() {
     let node = Node::new().await;
     node.sim.inject_unreapable_process();

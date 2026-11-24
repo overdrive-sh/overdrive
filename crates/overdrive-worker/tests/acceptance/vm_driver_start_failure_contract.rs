@@ -43,7 +43,7 @@ use overdrive_sim::adapters::cgroup_fs::SimOp;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_sim::adapters::probers::{SimHttpProber, SimTcpProber};
-use overdrive_sim::{SimCgroupAccounting, SimCgroupFs, SimVmm};
+use overdrive_sim::{SimCgroupAccounting, SimCgroupFs, SimVmHostState, SimVmm};
 use overdrive_worker::VmDriver;
 use overdrive_worker::probe_runner::ProbeRunner;
 use overdrive_worker::vm_driver::VmHostLayout;
@@ -149,9 +149,10 @@ async fn build_driver(
     sim: &SimVmm,
     vmm: Arc<dyn Vmm>,
     layout: VmHostLayout,
-) -> (VmDriver, SimClock, SimCgroupFs, BeaconHarness) {
+) -> (VmDriver, SimClock, SimCgroupFs, SimVmHostState, BeaconHarness) {
     let clock = SimClock::new();
     let cgroup_fs = SimCgroupFs::new();
+    let host_state = SimVmHostState::new();
     let fs: Arc<dyn overdrive_core::traits::CgroupFs> = Arc::new(cgroup_fs.clone());
     let accounting: Arc<dyn overdrive_core::traits::cgroup_accounting::CgroupAccounting> =
         Arc::new(SimCgroupAccounting::new());
@@ -171,9 +172,15 @@ async fn build_driver(
         beacon.intake().await,
         guest_listener_board,
         None,
-        std::sync::Arc::new(overdrive_sim::SimVmHostState::new()),
+        std::sync::Arc::new(host_state.clone()),
     );
-    (driver, clock, cgroup_fs, beacon)
+    (driver, clock, cgroup_fs, host_state, beacon)
+}
+
+/// Seeds `alloc`'s VM scope on the host-state port, as the platform's cgroup would hold it.
+/// The driver removes it only through `VmHostState::kill_scope` (ADR-0351).
+fn seed_scope(host_state: &SimVmHostState, alloc: &AllocationId) {
+    host_state.set_scope(alloc.clone(), std::collections::BTreeSet::new());
 }
 
 /// Spawn `start`; the guest connects with READY once its VMM exists; the
@@ -410,7 +417,7 @@ async fn vm_start_failure_class_is_independent_of_vmm_diagnostic_wording() {
                 source: std::io::Error::new(std::io::ErrorKind::NotFound, text),
             }),
         };
-        let (driver, _clock, _fs, _beacon) = build_driver(
+        let (driver, _clock, _fs, _host_state, _beacon) = build_driver(
             &SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new())),
             Arc::new(vmm),
             layout,
@@ -458,7 +465,7 @@ async fn vm_start_failure_preserves_verbatim_vmm_diagnostic_detail() {
             ),
         }),
     };
-    let (driver, _clock, _fs, _beacon) = build_driver(
+    let (driver, _clock, _fs, _host_state, _beacon) = build_driver(
         &SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new())),
         Arc::new(vmm),
         layout,
@@ -496,7 +503,7 @@ async fn vm_early_exit_failure_preserves_exit_code_signal_and_final_stderr_tail(
             stderr_tail: Some("cloud-hypervisor: fatal: bad disk\nabort".to_owned()),
         },
     };
-    let (driver, _clock, _fs, _beacon) = build_driver(
+    let (driver, _clock, _fs, _host_state, _beacon) = build_driver(
         &SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new())),
         Arc::new(vmm),
         layout,
@@ -531,7 +538,7 @@ async fn vm_boot_deadline_failure_preserves_deadline_milliseconds_and_live_conso
     let run_dir_root = layout.run_dir_root.clone();
     let vmm =
         SilentButNoisy { console: "[    0.78] Run /sbin/init as init process\npanic: no init" };
-    let (driver, clock, _fs, _beacon) = build_driver(
+    let (driver, clock, _fs, _host_state, _beacon) = build_driver(
         &SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new())),
         Arc::new(vmm),
         layout,
@@ -602,7 +609,8 @@ async fn initial_and_restart_start_expose_identical_cause_and_detail_pairs() {
     std::fs::remove_file(fixture_rootfs_path(&tmp)).expect("remove the configured rootfs master");
     let configured = fixture_rootfs_path(&tmp).display().to_string();
     let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
-    let (driver, _clock, _fs, _beacon) = build_driver(&sim, Arc::new(sim.clone()), layout).await;
+    let (driver, _clock, _fs, _host_state, _beacon) =
+        build_driver(&sim, Arc::new(sim.clone()), layout).await;
     let alloc = AllocationId::new("alloc-restart-parity").expect("valid alloc id");
     let spec = build_spec(&alloc, &tmp, 0);
     // A restart is a second launch of the allocation: placement hands it a
@@ -657,12 +665,15 @@ async fn duplicate_start_request_is_rejected_without_replacement_cross_ownership
         release: Semaphore::new(0),
         create_calls: AtomicUsize::new(0),
     });
-    let (driver, clock, cgroup_fs, beacon) = build_driver(&sim, barrier_vmm.clone(), layout).await;
+    let (driver, clock, cgroup_fs, host_state, beacon) =
+        build_driver(&sim, barrier_vmm.clone(), layout).await;
     let target_spec = build_spec(&target, &tmp, 0);
     let sibling_spec = build_spec(&sibling, &tmp, 1);
     // A duplicate request is a second launch request for the target: it
     // carries its own transport (the target.s leased CID).
     let duplicate_spec = || build_spec(&target, &tmp, 0);
+    seed_scope(&host_state, &target);
+    seed_scope(&host_state, &sibling);
 
     let (sibling_handle, _sibling_beacon) = start_ready(&driver, &sibling_spec, &beacon).await;
     let sibling_pid = sibling_handle.pid.expect("sibling start returns a VMM pid");
@@ -762,15 +773,8 @@ async fn duplicate_start_request_is_rejected_without_replacement_cross_ownership
     assert_eq!(driver.live_allocations(), Some(Vec::new()));
     assert!(!sim.is_live(target_pid));
     assert!(!sim.is_live(sibling_pid));
-    let cgroups = cgroup_fs.snapshot();
-    assert!(
-        !cgroups.contains_key(&CgroupPath::for_alloc(&target).resolve(&tmp.path().join("cgroup"))),
-        "ordinary stop removes the target cgroup scope"
-    );
-    assert!(
-        !cgroups.contains_key(&CgroupPath::for_alloc(&sibling).resolve(&tmp.path().join("cgroup"))),
-        "ordinary stop removes the sibling cgroup scope"
-    );
+    assert!(!host_state.has_scope(&target), "ordinary stop removes the target scope");
+    assert!(!host_state.has_scope(&sibling), "ordinary stop removes the sibling scope");
     assert!(!VmRunDir::for_alloc(&run_dir_root, &target).path().exists());
     assert!(!VmRunDir::for_alloc(&run_dir_root, &sibling).path().exists());
 }
@@ -788,25 +792,37 @@ async fn failed_start_cleanup_twice_converges_to_the_same_residue_free_state() {
     let run_dir_root = layout.run_dir_root.clone();
     let clone_staging = layout.clone_staging_dir.clone();
     let clone_index = layout.clone_index_dir.clone();
-    let cgroup_root = layout.cgroup_root.clone();
+    let layout_cgroup_root = layout.cgroup_root.clone();
     let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
-    let (driver, clock, cgroup_fs, beacon) =
+    let (driver, clock, cgroup_fs, host_state, beacon) =
         build_driver(&sim, Arc::new(sim.clone()), layout).await;
     let sibling = AllocationId::new("alloc-cleanup-twice-sibling").expect("valid sibling id");
     let target = AllocationId::new("alloc-cleanup-twice-target").expect("valid target id");
     let sibling_spec = build_spec(&sibling, &tmp, 0);
+    seed_scope(&host_state, &sibling);
     let (sibling_handle, _sibling_beacon) = start_ready(&driver, &sibling_spec, &beacon).await;
     let sibling_pid = sibling_handle.pid.expect("sibling VMM pid");
     let sibling_claims = driver.live_allocations().expect("VM driver reports claims");
-    let sibling_cgroups = cgroup_fs.snapshot();
+    // The sibling's own cgroup subtree. The target's leftover directories are the platform's to
+    // remove through `kill_scope`, not the driver's, so only the sibling's entries are compared.
+    let sibling_scope = CgroupPath::for_alloc(&sibling).resolve(&layout_cgroup_root);
+    let sibling_subtree = || {
+        cgroup_fs
+            .snapshot()
+            .into_iter()
+            .filter(|(path, _)| path.starts_with(&sibling_scope))
+            .collect::<Vec<_>>()
+    };
+    let sibling_cgroups = sibling_subtree();
 
     std::fs::remove_file(fixture_rootfs_path(&tmp)).expect("remove target rootfs master");
     let target_plan =
         RootfsPlan::for_alloc(fixture_rootfs_path(&tmp), 0, &target, &clone_staging, &clone_index);
-    let target_scope = CgroupPath::for_alloc(&target).resolve(&cgroup_root);
 
     let mut residue_snapshots = Vec::new();
     for attempt in 1..=2 {
+        // Each attempt starts from a platform that holds the target's scope again.
+        seed_scope(&host_state, &target);
         // Every fresh start is its own launch with its own transport.
         let target_spec = build_spec(&target, &tmp, 1);
         let failure = expect_rejection(
@@ -823,7 +839,7 @@ async fn failed_start_cleanup_twice_converges_to_the_same_residue_free_state() {
             VmRunDir::for_alloc(&run_dir_root, &target).path().exists(),
             target_plan.clone_dest().exists(),
             target_plan.index_link().exists(),
-            cgroup_fs.snapshot().contains_key(&target_scope),
+            host_state.has_scope(&target),
             driver.live_allocations().expect("VM driver reports claims").contains(&target),
         );
         assert_eq!(
@@ -838,10 +854,11 @@ async fn failed_start_cleanup_twice_converges_to_the_same_residue_free_state() {
             "attempt {attempt} preserves independent supervision"
         );
         assert_eq!(
-            cgroup_fs.snapshot(),
+            sibling_subtree(),
             sibling_cgroups,
             "attempt {attempt} preserves the independent cgroup exactly"
         );
+        assert!(host_state.has_scope(&sibling), "attempt {attempt} preserves the sibling's scope");
         assert!(sim.is_live(sibling_pid), "attempt {attempt} preserves the sibling VMM");
         residue_snapshots.push(residue);
     }
@@ -871,7 +888,6 @@ async fn every_vm_start_rejection_leaves_no_vm_resources() {
         let tmp = TempDir::new().expect("tempdir");
         let layout = build_layout(&tmp);
         let run_dir_root = layout.run_dir_root.clone();
-        let cgroup_root = layout.cgroup_root.clone();
         let rootfs_master = fixture_rootfs_path(&tmp);
 
         let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
@@ -889,8 +905,9 @@ async fn every_vm_start_rejection_leaves_no_vm_resources() {
             }),
         };
 
-        let (driver, _clock, cgroup_fs, _beacon) = build_driver(&sim, vmm, layout).await;
+        let (driver, _clock, _fs, host_state, _beacon) = build_driver(&sim, vmm, layout).await;
         let alloc = AllocationId::new("alloc-cleanup").expect("valid alloc id");
+        seed_scope(&host_state, &alloc);
         let err = driver
             .start(
                 &build_spec(&alloc, &tmp, 0),
@@ -924,11 +941,7 @@ async fn every_vm_start_rejection_leaves_no_vm_resources() {
             "[{arm}] the per-launch rootfs clone must be removed",
         );
 
-        let scope_dir = CgroupPath::for_alloc(&alloc).resolve(Path::new(&cgroup_root));
-        assert!(
-            !cgroup_fs.snapshot().contains_key(&scope_dir),
-            "[{arm}] the cgroup scope must be removed",
-        );
+        assert!(!host_state.has_scope(&alloc), "[{arm}] the scope must be removed");
 
         if arm != "preflight" {
             assert!(!sim.is_live(1_000_000), "[{arm}] no hypervisor process may survive");
@@ -951,19 +964,13 @@ async fn run_directory_create_failure_attempts_the_complete_known_cleanup_partit
     std::fs::write(&layout.run_dir_root, b"not a directory")
         .expect("make the run-directory root non-traversable");
     let alloc = AllocationId::new("alloc-run-dir-create-failure").expect("valid alloc id");
-    let scope_dir = CgroupPath::for_alloc(&alloc).resolve(&layout.cgroup_root);
-    let (driver, _clock, cgroup_fs, _beacon) = build_driver(
+    let (driver, _clock, _fs, host_state, _beacon) = build_driver(
         &SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new())),
         Arc::new(SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()))),
         layout.clone(),
     )
     .await;
-    cgroup_fs.inject_error(
-        SimOp::Write,
-        scope_dir.join("cgroup.kill"),
-        std::io::ErrorKind::PermissionDenied,
-    );
-    cgroup_fs.inject_error(SimOp::RemoveDir, scope_dir, std::io::ErrorKind::DirectoryNotEmpty);
+    host_state.script_kill_scope_failure(std::io::ErrorKind::PermissionDenied);
 
     let failure = expect_rejection(
         driver
@@ -979,8 +986,7 @@ async fn run_directory_create_failure_attempts_the_complete_known_cleanup_partit
     for expected in [
         "primary rejection:",
         "create VM run directory:",
-        "cgroup kill:",
-        "cgroup remove:",
+        "cgroup scope kill:",
         "run directory remove:",
     ] {
         assert!(failure.detail.contains(expected), "missing `{expected}` in {}", failure.detail);
@@ -1007,19 +1013,10 @@ async fn cgroup_create_failure_attempts_cleanup_and_removes_the_run_directory() 
     let scope_dir = CgroupPath::for_alloc(&alloc).resolve(&layout.cgroup_root);
     let run_dir = VmRunDir::for_alloc(&layout.run_dir_root, &alloc);
     let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
-    let (driver, _clock, cgroup_fs, _beacon) =
+    let (driver, _clock, cgroup_fs, host_state, _beacon) =
         build_driver(&sim, Arc::new(sim.clone()), layout).await;
-    cgroup_fs.inject_error(
-        SimOp::CreateDir,
-        scope_dir.clone(),
-        std::io::ErrorKind::PermissionDenied,
-    );
-    cgroup_fs.inject_error(
-        SimOp::Write,
-        scope_dir.join("cgroup.kill"),
-        std::io::ErrorKind::PermissionDenied,
-    );
-    cgroup_fs.inject_error(SimOp::RemoveDir, scope_dir, std::io::ErrorKind::DirectoryNotEmpty);
+    cgroup_fs.inject_error(SimOp::CreateDir, scope_dir, std::io::ErrorKind::PermissionDenied);
+    host_state.script_kill_scope_failure(std::io::ErrorKind::PermissionDenied);
 
     let failure = expect_rejection(
         driver
@@ -1032,9 +1029,7 @@ async fn cgroup_create_failure_attempts_cleanup_and_removes_the_run_directory() 
     );
 
     assert_eq!(failure.class, DriverStartClass::Unclassified { driver: DriverType::Vm });
-    for expected in
-        ["primary rejection:", "create workload scope:", "cgroup kill:", "cgroup remove:"]
-    {
+    for expected in ["primary rejection:", "create workload scope:", "cgroup scope kill:"] {
         assert!(failure.detail.contains(expected), "missing `{expected}` in {}", failure.detail);
     }
     assert!(!run_dir.path().exists(), "cleanup removes the pre-cgroup run directory");
@@ -1059,7 +1054,7 @@ async fn a_permission_error_is_never_reported_as_a_missing_artifact() {
             ))
         }),
     };
-    let (driver, _clock, _fs, _beacon) = build_driver(
+    let (driver, _clock, _fs, _host_state, _beacon) = build_driver(
         &SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new())),
         Arc::new(vmm),
         layout,

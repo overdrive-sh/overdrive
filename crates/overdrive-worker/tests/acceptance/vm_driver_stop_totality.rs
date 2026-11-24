@@ -37,13 +37,14 @@ use overdrive_core::cgroup::CgroupPath;
 use overdrive_core::guest_transport::GuestCid;
 use overdrive_core::id::AllocationId;
 use overdrive_core::id::NodeId;
-use overdrive_core::traits::CgroupFs;
-use overdrive_core::traits::cgroup_fs::ProbeError;
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, Driver, DriverError, DriverStartClass, DriverType, ExitEvent,
     ExitKind, Resources, VmStartFailure,
 };
 use overdrive_core::traits::observation_store::ObservationStore;
+use overdrive_core::traits::vm_host_state::{
+    VmHostObservation, VmHostState, VmHostStateProbeError,
+};
 use overdrive_core::traits::vmm::{
     Result as VmmResult, VmControl, VmExitWatch, VmProcess, VmTermination, Vmm, VmmProbeError,
 };
@@ -54,7 +55,7 @@ use overdrive_core::vm::config::{
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_sim::adapters::probers::{SimHttpProber, SimTcpProber};
-use overdrive_sim::{SimCgroupAccounting, SimCgroupFs, SimVmm};
+use overdrive_sim::{SimCgroupAccounting, SimCgroupFs, SimVmHostState, SimVmm};
 use overdrive_worker::VmDriver;
 use overdrive_worker::probe_runner::ProbeRunner;
 use overdrive_worker::vm_driver::VmHostLayout;
@@ -207,22 +208,21 @@ async fn build_driver(
     (driver, clock, beacon)
 }
 
-/// Like [`build_driver`], but additionally returns the concrete
-/// [`SimCgroupFs`] handle so callers can assert on cgroup-scope
-/// removal via [`SimCgroupFs::snapshot`] (01-07 review remediation,
-/// BLOCKER D2). Mirrors the established `SimVmm`-handle-retention
-/// pattern already used throughout this file: the fs is cloned before
-/// being erased to the trait object, so both the driver and the test
-/// observe the same `Arc<Mutex<...>>`-backed mutations.
-async fn build_driver_with_cgroup_fs(
+/// Like [`build_driver`], but additionally returns the [`SimVmHostState`] handle the
+/// driver was given, so callers observe cgroup-scope removal through the single remover
+/// (`VmHostState::kill_scope`, ADR-0351) via [`SimVmHostState::has_scope`]. The scope is
+/// seeded by the caller through [`seed_scope`] once its allocation is known; the host-state
+/// handle is cloned before being erased to the trait object, so the driver and the test
+/// observe the same `Arc<Mutex<...>>`-backed state.
+async fn build_driver_with_host_state(
     sim: &SimVmm,
     vmm: std::sync::Arc<dyn Vmm>,
     layout: VmHostLayout,
-) -> (VmDriver, SimClock, SimCgroupFs, BeaconHarness) {
+) -> (VmDriver, SimClock, SimVmHostState, BeaconHarness) {
     let clock = SimClock::new();
-    let cgroup_fs = SimCgroupFs::new();
+    let host_state = SimVmHostState::new();
     let fs: std::sync::Arc<dyn overdrive_core::traits::CgroupFs> =
-        std::sync::Arc::new(cgroup_fs.clone());
+        std::sync::Arc::new(SimCgroupFs::new());
     let cgroup_accounting: std::sync::Arc<
         dyn overdrive_core::traits::cgroup_accounting::CgroupAccounting,
     > = std::sync::Arc::new(SimCgroupAccounting::new());
@@ -243,27 +243,31 @@ async fn build_driver_with_cgroup_fs(
         beacon.intake().await,
         guest_listener_board,
         None,
-        std::sync::Arc::new(overdrive_sim::SimVmHostState::new()),
+        std::sync::Arc::new(host_state.clone()),
     );
-    (driver, clock, cgroup_fs, beacon)
+    (driver, clock, host_state, beacon)
 }
 
-/// Test adapter over the existing [`CgroupFs`] port that holds the allocation
-/// scope removal after the VMM exit watcher begins driver cleanup. All other
-/// effects delegate byte-for-byte to [`SimCgroupFs`].
+/// Seeds `alloc`'s VM scope on the host-state port, as the platform's cgroup would hold it
+/// while the VM runs. The driver removes it only through `kill_scope`.
+fn seed_scope(host_state: &SimVmHostState, alloc: &AllocationId) {
+    host_state.set_scope(alloc.clone(), std::collections::BTreeSet::new());
+}
+
+/// Test adapter over the [`VmHostState`] port that holds the allocation's scope kill after
+/// the VMM exit watcher begins driver cleanup. All other effects delegate to
+/// [`SimVmHostState`].
 #[derive(Clone)]
-struct HoldsWorkloadScopeRemoval {
-    inner: SimCgroupFs,
-    scope: PathBuf,
+struct HoldsScopeKill {
+    inner: SimVmHostState,
     entered: std::sync::Arc<tokio::sync::Notify>,
     release: std::sync::Arc<tokio::sync::Notify>,
 }
 
-impl HoldsWorkloadScopeRemoval {
-    fn new(inner: SimCgroupFs, scope: PathBuf) -> Self {
+impl HoldsScopeKill {
+    fn new(inner: SimVmHostState) -> Self {
         Self {
             inner,
-            scope,
             entered: std::sync::Arc::new(tokio::sync::Notify::new()),
             release: std::sync::Arc::new(tokio::sync::Notify::new()),
         }
@@ -281,29 +285,27 @@ impl HoldsWorkloadScopeRemoval {
 }
 
 #[async_trait]
-impl CgroupFs for HoldsWorkloadScopeRemoval {
-    async fn create_dir(&self, path: &Path) -> std::io::Result<()> {
-        self.inner.create_dir(path).await
+impl VmHostState for HoldsScopeKill {
+    fn kind(&self) -> &'static str {
+        "vm_driver_stop_totality::HoldsScopeKill"
     }
 
-    async fn write(&self, path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-        self.inner.write(path, bytes).await
-    }
-
-    async fn remove_dir(&self, path: &Path) -> std::io::Result<()> {
-        if path == self.scope {
-            self.entered.notify_one();
-            self.release.notified().await;
-        }
-        self.inner.remove_dir(path).await
-    }
-
-    async fn probe(&self) -> Result<(), ProbeError> {
+    async fn probe(&self) -> Result<(), VmHostStateProbeError> {
         self.inner.probe().await
     }
 
-    fn kind(&self) -> &'static str {
-        "vm_driver_stop_totality::HoldsWorkloadScopeRemoval"
+    async fn observe(&self) -> std::io::Result<VmHostObservation> {
+        self.inner.observe().await
+    }
+
+    async fn kill_scope(&self, scope: &CgroupPath) -> std::io::Result<()> {
+        self.entered.notify_one();
+        self.release.notified().await;
+        self.inner.kill_scope(scope).await
+    }
+
+    async fn discard_artifacts(&self, alloc: &AllocationId) -> std::io::Result<()> {
+        self.inner.discard_artifacts(alloc).await
     }
 }
 
@@ -419,13 +421,13 @@ async fn create_failure_retains_disposition_claim_and_cleans_up_run_directory() 
     let layout = build_layout(&tmp);
     let run_dir_root = layout.run_dir_root.clone();
     let rootfs_master = fixture_rootfs_path(&tmp);
-    let cgroup_root = layout.cgroup_root.clone();
     let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
     sim.inject_create_failure();
-    let (driver, _clock, cgroup_fs, _beacon) =
-        build_driver_with_cgroup_fs(&sim, std::sync::Arc::new(sim.clone()), layout).await;
+    let (driver, _clock, host_state, _beacon) =
+        build_driver_with_host_state(&sim, std::sync::Arc::new(sim.clone()), layout).await;
 
     let alloc = AllocationId::new("alloc-create-fail").expect("valid alloc id");
+    seed_scope(&host_state, &alloc);
     let spec = build_spec(&alloc, &tmp);
 
     let err = driver
@@ -466,21 +468,11 @@ async fn create_failure_retains_disposition_claim_and_cleans_up_run_directory() 
         rootfs_plan.clone_dest().display()
     );
 
-    // 01-07 review D2 closure: cgroup-scope removal via
-    // `SimCgroupFs::snapshot`. `SimCgroupFs::remove_dir` now models
-    // real cgroup v2 `rmdir` semantics faithfully — the
-    // controller-interface files this arm already wrote
-    // (`cpu.weight`, `memory.max` from `write_resource_limits`, plus
-    // `cgroup.kill` from this same cleanup path) are kernel-managed
-    // pseudo-files that real cgroupfs auto-reaps on `rmdir(2)` and
-    // must not block removal (see the `CgroupFs::remove_dir` trait
-    // rustdoc + the Tier-3 `rmdir_auto_reap` evidence).
-    let scope_dir = CgroupPath::for_alloc(&alloc).resolve(&cgroup_root);
-    let snap = cgroup_fs.snapshot();
+    // The scope's one remover is `VmHostState::kill_scope` (ADR-0351): its absence from the
+    // host-state port is the observable.
     assert!(
-        !snap.contains_key(&scope_dir),
-        "cgroup scope must be removed after a Vmm::create failure, still present at {}",
-        scope_dir.display()
+        !host_state.has_scope(&alloc),
+        "the scope must be removed through the single remover after a Vmm::create failure"
     );
     driver.release_supervision(&alloc);
 }
@@ -501,13 +493,13 @@ async fn vmm_exits_before_beacon_retains_disposition_claim_and_cleans_up() {
     let layout = build_layout(&tmp);
     let run_dir_root = layout.run_dir_root.clone();
     let rootfs_master = fixture_rootfs_path(&tmp);
-    let cgroup_root = layout.cgroup_root.clone();
     let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
     let dies_before_beacon = DiesBeforeBeacon { inner: sim.clone() };
-    let (driver, _clock, cgroup_fs, _beacon) =
-        build_driver_with_cgroup_fs(&sim, std::sync::Arc::new(dies_before_beacon), layout).await;
+    let (driver, _clock, host_state, _beacon) =
+        build_driver_with_host_state(&sim, std::sync::Arc::new(dies_before_beacon), layout).await;
 
     let alloc = AllocationId::new("alloc-exit-before-beacon").expect("valid alloc id");
+    seed_scope(&host_state, &alloc);
     let spec = build_spec(&alloc, &tmp);
 
     let err = driver
@@ -554,17 +546,10 @@ async fn vmm_exits_before_beacon_retains_disposition_claim_and_cleans_up() {
         rootfs_plan.clone_dest().display()
     );
 
-    // 01-07 review D2 closure: cgroup-scope removal — see the
-    // rationale documented in
-    // `create_failure_retains_disposition_claim_and_cleans_up_run_directory`
-    // above (`SimCgroupFs::remove_dir` now models real cgroup v2
-    // `rmdir` auto-reap of kernel-managed pseudo-files).
-    let scope_dir = CgroupPath::for_alloc(&alloc).resolve(&cgroup_root);
-    let snap = cgroup_fs.snapshot();
+    // The scope's one remover is `VmHostState::kill_scope` (ADR-0351).
     assert!(
-        !snap.contains_key(&scope_dir),
-        "cgroup scope must be removed on the exit-before-beacon arm, still present at {}",
-        scope_dir.display()
+        !host_state.has_scope(&alloc),
+        "the scope must be removed through the single remover on the exit-before-beacon arm"
     );
     driver.release_supervision(&alloc);
 }
@@ -637,12 +622,12 @@ async fn boot_deadline_elapses_retains_disposition_claim_and_cleans_up() {
     let layout = build_layout(&tmp);
     let run_dir_root = layout.run_dir_root.clone();
     let rootfs_master = fixture_rootfs_path(&tmp);
-    let cgroup_root = layout.cgroup_root.clone();
     let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
-    let (driver, clock, cgroup_fs, _beacon) =
-        build_driver_with_cgroup_fs(&sim, std::sync::Arc::new(sim.clone()), layout).await;
+    let (driver, clock, host_state, _beacon) =
+        build_driver_with_host_state(&sim, std::sync::Arc::new(sim.clone()), layout).await;
 
     let alloc = AllocationId::new("alloc-deadline").expect("valid alloc id");
+    seed_scope(&host_state, &alloc);
     let spec = build_spec(&alloc, &tmp);
 
     let driver_for_task = driver.clone();
@@ -714,17 +699,10 @@ async fn boot_deadline_elapses_retains_disposition_claim_and_cleans_up() {
         rootfs_plan.clone_dest().display()
     );
 
-    // 01-07 review D2 closure: cgroup-scope removal — see the
-    // rationale documented in
-    // `create_failure_retains_disposition_claim_and_cleans_up_run_directory`
-    // above (`SimCgroupFs::remove_dir` now models real cgroup v2
-    // `rmdir` auto-reap of kernel-managed pseudo-files).
-    let scope_dir = CgroupPath::for_alloc(&alloc).resolve(&cgroup_root);
-    let snap = cgroup_fs.snapshot();
+    // The scope's one remover is `VmHostState::kill_scope` (ADR-0351).
     assert!(
-        !snap.contains_key(&scope_dir),
-        "cgroup scope must be removed on the deadline arm, still present at {}",
-        scope_dir.display()
+        !host_state.has_scope(&alloc),
+        "the scope must be removed through the single remover on the deadline arm"
     );
     driver.release_supervision(&alloc);
 }
@@ -1190,8 +1168,7 @@ fn assert_s08_stop_postconditions(
     alloc: &AllocationId,
     tmp: &TempDir,
     run_dir_root: &Path,
-    cgroup_root: &Path,
-    cgroup_fs: &SimCgroupFs,
+    host_state: &SimVmHostState,
 ) {
     assert_eq!(
         driver.live_allocations(),
@@ -1202,10 +1179,7 @@ fn assert_s08_stop_postconditions(
         !VmRunDir::for_alloc(run_dir_root, alloc).path().exists(),
         "driver run directory remains after stop"
     );
-    assert!(
-        !cgroup_fs.snapshot().contains_key(&CgroupPath::for_alloc(alloc).resolve(cgroup_root)),
-        "all existing cgroup cleanup calls finish before stop returns"
-    );
+    assert!(!host_state.has_scope(alloc), "the scope kill finishes before stop returns");
     let rootfs = RootfsPlan::for_alloc(
         fixture_rootfs_path(tmp),
         std::fs::metadata(fixture_rootfs_path(tmp)).expect("rootfs metadata").len(),
@@ -1778,7 +1752,7 @@ async fn resize_rejects_with_resize_unsupported_naming_gh_92() {
 /// `SimClock` tick is needed. The two `tokio::time::timeout`s are
 /// real-time bounds on the channel. Running-confirmed release permits the
 /// already-reaped watcher to proceed; it cannot replace VMM reaping. A held
-/// scope removal at the existing cgroup port proves cleanup completion is a
+/// scope kill at the host-state port proves cleanup completion is a
 /// second prerequisite for event publication.
 /// CONTRACT_SHAPE: bounded-change.
 #[allow(clippy::doc_markdown, reason = "exact per-test contract declaration")]
@@ -1787,14 +1761,13 @@ async fn exit_event_is_gated_until_running_confirmed_release() {
     let tmp = TempDir::new().expect("tempdir");
     let layout = build_layout(&tmp);
     let run_dir_root = layout.run_dir_root.clone();
-    let cgroup_root = layout.cgroup_root.clone();
     let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
 
     let alloc = AllocationId::new("alloc-running-gate").expect("valid alloc id");
     let spec = build_spec(&alloc, &tmp);
-    let scope = CgroupPath::for_alloc(&alloc).resolve(&cgroup_root);
-    let cgroup_fs = SimCgroupFs::new();
-    let held_cleanup = HoldsWorkloadScopeRemoval::new(cgroup_fs.clone(), scope.clone());
+    let host_state = SimVmHostState::new();
+    seed_scope(&host_state, &alloc);
+    let held_cleanup = HoldsScopeKill::new(host_state.clone());
     let clock = SimClock::new();
     let wiring = overdrive_core::guest_network::GuestNetworkExecWiring::new(std::sync::Arc::new(
         clock.clone(),
@@ -1805,7 +1778,7 @@ async fn exit_event_is_gated_until_running_confirmed_release() {
     let driver = VmDriver::new(
         beacon.vmm(std::sync::Arc::new(sim.clone())),
         std::sync::Arc::new(clock.clone()),
-        std::sync::Arc::new(held_cleanup.clone()),
+        std::sync::Arc::new(SimCgroupFs::new()),
         std::sync::Arc::new(SimCgroupAccounting::new()),
         probe_runner(&guest_listener_board),
         wiring.gate(),
@@ -1813,7 +1786,7 @@ async fn exit_event_is_gated_until_running_confirmed_release() {
         beacon.intake().await,
         guest_listener_board,
         None,
-        std::sync::Arc::new(overdrive_sim::SimVmHostState::new()),
+        std::sync::Arc::new(held_cleanup.clone()),
     );
 
     // Drain the driver's `ExitEvent` channel — the exit observer's role.
@@ -1857,7 +1830,7 @@ async fn exit_event_is_gated_until_running_confirmed_release() {
     );
 
     // Resolve the existing process watch explicitly. The watcher may now enter
-    // driver cleanup, but the held scope removal prevents that cleanup from
+    // driver cleanup, but the held scope kill prevents that cleanup from
     // completing and therefore must continue to hold the event.
     sim.inject_exit(Some(0), None);
     let control =
@@ -1887,10 +1860,7 @@ async fn exit_event_is_gated_until_running_confirmed_release() {
         !VmRunDir::for_alloc(&run_dir_root, &alloc).path().exists(),
         "event publication requires the allocation run directory cleanup to finish"
     );
-    assert!(
-        !cgroup_fs.snapshot().contains_key(&scope),
-        "event publication requires the workload scope cleanup to finish"
-    );
+    assert!(!host_state.has_scope(&alloc), "event publication requires the scope kill to finish");
     let rootfs = RootfsPlan::for_alloc(
         fixture_rootfs_path(&tmp),
         std::fs::metadata(fixture_rootfs_path(&tmp)).expect("rootfs metadata").len(),
@@ -1966,12 +1936,12 @@ async fn writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed
         let tmp = TempDir::new().expect("tempdir");
         let layout = build_layout(&tmp);
         let run_dir_root = layout.run_dir_root.clone();
-        let cgroup_root = layout.cgroup_root.clone();
         let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
         let vmm = RecordsTermination::new(sim.clone(), true);
-        let (driver, _clock, cgroup_fs, beacon) =
-            build_driver_with_cgroup_fs(&sim, std::sync::Arc::new(vmm.clone()), layout).await;
+        let (driver, _clock, host_state, beacon) =
+            build_driver_with_host_state(&sim, std::sync::Arc::new(vmm.clone()), layout).await;
         let alloc = AllocationId::new("s08-writer-completed").expect("valid allocation");
+        seed_scope(&host_state, &alloc);
         let spec = build_spec(&alloc, &tmp);
         let (handle, mut guest) = start_with_beacon_accepted(&driver, &spec, &beacon).await;
 
@@ -1992,14 +1962,7 @@ async fn writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed
         assert!(result.is_ok(), "completed-writer stop retains narrow Ok: {result:?}");
         vmm.assert_single_ten_second_grace();
         assert!(!sim.is_live(handle.pid.expect("VMM pid")));
-        assert_s08_stop_postconditions(
-            &driver,
-            &alloc,
-            &tmp,
-            &run_dir_root,
-            &cgroup_root,
-            &cgroup_fs,
-        );
+        assert_s08_stop_postconditions(&driver, &alloc, &tmp, &run_dir_root, &host_state);
     }
 
     // Writer I/O error: close only the guest's receive direction.  The host
@@ -2010,12 +1973,12 @@ async fn writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed
         let tmp = TempDir::new().expect("tempdir");
         let layout = build_layout(&tmp);
         let run_dir_root = layout.run_dir_root.clone();
-        let cgroup_root = layout.cgroup_root.clone();
         let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
         let vmm = RecordsTermination::new(sim.clone(), true);
-        let (driver, _clock, cgroup_fs, beacon) =
-            build_driver_with_cgroup_fs(&sim, std::sync::Arc::new(vmm.clone()), layout).await;
+        let (driver, _clock, host_state, beacon) =
+            build_driver_with_host_state(&sim, std::sync::Arc::new(vmm.clone()), layout).await;
         let alloc = AllocationId::new("s08-writer-error").expect("valid allocation");
+        seed_scope(&host_state, &alloc);
         let spec = build_spec(&alloc, &tmp);
         let (handle, guest) = start_with_beacon_accepted(&driver, &spec, &beacon).await;
         guest.refuse_host_writes();
@@ -2027,14 +1990,7 @@ async fn writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed
         assert!(stop.await.expect("stop joins").is_ok());
         vmm.assert_single_ten_second_grace();
         assert!(!sim.is_live(handle.pid.expect("VMM pid")));
-        assert_s08_stop_postconditions(
-            &driver,
-            &alloc,
-            &tmp,
-            &run_dir_root,
-            &cgroup_root,
-            &cgroup_fs,
-        );
+        assert_s08_stop_postconditions(&driver, &alloc, &tmp, &run_dir_root, &host_state);
     }
 
     // Peer EOF is distinct from a failed host write: closing only the guest's
@@ -2046,12 +2002,12 @@ async fn writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed
         let tmp = TempDir::new().expect("tempdir");
         let layout = build_layout(&tmp);
         let run_dir_root = layout.run_dir_root.clone();
-        let cgroup_root = layout.cgroup_root.clone();
         let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
         let vmm = RecordsTermination::new(sim.clone(), true);
-        let (driver, _clock, cgroup_fs, beacon) =
-            build_driver_with_cgroup_fs(&sim, std::sync::Arc::new(vmm.clone()), layout).await;
+        let (driver, _clock, host_state, beacon) =
+            build_driver_with_host_state(&sim, std::sync::Arc::new(vmm.clone()), layout).await;
         let alloc = AllocationId::new("s08-writer-peer-eof").expect("valid allocation");
+        seed_scope(&host_state, &alloc);
         let spec = build_spec(&alloc, &tmp);
         let (handle, guest) = start_with_beacon_accepted(&driver, &spec, &beacon).await;
         // Closing only the send direction preserves the guest's receive
@@ -2070,14 +2026,7 @@ async fn writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed
         assert!(stop.await.is_ok());
         vmm.assert_single_ten_second_grace();
         assert!(!sim.is_live(handle.pid.expect("VMM pid")));
-        assert_s08_stop_postconditions(
-            &driver,
-            &alloc,
-            &tmp,
-            &run_dir_root,
-            &cgroup_root,
-            &cgroup_fs,
-        );
+        assert_s08_stop_postconditions(&driver, &alloc, &tmp, &run_dir_root, &host_state);
     }
 
     // No accepted writer at all: stopping the Live-without-beacon interval
@@ -2087,7 +2036,6 @@ async fn writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed
         let tmp = TempDir::new().expect("tempdir");
         let layout = build_layout(&tmp);
         let run_dir_root = layout.run_dir_root.clone();
-        let cgroup_root = layout.cgroup_root.clone();
         let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
         let vmm = RecordsTermination::new(sim.clone(), true);
         let (live_tx, live_rx) = tokio::sync::oneshot::channel();
@@ -2095,9 +2043,10 @@ async fn writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed
             inner: vmm.clone(),
             signal: std::sync::Arc::new(std::sync::Mutex::new(Some(live_tx))),
         };
-        let (driver, _clock, cgroup_fs, _beacon) =
-            build_driver_with_cgroup_fs(&sim, std::sync::Arc::new(signals_live), layout).await;
+        let (driver, _clock, host_state, _beacon) =
+            build_driver_with_host_state(&sim, std::sync::Arc::new(signals_live), layout).await;
         let alloc = AllocationId::new("s08-writer-absent").expect("valid allocation");
+        seed_scope(&host_state, &alloc);
         let spec = build_spec(&alloc, &tmp);
         let start_driver = driver.clone();
         let start_spec = spec.clone();
@@ -2118,14 +2067,7 @@ async fn writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed
         assert!(stop.await.expect("absent-writer stop joins").is_ok());
         assert!(start.await.expect("start joins after termination").is_err());
         vmm.assert_single_ten_second_grace();
-        assert_s08_stop_postconditions(
-            &driver,
-            &alloc,
-            &tmp,
-            &run_dir_root,
-            &cgroup_root,
-            &cgroup_fs,
-        );
+        assert_s08_stop_postconditions(&driver, &alloc, &tmp, &run_dir_root, &host_state);
     }
 
     // Socket-backpressured EXEC: at two seconds the production writer must be
@@ -2135,12 +2077,12 @@ async fn writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed
         let tmp = TempDir::new().expect("tempdir");
         let layout = build_layout(&tmp);
         let run_dir_root = layout.run_dir_root.clone();
-        let cgroup_root = layout.cgroup_root.clone();
         let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
         let vmm = RecordsTermination::new(sim.clone(), true);
-        let (driver, clock, cgroup_fs, beacon) =
-            build_driver_with_cgroup_fs(&sim, std::sync::Arc::new(vmm.clone()), layout).await;
+        let (driver, clock, host_state, beacon) =
+            build_driver_with_host_state(&sim, std::sync::Arc::new(vmm.clone()), layout).await;
         let alloc = AllocationId::new("s08-writer-backpressure").expect("valid allocation");
+        seed_scope(&host_state, &alloc);
         let mut spec = build_spec(&alloc, &tmp);
         let overdrive_core::traits::driver::DriverPayload::Vm(payload) = &mut spec.driver;
         payload.args.push("z".repeat(16 * 1024 * 1024));
@@ -2169,14 +2111,7 @@ async fn writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed
         assert!(stop.await.expect("backpressured stop joins").is_ok());
         vmm.assert_single_ten_second_grace();
         assert!(!sim.is_live(handle.pid.expect("VMM pid")));
-        assert_s08_stop_postconditions(
-            &driver,
-            &alloc,
-            &tmp,
-            &run_dir_root,
-            &cgroup_root,
-            &cgroup_fs,
-        );
+        assert_s08_stop_postconditions(&driver, &alloc, &tmp, &run_dir_root, &host_state);
     }
 
     // Early VMM completion is the other writer bound: if the process ending
@@ -2186,12 +2121,12 @@ async fn writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed
         let tmp = TempDir::new().expect("tempdir");
         let layout = build_layout(&tmp);
         let run_dir_root = layout.run_dir_root.clone();
-        let cgroup_root = layout.cgroup_root.clone();
         let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
         let vmm = RecordsTermination::new(sim.clone(), false);
-        let (driver, _clock, cgroup_fs, beacon) =
-            build_driver_with_cgroup_fs(&sim, std::sync::Arc::new(vmm.clone()), layout).await;
+        let (driver, _clock, host_state, beacon) =
+            build_driver_with_host_state(&sim, std::sync::Arc::new(vmm.clone()), layout).await;
         let alloc = AllocationId::new("s08-early-vmm-exit").expect("valid allocation");
+        seed_scope(&host_state, &alloc);
         let mut spec = build_spec(&alloc, &tmp);
         let overdrive_core::traits::driver::DriverPayload::Vm(payload) = &mut spec.driver;
         payload.args.push("e".repeat(16 * 1024 * 1024));
@@ -2216,14 +2151,7 @@ async fn writer_bound_overlaps_the_single_vmm_grace_and_every_writer_is_consumed
             .expect("release task does not panic");
         vmm.assert_single_ten_second_grace();
         assert!(!sim.is_live(handle.pid.expect("VMM pid")));
-        assert_s08_stop_postconditions(
-            &driver,
-            &alloc,
-            &tmp,
-            &run_dir_root,
-            &cgroup_root,
-            &cgroup_fs,
-        );
+        assert_s08_stop_postconditions(&driver, &alloc, &tmp, &run_dir_root, &host_state);
     }
 
     // The accepted healthy verdict is deliberately stronger than Driver::stop

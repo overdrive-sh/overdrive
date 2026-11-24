@@ -7,10 +7,10 @@
 //!
 //! Contract shape: `Driver::start(&spec, &dyn LaunchSupersession)`, driven through the pinned
 //! driving port over `VmDriver` composed as the node composes it (`SimVmm`, `SimBeaconIo`,
-//! `SimClock`, `SimCgroupFs`, `SimVolumeBacking` through the pool probe). The signal is a
+//! `SimClock`, `SimVmHostState`, `SimVolumeBacking` through the pool probe). The signal is a
 //! `SimLaunchSupersession` the test raises. Faults enter only at driven ports: `SimVolumeBacking`
 //! (a parked or stalled `ensure`, a held claim, a parked `claim_state`), `SimBeaconIo` (a failed
-//! accept, through a decorator at the `BeaconIo` port), `SimCgroupFs` (a failing scope removal),
+//! accept, through a decorator at the `BeaconIo` port), `SimVmHostState` (a failing scope kill),
 //! `SimClock`.
 //!
 //! Oracle: the start's result, and the driven ports' own state after it: the VMM double's live
@@ -47,7 +47,6 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use overdrive_core::SpiffeId;
-use overdrive_core::cgroup::CgroupPath;
 use overdrive_core::guest_transport::{
     GUEST_CID_BASE, GuestCid, GuestFlowPorts, GuestTransportAssignment, LaunchToken,
     VsockListenPort,
@@ -74,7 +73,7 @@ use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_sim::adapters::probers::{SimHttpProber, SimTcpProber};
 use overdrive_sim::{
-    SimCgroupAccounting, SimCgroupFs, SimOp, SimVmm, SimVolumeBacking, SimVolumePoolProbe,
+    SimCgroupAccounting, SimCgroupFs, SimVmHostState, SimVmm, SimVolumeBacking, SimVolumePoolProbe,
 };
 use overdrive_testing::placement;
 use overdrive_worker::probe_runner::ProbeRunner;
@@ -205,7 +204,7 @@ struct Node {
     io: Arc<SimBeaconIo>,
     gate: Arc<FaultableBeaconIo>,
     clock: SimClock,
-    cgroup_fs: SimCgroupFs,
+    host_state: SimVmHostState,
     driver: VmDriver,
     next: u32,
 }
@@ -240,18 +239,18 @@ impl Node {
             inner: Arc::clone(&io),
             failed: tokio::sync::watch::channel(false).0,
         });
-        let cgroup_fs = SimCgroupFs::new();
+        let host_state = SimVmHostState::new();
         let driver = Self::build_driver(
             &root,
             &recorder,
             &gate,
             &clock,
-            &cgroup_fs,
+            &host_state,
             pool.as_ref(),
             &on_node,
         )
         .await;
-        Self { _tmp: tmp, root, vmm, recorder, io, gate, clock, cgroup_fs, driver, next: 0 }
+        Self { _tmp: tmp, root, vmm, recorder, io, gate, clock, host_state, driver, next: 0 }
     }
 
     async fn build_driver(
@@ -259,7 +258,7 @@ impl Node {
         recorder: &Arc<RecordingVmm>,
         io: &Arc<FaultableBeaconIo>,
         clock: &SimClock,
-        cgroup_fs: &SimCgroupFs,
+        host_state: &SimVmHostState,
         pool: Option<&SimVolumeBacking>,
         on_node: &PoolOnNode,
     ) -> VmDriver {
@@ -294,7 +293,7 @@ impl Node {
         VmDriver::new(
             Arc::clone(recorder) as Arc<dyn Vmm>,
             Arc::new(clock.clone()),
-            Arc::new(cgroup_fs.clone()),
+            Arc::new(SimCgroupFs::new()),
             Arc::new(SimCgroupAccounting::new()),
             probe_runner,
             wiring.gate(),
@@ -312,7 +311,7 @@ impl Node {
             intake,
             board,
             volumes,
-            std::sync::Arc::new(overdrive_sim::SimVmHostState::new()),
+            Arc::new(host_state.clone()),
         )
     }
 
@@ -424,7 +423,7 @@ impl Node {
     /// Waits (real time) until the launch's VMM exists: the launch is then in its boot wait.
     async fn wait_vmm(&self, index: u32) -> u32 {
         let cid = Self::cid(index);
-        tokio::time::timeout(Duration::from_secs(5), async {
+        let pid = tokio::time::timeout(Duration::from_secs(5), async {
             loop {
                 if let Some(pid) = self.vmm.vsock_device_holders().get(&cid) {
                     break *pid;
@@ -433,7 +432,13 @@ impl Node {
             }
         })
         .await
-        .expect("the launch created its VMM and is in its boot wait")
+        .expect("the launch created its VMM and is in its boot wait");
+        // The VMM's scope now exists on the host. The driver's teardown removes it only through
+        // `VmHostState::kill_scope` (ADR-0351), so its absence from the host-state port is the
+        // observable.
+        let alloc = AllocationId::new(&format!("vol-alloc-{index}")).expect("valid alloc id");
+        self.host_state.set_scope(alloc, std::collections::BTreeSet::from([pid]));
+        pid
     }
 
     /// Waits (real time, no simulated time) until `condition` holds; `false` when it never did.
@@ -498,10 +503,8 @@ impl Node {
         assert!(!names_alloc("run"), "{what} must remove the run directory");
         assert!(!names_alloc("clone-staging"), "{what} must remove the rootfs clone");
         assert!(!names_alloc("clone-index"), "{what} must remove the clone index link");
-        assert!(
-            !self.cgroup_fs.snapshot().keys().any(|path| path.to_string_lossy().contains(&alloc)),
-            "{what} must remove the cgroup scope"
-        );
+        let alloc_id = AllocationId::new(&alloc).expect("valid alloc id");
+        assert!(!self.host_state.has_scope(&alloc_id), "{what} must remove the VM scope");
         assert!(
             self.driver.beacon_observation().live.is_empty(),
             "{what} must clear the beacon record"
@@ -512,12 +515,6 @@ impl Node {
     fn assert_nothing_created(&self, index: u32, what: &str) {
         assert!(self.attachments().is_empty(), "{what} must not create a VMM");
         self.assert_nothing_left(index, what);
-    }
-
-    /// The scope path the cgroup double keys launch `index`'s removal on.
-    fn scope_path(&self, index: u32) -> PathBuf {
-        let alloc = AllocationId::new(&format!("vol-alloc-{index}")).expect("valid alloc id");
-        CgroupPath::for_alloc(&alloc).resolve(&self.root.join("cgroup"))
     }
 }
 
@@ -640,7 +637,7 @@ async fn the_signal_wins_over_the_second_boot_deadline_at_the_same_instant() {
     node.assert_nothing_left(0, what);
 }
 
-/// A teardown that fails while abandoning is not hidden: the scope removal fails, so `start`
+/// A teardown that fails while abandoning is not hidden: the scope kill fails, so `start`
 /// returns the unclassified `StartRejected` carrying the failure, never `StartSuperseded`. The
 /// VMM is still terminated.
 /// CONTRACT_SHAPE: bounded-change.
@@ -648,11 +645,7 @@ async fn the_signal_wins_over_the_second_boot_deadline_at_the_same_instant() {
 async fn a_failing_teardown_is_reported_as_a_start_rejection_never_as_superseded() {
     let what = "a superseded launch whose teardown fails";
     let mut node = Node::new(None, PoolOnNode::NotComposed).await;
-    node.cgroup_fs.inject_error(
-        SimOp::RemoveDir,
-        node.scope_path(0),
-        std::io::ErrorKind::PermissionDenied,
-    );
+    node.host_state.script_kill_scope_failure(std::io::ErrorKind::PermissionDenied);
     let signal = unraised();
     let launch = node.begin(None, &signal);
     node.wait_vmm(0).await;
