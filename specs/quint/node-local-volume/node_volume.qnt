@@ -27,7 +27,8 @@
  * `W_SUPERSEDED`), with no `Running` row, no `Failed` row, no charge and no budget input, the VMM terminated, the volume kept.
  * A launch lost with the control plane (CpCrash, NodeReboot, and `Boot`, whose first step closes every `Pending` row) ends
  * the same way with `W_LOST` (`LaunchLostWithControlPlane`). The allocation gains no state: both are TERMINATED, and the
- * reason is the projection. An abandoned row is the current row, restartable, uncharged, and carries its count to the relaunch. The
+ * reason is the projection. An abandoned row is the current row and restartable, but it never ran and does not count (RB-13): the
+ * count, the pending generation and the ceiling are derived from the newest row that ran. The
  * abandonment is the same step as the signal reaching an observation point: a launch parked at a claim-poll boundary,
  * at the create gate or in the boot wait abandons in the step that raises the signal; a launch whose `ensure` is in
  * flight abandons in the step that ends `ensure` (`LaunchEnsureActivate`); a lane born after shutdown abandons in
@@ -130,11 +131,13 @@ module node_volume {
     conf_step' = if (REC) t else conf_step,
   }
   // the committed state carries the derived BackoffExhausted fact the conformance driver compares
-  // Only the current row's and a PENDING launch's `old` / `cnt` are ever read (`curA` is the highest id with a row, and a PENDING
+  // Only the count basis's and a PENDING launch's `old` / `cnt` are ever read (`curA` is the highest id with a row, and a PENDING
   // launch gets a row above it), so every other allocation's values are normalised to 0: the same behaviour in fewer states.
   // a generation bump makes every issued allocation stale
   def bumpGen(s: S): S = { ...s, old: AL.mapBy(a => true) }
-  def keep(s: S, a: int): bool = a == curA(s) or s.as.get(a) == PENDING
+  // RB-13: the rows read are the count basis (the newest row that ran) and the one a PENDING launch's abandonment would leave
+  // as the basis (the newest settled row that ran, which a PENDING launch above it hides until it ends)
+  def keep(s: S, a: int): bool = a == basisA(s) or a == settledBasisA(s) or s.as.get(a) == PENDING
   def canon(n: S): S =
     { ...n, exh: exhausted(n),
       old: AL.mapBy(a => keep(n, a) and n.old.get(a)), cnt: AL.mapBy(a => if (keep(n, a)) n.cnt.get(a) else 0) }
@@ -163,18 +166,24 @@ module node_volume {
   def hasRow(s: S, a: int): bool =
     s.as.get(a) == PENDING or s.as.get(a) == RUNNING or s.as.get(a) == FAILED or s.as.get(a) == TERMINATED
   def curA(s: S): int = AL.fold(0, (m, a) => if (hasRow(s, a) and a > m) a else m)
-  // the current row is an abandoned launch (superseded, or lost with the control plane): the platform ended it, the workload's
-  // intent stands (`is_platform_reclaimed`)
-  def abandonedCur(s: S): bool =
-    curA(s) != 0 and s.as.get(curA(s)) == TERMINATED and (s.why.get(curA(s)) == W_SUPERSEDED or s.why.get(curA(s)) == W_LOST)
-  // a generation is pending until the allocation issued for it has a row (ADR-0335)
-  def pendingGen(s: S): bool = curA(s) != 0 and s.old.get(curA(s))
-  // the restart budget rule is restart_budget.qnt's; this spec only says which row is current
-  def charged(s: S): int = budgetCharged(curA(s), s.cnt, curA(s) != 0 and s.as.get(curA(s)) == FAILED)
-  // an abandoned current row is exempt from the ceiling, so it is never BackoffExhausted
-  def exhausted(s: S): bool = budgetExhausted(charged(s), LIMIT, nonTerminal(s)) and not(abandonedCur(s))
-  // an abandoned launch charges nothing: the relaunch carries the abandoned row's own count unchanged (ADR-0355 item 2)
-  def startCnt(s: S): int = if (abandonedCur(s)) s.cnt.get(curA(s)) else budgetStartCnt(curA(s), s.cnt, pendingGen(s))
+  // a row that is an abandoned launch (superseded, or lost with the control plane): the platform ended it before it ran and the
+  // workload's intent stands (`is_launch_abandoned`)
+  def abandonedRow(s: S, a: int): bool =
+    s.as.get(a) == TERMINATED and (s.why.get(a) == W_SUPERSEDED or s.why.get(a) == W_LOST)
+  // RB-13 (ADR-0355 item 2): a launch that never ran does not count. The COUNT BASIS is the newest row that ran
+  // (`last_ran_alloc`): `curA` over the rows that are not abandoned. The abandoned rows stay in history; the count, whether a
+  // generation is pending and the ceiling never read them.
+  def basisA(s: S): int = AL.fold(0, (m, a) => if (hasRow(s, a) and not(abandonedRow(s, a)) and a > m) a else m)
+  // the newest settled row that ran (not PENDING): the basis once every PENDING launch above it is abandoned
+  def settledBasisA(s: S): int =
+    AL.fold(0, (m, a) => if (hasRow(s, a) and s.as.get(a) != PENDING and not(abandonedRow(s, a)) and a > m) a else m)
+  // a generation is pending until the allocation issued for it has a row that ran (ADR-0335; an abandoned successor handles nothing)
+  def pendingGen(s: S): bool = basisA(s) != 0 and s.old.get(basisA(s))
+  // the restart budget rule is restart_budget.qnt's; this spec only says which row is the count basis
+  def charged(s: S): int = budgetCharged(basisA(s), s.cnt, basisA(s) != 0 and s.as.get(basisA(s)) == FAILED)
+  def exhausted(s: S): bool = budgetExhausted(charged(s), LIMIT, nonTerminal(s))
+  // the count the next launch carries is the shared rule's over the count basis (an abandoned launch charges nothing)
+  def startCnt(s: S): int = budgetStartCnt(basisA(s), s.cnt, pendingGen(s))
   // the placement of allocation a: issued for the current generation, carrying the budget rule's count
   def place(s: S, a: int): S = { ...s, as: s.as.set(a, PENDING), old: s.old.set(a, false), cnt: s.cnt.set(a, startCnt(s)) }
 
@@ -235,7 +244,7 @@ module node_volume {
 
   // ---------------------------------------------------------------- workload-lifecycle
   def canStart(s: S, a: int): bool = and {
-    s.declared, not(s.stopped), budgetMayRestart(charged(s), LIMIT, pendingGen(s) or abandonedCur(s)), not(nonTerminal(s)),
+    s.declared, not(s.stopped), budgetMayRestart(charged(s), LIMIT, pendingGen(s)), not(nonTerminal(s)),
     // M7: the boot sweep reclaims a VMM that survived a control-plane crash before any launch starts (feature delta,
     // boundary scenario 5); a Running orphan already blocked minting through its non-terminal row, a booting one does not
     AL.forall(x => not(s.orphan.get(x))),
@@ -666,10 +675,10 @@ module node_volume {
     .then(LaunchCheck(3)).then(VmmSpawn(3)).then(GuestReady(3))
     .expect(st.as.get(3) == RUNNING and st.claim == 3 and not(st.ran.get(2)) and st.dv == 1 and st.nCreated == 1
             and vmms(st).size() == 1 and Safety)
-    // the superseded launch is an abandoned row (ADR-0355): its id was issued as a crash-restart successor, so it holds count 1,
-    // and the relaunch carries that count unchanged (charged once, not twice): the restart does not forgive the failure it
-    // never replaced, where a generation replacement of the Failed row itself would carry 0
-    .expect(not(st.old.get(3)) and charged(st) == 1)
+    // the superseded launch never ran, so it does not count (RB-13): the count basis is the Failed #1, the restart commit left the
+    // generation pending (an abandoned successor handles nothing) and the relaunch is a generation replacement of #1 carrying its
+    // count 0, which forgives the crash the operator's restart replaced
+    .expect(not(st.old.get(3)) and charged(st) == 0)
 
   // SD-1 / SD-3 / SD-4: an operator stop while the guest boots (point 5): the VMM is terminated, its claim lingers until
   // the drain, the volume is kept, a Terminated row (LaunchSuperseded), no Running row, no charge; resume reattaches the same volume

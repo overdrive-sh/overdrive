@@ -33,3 +33,12 @@ module rg_bugAbandonWritesNoRow {
   import restart_generation(OFF = Set("abandonWritesNoRow"), REC = false, OPS = Set("lost"), NA = 2, FB = 1, LIMIT = 3,
     DGMAX = 1, JOB = false).* from "../restart_generation"
 }
+
+// ADR-0355 item 2 (RB-13): a launch that never ran does not count; the count basis is the newest row that ran. Hazard: the basis is
+// the newest row, abandoned or not, so each abandoned launch is one more crash restart of the one before it. Counterexample: #1
+// crashes, #2 is its crash restart (count 1) and is lost, #3 is a crash restart of the abandoned #2 (count 2, expected 1); with
+// several consecutive abandoned rows the count grows by one for each (NA = 4: #2 and #3 lost, #4 carries 3, expected 1).
+module rg_bugAbandonedRowCounts {
+  import restart_generation(OFF = Set("abandonedRowCounts"), REC = false, OPS = Set("lost"), NA = 4, FB = 1, LIMIT = 4,
+    DGMAX = 1, JOB = false).* from "../restart_generation"
+}

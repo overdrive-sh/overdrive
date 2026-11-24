@@ -70,6 +70,16 @@ backend = "tlc"
 expect = "violation"
 ci = true
 
+# ADR-0355 item 2 (RB-13): a launch that never ran does not count; the count basis is the newest row that ran
+[[check]]
+name = "rg-hazard-abandoned-row-counts"
+spec = "hazard/restart_generation_hazards.qnt"
+main = "rg_bugAbandonedRowCounts"
+invariant = "I_ABANDONED_ROWS_DO_NOT_COUNT"
+backend = "tlc"
+expect = "violation"
+ci = true
+
 [[check]]
 name = "rg-run-control-plane-crash-during-restart-launch-relaunches-once"
 spec = "restart_generation.qnt"
@@ -157,6 +167,24 @@ name = "rg-run-resume-of-stopped-job-does-nothing-and-issues-no-id"
 spec = "restart_generation.qnt"
 main = "rg_conf_job"
 run = "resume_of_stopped_job_does_nothing_and_issues_no_id"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "rg-run-crash-restart-abandoned-by-operator-restart-forgives-the-crash"
+spec = "restart_generation.qnt"
+main = "rg_conf"
+run = "crash_restart_abandoned_by_operator_restart_forgives_the_crash"
+backend = "evaluator"
+expect = "holds"
+ci = true
+
+[[check]]
+name = "rg-run-consecutive-abandoned-launches-charge-the-crash-once"
+spec = "restart_generation.qnt"
+main = "rg_conf"
+run = "consecutive_abandoned_launches_charge_the_crash_once"
 backend = "evaluator"
 expect = "holds"
 ci = true

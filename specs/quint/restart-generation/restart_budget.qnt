@@ -13,8 +13,13 @@
  * chain fails CEILING + 1 times before BackoffExhausted: LIMIT = CEILING + 1 in these terms. Exhaustion is `charged >= LIMIT`
  * with nothing running. `charged` and `exhausted` are DERIVED from the current row's count, never state.
  *
- * Definitions only: no state, no `step`, never a conformance target. The importing spec decides what "the current row" is
- * (production `current_alloc`: the highest allocation id with a row) and supplies it through the arguments.
+ * RB-13 (ADR-0355 item 2): a launch that never ran does not count. "The current row" below is the COUNT BASIS, the newest row that
+ * ran (production `last_ran_alloc`: `current_alloc` over the rows that are not abandoned, `LaunchSuperseded` or
+ * `LaunchLostWithControlPlane`), not the newest row. `cur` and `pendingGen` take the basis, so an abandoned row is never read:
+ * deleting the abandoned rows from any chain changes no later launch's count, `charged` or `exhausted`.
+ *
+ * Definitions only: no state, no `step`, never a conformance target. The importing spec decides what the count basis is and
+ * supplies it through the arguments.
  */
 module restart_budget {
   // The current row is `cur` (0: none), its count is `cnt.get(cur)`, read only when there is one (the argument is lazy: a
