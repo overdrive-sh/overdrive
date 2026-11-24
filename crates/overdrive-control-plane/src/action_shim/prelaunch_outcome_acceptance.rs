@@ -95,6 +95,7 @@ use overdrive_core::guest_network::{
     GuestNetworkExecSupervisor, GuestNetworkExecWiring, MAX_GUEST_NETWORK_ATTACHMENTS,
     SharedGuestNetworkComponent, SharedGuestNetworkFailStopCause,
 };
+use overdrive_core::guest_transport::GuestTransportAssignment;
 use overdrive_core::id::{
     AllocationId, CorrelationKey, IssuanceOrdinal, NodeId, ServiceId, SpiffeId, WorkloadId,
 };
@@ -121,6 +122,7 @@ use overdrive_core::traits::observation_store::{
     LogicalTimestamp, NodeHealthRow, ObservationStore, ObservationStoreError, ObservationWrite,
     ServiceBackendRow, TransitionSource, WorkloadSvidIssueStatusRowV1,
 };
+use overdrive_core::traits::vm_host_state::VmHostState as _;
 use overdrive_core::transition_reason::{StoppedBy, TerminalCondition, TransitionReason};
 use overdrive_core::workflow::{SignalKey, SignalValue, WorkflowStatus};
 use overdrive_sim::adapters::ca::SimCa;
@@ -131,6 +133,7 @@ use overdrive_sim::adapters::entropy::SimEntropy;
 use overdrive_sim::adapters::mtls_enforcement::SimMtlsEnforcement;
 use overdrive_sim::adapters::mtls_intercept::SimMtlsIntercept;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
+use overdrive_sim::adapters::vm_host_state::SimVmHostState;
 use overdrive_sim::adapters::{SimIdentityRead, SimMtlsResolve};
 use overdrive_store_local::LocalIntentStore;
 use overdrive_testing::placement;
@@ -155,6 +158,8 @@ placement!(host_pure);
 
 /// The cause text the failing CA double carries; the row's `detail` must carry it.
 const CA_CAUSE: &str = "prelaunch-ca-refused-to-sign";
+/// The text the failing observation lifecycle write carries.
+const WRITE_CAUSE: &str = "prelaunch-lifecycle-write-refused";
 /// The text the failing observation point read carries.
 const READ_CAUSE: &str = "prelaunch-point-read-refused";
 
@@ -205,6 +210,13 @@ impl Ca for FailingCa {
     }
 }
 
+/// What the store and the spec held when a launch reached the driver.
+#[derive(Clone)]
+struct SeenAtStart {
+    row: Option<AllocStatusRow>,
+    address: Option<Ipv4Addr>,
+}
+
 /// The typed outcome the scripted `start` returns.
 #[derive(Clone, Copy)]
 enum ScriptedStart {
@@ -212,6 +224,9 @@ enum ScriptedStart {
     Superseded,
     /// `StartRejected` carrying `AllocationAlreadyOwned` for the started allocation.
     DuplicateOwner,
+    /// A non-start `DriverError` (`GuestTransportMissing`, the composition error
+    /// `VmDriver::start` can return besides `StartRejected`).
+    OtherError,
 }
 
 /// `Driver` double for a scripted launch outcome. By default `start` returns
@@ -221,6 +236,13 @@ enum ScriptedStart {
 /// driver is recorded.
 struct ScriptedStartDriver {
     outcome: ScriptedStart,
+    /// The observation store the shim writes to, attached by the test after
+    /// the rig is built; `start` reads the allocation's row from it, which is
+    /// what the store holds at the instant the launch reaches the driver.
+    obs: Mutex<Option<Arc<dyn ObservationStore>>>,
+    /// What each `start` saw: the allocation's row in the store and the
+    /// guest address of the transport the shim injected into the spec.
+    seen_at_start: Mutex<Vec<SeenAtStart>>,
     starts: Mutex<Vec<AllocationId>>,
     stops: Mutex<Vec<AllocationId>>,
     supervision_releases: Mutex<Vec<AllocationId>>,
@@ -231,13 +253,24 @@ impl ScriptedStartDriver {
         Self::scripted(ScriptedStart::Superseded)
     }
 
+    /// Attach the observation store `start` reads the allocation's row from.
+    fn attach_obs(&self, obs: Arc<dyn ObservationStore>) {
+        *self.obs.lock() = Some(obs);
+    }
+
     fn duplicate_owner() -> Self {
         Self::scripted(ScriptedStart::DuplicateOwner)
+    }
+
+    fn other_error() -> Self {
+        Self::scripted(ScriptedStart::OtherError)
     }
 
     fn scripted(outcome: ScriptedStart) -> Self {
         Self {
             outcome,
+            obs: Mutex::new(None),
+            seen_at_start: Mutex::new(Vec::new()),
             starts: Mutex::new(Vec::new()),
             stops: Mutex::new(Vec::new()),
             supervision_releases: Mutex::new(Vec::new()),
@@ -257,8 +290,20 @@ impl Driver for ScriptedStartDriver {
         _supersession: &dyn LaunchSupersession,
     ) -> Result<AllocationHandle, DriverError> {
         self.starts.lock().push(spec.alloc.clone());
+        let obs = self.obs.lock().clone();
+        let row = match obs {
+            Some(obs) => obs.alloc_status_row(&spec.alloc).await.expect("row readable at start"),
+            None => None,
+        };
+        self.seen_at_start.lock().push(SeenAtStart {
+            row,
+            address: spec.transport.as_ref().map(GuestTransportAssignment::workload_addr),
+        });
         match self.outcome {
             ScriptedStart::Superseded => Err(DriverError::StartSuperseded),
+            ScriptedStart::OtherError => {
+                Err(DriverError::GuestTransportMissing { alloc: spec.alloc.clone() })
+            }
             ScriptedStart::DuplicateOwner => Err(DriverError::StartRejected {
                 failure: DriverStartFailure {
                     class: DriverStartClass::Vm(VmStartFailure::AllocationAlreadyOwned {
@@ -301,6 +346,9 @@ impl Driver for ScriptedStartDriver {
 struct FaultObs {
     inner: Arc<SimObservationStore>,
     fail_point_reads: AtomicBool,
+    /// The next lifecycle write of a row in this state fails once, as an
+    /// unreachable observation store.
+    fail_next_write_of: Mutex<Option<AllocState>>,
     point_read_hook: Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 
@@ -309,6 +357,7 @@ impl FaultObs {
         Arc::new(Self {
             inner,
             fail_point_reads: AtomicBool::new(false),
+            fail_next_write_of: Mutex::new(None),
             point_read_hook: Mutex::new(None),
         })
     }
@@ -355,6 +404,13 @@ impl ObservationStore for FaultObs {
         current: AllocStatusRow,
         source: TransitionSource,
     ) -> Result<Option<AllocLifecycleOccurrenceRow>, ObservationStoreError> {
+        let armed = {
+            let mut guard = self.fail_next_write_of.lock();
+            if *guard == Some(current.state) { guard.take() } else { None }
+        };
+        if armed.is_some() {
+            return Err(ObservationStoreError::Unreachable { peer: WRITE_CAUSE.to_owned() });
+        }
         self.inner.write_alloc_lifecycle(current, source).await
     }
 
@@ -864,37 +920,66 @@ fn is_admission_refusal(result: &Result<(), ConvergenceError>) -> bool {
 // N-SUP: a superseded launch.
 // ---------------------------------------------------------------------------
 
-/// PENDING (N-SUP, S11).
+/// The reason text an abandoned launch's row must present (ADR-0355). The
+/// `LaunchSuperseded` variant does not exist yet, so the tests read the row's
+/// reason through `TransitionReason::human_readable`, whose wording the design
+/// pins.
+fn reason_text(row: &AllocStatusRow) -> String {
+    row.reason.as_ref().map_or_else(|| "<no reason>".to_owned(), TransitionReason::human_readable)
+}
+
+/// Assert `row` is an abandoned-launch row of `address` (ADR-0355 section 1):
+/// `Terminated`, `terminal: None`, never started, the Pending row's address and
+/// count facts carried, and the wording of `wanted` (`superseded` or `lost`).
+fn assert_abandoned_launch_row(row: &AllocStatusRow, address: Option<Ipv4Addr>, wanted: &str) {
+    assert_eq!(
+        row.state,
+        AllocState::Terminated,
+        "an abandoned launch ends its Pending row as Terminated, never Failed; got {:?} ({})",
+        row.state,
+        reason_text(row)
+    );
+    assert!(
+        reason_text(row).contains(&format!("launch abandoned: {wanted}")),
+        "the abandoned row names why: expected `launch abandoned: {wanted}`, got `{}`",
+        reason_text(row)
+    );
+    assert_eq!(row.terminal, None, "the workload's intent still stands: no terminal claim");
+    assert_eq!(row.started_at, None, "the launch never ran");
+    assert!(address.is_some(), "precondition: the launch had a guest address");
+    assert_eq!(row.workload_addr, address, "the abandoned row carries the lease's address");
+    assert_eq!(row.restart_count, 0, "the Pending row's restart count is carried, not advanced");
+    assert_eq!(row.last_terminated, None, "no crash is recorded for an abandoned launch");
+}
+
+/// PENDING (N-SUP, W1, ADR-0355; was the no-row guard of ADR-0334).
 ///
 /// CONTRACT_SHAPE: bounded-change. A `StartAllocation` whose launch returns
-/// `StartSuperseded` writes no row, releases the lease, the SVID and the
-/// supervision claim, emits `launch.superseded`, and returns `Ok(())`.
-/// Today the arm falls to the `Err(other)` arm: `Err(ShimError::Driver(..))`.
+/// `StartSuperseded` ends its `Pending` row with one `Terminated` row
+/// `LaunchSuperseded` (terminal `None`, the lease's address carried), releases
+/// the lease, the SVID and the supervision claim, emits `launch.superseded`,
+/// and returns `Ok(())`. Universe: the allocation's rows, lifecycle events, the
+/// lease, the held SVID, the driver's supervision releases. Today the shim
+/// writes no row, so the allocation has none.
 #[tokio::test]
-async fn start_arm_superseded_launch_writes_no_row_and_releases_lease_svid_and_claim() {
+#[should_panic(expected = "a superseded launch ends its Pending row with an abandoned row")]
+async fn start_arm_superseded_launch_ends_its_row_as_abandoned_and_releases_lease_svid_and_claim() {
     let driver = Arc::new(ScriptedStartDriver::new());
     let rig = Rig::build(Arc::clone(&driver) as Arc<dyn Driver>).await;
-    let mut lifecycle = rig.state.lifecycle_events.subscribe();
+    driver.attach_obs(Arc::clone(&rig.obs) as Arc<dyn ObservationStore>);
     let id = "alloc-prelaunch-service-0";
 
     let result = rig.dispatch(start_action(id, WorkloadKind::Service)).await;
 
     assert!(
         result.is_ok(),
-        "a superseded launch is a clean no-row outcome: the start dispatch returns Ok(()), got {result:?}"
+        "a superseded launch is a clean outcome: the start dispatch returns Ok(()), got {result:?}"
     );
     assert_eq!(driver.starts.lock().as_slice(), [alloc(id)], "the launch reached the driver once");
-    assert!(rig.row(id).await.is_none(), "a superseded launch writes no allocation row");
-    assert!(
-        rig.state
-            .obs
-            .alloc_lifecycle_occurrences(&alloc(id))
-            .await
-            .expect("occurrences")
-            .is_empty(),
-        "a superseded launch records no lifecycle occurrence"
-    );
-    assert!(drain_lifecycle(&mut lifecycle).is_empty(), "no lifecycle event is published");
+    let address = driver.seen_at_start.lock().first().and_then(|seen| seen.address);
+    let row =
+        rig.row(id).await.expect("a superseded launch ends its Pending row with an abandoned row");
+    assert_abandoned_launch_row(&row, address, "superseded");
     assert!(!rig.has_lease(id), "the launch's guest-network lease is released");
     assert_eq!(rig.teardowns_of(id), 1, "the launch's network is torn down once");
     assert!(!rig.held_svid(id), "the SVID the shim minted before the launch is dropped");
@@ -915,38 +1000,41 @@ async fn start_arm_superseded_launch_writes_no_row_and_releases_lease_svid_and_c
     assert!(driver.stops.lock().is_empty(), "nothing started, so nothing is stopped");
 }
 
-/// PENDING (N-SUP, R12).
+/// PENDING (N-SUP, W2, ADR-0355).
 ///
-/// CONTRACT_SHAPE: bounded-change. A `RestartAllocation` whose successor
-/// launch returns `StartSuperseded` writes no row, releases the successor's
-/// lease, SVID and supervision claim, and still runs the exact-old predecessor
-/// cleanup (`finish_restart`) once: the predecessor's one stop, its one
-/// teardown, its lease released.
+/// CONTRACT_SHAPE: bounded-change. A `RestartAllocation` whose successor launch
+/// returns `StartSuperseded` ends the successor's `Pending` row as abandoned
+/// (`LaunchSuperseded`, address carried), releases the successor's lease, SVID
+/// and supervision claim, leaves the predecessor's row unchanged, and still
+/// runs the exact-old predecessor cleanup once.
 #[tokio::test]
-async fn restart_arm_superseded_successor_runs_exact_old_predecessor_cleanup() {
+#[should_panic(expected = "a superseded successor ends its Pending row with an abandoned row")]
+async fn restart_arm_superseded_successor_ends_its_row_as_abandoned_and_runs_exact_old_predecessor_cleanup()
+ {
     let driver = Arc::new(ScriptedStartDriver::new());
     let rig = Rig::build(Arc::clone(&driver) as Arc<dyn Driver>).await;
+    driver.attach_obs(Arc::clone(&rig.obs) as Arc<dyn ObservationStore>);
     let predecessor = "alloc-prelaunch-service-0";
     let successor = "alloc-prelaunch-service-1";
     rig.seed_crashed_predecessor(predecessor, true).await;
     let predecessor_row_before = rig.row(predecessor).await;
-    let mut lifecycle = rig.state.lifecycle_events.subscribe();
 
     let result = rig.dispatch(restart_action(predecessor, successor)).await;
 
     assert!(
         result.is_ok(),
-        "a superseded launch is a clean no-row outcome: the restart dispatch returns Ok(()), got {result:?}"
+        "a superseded launch is a clean outcome: the restart dispatch returns Ok(()), got {result:?}"
     );
-    assert!(rig.row(successor).await.is_none(), "a superseded successor writes no row");
+    let address = driver.seen_at_start.lock().first().and_then(|seen| seen.address);
+    let row = rig
+        .row(successor)
+        .await
+        .expect("a superseded successor ends its Pending row with an abandoned row");
+    assert_abandoned_launch_row(&row, address, "superseded");
     assert_eq!(
         rig.row(predecessor).await,
         predecessor_row_before,
         "the predecessor row is unchanged"
-    );
-    assert!(
-        drain_lifecycle(&mut lifecycle).iter().all(|event| event.alloc_id != alloc(successor)),
-        "no lifecycle event names the successor"
     );
     assert!(!rig.has_lease(successor), "the successor's lease is released");
     assert_eq!(rig.teardowns_of(successor), 1, "the successor's network is torn down once");
@@ -964,6 +1052,346 @@ async fn restart_arm_superseded_successor_runs_exact_old_predecessor_cleanup() {
     assert_eq!(rig.teardowns_of(predecessor), 1, "the predecessor's network is torn down once");
     assert!(!rig.has_lease(predecessor), "the predecessor's lease is released");
     assert!(rig.event_names().contains(&"launch.superseded"), "one launch.superseded event");
+}
+
+/// PENDING (N-SUP, W1, ADR-0355 section 4). A failing lease teardown does not
+/// suppress the abandoned row: the row is written, then the teardown error is
+/// returned.
+#[tokio::test]
+#[should_panic(expected = "the abandoned row is written even when the lease teardown fails")]
+async fn start_arm_teardown_failure_does_not_suppress_the_abandoned_row() {
+    let driver = Arc::new(ScriptedStartDriver::new());
+    let rig = Rig::build(Arc::clone(&driver) as Arc<dyn Driver>).await;
+    driver.attach_obs(Arc::clone(&rig.obs) as Arc<dyn ObservationStore>);
+    rig.owner.script_teardown_failure(true);
+    let id = "alloc-prelaunch-service-0";
+
+    let result = rig.dispatch(start_action(id, WorkloadKind::Service)).await;
+
+    let address = driver.seen_at_start.lock().first().and_then(|seen| seen.address);
+    let row =
+        rig.row(id).await.expect("the abandoned row is written even when the lease teardown fails");
+    assert_abandoned_launch_row(&row, address, "superseded");
+    assert!(
+        matches!(result, Err(ShimError::GuestNetwork(_))),
+        "the teardown failure is returned after the row: {result:?}"
+    );
+    assert_eq!(rig.teardowns_of(id), 1, "the teardown was attempted once");
+}
+
+/// PENDING (N-SUP, N-REC, ADR-0355 section 4). A failing write of the
+/// abandoned row is the typed observation error; the `Pending` row stays for
+/// the next boot to close.
+#[tokio::test]
+#[should_panic(
+    expected = "a failing abandoned-row write is returned as the typed observation error"
+)]
+async fn start_arm_failing_abandoned_row_write_is_returned_as_the_typed_observation_error() {
+    let driver = Arc::new(ScriptedStartDriver::new());
+    let rig = Rig::build(Arc::clone(&driver) as Arc<dyn Driver>).await;
+    driver.attach_obs(Arc::clone(&rig.obs) as Arc<dyn ObservationStore>);
+    *rig.obs.fail_next_write_of.lock() = Some(AllocState::Terminated);
+    let id = "alloc-prelaunch-service-0";
+
+    let result = rig.dispatch(start_action(id, WorkloadKind::Service)).await;
+
+    assert!(
+        matches!(&result, Err(ShimError::Observation(ObservationStoreError::Unreachable { peer })) if peer == WRITE_CAUSE),
+        "a failing abandoned-row write is returned as the typed observation error: {result:?}"
+    );
+    assert_eq!(
+        rig.row(id).await.map(|row| row.state),
+        Some(AllocState::Pending),
+        "the Pending row stays until the next boot closes it"
+    );
+}
+
+/// PENDING (RB-8 W3, ADR-0355 section 4; was DE-1's "internal typed error with
+/// no row"). A non-start `DriverError` from `driver.start` ends the launch's
+/// `Pending` row as a `Failed` row `DriverInternalError` (charged like any start
+/// failure), carrying the address and releasing the lease; the launch is never
+/// left as a `Pending` row. Today the arm returns the error and writes no row.
+#[tokio::test]
+#[should_panic(
+    expected = "a non-start driver error ends the launch in a Failed DriverInternalError row"
+)]
+async fn start_arm_a_non_start_driver_error_ends_in_a_failed_driver_internal_error_row() {
+    let driver = Arc::new(ScriptedStartDriver::other_error());
+    let rig = Rig::build(Arc::clone(&driver) as Arc<dyn Driver>).await;
+    driver.attach_obs(Arc::clone(&rig.obs) as Arc<dyn ObservationStore>);
+    let id = "alloc-prelaunch-service-0";
+
+    let result = rig.dispatch(start_action(id, WorkloadKind::Service)).await;
+
+    let row = rig
+        .row(id)
+        .await
+        .unwrap_or_else(|| panic!("a non-start driver error ends the launch in a Failed DriverInternalError row, got no row (dispatch: {result:?})"));
+    assert_eq!(row.state, AllocState::Failed, "ended as Failed, never left Pending: {row:?}");
+    assert!(
+        matches!(row.reason, Some(TransitionReason::DriverInternalError { .. })),
+        "the reason is DriverInternalError: {:?}",
+        row.reason
+    );
+    assert!(row.workload_addr.is_some(), "the Pending row's address is carried");
+    assert!(!rig.has_lease(id), "the lease is released");
+}
+
+// ---------------------------------------------------------------------------
+// N-2: the guest address is on record before the VMM can exist.
+// ---------------------------------------------------------------------------
+
+/// PENDING (RB-6, ADR-0353). When the launch reaches the driver, so before
+/// `Vmm::create` is reachable, the store holds the allocation's `Pending` row
+/// and its `workload_addr` is the address of the lease the pool handed out
+/// (the transport the shim injected into the spec).
+///
+/// CONTRACT_SHAPE: bounded-change. Universe: the allocation's row at the
+/// instant of `Driver::start`.
+#[tokio::test]
+#[should_panic(expected = "the store holds the launch's Pending row when the driver starts")]
+async fn start_arm_records_the_pending_row_with_the_leases_address_before_the_driver_starts() {
+    let driver = Arc::new(ScriptedStartDriver::new());
+    let rig = Rig::build(Arc::clone(&driver) as Arc<dyn Driver>).await;
+    driver.attach_obs(Arc::clone(&rig.obs) as Arc<dyn ObservationStore>);
+    let id = "alloc-prelaunch-service-0";
+
+    rig.dispatch(start_action(id, WorkloadKind::Service)).await.expect("dispatch");
+
+    let seen = driver.seen_at_start.lock().first().cloned().expect("the launch reached the driver");
+    let address = seen.address.expect("the shim injected the lease's transport into the spec");
+    let row =
+        seen.row.as_ref().expect("the store holds the launch's Pending row when the driver starts");
+    assert_eq!(row.state, AllocState::Pending, "the record is the existing Pending state");
+    assert_eq!(row.workload_addr, Some(address), "the row carries the lease's address");
+    assert_eq!((row.started_at, row.reason.is_none(), row.terminal.clone()), (None, true, None));
+}
+
+/// PENDING (RB-6, ADR-0353). The restart arm records the successor's `Pending`
+/// row with the successor lease's address before the successor reaches the
+/// driver.
+#[tokio::test]
+#[should_panic(expected = "the store holds the successor's Pending row when the driver starts")]
+async fn restart_arm_records_the_successors_pending_row_with_the_leases_address_before_the_driver_starts()
+ {
+    let driver = Arc::new(ScriptedStartDriver::new());
+    let rig = Rig::build(Arc::clone(&driver) as Arc<dyn Driver>).await;
+    driver.attach_obs(Arc::clone(&rig.obs) as Arc<dyn ObservationStore>);
+    rig.seed_crashed_predecessor("alloc-prelaunch-service-0", true).await;
+    let successor = "alloc-prelaunch-service-1";
+
+    rig.dispatch(restart_action("alloc-prelaunch-service-0", successor)).await.expect("dispatch");
+
+    let seen =
+        driver.seen_at_start.lock().first().cloned().expect("the successor reached the driver");
+    let address = seen.address.expect("the shim injected the lease's transport into the spec");
+    let row = seen
+        .row
+        .as_ref()
+        .expect("the store holds the successor's Pending row when the driver starts");
+    assert_eq!(row.alloc_id, alloc(successor));
+    assert_eq!(row.state, AllocState::Pending, "the record is the existing Pending state");
+    assert_eq!(row.workload_addr, Some(address), "the row carries the lease's address");
+}
+
+/// PENDING (RB-6, N-REC, ADR-0353). When the `Pending` write fails no VMM can
+/// exist: the driver is never reached, the lease is retired and torn down, and
+/// the typed error is returned.
+#[tokio::test]
+#[should_panic(expected = "the driver is never reached when the Pending write fails")]
+async fn start_arm_failing_pending_write_never_reaches_the_driver_and_releases_the_lease() {
+    let driver = Arc::new(ScriptedStartDriver::new());
+    let rig = Rig::build(Arc::clone(&driver) as Arc<dyn Driver>).await;
+    driver.attach_obs(Arc::clone(&rig.obs) as Arc<dyn ObservationStore>);
+    *rig.obs.fail_next_write_of.lock() = Some(AllocState::Pending);
+    let id = "alloc-prelaunch-service-0";
+
+    let result = rig.dispatch(start_action(id, WorkloadKind::Service)).await;
+
+    assert!(
+        driver.starts.lock().is_empty(),
+        "the driver is never reached when the Pending write fails"
+    );
+    assert!(
+        matches!(&result, Err(ShimError::Observation(ObservationStoreError::Unreachable { peer })) if peer == WRITE_CAUSE),
+        "the typed error is returned: {result:?}"
+    );
+    assert!(!rig.has_lease(id), "the lease is released");
+    assert_eq!(rig.teardowns_of(id), 1, "the lease's network is torn down once");
+}
+
+/// PENDING (RB-6, ADR-0353 terminal-row carry). The `Failed` row of a start the
+/// driver rejects carries the `Pending` row's address.
+#[tokio::test]
+#[should_panic(expected = "the Failed row of a rejected start carries the Pending row's address")]
+async fn start_arm_failed_start_row_carries_the_pending_rows_address() {
+    let driver = Arc::new(SimDriver::new(DriverType::Vm));
+    driver.script_next_start_rejection(Some("scripted rejection"));
+    let rig = Rig::build(Arc::clone(&driver) as Arc<dyn Driver>).await;
+    let id = "alloc-prelaunch-service-0";
+
+    let result = rig.dispatch(start_action(id, WorkloadKind::Service)).await;
+
+    assert!(result.is_ok(), "a rejected start is recorded as a row: {result:?}");
+    let row = rig.row(id).await.expect("the rejected start has a row");
+    assert_eq!(row.state, AllocState::Failed);
+    assert!(
+        row.workload_addr.is_some(),
+        "the Failed row of a rejected start carries the Pending row's address"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// RB-2: a guest-address lease is released only once the scope is absent.
+// ---------------------------------------------------------------------------
+
+/// Start `id` over a `SimDriver` and a `SimVmHostState`, leaving a `Running`
+/// allocation with its lease. Returns the rig and the host double.
+async fn running_vm_over_a_host(id: &str) -> (Rig, SimVmHostState) {
+    let driver = Arc::new(SimDriver::new(DriverType::Vm));
+    let mut rig = Rig::build(Arc::clone(&driver) as Arc<dyn Driver>).await;
+    let host = SimVmHostState::new();
+    rig.state.vm_host_state = Arc::new(host.clone());
+    rig.dispatch(start_action(id, WorkloadKind::Service)).await.expect("the start dispatches");
+    assert_eq!(
+        rig.row(id).await.map(|row| row.state),
+        Some(AllocState::Running),
+        "precondition: the allocation is Running"
+    );
+    assert!(rig.has_lease(id), "precondition: the running allocation holds a lease");
+    (rig, host)
+}
+
+/// PENDING (RB-2, ADR-0156 amended). A stop whose VM still has its cgroup scope
+/// (the VMM was killed and is not yet reaped) completes (the row is
+/// `Terminated`) but keeps the guest-address lease: the lease is released only
+/// once the scope is observed absent, because the scope's presence is the proof
+/// that the VMM still holds its vsock device and so its CID. After the scope is
+/// gone, the network-reclaim action that a terminal row with a lease already
+/// triggers releases the lease, through the one release site.
+///
+/// CONTRACT_SHAPE: bounded-change. Universe: the allocation's row, the pool's
+/// lease and occupancy, the host's scopes.
+#[tokio::test]
+#[should_panic(expected = "the lease is held while the VM's scope is present")]
+async fn a_stop_keeps_the_lease_held_while_the_vms_scope_is_present_and_a_reclaim_releases_it_after()
+ {
+    let id = "alloc-prelaunch-service-0";
+    let (rig, host) = running_vm_over_a_host(id).await;
+    host.set_scope(alloc(id), BTreeSet::from([4242]));
+
+    rig.dispatch(Action::StopAllocation { alloc_id: alloc(id), terminal: None })
+        .await
+        .expect("the stop completes");
+
+    assert_eq!(
+        rig.row(id).await.map(|row| row.state),
+        Some(AllocState::Terminated),
+        "the stop completes while the scope is present"
+    );
+    let held = rig.pool.observe(&[alloc(id)]);
+    assert_eq!(
+        held.leases.get(&alloc(id)),
+        Some(&overdrive_core::traits::guest_attachment_view::GuestAttachmentLease::Retiring),
+        "the lease is held while the VM's scope is present (Retiring, still counted)"
+    );
+    assert_eq!(held.occupancy.held, 1, "the held lease counts toward the attachment cap");
+
+    // The VMM is reaped and the reclamation pass removes the scope.
+    host.kill_scope(&overdrive_core::cgroup::CgroupPath::for_alloc(&alloc(id)))
+        .await
+        .expect("the scope is removed");
+    rig.dispatch(Action::ReclaimAllocationNetwork { alloc_id: alloc(id) })
+        .await
+        .expect("the reclaim attempt dispatches");
+    assert!(!rig.has_lease(id), "the reclaim attempt releases the lease once the scope is absent");
+}
+
+/// PENDING (RB-6, ADR-0353 terminal-row carry). The stop's terminal row carries
+/// the running row's `workload_addr`: boot reserves a stuck VM's offset from the
+/// allocation's last row, and a stopped-but-unreaped VMM is exactly that VM.
+#[tokio::test]
+#[should_panic(expected = "the stop's terminal row carries the prior row's workload_addr")]
+async fn a_stops_terminal_row_carries_the_prior_rows_workload_addr() {
+    let id = "alloc-prelaunch-service-0";
+    let (rig, _host) = running_vm_over_a_host(id).await;
+    let running = rig.row(id).await.expect("the running row");
+    assert!(running.workload_addr.is_some(), "precondition: the Running row carries the address");
+
+    rig.dispatch(Action::StopAllocation { alloc_id: alloc(id), terminal: None })
+        .await
+        .expect("the stop completes");
+
+    let stopped = rig.row(id).await.expect("the terminal row");
+    assert_eq!(stopped.state, AllocState::Terminated);
+    assert_eq!(
+        stopped.workload_addr, running.workload_addr,
+        "the stop's terminal row carries the prior row's workload_addr"
+    );
+}
+
+/// GUARD (RB-6, ADR-0353 "a stale duplicate dispatch"). Dispatching a start
+/// again for an allocation whose row is already `Running` never writes a
+/// `Pending` row over it: the existing non-terminal row is the record and
+/// carries the same address.
+#[tokio::test]
+async fn guard_a_duplicate_start_dispatch_never_regresses_a_running_row_to_pending() {
+    let id = "alloc-prelaunch-service-0";
+    let (rig, _host) = running_vm_over_a_host(id).await;
+    let running = rig.row(id).await.expect("the running row");
+
+    let second = rig.dispatch(start_action(id, WorkloadKind::Service)).await;
+
+    let after = rig.row(id).await.expect("the row survives the duplicate dispatch");
+    assert_eq!(
+        after.state,
+        AllocState::Running,
+        "a duplicate start never writes Pending over a Running row (second dispatch: {second:?})"
+    );
+    assert_eq!(after.workload_addr, running.workload_addr, "the record keeps its address");
+}
+
+/// GUARD (RB-6, ADR-0353 restart arm, `dominating(.., None)`). A restart
+/// dispatched twice for the same successor never regresses the successor's
+/// `Running` row to `Pending`. ADR-0353 states the guard for the start arm
+/// only; this pins it for the restart arm, whose successor write has no prior
+/// row to dominate.
+#[tokio::test]
+async fn guard_a_duplicate_restart_dispatch_never_regresses_the_successors_running_row() {
+    let driver = Arc::new(SimDriver::new(DriverType::Vm));
+    let rig = Rig::build(Arc::clone(&driver) as Arc<dyn Driver>).await;
+    let predecessor = "alloc-prelaunch-service-0";
+    let successor = "alloc-prelaunch-service-1";
+    rig.seed_crashed_predecessor(predecessor, true).await;
+    rig.dispatch(restart_action(predecessor, successor)).await.expect("the restart dispatches");
+    assert_eq!(
+        rig.row(successor).await.map(|row| row.state),
+        Some(AllocState::Running),
+        "precondition: the successor is Running"
+    );
+
+    let second = rig.dispatch(restart_action(predecessor, successor)).await;
+
+    assert_eq!(
+        rig.row(successor).await.map(|row| row.state),
+        Some(AllocState::Running),
+        "a duplicate restart never writes Pending over the successor's Running row (second dispatch: {second:?})"
+    );
+}
+
+/// GUARD (RB-2). With no scope left, a stop releases the lease at once, as it
+/// does today and after the change: the gate costs nothing for a reaped VMM.
+#[tokio::test]
+async fn guard_a_stop_releases_the_lease_at_once_when_no_scope_remains() {
+    let id = "alloc-prelaunch-service-0";
+    let (rig, _host) = running_vm_over_a_host(id).await;
+
+    rig.dispatch(Action::StopAllocation { alloc_id: alloc(id), terminal: None })
+        .await
+        .expect("the stop completes");
+
+    assert_eq!(rig.row(id).await.map(|row| row.state), Some(AllocState::Terminated));
+    assert!(!rig.has_lease(id), "no scope, so the lease is released at the stop");
 }
 
 // ---------------------------------------------------------------------------

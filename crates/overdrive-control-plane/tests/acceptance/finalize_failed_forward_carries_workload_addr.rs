@@ -202,12 +202,17 @@ proptest! {
         );
     }
 
-    /// PROPERTY (genuine terminal drops `workload_addr`; row `state` follows
-    /// the terminal claim's own success/failure identity): for ANY IPv4
-    /// `addr` AND ANY non-`Stable` terminal (`Failed` / `Completed` /
+    /// PENDING (RB-6, ADR-0353 terminal-row carry; was "a genuine terminal
+    /// drops `workload_addr`").
+    ///
+    /// PROPERTY (genuine terminal forward-carries `workload_addr`; row `state`
+    /// follows the terminal claim's own success/failure identity): for ANY
+    /// IPv4 `addr` AND ANY non-`Stable` terminal (`Failed` / `Completed` /
     /// `BackoffExhausted`), a `FinalizeFailed` against the SAME `Running`
-    /// `Some(addr)` prior row drops `workload_addr` to `None` — a dead alloc
-    /// is not a live backend, whether the terminal is success or failure.
+    /// `Some(addr)` prior row carries `Some(addr)` forward: boot reserves a
+    /// stuck VM's guest-address offset from the allocation's last row, so every
+    /// row after the `Pending` one carries the address, and readers gate on
+    /// `state`, not on the field. Today the arm drops it to `None`.
     /// The row's `state` mirrors the terminal's own variant (per
     /// `TerminalCondition::Completed` / `::Failed`'s docs: "branch on the
     /// variant, never on exit_code != 0"): `Completed` (a Job-kind clean
@@ -234,11 +239,15 @@ proptest! {
     /// streaming path for a zero-exit Job — this property's `state`
     /// assertion had not caught up.
     ///
-    /// Kills: always-`prior` (would keep `Some(addr)` on a genuine terminal),
-    /// swap-arms (would keep addr on the genuine arm), and a regression of
-    /// the `Completed -> Terminated` mapping back to unconditional `Failed`.
+    /// Kills: a `FinalizeFailed` arm that drops the address on a genuine
+    /// terminal (the boot reservation then has nothing to read), and a
+    /// regression of the `Completed -> Terminated` mapping back to
+    /// unconditional `Failed`.
     #[test]
-    fn finalize_failed_genuine_terminal_drops_workload_addr(
+    #[should_panic(
+        expected = "a FinalizeFailed row forward-carries the prior row's workload_addr"
+    )]
+    fn finalize_failed_genuine_terminal_forward_carries_workload_addr(
         a in any::<u8>(), b in any::<u8>(), c in any::<u8>(), d in any::<u8>(),
         terminal in prop_oneof![
             any::<i32>().prop_map(|code| TerminalCondition::Failed { exit_code: Some(code) }),
@@ -263,8 +272,8 @@ proptest! {
         );
         prop_assert_eq!(
             carried,
-            None,
-            "a genuine terminal is a dead alloc — workload_addr must drop to None, got {:?}",
+            Some(addr),
+            "a FinalizeFailed row forward-carries the prior row's workload_addr, got {:?}",
             carried,
         );
     }

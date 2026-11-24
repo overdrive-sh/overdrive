@@ -221,6 +221,28 @@ impl Rig {
     }
 }
 
+/// ADR-0355: exactly one row, the launch's `Pending` row ended `Terminated` /
+/// `LaunchSuperseded` with no terminal claim. The reason is read through
+/// `human_readable` because the variant does not exist yet; its wording is the design's.
+fn assert_one_abandoned_superseded_row(rows: &[AllocStatusRow]) {
+    assert_eq!(
+        rows.len(),
+        1,
+        "a superseded launch ends its Pending row as an abandoned row: expected one row, got {rows:?}"
+    );
+    let row = &rows[0];
+    let reason = row
+        .reason
+        .as_ref()
+        .map_or_else(|| "<no reason>".to_owned(), TransitionReason::human_readable);
+    assert_eq!(row.state, AllocState::Terminated, "never Running, never Failed: {row:?}");
+    assert!(
+        reason.contains("launch abandoned: superseded"),
+        "the abandoned row names why: `{reason}`"
+    );
+    assert_eq!(row.terminal, None, "no terminal claim: the intent still stands");
+}
+
 /// Boundary 4 (late success, ADR-0334): a stop recorded while a launch waits on a held claim
 /// interrupts it. The launch ends at once with `StartSuperseded` (no simulated time passes, so
 /// it does not wait for its 30 s claim bound): no row, no VMM, nothing charged to the restart
@@ -232,6 +254,7 @@ impl Rig {
 /// so the body stops at `declare`; the assertions after it are the contract the launch path must
 /// meet once the parser and the lane table land.
 #[test]
+#[should_panic(expected = "a superseded launch ends its Pending row as an abandoned row")]
 fn a_stop_interrupts_the_start_and_its_result_is_never_used() {
     let mut rig = Rig::new();
     rig.declare();
@@ -255,11 +278,9 @@ fn a_stop_interrupts_the_start_and_its_result_is_never_used() {
         "a stop recorded during a launch's claim wait must end the launch at once with StartSuperseded"
     );
     rig.reap(launch);
-    assert!(
-        rig.rows().is_empty(),
-        "a superseded launch writes no row, not even a Failed Held row; rows: {:?}",
-        rig.rows()
-    );
+    // ADR-0355: the launch wrote its Pending row before `Vmm::create` was reachable and ends it
+    // with one abandoned row; never a Running row, never a Failed Held row.
+    assert_one_abandoned_superseded_row(&rig.rows());
     assert!(rig.held_failure_row().is_none(), "the claim wait's bound was never reached");
     assert_eq!(
         rig.serve.state.runtime.view_for_workload_lifecycle(&target()).restart_counts,
@@ -275,8 +296,8 @@ fn a_stop_interrupts_the_start_and_its_result_is_never_used() {
     rig.settle("the stop's evaluation returns", |rig| rig.finished(stop));
     rig.reap(stop);
     assert!(
-        !rig.states().contains(&AllocState::Running) && rig.rows().is_empty(),
-        "the stale launch must never run after the stop: rows {:?}",
+        !rig.states().contains(&AllocState::Running) && rig.rows().len() == 1,
+        "the stale launch must never run after the stop, and leaves only its abandoned row: rows {:?}",
         rig.rows()
     );
     assert!(rig.node.attached.lock().is_empty(), "the stale launch's result is never reattached");
@@ -487,10 +508,13 @@ mod loop_shutdown {
     }
 
     /// PENDING (boundary 4a (h), normal): node shutdown ends a launch that is waiting inside
-    /// `Driver::start`. The launch returns `StartSuperseded`, no row is written, the loop drains and
+    /// `Driver::start`. The launch returns `StartSuperseded`, its `Pending` row ends abandoned (ADR-0355), the loop drains and
     /// exits, and the simulated clock never advances (the launch's own bound is never reached).
     #[tokio::test(flavor = "current_thread")]
-    async fn node_shutdown_ends_a_waiting_launch_with_no_row_and_the_loop_exits() {
+    #[should_panic(
+        expected = "a launch abandoned by shutdown ends its Pending row as an abandoned row"
+    )]
+    async fn node_shutdown_ends_a_waiting_launch_with_an_abandoned_row_and_the_loop_exits() {
         let rig = LoopRig::new().await;
         let park = rig.sim.park_next_start(true);
         let task = rig.spawn_loop();
@@ -505,7 +529,13 @@ mod loop_shutdown {
             "shutdown must raise the signal of the lane a waiting launch is dispatching under"
         );
         assert!(ends(&task).await, "the loop drains its admitted evaluation and exits");
-        assert!(rig.rows().await.is_empty(), "a launch abandoned by shutdown writes no row");
+        let rows = rig.rows().await;
+        assert_eq!(
+            rows.len(),
+            1,
+            "a launch abandoned by shutdown ends its Pending row as an abandoned row: {rows:?}"
+        );
+        assert_eq!(rows[0].state, AllocState::Terminated, "never Running, never Failed");
         assert_eq!(
             rig.clock.now(),
             clock_before,

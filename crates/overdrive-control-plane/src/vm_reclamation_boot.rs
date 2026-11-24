@@ -1729,14 +1729,18 @@ mod mid_boot_volume_reclamation {
     /// The `Running` row a launch that completed leaves behind, in the shape
     /// the action shim writes.
     #[cfg(test)]
-    fn running_row(alloc_id: &AllocationId) -> AllocStatusRow {
+    fn running_row(
+        alloc_id: &AllocationId,
+        workload_addr: Option<std::net::Ipv4Addr>,
+    ) -> AllocStatusRow {
         let node = NodeId::new("local").expect("valid NodeId");
         AllocStatusRow {
             alloc_id: alloc_id.clone(),
             workload_id: workload(),
             node_id: node.clone(),
             state: AllocState::Running,
-            updated_at: LogicalTimestamp { counter: 1, writer: node },
+            // Dominates the launch's `Pending` row (counter 1).
+            updated_at: LogicalTimestamp { counter: 2, writer: node },
             reason: Some(TransitionReason::Started),
             detail: None,
             terminal: None,
@@ -1744,7 +1748,7 @@ mod mid_boot_volume_reclamation {
             kind: WorkloadKind::Service,
             listeners: Vec::new(),
             started_at: Some(UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_000))),
-            workload_addr: None,
+            workload_addr,
             last_terminated: None,
             restart_count: 0,
         }
@@ -1753,8 +1757,9 @@ mod mid_boot_volume_reclamation {
     /// What the crash leaves in the durable observation store.
     #[derive(Clone, Copy)]
     enum Residue {
-        /// The launch was parked in boot: no row was written (the boot
-        /// reclamation discards the stranded artifacts).
+        /// The launch was parked in boot: its `Pending` row (the guest address
+        /// on record before `Vmm::create`, ADR-0353) is the only row, and the
+        /// boot ends it as lost with the control plane (ADR-0355 W4).
         NoRow,
         /// The allocation's `Running` row survives (the boot reclamation
         /// reclaims the allocation).
@@ -1785,10 +1790,13 @@ mod mid_boot_volume_reclamation {
             matches!(node.volumes.claim_state(&workload()).await, Ok(ClaimState::Held)),
             "the parked launch's VMM must hold the workload's volume claim"
         );
-        assert!(
-            node.obs.alloc_status_rows().await.expect("rows").is_empty(),
-            "precondition: the parked launch has written no row"
-        );
+        let pending_rows = node.obs.alloc_status_rows().await.expect("rows");
+        let pending = pending_rows
+            .iter()
+            .find(|row| row.alloc_id == orphan_alloc && row.state == AllocState::Pending)
+            .expect("the parked launch's Pending row is on record before its VMM exists");
+        let recorded_addr = pending.workload_addr;
+        assert!(recorded_addr.is_some(), "the Pending row carries the launch's guest address");
 
         // `serve` dies: its tasks and composition die; its VMM does not.
         let Process { server, .. } = first;
@@ -1796,7 +1804,10 @@ mod mid_boot_volume_reclamation {
         assert!(node.sim_vmm.is_live(orphan_pid), "the orphan survives the crash");
         if matches!(residue, Residue::RunningRow) {
             node.obs
-                .write_alloc_lifecycle(running_row(&orphan_alloc), TransitionSource::Reconciler)
+                .write_alloc_lifecycle(
+                    running_row(&orphan_alloc, recorded_addr),
+                    TransitionSource::Reconciler,
+                )
                 .await
                 .expect("the completed launch's Running row");
         }
@@ -1838,6 +1849,34 @@ mod mid_boot_volume_reclamation {
                 && !matches!(row.reason, Some(TransitionReason::VmVolumeUnavailable { .. }))),
             "no VolumeUnavailable Held row and nothing charged: {rows:?}"
         );
+        let orphan_row = rows
+            .iter()
+            .find(|row| row.alloc_id == orphan_alloc)
+            .expect("the orphan allocation keeps a terminal row");
+        assert_eq!(orphan_row.state, AllocState::Terminated, "the orphan's row is terminal");
+        assert_eq!(
+            orphan_row.workload_addr, recorded_addr,
+            "the terminal row carries the recorded address"
+        );
+        let text = orphan_row
+            .reason
+            .as_ref()
+            .map_or_else(|| "<no reason>".to_owned(), TransitionReason::human_readable);
+        match residue {
+            Residue::NoRow => assert!(
+                text.contains("launch abandoned: lost with the control plane"),
+                "a Pending row ends as lost with the control plane, got `{text}`"
+            ),
+            Residue::RunningRow => assert!(
+                matches!(
+                    orphan_row.reason,
+                    Some(TransitionReason::Stopped {
+                        by: overdrive_core::transition_reason::StoppedBy::PlatformReclaimed
+                    })
+                ),
+                "a Running row ends as platform-reclaimed, got `{text}`"
+            ),
+        }
 
         let Process { server, .. } = second;
         node.ticking(server.shutdown(Duration::from_secs(2)))
@@ -1845,10 +1884,12 @@ mod mid_boot_volume_reclamation {
             .expect("the second process shuts down within its drain deadline");
     }
 
-    /// M7 (the named cell; the crash leaves no row). PENDING on its own
-    /// precondition, see the module documentation.
+    /// M7 (the named cell; the crash leaves the launch's `Pending` row).
+    /// PENDING (ADR-0353, ADR-0355 W4): today no `Pending` row is written
+    /// before `Vmm::create`, so the precondition fails.
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[should_panic(expected = "the parked launch's Pending row is on record before its VMM exists")]
     async fn boot_reclamation_ends_a_mid_boot_vmm_before_any_launch_for_its_workload() {
         scenario(Residue::NoRow).await;
     }
@@ -1857,7 +1898,430 @@ mod mid_boot_volume_reclamation {
     /// reclamation is a `ReclaimAllocation`. PENDING on the same precondition.
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    #[should_panic(expected = "the parked launch's Pending row is on record before its VMM exists")]
     async fn boot_reclamation_ends_a_mid_boot_vmm_when_the_crash_left_a_running_row() {
         scenario(Residue::RunningRow).await;
+    }
+}
+
+/// Boot reclamation ends every launch the previous control plane left
+/// unfinished (RB-4, RB-7, RB-11; ADR-0350, ADR-0354, ADR-0355 W4).
+///
+/// # Scenario family
+///
+/// A `serve` that crashed leaves rows. A `Pending` row is a launch that had
+/// not yet run; it is closed first, by the first step of `converge`, as
+/// `Terminated` / `LaunchLostWithControlPlane` with the row's address carried,
+/// whether or not its VM left host artifacts. A `Running` row whose scope is
+/// busy (the kill is delivered, the VMM is not gone) is ended as
+/// platform-reclaimed at once and its guest-address offset is reserved; boot
+/// continues. A non-busy substrate refusal still refuses the boot.
+///
+/// # Owner path, fault stimulus, oracle
+///
+/// Production `converge` over `SimVmHostState` and the production observation
+/// store seam (`SimObservationStore`). Faults enter at the driven port only:
+/// the host double's scopes and its scripted `kill_scope` failure. No row is
+/// seeded that production does not author: the `Pending` row is the row the
+/// shim writes before `Vmm::create` (ADR-0353), the `Running` row is the shim's.
+/// Oracle: the allocation's row, the host observation, the pool's `observe`.
+///
+/// # Tier and placement
+///
+/// Tier 1 layer 2, `host_pure`. Pending tests keep their full body under
+/// `#[should_panic(expected = ...)]` naming the assertion that fails today.
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    clippy::panic,
+    clippy::too_many_lines,
+    reason = "acceptance bodies fail at once on a broken precondition, naming it"
+)]
+mod launches_lost_with_the_control_plane {
+    use std::collections::BTreeSet;
+    use std::net::Ipv4Addr;
+    use std::num::NonZeroU32;
+    use std::sync::Arc;
+
+    use overdrive_core::aggregate::{
+        IntentKey, Job, Vm, WorkloadDriver, WorkloadIntent, WorkloadKind,
+    };
+    use overdrive_core::byte_size::ByteSize;
+    use overdrive_core::cpu_quantity::CpuQuantity;
+    use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
+    use overdrive_core::traits::driver::{Driver, DriverType, Resources};
+    use overdrive_core::traits::guest_attachment_view::GuestAttachmentLease;
+    use overdrive_core::traits::intent_store::IntentStore;
+    use overdrive_core::traits::observation_store::{
+        AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore, TransitionSource,
+    };
+    use overdrive_core::traits::vm_host_state::VmHostState;
+    use overdrive_core::transition_reason::{StoppedBy, TransitionReason};
+    use overdrive_sim::adapters::vm_host_state::SimVmHostState;
+    use overdrive_store_local::LocalIntentStore;
+    use overdrive_testing::placement;
+    use tempfile::TempDir;
+
+    use super::{AppState, ConvergeError, converge};
+    use crate::action_shim::reclamation::ReclamationError;
+    use crate::reconciler_runtime::ReconcilerRuntime;
+
+    placement!(host_pure);
+
+    /// The node the composition runs as; a row owned by it is this boot's.
+    const THIS_NODE: &str = "writer-1";
+    const WORKLOAD: &str = "lost-launch-workload";
+
+    fn node(name: &str) -> NodeId {
+        NodeId::new(name).expect("valid node id")
+    }
+
+    fn alloc(name: &str) -> AllocationId {
+        AllocationId::new(name).expect("valid allocation id")
+    }
+
+    /// One `AppState` over `host`, composing a non-VM driver (so supervision
+    /// reads `Observed(empty)` and every non-terminal allocation is
+    /// unsupervised) and the production guest-address pool.
+    fn app_state(tmp: &TempDir, host: &SimVmHostState) -> AppState {
+        let runtime =
+            ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime");
+        let store_path = tmp.path().join("intent.redb");
+        let store = Arc::new(LocalIntentStore::open(&store_path).expect("intent store"));
+        let obs: Arc<dyn ObservationStore> =
+            Arc::new(overdrive_sim::adapters::observation_store::SimObservationStore::single_peer(
+                node("local"),
+                0,
+            ));
+        let driver: Arc<dyn Driver> =
+            Arc::new(overdrive_sim::adapters::driver::SimDriver::new(DriverType::Unikernel));
+        let allocator = crate::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
+        let mut state = AppState::new(
+            store,
+            store_path,
+            obs,
+            Arc::new(runtime),
+            driver,
+            Arc::new(overdrive_sim::adapters::clock::SimClock::new()),
+            Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+            Arc::new(overdrive_sim::adapters::ca::SimCa::new(Arc::new(
+                overdrive_sim::adapters::entropy::SimEntropy::new(0),
+            ))),
+            Arc::new(crate::identity_mgr::IdentityMgr::new(None)),
+            node(THIS_NODE),
+            allocator,
+            crate::test_empty_listener_facts(),
+            Ipv4Addr::LOCALHOST,
+            crate::shared_network_test_ports::mtls_worker(),
+            crate::shared_network_test_ports::shared_guest_network_owner(),
+            crate::shared_network_test_ports::guest_network_exec_gate(),
+            crate::shared_network_test_ports::guest_pool(),
+        );
+        state.vm_host_state = Arc::new(host.clone()) as Arc<dyn VmHostState>;
+        state
+    }
+
+    /// The Vm-driven Job intent the desired-side join reads.
+    async fn put_vm_job(state: &AppState) {
+        let id = WorkloadId::new(WORKLOAD).expect("workload id");
+        let job = Job {
+            id: id.clone(),
+            replicas: NonZeroU32::new(1).expect("nonzero"),
+            resources: Resources {
+                cpu: CpuQuantity::from_millis(500),
+                memory: ByteSize::new(134_217_728),
+            },
+            driver: WorkloadDriver::Vm(Vm {
+                volume: None,
+                command: "/sbin/init".to_owned(),
+                args: Vec::new(),
+                kernel: "/boot/vmlinux".to_owned(),
+                rootfs: "/boot/rootfs.ext4".to_owned(),
+            }),
+        };
+        let archived = WorkloadIntent::Job(job).archive_for_store().expect("archive");
+        state
+            .store
+            .put(IntentKey::for_workload(&id).as_bytes(), archived.as_ref())
+            .await
+            .expect("put intent");
+    }
+
+    /// A row of `name` as the shim authors it: `Pending` (before `Vmm::create`,
+    /// ADR-0353) or `Running` (after the guest's readiness).
+    async fn write_row(
+        state: &AppState,
+        name: &str,
+        owner: &str,
+        row_state: AllocState,
+        address: Ipv4Addr,
+    ) {
+        let row = AllocStatusRow {
+            alloc_id: alloc(name),
+            workload_id: WorkloadId::new(WORKLOAD).expect("workload id"),
+            node_id: node(owner),
+            state: row_state,
+            updated_at: LogicalTimestamp { counter: 1, writer: node(owner) },
+            reason: (row_state == AllocState::Running).then_some(TransitionReason::Started),
+            detail: None,
+            terminal: None,
+            stderr_tail: None,
+            kind: WorkloadKind::Job,
+            listeners: Vec::new(),
+            started_at: None,
+            workload_addr: Some(address),
+            last_terminated: None,
+            restart_count: 0,
+        };
+        state
+            .obs
+            .write_alloc_lifecycle(row, TransitionSource::Reconciler)
+            .await
+            .expect("write the row");
+    }
+
+    async fn row(state: &AppState, name: &str) -> AllocStatusRow {
+        state
+            .obs
+            .alloc_status_row(&alloc(name))
+            .await
+            .expect("row readable")
+            .expect("the allocation has a row")
+    }
+
+    fn reason_text(row: &AllocStatusRow) -> String {
+        row.reason
+            .as_ref()
+            .map_or_else(|| "<no reason>".to_owned(), TransitionReason::human_readable)
+    }
+
+    /// The row a launch lost with the control plane must end as (ADR-0355 W4).
+    fn assert_lost_with_the_control_plane(row: &AllocStatusRow, address: Ipv4Addr) {
+        assert_eq!(
+            row.state,
+            AllocState::Terminated,
+            "a launch lost with the control plane ends Terminated, got {:?} ({})",
+            row.state,
+            reason_text(row)
+        );
+        assert!(
+            reason_text(row).contains("launch abandoned: lost with the control plane"),
+            "the row names why: `launch abandoned: lost with the control plane`, got `{}`",
+            reason_text(row)
+        );
+        assert!(
+            !matches!(
+                row.reason,
+                Some(TransitionReason::Stopped { by: StoppedBy::PlatformReclaimed })
+            ),
+            "the executors never rewrite the reason of a row the closing step ended"
+        );
+        assert_eq!(row.terminal, None, "the workload's intent still stands");
+        assert_eq!(row.workload_addr, Some(address), "the Pending row's address is carried");
+    }
+
+    const ADDRESS: Ipv4Addr = Ipv4Addr::new(100, 95, 0, 9);
+
+    /// PENDING (RB-11, W4). A `Pending` row whose launch left no host artifact
+    /// ends `Terminated` / `LaunchLostWithControlPlane`, address carried.
+    /// CONTRACT_SHAPE: bounded-change. Universe: the node's rows.
+    #[tokio::test]
+    #[should_panic(expected = "a launch lost with the control plane ends Terminated")]
+    async fn a_pending_row_with_no_host_artifact_ends_as_lost_with_the_control_plane() {
+        let tmp = TempDir::new().expect("tmpdir");
+        let host = SimVmHostState::new();
+        let state = app_state(&tmp, &host);
+        write_row(&state, "lost-bare-0", THIS_NODE, AllocState::Pending, ADDRESS).await;
+
+        converge(&state).await.expect("boot converges");
+
+        assert_lost_with_the_control_plane(&row(&state, "lost-bare-0").await, ADDRESS);
+    }
+
+    /// PENDING (RB-11, W4). A `Pending` row whose VM left a settled scope, a
+    /// run directory and a clone ends as lost with the control plane, not as
+    /// `Stopped { PlatformReclaimed }`; the executors discard the artifacts
+    /// and leave the reason alone.
+    #[tokio::test]
+    #[should_panic(expected = "the row names why: `launch abandoned: lost with the control plane`")]
+    async fn a_pending_row_whose_vm_left_a_settled_scope_ends_as_lost_with_the_control_plane() {
+        let tmp = TempDir::new().expect("tmpdir");
+        let host = SimVmHostState::new();
+        let id = alloc("lost-settled-0");
+        host.set_scope(id.clone(), BTreeSet::from([4242]));
+        host.set_run_dir(id.clone());
+        host.set_clone(id.clone(), tmp.path().join("clone.img"));
+        let state = app_state(&tmp, &host);
+        put_vm_job(&state).await;
+        write_row(&state, "lost-settled-0", THIS_NODE, AllocState::Pending, ADDRESS).await;
+
+        converge(&state).await.expect("boot converges");
+
+        assert_lost_with_the_control_plane(&row(&state, "lost-settled-0").await, ADDRESS);
+        assert!(host.artifacts_absent(&id), "the executors discard the launch's artifacts");
+    }
+
+    /// PENDING (RB-11). A second boot over the closed rows writes nothing: the
+    /// closing step is idempotent.
+    #[tokio::test]
+    #[should_panic(expected = "a launch lost with the control plane ends Terminated")]
+    async fn a_second_boot_over_the_closed_rows_writes_nothing() {
+        let tmp = TempDir::new().expect("tmpdir");
+        let host = SimVmHostState::new();
+        let state = app_state(&tmp, &host);
+        write_row(&state, "lost-twice-0", THIS_NODE, AllocState::Pending, ADDRESS).await;
+        converge(&state).await.expect("first boot converges");
+        let after_first = row(&state, "lost-twice-0").await;
+        assert_lost_with_the_control_plane(&after_first, ADDRESS);
+
+        converge(&state).await.expect("second boot converges");
+
+        assert_eq!(row(&state, "lost-twice-0").await, after_first, "a second boot writes nothing");
+    }
+
+    /// GUARD (RB-11). Another node's `Pending` row is not this boot's launch:
+    /// the closing step leaves it alone, today and after the change.
+    #[tokio::test]
+    async fn guard_another_nodes_pending_row_is_left_alone() {
+        let tmp = TempDir::new().expect("tmpdir");
+        let host = SimVmHostState::new();
+        let state = app_state(&tmp, &host);
+        write_row(&state, "other-node-0", "other-node", AllocState::Pending, ADDRESS).await;
+
+        converge(&state).await.expect("boot converges");
+
+        assert_eq!(
+            row(&state, "other-node-0").await.state,
+            AllocState::Pending,
+            "a Pending row of another node is not closed by this node's boot"
+        );
+    }
+
+    /// PENDING (RB-4, RB-7, ADR-0350, ADR-0354). A `Running` row whose scope
+    /// is busy (the kill is delivered, the scope stays) never refuses the boot:
+    /// `converge` returns `Ok`, the row is ended as platform-reclaimed carrying
+    /// the address, the scope stays for `VmReclamation`, and the guest-address
+    /// offset the row names is held (a Retiring lease) so no launch can be
+    /// handed that CID. Today the busy error refuses the boot.
+    ///
+    /// CONTRACT_SHAPE: bounded-change. Universe: the allocation's row, the
+    /// host's scopes, the pool's occupancy and lease of the allocation.
+    #[tokio::test]
+    #[should_panic(expected = "a busy scope never refuses the boot")]
+    async fn a_busy_scope_boots_ends_the_running_row_and_reserves_its_address() {
+        let tmp = TempDir::new().expect("tmpdir");
+        let host = SimVmHostState::new();
+        let id = alloc("busy-running-0");
+        host.set_scope(id.clone(), BTreeSet::from([4242]));
+        host.script_kill_scope_failure(std::io::ErrorKind::ResourceBusy);
+        let state = app_state(&tmp, &host);
+        put_vm_job(&state).await;
+        write_row(&state, "busy-running-0", THIS_NODE, AllocState::Running, ADDRESS).await;
+        let before = state.guest_pool.observe(std::slice::from_ref(&id));
+        assert!(before.leases.is_empty(), "precondition: no lease is held at boot");
+
+        let result = converge(&state).await;
+
+        assert!(result.is_ok(), "a busy scope never refuses the boot: {result:?}");
+        let ended = row(&state, "busy-running-0").await;
+        assert_eq!(ended.state, AllocState::Terminated, "the stuck VM's row is terminal at once");
+        assert!(
+            matches!(
+                ended.reason,
+                Some(TransitionReason::Stopped { by: StoppedBy::PlatformReclaimed })
+            ),
+            "the busy Running row is ended as platform-reclaimed: {:?}",
+            ended.reason
+        );
+        assert_eq!(ended.workload_addr, Some(ADDRESS), "the terminal row carries the address");
+        assert!(host.has_scope(&id), "the scope stays for VmReclamation");
+        let after = state.guest_pool.observe(std::slice::from_ref(&id));
+        assert_eq!(
+            after.leases.get(&id),
+            Some(&GuestAttachmentLease::Retiring),
+            "the stuck VM's offset is reserved as a Retiring lease"
+        );
+        assert_eq!(after.occupancy.held, 1, "the reservation counts toward the attachment cap");
+        assert_eq!(after.occupancy.retiring, 1, "and is Retiring");
+    }
+
+    /// PENDING (RB-11, RB-4). A `Pending` row whose VM left a busy scope ends as
+    /// lost with the control plane (not platform-reclaimed) and its offset is
+    /// reserved from the closed row's carried address.
+    #[tokio::test]
+    #[should_panic(expected = "a busy scope never refuses the boot")]
+    async fn a_busy_scope_of_a_pending_row_ends_as_lost_and_reserves_the_carried_address() {
+        let tmp = TempDir::new().expect("tmpdir");
+        let host = SimVmHostState::new();
+        let id = alloc("busy-pending-0");
+        host.set_scope(id.clone(), BTreeSet::from([4242]));
+        host.script_kill_scope_failure(std::io::ErrorKind::ResourceBusy);
+        let state = app_state(&tmp, &host);
+        put_vm_job(&state).await;
+        write_row(&state, "busy-pending-0", THIS_NODE, AllocState::Pending, ADDRESS).await;
+
+        let result = converge(&state).await;
+
+        assert!(result.is_ok(), "a busy scope never refuses the boot: {result:?}");
+        assert_lost_with_the_control_plane(&row(&state, "busy-pending-0").await, ADDRESS);
+        let observed = state.guest_pool.observe(std::slice::from_ref(&id));
+        assert_eq!(
+            observed.leases.get(&id),
+            Some(&GuestAttachmentLease::Retiring),
+            "the offset named by the closed row is reserved"
+        );
+    }
+
+    /// PENDING (RB-6, ADR-0353 terminal-row carry). The row the reclamation
+    /// executor writes for a `Running` row whose scope settled carries the prior
+    /// row's address (it was `None`).
+    #[tokio::test]
+    #[should_panic(expected = "the platform-reclaimed row carries the prior row's workload_addr")]
+    async fn a_platform_reclaimed_row_carries_the_prior_rows_address() {
+        let tmp = TempDir::new().expect("tmpdir");
+        let host = SimVmHostState::new();
+        let id = alloc("reclaimed-running-0");
+        host.set_scope(id.clone(), BTreeSet::from([4242]));
+        let state = app_state(&tmp, &host);
+        put_vm_job(&state).await;
+        write_row(&state, "reclaimed-running-0", THIS_NODE, AllocState::Running, ADDRESS).await;
+
+        converge(&state).await.expect("boot converges");
+
+        let ended = row(&state, "reclaimed-running-0").await;
+        assert!(
+            matches!(
+                ended.reason,
+                Some(TransitionReason::Stopped { by: StoppedBy::PlatformReclaimed })
+            ),
+            "precondition: the Running row is ended as platform-reclaimed: {:?}",
+            ended.reason
+        );
+        assert_eq!(
+            ended.workload_addr,
+            Some(ADDRESS),
+            "the platform-reclaimed row carries the prior row's workload_addr"
+        );
+    }
+
+    /// GUARD (ADR-0350 item 5). A non-busy substrate refusal still refuses the
+    /// boot with `ConvergeError::Reclamation`: it is not a stuck VM.
+    #[tokio::test]
+    async fn guard_a_non_busy_executor_error_still_refuses_the_boot() {
+        let tmp = TempDir::new().expect("tmpdir");
+        let host = SimVmHostState::new();
+        let id = alloc("refused-running-0");
+        host.set_scope(id.clone(), BTreeSet::from([4242]));
+        host.script_kill_scope_failure(std::io::ErrorKind::PermissionDenied);
+        let state = app_state(&tmp, &host);
+        put_vm_job(&state).await;
+        write_row(&state, "refused-running-0", THIS_NODE, AllocState::Running, ADDRESS).await;
+
+        let result = converge(&state).await;
+
+        assert!(
+            matches!(result, Err(ConvergeError::Reclamation(ReclamationError::Host(_)))),
+            "a substrate refusal refuses the boot: {result:?}"
+        );
     }
 }

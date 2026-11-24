@@ -255,3 +255,49 @@ Totals of tests run are in `test-scenarios.md` § M; this table gives the outcom
 | `cargo run -p overdrive-sim --bin dst -- --seed 7` | `d1185fdbd847d0b3be0a5805` | 43 invariants passed |
 | `cargo xtask placement-lint` | `f5a281faa219d3bfe188cac8` | exit 0 |
 | `cargo xtask conformance-lint` | `76eb1bb9ec78f1957d823706` | exit 0 |
+
+## The stuck-VM design (RB-1 to RB-13; ADR-0348 to ADR-0355) — added 2026-11-24
+
+Every test below is MISSING_FUNCTIONALITY: it reaches its own assertion today and fails on the stated line. Each ran on metal (run
+`aba1dcee8e40b97f71601595`, 75 passed: a pending test passes when its body panics with its `expected` text). No test stops at a
+precondition except where named. Tests the design requires but that cannot compile before an owner API exists are in
+`test-scenarios.md` § N3; they have no classification until they are written.
+
+| Test | Fails today on | Activation (what lands, then the marker is removed) |
+|---|---|---|
+| `start_arm_records_the_pending_row_with_the_leases_address_before_the_driver_starts`, `restart_arm_records_the_successors_pending_row_...` | "the store holds the launch's Pending row when the driver starts": no row exists when `Driver::start` is reached | the shim's `Pending` write after `provision_and_inject_netns` (ADR-0353) |
+| `start_arm_failing_pending_write_never_reaches_the_driver_and_releases_the_lease` | "the driver is never reached when the Pending write fails": there is no write, so the driver starts | the same write, with its N-REC failure arm |
+| `start_arm_failed_start_row_carries_the_pending_rows_address`, `a_stops_terminal_row_carries_the_prior_rows_workload_addr`, `finalize_failed_genuine_terminal_forward_carries_workload_addr`, `a_platform_reclaimed_row_carries_the_prior_rows_address` | the row's `workload_addr` is `None` | the terminal-row carry table of ADR-0353 |
+| `start_arm_superseded_launch_ends_its_row_as_abandoned_...`, `restart_arm_superseded_successor_ends_its_row_as_abandoned_...`, `start_arm_teardown_failure_does_not_suppress_the_abandoned_row`, `start_arm_failing_abandoned_row_write_is_returned_as_the_typed_observation_error` | "a superseded launch ends its Pending row with an abandoned row": the allocation has no row | W1 and W2 of ADR-0355 with the two `TransitionReason` variants (until then the tests read the reason through `human_readable`) |
+| `start_arm_a_non_start_driver_error_ends_in_a_failed_driver_internal_error_row` | "...ends the launch in a Failed DriverInternalError row, got no row" | W3 of ADR-0355 |
+| `a_stop_keeps_the_lease_held_while_the_vms_scope_is_present_and_a_reclaim_releases_it_after` | "the lease is held while the VM's scope is present": the stop releases it | the lease gate in `teardown_guest_network` (ADR-0156 amended) |
+| the five rewritten `launch_lane_supersession.rs` tests, `a_stop_interrupts_the_start_and_its_result_is_never_used`, `node_shutdown_ends_a_waiting_launch_with_an_abandoned_row_and_the_loop_exits` | "a superseded launch ends its Pending row as an abandoned row" (zero rows) | W1 and W2 |
+| `launches_lost_with_the_control_plane::{a_pending_row_with_no_host_artifact_..., a_second_boot_over_the_closed_rows_writes_nothing}` | "a launch lost with the control plane ends Terminated": the `Pending` row is left `Pending` | the first step of `converge` (RB-11, W4) |
+| `launches_lost_with_the_control_plane::a_pending_row_whose_vm_left_a_settled_scope_...` | "the row names why: `launch abandoned: lost with the control plane`": the executor ends it platform-reclaimed | the same step |
+| `launches_lost_with_the_control_plane::{a_busy_scope_boots_ends_the_running_row_and_reserves_its_address, a_busy_scope_of_a_pending_row_...}` | "a busy scope never refuses the boot": `converge` returns `ConvergeError::Reclamation(Host(ResourceBusy))` | ADR-0350 and ADR-0354: busy collection, the reservation and the busy row write |
+| `mid_boot_volume_reclamation` (both cells) | "the parked launch's Pending row is on record before its VMM exists": the precondition (stops at a precondition; the outcome assertions are first exercised after ADR-0353 lands) | ADR-0353, then RB-11 |
+| `vm_scope_has_one_remover::a_vm_scope_is_removed_only_by_the_populated_first_scope_kill` | "a second remover of a VM scope exists": the offender is `overdrive-worker/src/cgroup_manager.rs` (`remove_workload_scope`) | ADR-0351: the method and its tests deleted |
+| `vm_host_state_scope_kill::kill_scope_never_removes_a_scope_whose_last_task_is_held_in_exit` | "kill_scope returns ResourceBusy while the scope's last task is held in exit": it returns `Ok` and removes the scope under the held task (the spike's finding, reproduced on `7.0.0-38-generic`) | ADR-0349 |
+| `vmm_launch_in_scope::a_created_vmm_is_a_member_of_its_scope_when_create_returns` | "the VMM is a member of its scope when create returns": it is in `serve`'s cgroup until the driver writes its pid | ADR-0352 |
+| `vmm_launch_in_scope::{create_against_a_removed_scope_..., create_against_a_scope_with_subtree_control_set_...}` | "create against a scope ... fails": `create` succeeds and boots the VMM | ADR-0352 item 8 |
+| `volume_survives.rs::a_workload_stop_during_a_held_claim_returns_promptly_with_no_failed_row` | unchanged: "a superseded launch must neither fail nor start once the claim bound has elapsed"; the two added scope assertions are reached only after that point (the first, scope kept, passes today; the second, scope removed after the drain, is unproven RED) | ADR-0348 and ADR-0349 |
+
+Guards added (pass before and after): `guard_a_stop_releases_the_lease_at_once_when_no_scope_remains`,
+`guard_a_duplicate_start_dispatch_never_regresses_a_running_row_to_pending`, `guard_a_duplicate_restart_dispatch_never_regresses_the_successors_running_row`,
+`guard_another_nodes_pending_row_is_left_alone`, `guard_a_non_busy_executor_error_still_refuses_the_boot`,
+`guard_the_scan_sees_the_one_allowed_remover`, `guard_the_scan_flags_a_scope_removal_and_ignores_a_run_dir_removal_and_test_code`,
+`guard_a_scope_that_empties_during_the_wait_returns_ok_before_the_bound`.
+
+**Tests the crafter deletes with the production code** (ADR-0351, ADR-0352, P-6; none is deleted by this pass):
+`overdrive-worker/tests/acceptance/cgroup_manager/{remove_workload_scope_idempotent,cgroup_kill_idempotent,cgroup_kill_writes_one_newline,place_pid_in_scope}.rs`
+and their `mod` lines; `overdrive-worker/tests/integration/cgroup_manager/{remove_workload_scope_propagates_real_io_error,cgroup_kill_propagates_real_io_error}.rs`,
+`tests/integration/real_cgroup_fs/{cgroup_kill_terminates_pids,refused_thread_kill}.rs` and the `mod` lines at `tests/integration.rs:37`, `:68`, `:69`
+(`rmdir_auto_reap.rs` and `procs_pid_movement.rs` only name the methods in their rustdoc: reword, keep the tests); the two cleanup callers in
+`overdrive-control-plane/tests/integration/cgroup_isolation/alloc_scope_has_writable_cpu_weight_and_memory_max.rs:192,233` move to `kill_scope` or
+`tokio::fs::remove_dir`; `overdrive-worker/tests/acceptance/sim_cgroup_fs/write.rs::b_write_cgroup_kill_stores_one_newline` is a `CgroupFs::write` test and stays;
+`overdrive-host/src/vmm.rs` tests `each_launch_filter_probe_cause_maps_to_its_typed_error` and `the_startup_probe_installs_the_exact_launch_program` (delete),
+`launch_on_a_target_without_a_program_is_refused_before_any_effect` (delete its probe half, keep the `create` half),
+`vmm_probe_preserves_stage_order_and_rejects_each_injected_ip_execution_failure` (drop `launch-seccomp` from its stage list), and the test double's
+`check_launch_seccomp`. Tests the crafter must edit when the Pending write lands (they will fail, correctly, and are not weakened here):
+`restart_arm_duplicate_vm_owner_is_a_no_row_success_that_still_cleans_the_predecessor` (§ N6 question 1) and the fail-closed
+`assert_superseding_failed_row` A-4 assertion in `action_shim/mod.rs` (§ N6 question 2).

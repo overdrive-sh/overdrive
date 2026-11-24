@@ -799,6 +799,12 @@ async fn a_workload_stop_during_a_held_claim_returns_promptly_with_no_failed_row
         took < Duration::from_secs(10),
         "workload stop during a held claim must return promptly, not wait out the 30 s claim bound; took {took:?}"
     );
+    // The stuck VMM is still a member of its scope (its flush is held in exit): nothing removes
+    // the scope under it, and the lease is held for as long as the scope is (ADR-0349, RB-2).
+    assert!(
+        workload_scope(&first_alloc).exists(),
+        "a scope whose last task is still exiting is kept, never removed under it: the VMM of {first_alloc} holds the device"
+    );
     // Supersession: the stop ends the waiting launch, so even once the 30 s claim bound has
     // elapsed with the claim still held, nothing runs and the replacement has not failed. Without
     // supersession the stop leaves the workload unsettled: either the launch waits out the bound
@@ -834,6 +840,18 @@ async fn a_workload_stop_during_a_held_claim_returns_promptly_with_no_failed_row
     // The device drains: the superseded replacement must still never run or fail.
     dmsetup("resume");
     tokio::time::sleep(Duration::from_secs(10)).await;
+    // Once the I/O drains the VMM is reaped, `VmReclamation` removes the emptied scope (its next
+    // pass is within `VM_RECLAMATION_SWEEP_INTERVAL`), and the lease is released through the
+    // scope's absence (ADR-0156 amended).
+    let scope = workload_scope(&first_alloc);
+    let removal_deadline = tokio::time::Instant::now() + Duration::from_secs(90);
+    while scope.exists() && tokio::time::Instant::now() < removal_deadline {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    assert!(
+        !scope.exists(),
+        "after the drain the emptied scope is removed by the reclamation pass"
+    );
     let after_drain = describe_once(&journey.cfg(), &id).await;
     assert_nothing_failed_or_charged(
         &after_drain,
@@ -933,6 +951,13 @@ async fn a_workload_stop_during_guest_boot_terminates_the_vmm_and_keeps_the_volu
     running_other_than(&journey.cfg(), &id, None, Duration::from_secs(120)).await;
     wait_for_records(&device, 1, Duration::from_secs(60)).await;
     handle.shutdown().await.expect("shutdown");
+}
+
+/// The cgroup scope of allocation `alloc` (ADR-0349, ADR-0351: removed only by the populated-first
+/// `kill_scope`, so present for as long as a task of the VMM, which is a member from its first
+/// instruction, is still exiting).
+fn workload_scope(alloc: &str) -> PathBuf {
+    PathBuf::from("/sys/fs/cgroup/overdrive.slice/workloads.slice").join(format!("{alloc}.scope"))
 }
 
 /// The old writer's claim is held although its process is gone: the old VMM's pid no longer

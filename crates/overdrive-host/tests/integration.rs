@@ -61,6 +61,8 @@ mod integration {
 
     // node-local-persistent-volume (GH #348, ADR-0314) — the volume pool boot probe.
     mod volume_pool_backing;
+    // node-local-persistent-volume (GH #348, ADR-0349) — `kill_scope` never removes a populated scope.
+    mod vm_host_state_scope_kill;
     mod volume_pool_probe;
     mod volume_pool_probe_pool;
     mod volume_pool_support;
@@ -95,6 +97,10 @@ mod integration {
     // process, same x86_64 + nested-KVM floor as `vmm_equivalence`.
     #[cfg(feature = "kvm-tests")]
     mod vm_host_state_equivalence;
+    // node-local-persistent-volume (GH #348, ADR-0352) — a VMM is born inside its scope; a refused
+    // placement names its step. Real Cloud Hypervisor, so `kvm-tests`.
+    #[cfg(feature = "kvm-tests")]
+    mod vmm_launch_in_scope;
     // netns-density-295 (CID-NOCLAIM, RESET-EXIT; DG-2) — the fork launch with
     // the VMM-opened `/dev/vhost-vsock` device: the VMM is the only holder,
     // the lease outlives the VMM, and a guest reset ends the VMM. `kvm-tests`:

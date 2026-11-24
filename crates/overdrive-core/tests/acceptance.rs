@@ -307,6 +307,8 @@ mod acceptance {
     // (`run(ctx, input) -> Result<Output, TerminalError>`); the two
     // syn-scan tests carry an embedded example body in the new shape.
     mod workflow_body_has_no_step_machine;
+    // node-local-persistent-volume (GH #348, ADR-0351) — a VM scope has one remover.
+    mod vm_scope_has_one_remover;
     mod workflow_body_routes_nondeterminism_through_ctx;
     mod workflow_ctx_run_and_sleep;
     mod workflow_trait_drives_to_terminal;
