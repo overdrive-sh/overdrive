@@ -1272,7 +1272,7 @@ It holds because every read of the derivation below takes the basis row and neve
   ceiling decision (`restart_decision(attempts, is_platform_reclaimed(basis), generation_replacement)`) and the finalisation of an exhausted
   budget (`FinalizeFailed` names the basis row) at `workload_lifecycle.rs:410`, `:467`, `:1156`, `:1173`, `:1315-1325`;
 - whether a generation is pending: `generation_replacement_pending(view, desired.generation, last_ran_alloc(rows))`, at `:366`, `:451`, `:925` and
-  in `restart_status_for_alloc`;
+  in `restart_status_for_alloc`, which receives the basis from its caller (§ "Restart generation is handled when its successor is observed", `ran`);
 - the natural-exit test: `is_natural_exit` excludes an abandoned row (`&& !is_launch_abandoned(row)`), so a Job whose launch never ran is not
   finalised `Failed { exit_code: Some(0) }`.
 
@@ -1332,7 +1332,7 @@ the interest router's List reach the closed rows. A read or write failure refuse
 | `WorkloadLifecycle` | `current_alloc` returns the abandoned row; § 2 is the whole change (the count basis is the newest row that ran); `next_allocation_attempt` mints above it, so the id is no longer a gap |
 | LWW counter, ADR-0077 and ADR-0078 | `Pending -> Terminated` is neither a terminal-to-`Running` transition nor a terminal row superseded by a non-terminal one: `restart_count` and `last_terminated` stay the `Pending` row's and are never counted twice; the relaunch takes a new id |
 | ADR-0335 handled-generation rule | a generation is handled when its issued id has a row that ran; an abandoned row handles nothing, so a generation whose successor was abandoned is still pending and its relaunch is a generation replacement with the count basis's count |
-| `describe`, the restart-budget answer of the handlers | `describe` shows the newest row, abandoned or not; `restart_status_for_alloc` reads attempts and pending through the count basis |
+| `describe`, the restart-budget answer of the handlers | `describe` shows the newest row, abandoned or not; `restart_status_for_alloc` reads attempts and pending through the count basis its caller passes as `ran` |
 | `describe` and the API | state `Terminated` with the reason through `TransitionReason::human_readable`; the OpenAPI enum gains two reasons |
 
 **6. Tests.** Tier 1 seeded unless stated, over the production shim and observation store.
@@ -1494,13 +1494,26 @@ workload down beside the old operator-stopped or replaced row (veto `:1069`, res
   highest `-<N>` suffix among rows whose suffix parses and that are not abandoned, `workload_lifecycle.rs:1506`), so an issued id with no row, and
   an issued id whose row is abandoned, are invisible to it. With no such row it is false. It is the only definition of `restart_pending`: it
   replaces the three expressions in `workload_lifecycle.rs` (`:366`, `:451`, `:925`) and the one in
-  `ReconcilerRuntime::restart_status_for_alloc` (`reconciler_runtime.rs:514-534`), whose signature is unchanged and which reads attempts and
-  pending through `last_ran_alloc`.
+  `ReconcilerRuntime::restart_status_for_alloc` (`reconciler_runtime.rs:583`), which takes the count basis as a parameter (below).
 - `pub fn restart_after_failure(kind: WorkloadKind, run_desired: bool, failed: &AllocStatusRow, ran: Option<&AllocStatusRow>, attempts: u32,
   generation_replacement: bool) -> bool` gains `ran`, the count basis, and nothing else: `failed` is still the current row, named as the
   `RestartAllocation` predecessor and tested for `Draining`, restartability and a Job's natural exit; `attempts` is
   `view.restart_counts[ran]` (0 with none); the ceiling decision reads `ran.is_some_and(is_platform_reclaimed)`. When the current row is not
   abandoned, callers pass `Some(failed)` and the function is as before.
+- `ReconcilerRuntime::restart_status_for_alloc(&self, target: &TargetResource, kind: WorkloadKind, run_desired: bool, failed: &AllocStatusRow,
+  ran: Option<&AllocStatusRow>, desired_generation: u64) -> (u32, bool)` gains `ran`, the count basis, and nothing else (RB-14). The runtime
+  holds no observation store, so it cannot read the basis; the caller, which holds the workload's observed rows, passes it, and the method reads
+  only the `WorkloadLifecycle` view it already holds. `failed` is the workload's current row (`current_alloc`), as before. With `attempts =
+  view.restart_counts[ran.alloc_id]` (0 with `ran` `None`): `.0 = attempts.saturating_add(1)`; `.1 = restart_after_failure(kind, run_desired,
+  failed, ran, attempts, generation_replacement_pending(&view, desired_generation, ran))`. **Callers pass `ran = last_ran_alloc(rows)` over the
+  workload's observed rows.** A caller that holds only a just-written `Failed` row (the Job stream, `failed_row_from_event`) passes
+  `Some(failed)`: a `Failed` row is never abandoned, so it is its own basis and the answer is as before. The answer differs from a
+  `failed`-only decision only when `failed` is abandoned, which only a `Terminated` current row can be: for a Job, `is_natural_exit` excludes
+  it, so it is a restart candidate rather than a finished run; and the abandoned row's own `restart_counts` and `issued_generation` entries
+  (written at its issue, a crash restart's at the basis count + 1, a generation replacement's at the desired generation) would move the ceiling
+  boundary one early and hide a pending generation that the basis still shows. The model-driven callers that pass the current row
+  (`quint_restart_generation::finalize_observed`, `quint_node_volume`, `quint_cid_lease::decision`) pass `last_ran_alloc` over the rows they
+  already read. No function reads a store: `reconcile` and `restart_after_failure` stay pure, and the hydration of the rows stays with the caller.
 - `ReconcilerRuntime::issued_generation_for_alloc(&self, target: &TargetResource, alloc_id: &AllocationId) -> Option<u64>`: the conformance and
   test read of `issued_generation`, in the shape of `attempt_index_for_alloc` (`reconciler_runtime.rs:546`).
 - Where `restart_pending` is false, behaviour is unchanged. Where it is true, ADR-0073's R2 stop and R3/R4 placement are unchanged, except that
