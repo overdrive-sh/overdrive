@@ -1034,6 +1034,49 @@ a row at boot, and a row can be damaged or written by another build, so `reserve
 A corrupt row is its own failure mode and has its own typed variant (`rust.md` § "Errors": distinct failure modes get distinct variants);
 `ReclamationError::Host` stays the `VmHostState` substrate failure and is not reused for it.
 
+**How the pool reports a reservation (`GuestAddressPool::lease_observation`, QPROJ-2).** A reservation has a CID and no launch token, so the
+view of a lease is a sum, and a reservation with a launch token is unrepresentable. The `lease_observation()` signature and
+`GuestLeaseObservation { next_fit, leases: BTreeMap<AllocationId, GuestLeaseView> }` are unchanged: `leases` keeps every Admitted and Retiring
+lease, and a reservation is one of them (it is a Retiring lease), so the cap, the occupancy counts, `CidUnique` and the release gate see it
+where they saw it before. `GuestLeaseView` changes from a struct to an enum (`overdrive-control-plane`, `guest_network`, re-exported
+`pub` from `guest_network`):
+
+- `GuestLeaseView::Launched { cid: GuestCid, state: GuestAttachmentLease, launch: LaunchToken }`: a lease `assign` made. `state` is Admitted or
+  Retiring, as today.
+- `GuestLeaseView::Reserved { cid: GuestCid }`: a lease `reserve_leftover` made. It is Retiring by construction and has no launch token field.
+- Accessors, all `const fn` and infallible: `cid(&self) -> GuestCid` (both variants); `state(&self) -> GuestAttachmentLease` (`Launched` returns
+  its `state`; `Reserved` returns `Retiring`); `launch(&self) -> Option<LaunchToken>` (`Some` for `Launched`, `None` for `Reserved`).
+  The struct's `pub` fields `cid`, `state` and `launch` are removed; a reader that needs the launch token calls `launch()` and decides what the
+  absence means for it.
+
+*Rejected.* (1) `launch: Option<LaunchToken>` on the struct: it keeps the struct shape but makes a reservation with a launch, and an Admitted
+reservation, representable, and every reader gets an `Option` it can `unwrap` away. (2) A `Reserved` variant of `GuestAttachmentLease`: that type
+is the `overdrive-core` read-port vocabulary of `GuestAttachmentView` that `WorkloadLifecycle` and the operator status match on
+(`cleanup_pending`), and a reservation has the Retiring meaning there; a third variant changes core public API and every exhaustive match for a
+distinction no reconciler decision uses. (3) Omitting reservations from `lease_observation` and listing them in a second map: `leases` would stop
+being "every lease the pool holds", `CidUnique` and the stuck-VM tests that need the reserved CID would read two maps, and the one place that
+states the invariant would split.
+
+*Readers.* No production reader consumes `GuestLeaseView`. The production hydration reads `GuestAttachmentView::observe` through
+`GuestPoolAttachmentView`, whose type is `GuestAttachmentObservation { occupancy, leases: BTreeMap<AllocationId, GuestAttachmentLease> }` in
+`overdrive-core`; it already reports a reservation as Retiring and carries no launch token, so `WorkloadLifecycle` (`guest_attachments`), the
+capacity gate and the operator status are unchanged, and nothing an operator observes changes. Every `GuestLeaseView` reader is a test,
+conformance driver or fixture: a reader of the launch token (the guest's READY, the placed-instance fixture, the owner-flow and cid_lease
+projections' launch comparison) calls `launch()` and fails its step when a lease it expects to be launched is `Reserved`; a reader of the CID or
+state (the cid_lease `lease` projection, the G-V0 uniqueness and range checks, the vm-reclamation boot assertions) calls `cid()` or `state()` and
+sees reservations like any other lease. A conformance projection that models only launched leases rejects a `Reserved` view it did not expect
+rather than omitting it.
+
+**Public surface.** `overdrive-core` does not change. `GuestLeaseView` and `GuestLeaseObservation` are `pub` in `overdrive-control-plane`
+(through `pub mod guest_network`) and are read by in-workspace test crates (`overdrive-sim`'s tests), so the struct-to-enum change is a public
+API change of `overdrive-control-plane`; no external consumer exists. `GuestAddressPool::assign`, `release`, `snapshot`, `observe` and
+`reserve_leftover` keep their signatures. This supersedes the struct shape pinned in the netns-density feature delta
+(`docs/feature/netns-density-295/feature-delta.md`, QPROJ-2 `GuestLeaseView { cid, state, launch }`); its `lease_observation` contract text
+(`leases` holds exactly the Admitted and Retiring leases; a Retiring lease keeps its CID and launch token) holds for every `Launched` lease, and a
+`Reserved` lease keeps its CID with no launch token. The pool's private lease record follows the same split (a launched lease owns its plan and
+state; a reservation owns neither plan nor launch), so that `assign` has no "Admitted without a plan" arm to declare unreachable; that is internal
+structure and the crafter's.
+
 *Contract* (`overdrive-control-plane`, `action_shim::reclamation`, beside `ReclamationError`):
 
 - `ReclamationError` gains `CorruptLeftoverRow(#[from] CorruptLeftoverRow)`, a pass-through embedding (`rust.md` § "Errors", pass-through not
@@ -1096,7 +1139,8 @@ rows. (10) The `Pending` write failed: no VMM exists, nothing to reserve.
   calling the provisioner (the sim provisioner records no teardown), and the same function with an Admitted lease still tears down. The reclaim path
   over a restarted process (no driver entry) returns `Ok` for the reservation.
 - Pool: `reserve_leftover` counts toward the cap; `assign` of a reserved allocation returns `LeaseRetiring`; the reservation survives a next-fit
-  wrap; `snapshot()` omits it and `observe` reports it Retiring.
+  wrap; `snapshot()` omits it; `observe` reports it Retiring; `lease_observation()` reports it as `GuestLeaseView::Reserved` with the offset's CID, `state()`
+Retiring and `launch()` `None`, and no `Launched` lease shares its CID.
 - A non-busy executor error still refuses the boot with `ConvergeError::Reclamation`.
 - Tier 3: S-VOL-T3-12's boot variant asserts the node boots with the held-flush VM left over.
 

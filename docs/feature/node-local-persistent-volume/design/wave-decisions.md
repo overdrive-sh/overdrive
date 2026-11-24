@@ -120,6 +120,20 @@ decisions; nothing operator-visible changes and no ruling is reopened.**
    `rustc`, passed to `with_binary`. Dropped: the uninterruptible-I/O stand-in (S-VOL-T3-12's real held flush covers it), the real core dump
    (a mapping unit test covers it) and a `PermissionDenied` removal (unreachable as root).
 
+**The pool reports a boot reservation as a lease with no launch token (2026-11-24, gap found at step 09-01). A choice within ADR-0350;
+nothing an operator observes changes and no ruling is reopened.**
+
+`GuestAddressPool::reserve_leftover` makes a Retiring lease with no `GuestNetworkPlan` and so no launch token, but `lease_observation()`
+(QPROJ-2) and `GuestLeaseView { cid, state, launch }` assumed every lease has one. `GuestLeaseView` (a `pub` type of `overdrive-control-plane`, not
+core) becomes an enum, `Launched { cid, state, launch }` or `Reserved { cid }`, with `cid()`, `state()` (`Reserved` is Retiring) and
+`launch() -> Option<LaunchToken>`; `lease_observation()` keeps listing every lease. A reservation with a launch token, and an Admitted
+reservation, are unrepresentable. Production hydration (`GuestAttachmentView::observe`, `GuestAttachmentLease`, `GuestAttachmentObservation` in
+`overdrive-core`) already carries no launch token and already reports a reservation Retiring: it does not change. Only tests, conformance drivers
+and fixtures read `GuestLeaseView`; those that read the launch token call `launch()`. Contract: feature delta § "Boot proceeds past a stuck VM (RB-4;
+ADR-0350)", "How the pool reports a reservation". Rejected: `launch: Option<LaunchToken>` (keeps invalid combinations representable); a
+`Reserved` variant of the core `GuestAttachmentLease` (changes core API and every exhaustive match for a distinction no reconciler decision uses);
+omitting reservations from `lease_observation` (splits `CidUnique` and the stuck-VM CID checks across two maps).
+
 ## Scope limitations and their tracking issues
 
 | # | Limitation | Issue |
