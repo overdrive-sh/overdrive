@@ -407,4 +407,6 @@ mod acceptance {
     mod guest_listeners_input_rejection;
     // D13 item 2 — the `LISTEN <tcp|udp> <port>` beacon line.
     mod beacon_listen_wire_form;
+    // ADR-0355 — the abandoned-launch predicate and its two reasons.
+    mod launch_abandoned_predicates;
 }

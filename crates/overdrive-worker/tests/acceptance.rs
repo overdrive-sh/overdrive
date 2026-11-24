@@ -58,6 +58,9 @@ mod acceptance {
     // crafter-authored race-arm examples against SimVmm (ADR-0082
     // §§D3-D4).
     mod vm_driver_stop_totality;
+    // node-local-persistent-volume (GH #348): ADR-0348 stuck-VM stop, ADR-0351/0352 scope ownership.
+    mod vm_driver_scope_single_remover;
+    mod vm_driver_stop_unreaped;
     // Step 03-05 (DWD-24) — typed VmDriver start-failure join: structured
     // cause selection, verbatim diagnostics, early-exit/deadline facts,
     // initial/restart parity, and allocation-scoped cleanup.

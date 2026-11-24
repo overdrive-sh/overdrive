@@ -133,6 +133,8 @@ mod integration {
     //     composition, a guest that never beacons, and a kernel replaced
     //     with an image the host cannot load.
     mod vm_boot_failure_vocabulary;
+    // GH #348: a serve crash just after the VMM is spawned (stand-in hypervisor, serve lifetime killed mode).
+    mod vm_crash_mid_launch;
 
     // microvm-driver-cloud-hypervisor step 02-03 (ADR-0083 §D7, brief.md
     // §105a, GH #42) — the Tier-3 suite for the `VmReclamation`

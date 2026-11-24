@@ -2329,3 +2329,1045 @@ mod launches_lost_with_the_control_plane {
         );
     }
 }
+
+/// Boot proceeds past a stuck VM (ADR-0350, ADR-0354; feature delta "Boot
+/// proceeds past a stuck VM", "A busy boot scope writes its terminal row", "A
+/// scope kill's settle wait is bounded" item 5; ADR-0348 and ADR-0349's
+/// `VmReclamation` clauses).
+///
+/// A stuck VM is a killed VMM that is not reaped: its scope stays populated,
+/// `SimVmHostState::hold_scope_while` keeps `kill_scope` answering
+/// `ResourceBusy`, and `SimVmm`'s unreaped process keeps its vsock device and
+/// its CID. Owner path: `converge` (the boot drive, run as `run_server` runs
+/// it), the production `VmReclamation` tick (`run_convergence_tick`), the
+/// action shim's `ReclaimAllocationNetwork` dispatch and the production
+/// `GuestAddressPool`. Fault stimulus: a held scope, a scripted non-busy
+/// refusal, a corrupt row address. Oracle: the allocation's row, the host's
+/// observation, the pool's `lease_observation` / `observe`, `SimVmm`'s vsock
+/// holders and the injected clock.
+///
+/// Tier 1 layer 2, `host_pure`. A GUARD passes today; a PENDING test keeps its
+/// whole body under `#[should_panic(expected = ...)]` naming the assertion
+/// that fails today.
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    clippy::panic,
+    clippy::too_many_lines,
+    clippy::doc_markdown,
+    clippy::similar_names,
+    reason = "acceptance bodies fail at once on a broken precondition, naming it"
+)]
+mod stuck_vm_boot {
+    use std::collections::BTreeSet;
+    use std::net::Ipv4Addr;
+    use std::num::NonZeroU32;
+    use std::path::{Path, PathBuf};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::time::{Duration, Instant};
+
+    use async_trait::async_trait;
+    use ipnet::Ipv4Net;
+    use overdrive_core::aggregate::{
+        IntentKey, Job, Vm, WorkloadDriver, WorkloadIntent, WorkloadKind,
+    };
+    use overdrive_core::byte_size::ByteSize;
+    use overdrive_core::cgroup::CgroupPath;
+    use overdrive_core::cpu_quantity::CpuQuantity;
+    use overdrive_core::guest_transport::{GUEST_CID_BASE, GuestCid};
+    use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
+    use overdrive_core::reconcilers::{Action, ReconcilerName, TargetResource, TickContext};
+    use overdrive_core::traits::driver::{Driver, DriverType, Resources};
+    use overdrive_core::traits::guest_attachment_view::GuestAttachmentLease;
+    use overdrive_core::traits::intent_store::IntentStore;
+    use overdrive_core::traits::observation_store::{
+        AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore, TransitionSource,
+    };
+    use overdrive_core::traits::vm_host_state::{
+        KILL_SCOPE_SETTLE_BOUND, VmHostObservation, VmHostState, VmHostStateProbeError,
+    };
+    use overdrive_core::traits::vmm::{VMM_REAP_BOUND, VmControl, VmTermination, Vmm};
+    use overdrive_core::transition_reason::{StoppedBy, TransitionReason};
+    use overdrive_core::wall_clock::UnixInstant;
+    use overdrive_sim::SimVmm;
+    use overdrive_sim::adapters::clock::SimClock;
+    use overdrive_sim::adapters::vm_host_state::SimVmHostState;
+    use overdrive_store_local::LocalIntentStore;
+    use overdrive_testing::placement;
+    use tempfile::TempDir;
+
+    use super::sim_vm_host::{SimVmmHost, VmComposition, compose};
+    use super::{AppState, ConvergeError, converge};
+    use crate::action_shim::reclamation::{CorruptLeftoverRow, ReclamationError};
+    use crate::guest_network::{
+        ForwardingActivation, GuestLeaseView, GuestNetworkPlan, GuestNetworkProvisioner,
+        Result as GuestNetworkResult,
+    };
+    use crate::reconciler_runtime::ReconcilerRuntime;
+
+    placement!(host_pure);
+
+    /// The node the composition runs as; a row owned by it is this boot's.
+    const THIS_NODE: &str = "writer-1";
+    const WORKLOAD: &str = "stuck-vm-workload";
+    /// An address of the guest prefix (offset 9).
+    const ADDRESS: Ipv4Addr = Ipv4Addr::new(100, 95, 0, 9);
+    const OFFSET_OF_ADDRESS: u32 = 9;
+
+    fn node(name: &str) -> NodeId {
+        NodeId::new(name).expect("valid node id")
+    }
+
+    fn alloc(name: &str) -> AllocationId {
+        AllocationId::new(name).expect("valid allocation id")
+    }
+
+    // -- the host double ----------------------------------------------------
+
+    /// `SimVmHostState` that counts its `kill_scope` calls and, with a clock,
+    /// waits `KILL_SCOPE_SETTLE_BOUND` on it before answering: the timing the
+    /// real adapter has and the sim leaves out. The scope hold and the scripted
+    /// failures are the sim's own.
+    #[derive(Clone)]
+    struct RecordingHost {
+        inner: SimVmHostState,
+        wait_on: Option<SimClock>,
+        kill_calls: Arc<AtomicUsize>,
+    }
+
+    impl RecordingHost {
+        fn new(inner: SimVmHostState, wait_on: Option<SimClock>) -> Self {
+            Self { inner, wait_on, kill_calls: Arc::new(AtomicUsize::new(0)) }
+        }
+
+        fn kill_calls(&self) -> usize {
+            self.kill_calls.load(Ordering::SeqCst)
+        }
+    }
+
+    #[async_trait]
+    impl VmHostState for RecordingHost {
+        fn kind(&self) -> &'static str {
+            "recording-sim-vm-host-state"
+        }
+
+        async fn probe(&self) -> Result<(), VmHostStateProbeError> {
+            self.inner.probe().await
+        }
+
+        async fn observe(&self) -> std::io::Result<VmHostObservation> {
+            self.inner.observe().await
+        }
+
+        async fn kill_scope(&self, scope: &CgroupPath) -> std::io::Result<()> {
+            self.kill_calls.fetch_add(1, Ordering::SeqCst);
+            if let Some(clock) = &self.wait_on {
+                use overdrive_core::traits::clock::Clock as _;
+                clock.sleep(KILL_SCOPE_SETTLE_BOUND).await;
+            }
+            self.inner.kill_scope(scope).await
+        }
+
+        async fn discard_artifacts(&self, alloc: &AllocationId) -> std::io::Result<()> {
+            self.inner.discard_artifacts(alloc).await
+        }
+    }
+
+    /// Seed `id`'s scope and hold it while the returned flag is set.
+    fn hold(host: &SimVmHostState, id: &AllocationId) -> Arc<AtomicBool> {
+        host.set_scope(id.clone(), BTreeSet::from([4242]));
+        let held = Arc::new(AtomicBool::new(true));
+        let flag = Arc::clone(&held);
+        host.hold_scope_while(id, move || flag.load(Ordering::SeqCst));
+        held
+    }
+
+    /// The guest network the shim is lent: it records its teardowns.
+    #[derive(Default)]
+    struct RecordingProvisioner {
+        teardowns: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl GuestNetworkProvisioner for RecordingProvisioner {
+        async fn provision(&self, _plan: &GuestNetworkPlan) -> GuestNetworkResult<()> {
+            Ok(())
+        }
+
+        async fn activate(
+            &self,
+            _plan: &GuestNetworkPlan,
+        ) -> GuestNetworkResult<ForwardingActivation> {
+            Ok(ForwardingActivation::Activated)
+        }
+
+        async fn teardown(&self, _plan: &GuestNetworkPlan) -> GuestNetworkResult<()> {
+            self.teardowns.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    // -- the composition ----------------------------------------------------
+
+    /// One `AppState` over `host`: the production guest-address pool, the
+    /// `vm-reclamation` reconciler registered (so the production tick runs),
+    /// a non-VM driver (supervision reads `Observed(empty)`, every non-terminal
+    /// allocation is unsupervised) and `clock` as the injected clock.
+    async fn app_state(tmp: &TempDir, host: Arc<dyn VmHostState>, clock: &SimClock) -> AppState {
+        let mut runtime =
+            ReconcilerRuntime::new_with_redb_view_store_for_test(tmp.path()).expect("runtime");
+        runtime.register(crate::vm_reclamation()).await.expect("register vm-reclamation");
+        let store_path = tmp.path().join("intent.redb");
+        let store = Arc::new(LocalIntentStore::open(&store_path).expect("intent store"));
+        let obs: Arc<dyn ObservationStore> =
+            Arc::new(overdrive_sim::adapters::observation_store::SimObservationStore::single_peer(
+                node("local"),
+                0,
+            ));
+        let driver: Arc<dyn Driver> =
+            Arc::new(overdrive_sim::adapters::driver::SimDriver::new(DriverType::Unikernel));
+        let allocator = crate::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
+        let mut state = AppState::new(
+            store,
+            store_path,
+            obs,
+            Arc::new(runtime),
+            driver,
+            Arc::new(clock.clone()),
+            Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
+            Arc::new(overdrive_sim::adapters::ca::SimCa::new(Arc::new(
+                overdrive_sim::adapters::entropy::SimEntropy::new(0),
+            ))),
+            Arc::new(crate::identity_mgr::IdentityMgr::new(None)),
+            node(THIS_NODE),
+            allocator,
+            crate::test_empty_listener_facts(),
+            Ipv4Addr::LOCALHOST,
+            crate::shared_network_test_ports::mtls_worker(),
+            crate::shared_network_test_ports::shared_guest_network_owner(),
+            crate::shared_network_test_ports::guest_network_exec_gate(),
+            crate::shared_network_test_ports::guest_pool(),
+        );
+        state.vm_host_state = host;
+        state
+    }
+
+    /// The Vm-driven Job intent the desired-side join reads.
+    async fn put_vm_job(state: &AppState) {
+        let id = WorkloadId::new(WORKLOAD).expect("workload id");
+        let job = Job {
+            id: id.clone(),
+            replicas: NonZeroU32::new(1).expect("nonzero"),
+            resources: Resources {
+                cpu: CpuQuantity::from_millis(500),
+                memory: ByteSize::new(134_217_728),
+            },
+            driver: WorkloadDriver::Vm(Vm {
+                volume: None,
+                command: "/sbin/init".to_owned(),
+                args: Vec::new(),
+                kernel: "/boot/vmlinux".to_owned(),
+                rootfs: "/boot/rootfs.ext4".to_owned(),
+            }),
+        };
+        let archived = WorkloadIntent::Job(job).archive_for_store().expect("archive");
+        state
+            .store
+            .put(IntentKey::for_workload(&id).as_bytes(), archived.as_ref())
+            .await
+            .expect("put intent");
+    }
+
+    /// A row of `name` as the shim authors it, with the address it recorded.
+    async fn write_row(
+        state: &AppState,
+        name: &str,
+        row_state: AllocState,
+        reason: Option<TransitionReason>,
+        address: Option<Ipv4Addr>,
+    ) {
+        let row = AllocStatusRow {
+            alloc_id: alloc(name),
+            workload_id: WorkloadId::new(WORKLOAD).expect("workload id"),
+            node_id: node(THIS_NODE),
+            state: row_state,
+            updated_at: LogicalTimestamp { counter: 1, writer: node(THIS_NODE) },
+            reason,
+            detail: None,
+            terminal: None,
+            stderr_tail: None,
+            kind: WorkloadKind::Job,
+            listeners: Vec::new(),
+            started_at: None,
+            workload_addr: address,
+            last_terminated: None,
+            restart_count: 0,
+        };
+        state
+            .obs
+            .write_alloc_lifecycle(row, TransitionSource::Reconciler)
+            .await
+            .expect("write the row");
+    }
+
+    async fn write_running(state: &AppState, name: &str, address: Option<Ipv4Addr>) {
+        write_row(state, name, AllocState::Running, Some(TransitionReason::Started), address).await;
+    }
+
+    async fn write_operator_stopped(state: &AppState, name: &str, address: Option<Ipv4Addr>) {
+        let reason = Some(TransitionReason::Stopped { by: StoppedBy::Operator });
+        write_row(state, name, AllocState::Terminated, reason, address).await;
+    }
+
+    async fn row(state: &AppState, name: &str) -> AllocStatusRow {
+        state
+            .obs
+            .alloc_status_row(&alloc(name))
+            .await
+            .expect("row readable")
+            .expect("the allocation has a row")
+    }
+
+    fn assert_platform_reclaimed(row: &AllocStatusRow, address: Option<Ipv4Addr>) {
+        assert_eq!(row.state, AllocState::Terminated, "the stuck VM's row is terminal at once");
+        assert!(
+            matches!(
+                row.reason,
+                Some(TransitionReason::Stopped { by: StoppedBy::PlatformReclaimed })
+            ),
+            "the busy Running row is ended as platform-reclaimed: {:?}",
+            row.reason
+        );
+        assert_eq!(row.workload_addr, address, "the terminal row carries the address");
+    }
+
+    /// One production `VmReclamation` tick over the node target.
+    async fn vm_reclamation_tick(
+        state: &AppState,
+        tick_n: u64,
+    ) -> Result<(), crate::reconciler_runtime::ConvergenceError> {
+        let name = ReconcilerName::new("vm-reclamation").expect("reconciler name");
+        let target = TargetResource::new(&format!("node/{THIS_NODE}")).expect("node target");
+        let now = Instant::now();
+        crate::reconciler_runtime::run_convergence_tick(
+            state,
+            &name,
+            &target,
+            now,
+            tick_n,
+            now + Duration::from_secs(5),
+        )
+        .await
+    }
+
+    fn tick_context() -> TickContext {
+        let now = Instant::now();
+        TickContext {
+            now,
+            now_unix: UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_100)),
+            tick: 1,
+            deadline: now + Duration::from_secs(1),
+        }
+    }
+
+    /// One `ReclaimAllocationNetwork` attempt through the production shim.
+    async fn reclaim_network_attempt(
+        state: &AppState,
+        provisioner: &RecordingProvisioner,
+        id: &AllocationId,
+    ) -> Result<(), crate::action_shim::ShimError> {
+        let tick = tick_context();
+        let attempt = crate::action_shim::dispatch_with_guest_network_provisioner_for_test(
+            vec![Action::ReclaimAllocationNetwork { alloc_id: id.clone() }],
+            state,
+            &tick,
+            provisioner,
+        );
+        tokio::time::timeout(Duration::from_secs(5), attempt)
+            .await
+            .expect("a reclaim attempt over a held scope returns promptly")
+    }
+
+    // -- a stuck VMM --------------------------------------------------------
+
+    /// What a crashed `serve` left behind: a VMM that was killed and is not
+    /// reaped, holding its vsock device, with its scope held.
+    struct StuckVm {
+        vmm: SimVmm,
+        vmm_host: Arc<SimVmmHost>,
+        host: SimVmHostState,
+        alloc: AllocationId,
+        pid: u32,
+        address: Ipv4Addr,
+        cid: GuestCid,
+    }
+
+    /// Lease `name` and launch its VM; returns once the VMM opened its device
+    /// or its start ended: the VMM's pid (0 when nothing holds the CID),
+    /// whether the launch holds its device with its start still pending, and
+    /// the start task.
+    async fn lease_and_launch(
+        composition: &VmComposition,
+        vmm: &SimVmm,
+        name: &str,
+    ) -> (u32, bool, tokio::task::JoinHandle<()>) {
+        let plan = composition
+            .pool
+            .assign(alloc(name), &[], crate::shared_network_test_ports::test_owner_flow_ports())
+            .expect("a free offset");
+        let cid = plan.assignment().cid();
+        let spec = super::sim_vm_host::vm_spec(&composition.root, &plan);
+        let driver = composition.driver.clone();
+        let start = tokio::spawn(async move {
+            let _ =
+                driver.start(&spec, &overdrive_sim::adapters::SimLaunchSupersession::new()).await;
+        });
+        for _ in 0..10_000 {
+            if vmm.vsock_device_holders().contains_key(&cid) || start.is_finished() {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        let held = vmm.vsock_device_holders().get(&cid).copied();
+        (held.unwrap_or(0), !start.is_finished() && held.is_some(), start)
+    }
+
+    /// Launch the first lease of a `prefix` pool as an unreapable VMM, crash
+    /// `serve`, and kill the VMM: it ends `KilledNotReaped`, still holding its
+    /// device. The returned host reports its scope and holds it while the VMM
+    /// is unreaped (the one shared fact, `SimVmm::is_unreaped`).
+    async fn leave_a_stuck_vm(root: &Path, prefix: Ipv4Net) -> StuckVm {
+        let clock = SimClock::new();
+        let vmm = SimVmm::new(Arc::new(clock.clone()));
+        let vmm_host = SimVmmHost::new(vmm.clone(), false);
+        let crashed = compose(&root.join("serve-1"), &vmm, &vmm_host, prefix, 1).await;
+        vmm.inject_unreapable_process();
+        let (pid, launched, start) = lease_and_launch(&crashed, &vmm, "stuck-0").await;
+        assert!(launched, "precondition: the stuck VM's VMM holds its device");
+        let plan = crashed.pool.snapshot().remove(&alloc("stuck-0")).expect("the lease's plan");
+        let (address, cid) = (plan.assignment().workload_addr(), plan.assignment().cid());
+        // `serve` crashes; its VMM does not.
+        start.abort();
+        drop(crashed);
+
+        let killer = {
+            let vmm = vmm.clone();
+            tokio::spawn(async move {
+                let control = VmControl { pid, api_socket: PathBuf::from("/sim/stuck/api.sock") };
+                vmm.terminate(&control, Duration::ZERO).await
+            })
+        };
+        for _ in 0..1_000 {
+            if killer.is_finished() {
+                break;
+            }
+            clock.tick(VMM_REAP_BOUND);
+            tokio::time::sleep(Duration::from_millis(1)).await;
+        }
+        let outcome = killer.await.expect("the kill task joins").expect("terminate answers");
+        assert!(
+            matches!(outcome, VmTermination::KilledNotReaped),
+            "precondition: the VMM is killed and not reaped: {outcome:?}"
+        );
+        assert!(vmm.is_unreaped(pid), "precondition: the process is unreaped");
+        assert_eq!(vmm.vsock_device_holders().get(&cid), Some(&pid), "the device is still held");
+
+        let id = alloc("stuck-0");
+        let host = SimVmHostState::new();
+        host.set_scope(id.clone(), BTreeSet::from([pid]));
+        host.set_run_dir(id.clone());
+        let reaped = vmm.clone();
+        host.hold_scope_while(&id, move || reaped.is_unreaped(pid));
+        StuckVm { vmm, vmm_host, host, alloc: id, pid, address, cid }
+    }
+
+    // -----------------------------------------------------------------
+    // ADR-0350: boot reserves what is still busy and proceeds
+    // -----------------------------------------------------------------
+
+    /// PENDING (ADR-0350, QPROJ-2). The reservation a busy scope makes is
+    /// reported `Reserved`: the CID its offset derives, no launch token, no plan.
+    /// CONTRACT_SHAPE: bounded-change. Universe: leases, snapshot.
+    #[tokio::test]
+    #[should_panic(expected = "a busy scope never refuses the boot")]
+    async fn a_busy_scope_is_reserved_as_a_retiring_reservation_with_no_launch_token() {
+        let tmp = TempDir::new().expect("tmpdir");
+        let host = SimVmHostState::new();
+        let id = alloc("busy-reserved-0");
+        hold(&host, &id);
+        let state = app_state(&tmp, Arc::new(host.clone()), &SimClock::new()).await;
+        put_vm_job(&state).await;
+        write_running(&state, "busy-reserved-0", Some(ADDRESS)).await;
+
+        let result = converge(&state).await;
+
+        assert!(result.is_ok(), "a busy scope never refuses the boot: {result:?}");
+        let observation = state.guest_pool.lease_observation();
+        assert_eq!(
+            observation.leases.get(&id),
+            Some(&GuestLeaseView::Reserved {
+                cid: GuestCid::new(GUEST_CID_BASE + OFFSET_OF_ADDRESS).expect("in range")
+            }),
+            "the busy VM's offset is reserved, with no launch token"
+        );
+        assert!(state.guest_pool.snapshot().is_empty(), "a reservation carries no plan");
+    }
+
+    /// PENDING (ADR-0350 item 4). A busy scope whose row records no address
+    /// cannot hold a CID (the address is on record before the VMM exists):
+    /// the boot proceeds, the row is terminal, nothing is reserved.
+    /// CONTRACT_SHAPE: bounded-change. Universe: the row, the pool's leases.
+    #[tokio::test]
+    #[should_panic(expected = "a busy scope never refuses the boot")]
+    async fn a_busy_scope_whose_row_records_no_address_reserves_nothing() {
+        let tmp = TempDir::new().expect("tmpdir");
+        let host = SimVmHostState::new();
+        let id = alloc("busy-no-address-0");
+        hold(&host, &id);
+        let state = app_state(&tmp, Arc::new(host.clone()), &SimClock::new()).await;
+        put_vm_job(&state).await;
+        write_running(&state, "busy-no-address-0", None).await;
+
+        let result = converge(&state).await;
+
+        assert!(result.is_ok(), "a busy scope never refuses the boot: {result:?}");
+        assert_platform_reclaimed(&row(&state, "busy-no-address-0").await, None);
+        let observed = state.guest_pool.observe(std::slice::from_ref(&id));
+        assert!(observed.leases.is_empty(), "no address, no reservation");
+        assert_eq!(observed.occupancy.held, 0);
+    }
+
+    /// PENDING (ADR-0350 item 4, plan_reclamation row 5). A busy scope with no
+    /// row is a stranded artifact: the boot proceeds, the artifacts stay for
+    /// `VmReclamation`, nothing is reserved.
+    /// CONTRACT_SHAPE: bounded-change. Universe: the pool's leases, the host.
+    #[tokio::test]
+    #[should_panic(expected = "a busy scope never refuses the boot")]
+    async fn a_busy_scope_with_no_row_reserves_nothing_and_does_not_refuse_the_boot() {
+        let tmp = TempDir::new().expect("tmpdir");
+        let host = SimVmHostState::new();
+        let id = alloc("busy-no-row-0");
+        hold(&host, &id);
+        host.set_run_dir(id.clone());
+        let state = app_state(&tmp, Arc::new(host.clone()), &SimClock::new()).await;
+
+        let result = converge(&state).await;
+
+        assert!(result.is_ok(), "a busy scope never refuses the boot: {result:?}");
+        assert!(host.has_scope(&id), "the scope stays for VmReclamation");
+        assert!(!host.artifacts_absent(&id), "the run directory stays for VmReclamation");
+        assert!(
+            state.guest_pool.observe(&[id]).leases.is_empty(),
+            "a row-less scope reserves nothing"
+        );
+    }
+
+    /// PENDING (ADR-0350 corrupt rows). A busy scope whose row names an address
+    /// outside the guest prefix refuses the boot with the typed corrupt-row
+    /// error naming the allocation and the address; nothing panics.
+    /// CONTRACT_SHAPE: bounded-change. Universe: the result, the pool's leases.
+    #[tokio::test]
+    #[should_panic(expected = "a corrupt leftover row refuses the boot naming the allocation")]
+    async fn a_row_address_outside_the_guest_prefix_refuses_the_boot_naming_the_allocation() {
+        let tmp = TempDir::new().expect("tmpdir");
+        let host = SimVmHostState::new();
+        let id = alloc("corrupt-outside-0");
+        hold(&host, &id);
+        let state = app_state(&tmp, Arc::new(host.clone()), &SimClock::new()).await;
+        put_vm_job(&state).await;
+        let outside = Ipv4Addr::new(10, 1, 2, 3);
+        write_running(&state, "corrupt-outside-0", Some(outside)).await;
+
+        let result = converge(&state).await;
+
+        assert!(
+            matches!(
+                &result,
+                Err(ConvergeError::Reclamation(ReclamationError::CorruptLeftoverRow(
+                    CorruptLeftoverRow::AddressOutsidePrefix { allocation, address }
+                ))) if *allocation == id && *address == outside
+            ),
+            "a corrupt leftover row refuses the boot naming the allocation: {result:?}"
+        );
+        let message = result.expect_err("refused").to_string();
+        assert!(message.contains(id.as_str()), "the message names the allocation: {message}");
+        assert!(
+            state.guest_pool.observe(&[id]).leases.is_empty(),
+            "a corrupt row reserves nothing"
+        );
+    }
+
+    /// PENDING (ADR-0350 corrupt rows, ordering). Two busy rows naming one
+    /// address refuse the boot naming the second allocation and its holder; the
+    /// first allocation's reservation stands (every executor ran, every valid
+    /// reservation was made before the refusal).
+    /// CONTRACT_SHAPE: bounded-change. Universe: the result, both rows, the pool.
+    #[tokio::test]
+    #[should_panic(expected = "a corrupt leftover row refuses the boot naming the allocation")]
+    async fn two_busy_rows_naming_one_address_refuse_the_boot_and_keep_the_first_reservation() {
+        let tmp = TempDir::new().expect("tmpdir");
+        let host = SimVmHostState::new();
+        let (first, second) = (alloc("dup-a-0"), alloc("dup-b-0"));
+        hold(&host, &first);
+        hold(&host, &second);
+        let state = app_state(&tmp, Arc::new(host.clone()), &SimClock::new()).await;
+        put_vm_job(&state).await;
+        write_running(&state, "dup-a-0", Some(ADDRESS)).await;
+        write_running(&state, "dup-b-0", Some(ADDRESS)).await;
+
+        let result = converge(&state).await;
+
+        assert!(
+            matches!(
+                &result,
+                Err(ConvergeError::Reclamation(ReclamationError::CorruptLeftoverRow(
+                    CorruptLeftoverRow::OffsetAlreadyHeld { allocation, held_by, address }
+                ))) if *allocation == second && *held_by == first && *address == ADDRESS
+            ),
+            "a corrupt leftover row refuses the boot naming the allocation: {result:?}"
+        );
+        let observed = state.guest_pool.observe(&[first.clone(), second.clone()]);
+        assert_eq!(observed.leases.get(&first), Some(&GuestAttachmentLease::Retiring));
+        assert_eq!(observed.leases.get(&second), None, "the corrupt row reserved nothing");
+        assert_platform_reclaimed(&row(&state, "dup-a-0").await, Some(ADDRESS));
+        assert_platform_reclaimed(&row(&state, "dup-b-0").await, Some(ADDRESS));
+    }
+
+    /// PENDING (ADR-0350 item 3, "boot waits one bound"). Several stuck scopes
+    /// cost one bound of boot delay: every executor's wait starts before any
+    /// ends, so one advance of the injected clock by `KILL_SCOPE_SETTLE_BOUND`
+    /// completes the boot, and every stuck VM's offset is reserved.
+    /// CONTRACT_SHAPE: bounded-change. Universe: the clock, rows, the pool.
+    #[tokio::test]
+    #[should_panic(expected = "every stuck scope's wait starts together")]
+    async fn several_stuck_scopes_cost_one_bound_of_boot_delay_and_are_all_reserved() {
+        const STUCK: usize = 3;
+        let tmp = TempDir::new().expect("tmpdir");
+        let clock = SimClock::new();
+        let inner = SimVmHostState::new();
+        let host = RecordingHost::new(inner.clone(), Some(clock.clone()));
+        let ids: Vec<AllocationId> =
+            (0..STUCK).map(|i| alloc(&format!("stuck-many-{i}"))).collect();
+        for id in &ids {
+            hold(&inner, id);
+        }
+        let state = app_state(&tmp, Arc::new(host.clone()), &clock).await;
+        put_vm_job(&state).await;
+        for (index, id) in ids.iter().enumerate() {
+            let offset = u8::try_from(index).expect("small");
+            write_running(&state, id.as_str(), Some(Ipv4Addr::new(100, 95, 0, 9 + offset))).await;
+        }
+
+        let converge_future = converge(&state);
+        tokio::pin!(converge_future);
+        let mut result = None;
+        let mut advanced = false;
+        for _ in 0..3_000 {
+            tokio::select! {
+                finished = &mut converge_future => {
+                    result = Some(finished);
+                    break;
+                }
+                () = tokio::time::sleep(Duration::from_millis(1)) => {}
+            }
+            if !advanced && host.kill_calls() == STUCK {
+                clock.tick(KILL_SCOPE_SETTLE_BOUND);
+                advanced = true;
+            }
+        }
+
+        assert!(
+            advanced,
+            "every stuck scope's wait starts together, so boot waits one bound and not one per \
+             scope (kill_scope called {} of {STUCK} times)",
+            host.kill_calls()
+        );
+        let result = result.expect("the boot returns after one bound of the injected clock");
+        assert!(result.is_ok(), "a busy scope never refuses the boot: {result:?}");
+        let observed = state.guest_pool.observe(&ids);
+        assert_eq!(observed.occupancy.held, 3, "every stuck VM's offset is reserved");
+        assert!(
+            ids.iter().all(|id| observed.leases.get(id) == Some(&GuestAttachmentLease::Retiring))
+        );
+    }
+
+    /// One non-busy refusal beside a stuck VM: the refusal is the boot's
+    /// error and the stuck VM's offset is reserved all the same, whichever
+    /// scope the planner reaches first (`failing` and `stuck` fix the order).
+    async fn refusal_beside_a_stuck_vm(failing: &str, stuck: &str) {
+        let tmp = TempDir::new().expect("tmpdir");
+        let host = SimVmHostState::new();
+        hold(&host, &alloc(stuck));
+        host.set_scope(alloc(failing), BTreeSet::from([4343]));
+        // A held scope answers busy before the queue; the one un-held kill
+        // takes the scripted refusal.
+        host.script_kill_scope_failure(std::io::ErrorKind::PermissionDenied);
+        let state = app_state(&tmp, Arc::new(host.clone()), &SimClock::new()).await;
+        put_vm_job(&state).await;
+        write_running(&state, failing, Some(Ipv4Addr::new(100, 95, 0, 20))).await;
+        write_running(&state, stuck, Some(ADDRESS)).await;
+
+        let result = converge(&state).await;
+
+        assert!(
+            matches!(&result, Err(ConvergeError::Reclamation(ReclamationError::Host(error)))
+                if error.kind() == std::io::ErrorKind::PermissionDenied),
+            "the refusal is the first non-busy executor error: {result:?}"
+        );
+        let observed = state.guest_pool.observe(&[alloc(stuck), alloc(failing)]);
+        assert_eq!(
+            observed.leases.get(&alloc(stuck)),
+            Some(&GuestAttachmentLease::Retiring),
+            "one scope's failure never drops another scope's reservation"
+        );
+        assert_eq!(observed.leases.get(&alloc(failing)), None, "the refused VM reserved nothing");
+        assert_platform_reclaimed(&row(&state, stuck).await, Some(ADDRESS));
+    }
+
+    /// PENDING (ADR-0350 item 5). The refusal comes from the scope the planner
+    /// reaches first; the stuck VM behind it is still killed, closed and reserved.
+    #[tokio::test]
+    #[should_panic(expected = "one scope's failure never drops another scope's reservation")]
+    async fn a_refusal_before_a_stuck_vm_never_drops_its_reservation() {
+        refusal_beside_a_stuck_vm("fail-a-0", "stuck-b-0").await;
+    }
+
+    /// PENDING (ADR-0350 item 5). The stuck VM comes first: the boot is still
+    /// refused for the later scope's non-busy error, with the reservation made.
+    #[tokio::test]
+    #[should_panic(expected = "the refusal is the first non-busy executor error")]
+    async fn a_refusal_after_a_stuck_vm_still_refuses_the_boot_with_its_reservation_made() {
+        refusal_beside_a_stuck_vm("fail-b-0", "busy-a-0").await;
+    }
+
+    /// PENDING (ADR-0350, G-V0, QPROJ-7). A stuck VMM keeps its vsock device:
+    /// the restarted boot proceeds, reserves its offset, and a launch sweep
+    /// across the whole offset range (a next-fit wrap included) never receives
+    /// its CID; every launch opens its own device (no clash) and the stuck
+    /// VMM's holder entry is unchanged. `SimVmm::vsock_device_holders` is the
+    /// arbiter.
+    /// CONTRACT_SHAPE: bounded-change. Universe: pool leases, vsock holders.
+    #[tokio::test]
+    #[should_panic(expected = "a busy scope never refuses the boot")]
+    async fn a_launch_sweep_across_the_whole_offset_range_never_receives_the_stuck_vmms_cid() {
+        let tmp = TempDir::new().expect("tmpdir");
+        let prefix: Ipv4Net = "100.95.0.0/29".parse().expect("prefix");
+        let stuck = leave_a_stuck_vm(tmp.path(), prefix).await;
+        let mut restarted =
+            compose(&tmp.path().join("serve-2"), &stuck.vmm, &stuck.vmm_host, prefix, 2).await;
+        restarted.state.vm_host_state = Arc::new(stuck.host.clone());
+        put_vm_job(&restarted.state).await;
+        write_running(&restarted.state, stuck.alloc.as_str(), Some(stuck.address)).await;
+
+        let result = converge(&restarted.state).await;
+
+        assert!(result.is_ok(), "a busy scope never refuses the boot: {result:?}");
+        assert_eq!(
+            restarted.pool.lease_observation().leases.get(&stuck.alloc).map(GuestLeaseView::cid),
+            Some(stuck.cid),
+            "the stuck VMM's CID is reserved before the first assign"
+        );
+        let mut swept = Vec::new();
+        for index in 0..4 {
+            let (pid, launched, _start) =
+                lease_and_launch(&restarted, &stuck.vmm, &format!("sweep-{index}")).await;
+            let cid =
+                restarted.pool.lease_observation().leases[&alloc(&format!("sweep-{index}"))].cid();
+            assert_ne!(cid, stuck.cid, "a launch was handed the stuck VMM's CID");
+            assert!(launched, "the launch opened its own device: no clash with the stuck VMM");
+            assert_eq!(stuck.vmm.vsock_device_holders().get(&cid), Some(&pid));
+            swept.push(cid);
+        }
+        let exhausted = restarted.pool.assign(
+            alloc("sweep-extra"),
+            &[],
+            crate::shared_network_test_ports::test_owner_flow_ports(),
+        );
+        assert!(exhausted.is_err(), "every offset but the stuck VMM's is leased: {exhausted:?}");
+        // Wrap: the cursor is past the last offset; a released offset is the
+        // only one next-fit may take, never the reserved one.
+        restarted.pool.release(&alloc("sweep-1"));
+        let wrapped = restarted
+            .pool
+            .assign(
+                alloc("sweep-wrap"),
+                &[],
+                crate::shared_network_test_ports::test_owner_flow_ports(),
+            )
+            .expect("the released offset");
+        assert_eq!(wrapped.assignment().cid(), swept[1], "the wrap takes the released offset");
+        assert_eq!(
+            stuck.vmm.vsock_device_holders().get(&stuck.cid),
+            Some(&stuck.pid),
+            "the stuck VMM still holds its device"
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // ADR-0350: the one release site over a reservation
+    // -----------------------------------------------------------------
+
+    /// PENDING (ADR-0350, feature delta "The late release"). Repeated
+    /// `ReclaimAllocationNetwork` attempts over a reservation, with no driver
+    /// entry for the allocation (a restarted process), return `Ok` promptly,
+    /// keep the reservation while the scope is held and tear nothing down
+    /// (a reservation has no plan).
+    /// CONTRACT_SHAPE: bounded-change. Universe: pool leases, teardowns.
+    #[tokio::test]
+    #[should_panic(expected = "a busy scope never refuses the boot")]
+    async fn repeated_reclaim_attempts_over_a_reservation_return_ok_and_keep_it_while_the_scope_is_held()
+     {
+        let tmp = TempDir::new().expect("tmpdir");
+        let stuck = leave_a_stuck_vm(tmp.path(), "100.95.0.0/29".parse().expect("prefix")).await;
+        let state = app_state(&tmp, Arc::new(stuck.host.clone()), &SimClock::new()).await;
+        put_vm_job(&state).await;
+        write_running(&state, stuck.alloc.as_str(), Some(stuck.address)).await;
+        let result = converge(&state).await;
+        assert!(result.is_ok(), "a busy scope never refuses the boot: {result:?}");
+        assert!(
+            state.alloc_drivers.lock().get(&stuck.alloc).is_none(),
+            "precondition: a restarted process has no driver entry for the allocation"
+        );
+        let provisioner = RecordingProvisioner::default();
+
+        for attempt in 0..3 {
+            reclaim_network_attempt(&state, &provisioner, &stuck.alloc)
+                .await
+                .unwrap_or_else(|error| panic!("attempt {attempt} over a reservation: {error}"));
+            let observed = state.guest_pool.observe(std::slice::from_ref(&stuck.alloc));
+            assert_eq!(
+                observed.leases.get(&stuck.alloc),
+                Some(&GuestAttachmentLease::Retiring),
+                "the reservation is kept while the scope is held (attempt {attempt})"
+            );
+        }
+        assert_eq!(
+            provisioner.teardowns.load(Ordering::SeqCst),
+            0,
+            "a reservation has no teardown"
+        );
+    }
+
+    /// PENDING (ADR-0350, ADR-0348 (b)). After the scripted reap, a
+    /// `VmReclamation` pass removes the scope and one more reclaim attempt
+    /// releases the reservation: the offset is assignable again, and no teardown
+    /// was recorded for it.
+    /// CONTRACT_SHAPE: bounded-change. Universe: pool leases, host scopes, teardowns.
+    #[tokio::test]
+    #[should_panic(expected = "a busy scope never refuses the boot")]
+    async fn a_reservation_is_released_by_a_reclaim_attempt_after_the_reap_and_a_reclamation_pass()
+    {
+        let tmp = TempDir::new().expect("tmpdir");
+        let stuck = leave_a_stuck_vm(tmp.path(), "100.95.0.0/29".parse().expect("prefix")).await;
+        let state = app_state(&tmp, Arc::new(stuck.host.clone()), &SimClock::new()).await;
+        put_vm_job(&state).await;
+        write_running(&state, stuck.alloc.as_str(), Some(stuck.address)).await;
+        let result = converge(&state).await;
+        assert!(result.is_ok(), "a busy scope never refuses the boot: {result:?}");
+        let provisioner = RecordingProvisioner::default();
+        reclaim_network_attempt(&state, &provisioner, &stuck.alloc).await.expect("held attempt");
+        assert!(vm_reclamation_tick(&state, 1).await.is_err(), "the pass meets the held scope");
+
+        assert!(stuck.vmm.exit_process(stuck.pid, None, Some(9)), "the scripted reap");
+        vm_reclamation_tick(&state, 2).await.expect("the pass removes the reaped scope");
+        assert!(!stuck.host.has_scope(&stuck.alloc), "the scope is gone after the reap");
+        reclaim_network_attempt(&state, &provisioner, &stuck.alloc).await.expect("late attempt");
+
+        let observed = state.guest_pool.observe(std::slice::from_ref(&stuck.alloc));
+        assert!(
+            observed.leases.is_empty(),
+            "the reservation is released once the scope is absent: {:?}",
+            observed.leases
+        );
+        assert_eq!(observed.occupancy.held, 0);
+        assert!(
+            state
+                .guest_pool
+                .assign(
+                    stuck.alloc.clone(),
+                    &[],
+                    crate::shared_network_test_ports::test_owner_flow_ports()
+                )
+                .is_ok(),
+            "the allocation's offset is assignable again"
+        );
+        assert_eq!(
+            provisioner.teardowns.load(Ordering::SeqCst),
+            0,
+            "a reservation has no teardown"
+        );
+    }
+
+    // -----------------------------------------------------------------
+    // ADR-0354: a busy boot executor step writes the row, not the discard
+    // -----------------------------------------------------------------
+
+    /// PENDING (ADR-0354, S-RB-13). A busy boot step ends the `Running` row as
+    /// platform-reclaimed carrying the address and leaves the scope, run
+    /// directory and clone; once the hold clears the next `VmReclamation` pass
+    /// discards them and writes no row.
+    /// CONTRACT_SHAPE: bounded-change. Universe: the row, the host's surfaces.
+    #[tokio::test]
+    #[should_panic(expected = "a busy scope never refuses the boot")]
+    async fn a_busy_boot_step_writes_the_row_and_the_next_pass_discards_the_artifacts() {
+        let tmp = TempDir::new().expect("tmpdir");
+        let host = SimVmHostState::new();
+        let id = alloc("busy-boot-0");
+        let held = hold(&host, &id);
+        host.set_run_dir(id.clone());
+        host.set_clone(id.clone(), tmp.path().join("clone.img"));
+        let state = app_state(&tmp, Arc::new(host.clone()), &SimClock::new()).await;
+        put_vm_job(&state).await;
+        write_running(&state, "busy-boot-0", Some(ADDRESS)).await;
+
+        let result = converge(&state).await;
+
+        assert!(result.is_ok(), "a busy scope never refuses the boot: {result:?}");
+        let after_boot = row(&state, "busy-boot-0").await;
+        assert_platform_reclaimed(&after_boot, Some(ADDRESS));
+        let observed = host.observe().await.expect("observe");
+        assert!(
+            observed.scopes.contains_key(&id)
+                && observed.run_dirs.contains(&id)
+                && observed.clones.contains_key(&id),
+            "a busy boot step discards no artifact: {observed:?}"
+        );
+
+        held.store(false, Ordering::SeqCst);
+        vm_reclamation_tick(&state, 1).await.expect("the pass after the hold clears");
+        assert!(!host.has_scope(&id), "the pass removes the scope");
+        assert!(host.artifacts_absent(&id), "the pass discards the run directory and clone");
+        assert_eq!(row(&state, "busy-boot-0").await, after_boot, "the pass writes no row");
+    }
+
+    /// PENDING (ADR-0354 consequences). After boot ended the row, a
+    /// steady-state tick that meets the same busy scope leaves the row
+    /// unchanged and still discards nothing.
+    /// CONTRACT_SHAPE: unbounded-preservation. Universe: the row, host surfaces.
+    #[tokio::test]
+    #[should_panic(expected = "a busy scope never refuses the boot")]
+    async fn the_steady_state_tick_that_meets_the_busy_scope_leaves_the_boot_written_row_unchanged()
+    {
+        let tmp = TempDir::new().expect("tmpdir");
+        let host = SimVmHostState::new();
+        let id = alloc("busy-then-tick-0");
+        hold(&host, &id);
+        host.set_run_dir(id.clone());
+        let state = app_state(&tmp, Arc::new(host.clone()), &SimClock::new()).await;
+        put_vm_job(&state).await;
+        write_running(&state, "busy-then-tick-0", Some(ADDRESS)).await;
+        let result = converge(&state).await;
+        assert!(result.is_ok(), "a busy scope never refuses the boot: {result:?}");
+        let after_boot = row(&state, "busy-then-tick-0").await;
+
+        let tick = vm_reclamation_tick(&state, 1).await;
+
+        assert!(tick.is_err(), "the tick meets the busy scope: {tick:?}");
+        assert_eq!(row(&state, "busy-then-tick-0").await, after_boot, "the tick writes no row");
+        assert!(host.has_scope(&id) && !host.artifacts_absent(&id), "the tick discards nothing");
+    }
+
+    // -----------------------------------------------------------------
+    // ADR-0349 / ADR-0354: the steady-state VmReclamation tick over a held scope
+    // -----------------------------------------------------------------
+
+    /// GUARD (ADR-0349 item 6, ADR-0354). A steady-state tick that meets a busy
+    /// scope of a `Running` row writes no row, discards nothing and leaves the
+    /// scope: only the boot step is exempt from "busy means no row".
+    /// CONTRACT_SHAPE: unbounded-preservation. Universe: the row, host surfaces.
+    #[tokio::test]
+    async fn guard_a_tick_over_a_busy_scope_of_a_running_row_writes_no_row_and_discards_nothing() {
+        let tmp = TempDir::new().expect("tmpdir");
+        let host = SimVmHostState::new();
+        let id = alloc("tick-busy-running-0");
+        hold(&host, &id);
+        host.set_run_dir(id.clone());
+        let state = app_state(&tmp, Arc::new(host.clone()), &SimClock::new()).await;
+        put_vm_job(&state).await;
+        write_running(&state, "tick-busy-running-0", Some(ADDRESS)).await;
+        let before = row(&state, "tick-busy-running-0").await;
+
+        let tick = vm_reclamation_tick(&state, 1).await;
+
+        assert!(tick.is_err(), "the busy scope is the tick's error: {tick:?}");
+        assert_eq!(row(&state, "tick-busy-running-0").await, before, "no row is written");
+        assert!(host.has_scope(&id), "the scope stays");
+        assert!(!host.artifacts_absent(&id), "no artifact is discarded");
+    }
+
+    /// GUARD (ADR-0349 item 6). A tick over a held scope of a terminal
+    /// allocation discards nothing, writes no row and still runs the tick's
+    /// other actions; the next tick, after the hold clears, removes the scope
+    /// and its artifacts and writes no row.
+    /// CONTRACT_SHAPE: bounded-change. Universe: both rows, host surfaces.
+    #[tokio::test]
+    async fn guard_a_tick_over_a_held_scope_runs_the_other_actions_and_the_next_tick_removes_it() {
+        let tmp = TempDir::new().expect("tmpdir");
+        let host = SimVmHostState::new();
+        let (busy, free) = (alloc("tick-a-busy-0"), alloc("tick-b-free-0"));
+        let held = hold(&host, &busy);
+        host.set_run_dir(busy.clone());
+        host.set_scope(free.clone(), BTreeSet::from([4343]));
+        let state = app_state(&tmp, Arc::new(host.clone()), &SimClock::new()).await;
+        put_vm_job(&state).await;
+        write_operator_stopped(&state, "tick-a-busy-0", Some(ADDRESS)).await;
+        write_running(&state, "tick-b-free-0", Some(Ipv4Addr::new(100, 95, 0, 20))).await;
+        let busy_before = row(&state, "tick-a-busy-0").await;
+
+        let tick = vm_reclamation_tick(&state, 1).await;
+
+        assert!(tick.is_err(), "the held scope is the tick's error: {tick:?}");
+        assert_eq!(
+            row(&state, "tick-a-busy-0").await,
+            busy_before,
+            "the busy scope's row is unchanged"
+        );
+        assert!(host.has_scope(&busy) && !host.artifacts_absent(&busy), "nothing was discarded");
+        let free_row = row(&state, "tick-b-free-0").await;
+        assert_eq!(free_row.state, AllocState::Terminated, "the other action ran");
+        assert!(
+            matches!(
+                free_row.reason,
+                Some(TransitionReason::Stopped { by: StoppedBy::PlatformReclaimed })
+            ),
+            "the other action ended its row as platform-reclaimed: {:?}",
+            free_row.reason
+        );
+
+        held.store(false, Ordering::SeqCst);
+        vm_reclamation_tick(&state, 2).await.expect("the next tick after the hold clears");
+        assert!(!host.has_scope(&busy), "the next tick removes the scope");
+        assert!(host.artifacts_absent(&busy), "and its artifacts");
+        assert_eq!(row(&state, "tick-a-busy-0").await, busy_before, "and writes no row");
+    }
+
+    /// GUARD (ADR-0348 test (b) shape). A pass over a terminal allocation whose
+    /// scope cannot be removed emits again on the next pass (one more
+    /// `kill_scope`, still busy) and removes the scope after the VMM is
+    /// reaped (`SimVmm::exit_process`, the one fact the hold reads).
+    /// CONTRACT_SHAPE: bounded-change. Universe: kill calls, host surfaces.
+    #[tokio::test]
+    async fn guard_a_pass_over_a_terminal_allocation_with_an_unremovable_scope_emits_again_until_the_reap()
+     {
+        let tmp = TempDir::new().expect("tmpdir");
+        let stuck = leave_a_stuck_vm(tmp.path(), "100.95.0.0/29".parse().expect("prefix")).await;
+        let host = RecordingHost::new(stuck.host.clone(), None);
+        let state = app_state(&tmp, Arc::new(host.clone()), &SimClock::new()).await;
+        put_vm_job(&state).await;
+        write_operator_stopped(&state, stuck.alloc.as_str(), Some(stuck.address)).await;
+
+        assert!(
+            vm_reclamation_tick(&state, 1).await.is_err(),
+            "the first pass meets the busy scope"
+        );
+        assert!(vm_reclamation_tick(&state, 2).await.is_err(), "the next pass emits again");
+        assert_eq!(host.kill_calls(), 2, "each pass tried the removal once");
+        assert!(stuck.host.has_scope(&stuck.alloc), "the scope is kept until the reap");
+
+        assert!(stuck.vmm.exit_process(stuck.pid, None, Some(9)), "the scripted reap");
+        vm_reclamation_tick(&state, 3).await.expect("the pass after the reap");
+        assert!(!stuck.host.has_scope(&stuck.alloc), "the pass after the reap removes the scope");
+        assert_eq!(host.kill_calls(), 3);
+    }
+}

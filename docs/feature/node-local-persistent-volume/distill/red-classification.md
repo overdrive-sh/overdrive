@@ -301,3 +301,36 @@ and their `mod` lines; `overdrive-worker/tests/integration/cgroup_manager/{remov
 `check_launch_seccomp`. Tests the crafter must edit when the Pending write lands (they will fail, correctly, and are not weakened here):
 `restart_arm_duplicate_vm_owner_is_a_no_row_success_that_still_cleans_the_predecessor` (§ N6 question 1) and the fail-closed
 `assert_superseding_failed_row` A-4 assertion in `action_shim/mod.rs` (§ N6 question 2).
+
+## Pass 3: the N3 tests, authored after the stuck-VM API compiled
+
+Verified on metal (ordinary grammar). A PENDING test passes only while its body fails with its `expected` text; each text below was read from a real failing run
+(`--no-capture` where the first reached failure needed to be confirmed). The full table of tests, files, tiers and placements is `test-scenarios.md` § N7.
+
+| Test | Fails today on | Activation |
+|---|---|---|
+| `vm_driver_scope_single_remover::{a_reaped_stop_..., a_start_failure_cleanup_...}` | "a reaped stop (a start-failure cleanup) must remove the VM scope through VmHostState::kill_scope": the driver removes it through the cgroup port | ADR-0351 (09-02) |
+| `vm_driver_scope_single_remover::the_driver_never_removes_a_scope_directory_through_the_cgroup_port` | "the VM driver removed the scope directory itself" | 09-02 |
+| `vm_driver_scope_single_remover::{a_busy_scope_leaves_the_stop_outcome_..., a_busy_scope_leaves_the_reported_start_failure_unchanged}` | "the stop (the start-failure cleanup) must call VmHostState::kill_scope for the scope" | 09-02 |
+| `vm_driver_scope_single_remover::the_driver_does_not_place_the_vmm_pid_in_its_scope` | "the driver must not write the VMM pid to the scope's cgroup.procs" | ADR-0352 (09-05) |
+| `vm_host_state_equivalence::a_failed_removal_with_a_non_busy_kind_returns_at_once_without_retry` | "a removal failure that is not busy must return at once" (it retries for the 3 s settle bound) | ADR-0349 (09-02) |
+| `vmm_equivalence::{a_created_vmm_is_a_member_of_its_scope_on_the_real_adapter, create_into_a_missing_scope_fails_on_the_real_adapter}` | "the VMM must be a member of config.cgroup_scope"; "create into a scope that does not exist must fail" | 09-05 |
+| `vm_reclamation_boot::stuck_vm_boot::*` (13) | "a busy scope never refuses the boot" (`converge` returns `Host(ResourceBusy)`); the corrupt-row cases "a corrupt leftover row refuses the boot naming the allocation"; the sweep and several-VMs cases their named assertions ("every stuck scope's wait starts together", "one scope's failure never drops another scope's reservation") | ADR-0350, ADR-0354 (09-07) |
+| `prelaunch_outcome_acceptance` RB-2 (a) to (d) (4) | "the unreaped VM's lease stays held Retiring while its scope is present"; "the lease is held until the VMM is reaped"; "a failing scope observation at the stop is the typed reclamation error"; "the lease stays held while the scope is held, attempt 1" | ADR-0156 amended (09-04) |
+| `action_shim::install_failure_supersedes_running_with_failed_and_never_releases_the_gate` | "the superseding Failed row must carry the Running row's workload_addr" | ADR-0353 carry (09-06) |
+| `launch_abandoned_count::*` (six count cells, the `is_natural_exit` Job test, the deletion-equivalence proptest) | the relaunch's count is taken from the newest row, not the newest row that ran, e.g. "an operator restart over a crash restart that never ran must carry the count of the launch that ran (0)"; "a lost launch with no operator action must charge the crash exactly once"; "a Job whose launch never ran must not be finalised Failed { exit_code: Some(0) }" | ADR-0355, RB-13 (09-08) |
+| `launch_abandoned_count::the_pending_generation_verdict_agrees_...` | "generation_replacement_pending must read the generation from the newest row that ran" (the function is still a scaffold) | 06-01 |
+| `vm_crash_mid_launch::a_serve_crash_just_after_the_vmm_is_spawned_leaves_nothing_outside_a_scope_boot_reclaims` | "the hypervisor's first act must run inside its allocation's cgroup scope .../alloc-crash-mid-launch-0.scope; it recorded [\"0::/overdrive.slice/control-plane.slice\"]": the process is born in `serve`'s slice and placed after the spawn | ADR-0352 (09-05) |
+| `volume_survives::a_node_boots_past_a_vm_stuck_in_exit_left_over_by_a_serve_crash` | "a node must boot past a VM whose scope cannot be removed; boot refused: ... reclamation executor failed: VmHostState operation failed: Device or resource busy (os error 16)" | ADR-0350, ADR-0354 (09-07) |
+
+Guards added (pass before and after): the seven `vm_driver_stop_unreaped::guard_*`, `vm_driver_stop_totality::stop_is_total_over_a_killed_not_reaped_termination`, the 15
+`sim_stuck_vm_contract` tests, the pool tests of `pool_acceptance` (`reserve_leftover`, `CorruptLeftoverRow`, `Reserved`), `stuck_vm_boot::guard_*` (three),
+`prelaunch_outcome_acceptance::restart_arm_duplicate_vm_owner_writes_no_row_of_its_own_...` (R9), the six `launch_abandoned_predicates` tests, the `last_ran_alloc` and
+backend-candidate guards, the three `workload_describe_abandoned_launch` goldens, the two Job relaunch cells of `restart_generation_invariant.rs`.
+
+**ADR-0348 Tier 1 (a) to (e) are guards, not pending tests.** The bound lives in the adapter and `SimVmm` (09-01) and `VmDriver::stop` already completes on
+`KilledNotReaped` (it ignores the termination value), so the clauses hold today. The tests observe a `kill_scope` call through the scripted-failure queue of
+`SimVmHostState` (it has no call recorder).
+
+**Existing tests the crafter must rewrite when 09-02 lands** (they assert the opposite of ADR-0351): the start-failure tests in `vm_driver_stop_totality.rs` and
+`vm_driver_start_failure_contract.rs` that read the scope's removal from `SimCgroupFs`.

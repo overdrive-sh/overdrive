@@ -3824,8 +3824,8 @@ mod fail_closed_mtls_tests {
     }
 
     /// Assertions A-2, A-3, A-4, A-8, A-9 — the superseding `Failed` row's
-    /// full field contract, including the forward-carried identity/kind and
-    /// the deliberately NON-carried per-instance address.
+    /// full field contract, including the forward-carried identity, kind and
+    /// per-instance address.
     fn assert_superseding_failed_row(
         label: &str,
         seeded: &AllocStatusRow,
@@ -3878,11 +3878,13 @@ mod fail_closed_mtls_tests {
             "[{label}] the detail column must carry the verbatim cause Display"
         );
 
-        // A-4 — a failed alloc is not a live backend and makes no terminal claim.
+        // A-4 — the Failed row carries the Running row's per-instance address
+        // (boot reserves a stuck VM's offset from the allocation's last row;
+        // ADR-0353) and makes no terminal claim.
         assert_eq!(
-            row.workload_addr, None,
-            "[{label}] the Failed row must NOT inherit the Running row's per-instance \
-             address — a failed alloc is not a live backend"
+            row.workload_addr, seeded.workload_addr,
+            "[{label}] the superseding Failed row must carry the Running row's \
+             workload_addr: the address is the allocation's record, not a claim that it is a live backend"
         );
         assert_eq!(
             row.terminal, None,
@@ -3983,8 +3985,15 @@ mod fail_closed_mtls_tests {
     /// idiom; the argument space is finite, so a generator
     /// would be parametrisation theatre). Assertions A-1 … A-10 are
     /// case-invariant except A-3's `stage`, pinned per case.
+    ///
+    /// PENDING (ADR-0353 terminal-row carry): A-4 asserts the `Failed` row
+    /// carries the `Running` row's `workload_addr`; today the fail-closed
+    /// handler drops it.
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
+    #[should_panic(
+        expected = "the superseding Failed row must carry the Running row's workload_addr"
+    )]
     async fn install_failure_supersedes_running_with_failed_and_never_releases_the_gate() {
         for (label, cause, expected_stage) in install_error_cases() {
             let expected_detail = cause.to_string();

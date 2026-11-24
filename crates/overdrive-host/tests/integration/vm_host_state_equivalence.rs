@@ -17,6 +17,11 @@
 //! Per Mandate 9 (`nw-tdd-methodology`): this is a FIXED, hand-enumerated
 //! call sequence at layer 3+ — `@example`, not `@property`.
 
+#![allow(
+    clippy::doc_markdown,
+    reason = "per-test CONTRACT_SHAPE declarations are machine-readable repository contracts"
+)]
+
 use std::collections::BTreeSet;
 use std::num::NonZeroU8;
 use std::path::{Path, PathBuf};
@@ -398,4 +403,205 @@ async fn index_backed_clone_surface_stays_equivalent_across_adapters() {
         "sim discard removes the clone — equivalent to the real adapter across the new indirection"
     );
     sim.discard_artifacts(&alloc).await.expect("sim discard is idempotent");
+}
+
+// ---------------------------------------------------------------------
+// Node-local persistent volume (GH #348, ADR-0349) — `kill_scope`'s busy
+// and refusal contract on both adapters.
+//
+// The real adapter takes its cgroup root as `RealVmHostState::new`'s
+// first argument, so the refusal clauses run over a tempdir: no real
+// scope, no guest, no VMM. A real BUSY scope (the last task held in exit)
+// needs a held device and is `vm_host_state_scope_kill.rs`'s fixture; the
+// busy clauses here run on `SimVmHostState` only.
+//
+// Not authored over a tempdir, and why: a `kill_scope` that returns `Ok`
+// over a scope directory removes the directory, but the adapter's own
+// `cgroup.kill` write creates a regular file in a tempdir scope, so the
+// removal meets a non-empty directory; a regular file is not pollable
+// for `cgroup.events` changes either. "Removal only after the `0`
+// reading" and "a scope with no `cgroup.events` is removed" are therefore
+// shown on the kernel by `vm_host_state_scope_kill.rs`.
+// ---------------------------------------------------------------------
+
+/// The longest a refusal may take before it counts as retried. The settle bound is
+/// `KILL_SCOPE_SETTLE_BOUND` (3 s); a refusal that returns "at once" is far under it.
+const AT_ONCE: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// A tempdir cgroup root and the scope directory of `alloc` under it, as
+/// `RealVmHostState` resolves it. Returns the root guard, the host and the
+/// scope directory.
+fn real_host_over_tempdir(
+    alloc: &AllocationId,
+) -> (tempfile::TempDir, RealVmHostState, std::path::PathBuf) {
+    let root = tempfile::TempDir::new().expect("tempdir");
+    let scope_dir = CgroupPath::for_alloc(alloc).resolve(root.path());
+    std::fs::create_dir_all(&scope_dir).expect("create the scope directory");
+    let host = RealVmHostState::new(
+        root.path().to_path_buf(),
+        root.path().join("run"),
+        root.path().join("clone-index"),
+    );
+    (root, host, scope_dir)
+}
+
+/// ADR-0349 item 4 ("a non-`ResourceBusy` error is returned at once"; "`Err` kinds other than
+/// busy are refusals"), the cgroup.kill write refused. Owner path: `VmHostState::kill_scope` then
+/// `observe`. Fault: `cgroup.kill` is a directory on the real adapter (the write fails with a
+/// non-`NotFound` kind); a scripted `PermissionDenied` on the sim. Oracle: the kind is not busy,
+/// the call took far less than the settle bound, and the scope is still observed.
+/// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(host_pure)]
+#[tokio::test]
+async fn a_refused_cgroup_kill_write_returns_its_kind_at_once_and_leaves_the_scope_observed() {
+    // --- Real adapter: the write to `cgroup.kill` fails. ---
+    let alloc = AllocationId::new("vmhosteq-refuse-a").expect("valid alloc id");
+    let (_root, real, scope_dir) = real_host_over_tempdir(&alloc);
+    std::fs::create_dir(scope_dir.join("cgroup.kill")).expect("make cgroup.kill unwritable");
+
+    let started = std::time::Instant::now();
+    let refusal = real
+        .kill_scope(&CgroupPath::for_alloc(&alloc))
+        .await
+        .expect_err("a refused cgroup.kill write must surface as Err");
+    let real_elapsed = started.elapsed();
+
+    assert_ne!(
+        refusal.kind(),
+        std::io::ErrorKind::ResourceBusy,
+        "a refused write is a refusal, never the retry-later busy kind: {refusal:?}"
+    );
+    assert!(
+        real_elapsed < AT_ONCE,
+        "a refused cgroup.kill write must return at once, took {real_elapsed:?}"
+    );
+    assert!(
+        real.observe().await.expect("real observe").scopes.contains_key(&alloc),
+        "a refused kill leaves the scope observed"
+    );
+
+    // --- Sim adapter: the same contract from a scripted refusal. ---
+    let sim = SimVmHostState::new();
+    sim.set_scope(alloc.clone(), BTreeSet::from([4242]));
+    sim.script_kill_scope_failure(std::io::ErrorKind::PermissionDenied);
+
+    let sim_refusal = sim
+        .kill_scope(&CgroupPath::for_alloc(&alloc))
+        .await
+        .expect_err("a scripted refusal must surface as Err");
+
+    assert_eq!(sim_refusal.kind(), std::io::ErrorKind::PermissionDenied);
+    assert!(
+        sim.observe().await.expect("sim observe").scopes.contains_key(&alloc),
+        "a refused kill leaves the scope observed"
+    );
+    sim.kill_scope(&CgroupPath::for_alloc(&alloc))
+        .await
+        .expect("the refusal was not retried inside the call: the next call proceeds and removes");
+    assert!(!sim.observe().await.expect("sim observe").scopes.contains_key(&alloc));
+}
+
+/// ADR-0349 item 3 ("a removal that fails is a real error returned at once", replacing today's
+/// retry of whatever the error). Owner path: `RealVmHostState::kill_scope` over a tempdir root.
+/// Fault: the scope directory holds a child directory, so its removal fails `ENOTEMPTY`, a
+/// non-busy kind; the scope has no `cgroup.events`, so there is no wait. Oracle: the kind is not
+/// busy, the call returns at once (not after the settle retries), the scope is still observed.
+/// PENDING until the settle loop stops retrying every error kind.
+/// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(host_pure)]
+#[tokio::test]
+#[should_panic(expected = "a removal failure that is not busy must return at once")]
+async fn a_failed_removal_with_a_non_busy_kind_returns_at_once_without_retry() {
+    let alloc = AllocationId::new("vmhosteq-remove-a").expect("valid alloc id");
+    let (_root, real, scope_dir) = real_host_over_tempdir(&alloc);
+    std::fs::create_dir(scope_dir.join("child")).expect("make the removal fail non-empty");
+
+    let started = std::time::Instant::now();
+    let failure = real
+        .kill_scope(&CgroupPath::for_alloc(&alloc))
+        .await
+        .expect_err("a non-empty scope directory cannot be removed");
+    let elapsed = started.elapsed();
+
+    assert_ne!(
+        failure.kind(),
+        std::io::ErrorKind::ResourceBusy,
+        "a removal that fails with ENOTEMPTY is not the busy kind: {failure:?}"
+    );
+    assert!(
+        elapsed < AT_ONCE,
+        "a removal failure that is not busy must return at once, never retried: took {elapsed:?}"
+    );
+    assert!(
+        real.observe().await.expect("real observe").scopes.contains_key(&alloc),
+        "the scope whose removal failed is still observed"
+    );
+}
+
+/// ADR-0349 item 4 ("an absent scope is `Ok`"). Owner path: `VmHostState::kill_scope`. Oracle: `Ok`
+/// and an unchanged observation, whether the whole slice is absent or only this scope is.
+/// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(host_pure)]
+#[tokio::test]
+async fn a_kill_of_a_scope_that_is_not_there_is_ok_and_changes_nothing_on_both_adapters() {
+    let alloc = AllocationId::new("vmhosteq-absent-a").expect("valid alloc id");
+    let other = AllocationId::new("vmhosteq-absent-other").expect("valid alloc id");
+
+    // Real: first the workloads slice itself does not exist, then it exists with only `other`.
+    let root = tempfile::TempDir::new().expect("tempdir");
+    let real = RealVmHostState::new(
+        root.path().to_path_buf(),
+        root.path().join("run"),
+        root.path().join("clone-index"),
+    );
+    real.kill_scope(&CgroupPath::for_alloc(&alloc)).await.expect("no slice at all is Ok");
+    std::fs::create_dir_all(CgroupPath::for_alloc(&other).resolve(root.path()))
+        .expect("create the other scope");
+    let before = real.observe().await.expect("real observe");
+    real.kill_scope(&CgroupPath::for_alloc(&alloc)).await.expect("an absent scope is Ok");
+    assert_eq!(
+        real.observe().await.expect("real observe"),
+        before,
+        "killing an absent scope changes nothing, the other scope included"
+    );
+
+    // Sim: the same, with `other` seeded.
+    let sim = SimVmHostState::new();
+    sim.set_scope(other.clone(), BTreeSet::new());
+    let sim_before = sim.observe().await.expect("sim observe");
+    sim.kill_scope(&CgroupPath::for_alloc(&alloc)).await.expect("an absent scope is Ok");
+    assert_eq!(sim.observe().await.expect("sim observe"), sim_before);
+}
+
+/// ADR-0349 item 5 (sim only; the real busy scope is `vm_host_state_scope_kill.rs`'s fixture).
+/// Owner path: `kill_scope` over a held scope. Fault: the scope is held. Oracle: `Err(ResourceBusy)`
+/// leaves the scope observed with its pids; once the hold ends, `Ok` implies the scope is absent
+/// from `observe`; a second kill is idempotent.
+/// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(host_pure)]
+#[tokio::test]
+async fn a_busy_scope_stays_observed_until_the_kill_succeeds_and_ok_means_absent_sim() {
+    let sim = SimVmHostState::new();
+    let alloc = AllocationId::new("vmhosteq-busy-a").expect("valid alloc id");
+    let scope = CgroupPath::for_alloc(&alloc);
+    sim.set_scope(alloc.clone(), BTreeSet::from([4242]));
+    sim.hold_scope_while(&alloc, || true);
+
+    let busy = sim.kill_scope(&scope).await.expect_err("a held scope is busy");
+
+    assert_eq!(busy.kind(), std::io::ErrorKind::ResourceBusy);
+    let observed = sim.observe().await.expect("sim observe");
+    assert_eq!(
+        observed.scopes.get(&alloc).map(|facts| facts.pids.clone()),
+        Some(BTreeSet::from([4242])),
+        "Err(ResourceBusy) leaves the scope observed with its pids"
+    );
+
+    sim.release_scope_hold(&alloc);
+    sim.kill_scope(&scope).await.expect("the hold ended: the kill succeeds");
+    assert!(
+        !sim.observe().await.expect("sim observe").scopes.contains_key(&alloc),
+        "Ok from kill_scope implies the scope is absent from observe"
+    );
+    sim.kill_scope(&scope).await.expect("a second kill of the now-absent scope is Ok");
 }

@@ -1807,6 +1807,92 @@ async fn a_crash_restart_successor_abandoned_by_shutdown_is_relaunched_with_the_
 }
 
 // ---------------------------------------------------------------------------
+// A Job whose first launch is abandoned (ADR-0355: a launch that never ran is never a natural exit)
+// ---------------------------------------------------------------------------
+
+/// A Job's first launch is held at the driver and abandoned by `interruption`; the next boot
+/// relaunches it. The Job is not finalised (`is_natural_exit` excludes an abandoned row), the
+/// launch that never ran charges nothing, and exactly one launch completes.
+async fn job_first_launch_abandoned(seed: u64, interruption: Interruption, label: &str) {
+    let mut w = World::new(seed, label).await;
+    w.deploy(Kind::Job).await;
+    let park = w.sim().park_next_start(true);
+    let Some(held) = w.until_entered(&park, PAST_BACKOFF).await else {
+        w.fail("setup: the Job's first launch must reach the held driver start").await;
+    };
+    match interruption {
+        Interruption::Shutdown => {
+            w.runtime().supersede_all_lanes();
+            w.line("shutdown: supersede_all_lanes".to_owned());
+            if !w.wait_superseded(&park).await {
+                held.abort().await;
+                w.fail(LANE_SIGNAL_MESSAGE).await;
+            }
+            let _ = held.join().await;
+        }
+        Interruption::Crash => {
+            held.abort().await;
+            w.line("crash: the dispatch future is dropped mid-launch".to_owned());
+        }
+        other => panic!("not part of this scenario: {other:?}"),
+    }
+    w.reboot().await;
+    if !w.converge_until_running(PAST_BACKOFF, 12).await {
+        w.fail("the abandoned Job launch must be relaunched until the Job is Running").await;
+    }
+    if let Some(row) = w.rows().await.into_iter().find(|row| row.terminal.is_some()) {
+        w.fail(&format!(
+            "a Job whose launch never ran must not be finalised: {} carries terminal {:?}",
+            row.alloc_id, row.terminal
+        ))
+        .await;
+    }
+    if !w.failed().await.is_empty() {
+        w.fail("an abandoned Job launch must write no Failed row").await;
+    }
+    if let Some((alloc, count)) = w.restart_counts().iter().find(|(_, count)| **count != 0) {
+        w.fail(&format!(
+            "a launch abandoned before anything ran must charge nothing: restart_counts[{alloc}] = {count}"
+        ))
+        .await;
+    }
+    let completed = w.log.records().iter().filter(|record| !record.outcome.abandoned()).count();
+    if completed != 1 {
+        w.fail(&format!(
+            "the abandoned Job launch must be followed by exactly one relaunch that completes, saw {completed}"
+        ))
+        .await;
+    }
+    let before = w.issue_state().await;
+    w.idle(2, PAST_BACKOFF).await;
+    if w.issue_state().await != before {
+        w.fail("a second evaluation with the relaunched Job's row present must issue nothing")
+            .await;
+    }
+}
+
+/// S-INV-01, Job dimension: a Job whose first launch is lost with the control plane is
+/// relaunched once on the next boot and is not finalised.
+/// Contract shape: bounded-change.
+#[tokio::test(flavor = "current_thread")]
+async fn a_job_whose_first_launch_is_lost_with_the_control_plane_is_relaunched_once_and_not_finalised()
+ {
+    for seed in SEEDS {
+        job_first_launch_abandoned(seed, Interruption::Crash, "job/first-launch-crash").await;
+    }
+}
+
+/// S-INV-01, Job dimension: a Job whose first launch is abandoned by node shutdown is
+/// relaunched once on the next boot and is not finalised.
+/// Contract shape: bounded-change.
+#[tokio::test(flavor = "current_thread")]
+async fn a_job_whose_first_launch_is_abandoned_by_shutdown_is_relaunched_once_and_not_finalised() {
+    for seed in SEEDS {
+        job_first_launch_abandoned(seed, Interruption::Shutdown, "job/first-launch-shutdown").await;
+    }
+}
+
+// ---------------------------------------------------------------------------
 // GUARDs that hold today
 // ---------------------------------------------------------------------------
 

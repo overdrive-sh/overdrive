@@ -162,7 +162,7 @@ pub enum SimVmmProbeFault {
 ///
 /// ```
 /// use overdrive_sim::SimVmm;
-/// let sim = SimVmm::new(std::sync::Arc::new(crate::adapters::clock::SimClock::new()));
+/// let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
 /// ```
 ///
 /// # Clone semantics

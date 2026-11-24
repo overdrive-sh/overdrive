@@ -2351,3 +2351,71 @@ async fn stop_keeps_the_beacon_open_so_the_guests_exit_after_shutdown_is_consume
     assert_eq!(s.unread_guest_lines(), Some(0), "the guest's one EXIT line was consumed");
     s.finish_without_exit_event().await;
 }
+
+// ---------------------------------------------------------------------
+// ADR-0348 — stop is total over every `VmTermination` outcome.
+// ---------------------------------------------------------------------
+
+/// Test-only `Vmm` decorator: terminates through the inner `SimVmm`, then reports
+/// `KilledNotReaped` — the adapter's verdict for a killed process still unreaped at the bound.
+#[derive(Clone)]
+struct ReportsKilledNotReaped {
+    inner: SimVmm,
+}
+
+#[async_trait]
+impl Vmm for ReportsKilledNotReaped {
+    fn kind(&self) -> &'static str {
+        self.inner.kind()
+    }
+
+    async fn probe(&self) -> Result<(), VmmProbeError> {
+        self.inner.probe().await
+    }
+
+    async fn create(&self, config: &VmConfig, cid: GuestCid) -> VmmResult<VmProcess> {
+        self.inner.create(config, cid).await
+    }
+
+    async fn terminate(&self, control: &VmControl, grace: Duration) -> VmmResult<VmTermination> {
+        self.inner.terminate(control, grace).await?;
+        Ok(VmTermination::KilledNotReaped)
+    }
+}
+
+/// ADR-0348: `stop` is total over `VmTermination::KilledNotReaped`: it returns `Ok`, the
+/// allocation reports gone, and the run directory and rootfs clone are removed. A GUARD: the
+/// driver already ignores the termination value.
+/// CONTRACT_SHAPE: bounded-change.
+#[tokio::test]
+async fn stop_is_total_over_a_killed_not_reaped_termination() {
+    let tmp = TempDir::new().expect("tempdir");
+    let layout = build_layout(&tmp);
+    let run_dir_root = layout.run_dir_root.clone();
+    let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
+    let vmm = ReportsKilledNotReaped { inner: sim.clone() };
+    let (driver, clock, beacon) = build_driver(&sim, std::sync::Arc::new(vmm), layout).await;
+
+    let alloc = AllocationId::new("alloc-stop-not-reaped").expect("valid alloc id");
+    let spec = build_spec(&alloc, &tmp);
+    let (handle, _stream) = start_with_beacon_accepted(&driver, &spec, &beacon).await;
+
+    let driver_for_task = driver.clone();
+    let handle_owned = handle.clone();
+    let stop_task = tokio::spawn(async move { driver_for_task.stop(&handle_owned).await });
+    yield_for_task_poll().await;
+    clock.tick(Duration::from_secs(2));
+    let stop_result = stop_task.await.expect("stop task did not panic");
+    assert!(stop_result.is_ok(), "stop over KilledNotReaped must return Ok: {stop_result:?}");
+    assert!(
+        matches!(
+            driver.status(&handle).await,
+            Err(overdrive_core::traits::driver::DriverError::NotFound { .. })
+        ),
+        "after the stop the allocation reports gone"
+    );
+    assert!(
+        !VmRunDir::for_alloc(&run_dir_root, &alloc).path().exists(),
+        "the run directory is removed after a stop that reported KilledNotReaped"
+    );
+}

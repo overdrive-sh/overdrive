@@ -91,11 +91,12 @@ use overdrive_core::aggregate::{
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput};
 use overdrive_core::ca::issue_failure::SvidIssueFailure;
 use overdrive_core::ca::issued_certificate_row::IssuedCertificateRow;
+use overdrive_core::cgroup::CgroupPath;
 use overdrive_core::guest_network::{
     GuestNetworkExecSupervisor, GuestNetworkExecWiring, MAX_GUEST_NETWORK_ATTACHMENTS,
     SharedGuestNetworkComponent, SharedGuestNetworkFailStopCause,
 };
-use overdrive_core::guest_transport::GuestTransportAssignment;
+use overdrive_core::guest_transport::{GuestCid, GuestTransportAssignment};
 use overdrive_core::id::{
     AllocationId, CorrelationKey, IssuanceOrdinal, NodeId, ServiceId, SpiffeId, WorkloadId,
 };
@@ -123,8 +124,14 @@ use overdrive_core::traits::observation_store::{
     ServiceBackendRow, TransitionSource, WorkloadSvidIssueStatusRowV1,
 };
 use overdrive_core::traits::vm_host_state::VmHostState as _;
+use overdrive_core::traits::vmm::{VMM_REAP_BOUND, VmTermination, Vmm};
 use overdrive_core::transition_reason::{StoppedBy, TerminalCondition, TransitionReason};
+use overdrive_core::vm::config::{
+    Gid, HostArch, KernelCmdline, KernelImage, MemoryPlan, RootfsPlan, VmConfig, VmConfinement,
+    VmRunDir, VmmIdentity,
+};
 use overdrive_core::workflow::{SignalKey, SignalValue, WorkflowStatus};
+use overdrive_sim::SimVmm;
 use overdrive_sim::adapters::ca::SimCa;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::dataplane::SimDataplane;
@@ -650,6 +657,7 @@ impl Rig {
             .expect("reconciler runtime");
         runtime.register(crate::noop_heartbeat()).await.expect("register heartbeat");
         runtime.register(crate::workload_lifecycle()).await.expect("register workload-lifecycle");
+        runtime.register(crate::vm_reclamation()).await.expect("register vm-reclamation");
         let store_path = tmp.path().join("intent.redb");
         let store = Arc::new(LocalIntentStore::open(&store_path).expect("intent store"));
         let obs = FaultObs::over(Arc::new(SimObservationStore::single_peer(node_id(), 0)));
@@ -839,6 +847,40 @@ impl Rig {
             .write_alloc_lifecycle(row, TransitionSource::Reconciler)
             .await
             .expect("seed the row");
+    }
+
+    /// The `Pending` row of a launch whose owner already holds a lease: the
+    /// state an owner claim has in production (the lease is assigned, its
+    /// address is on the row). Returns the row as written.
+    #[cfg(test)]
+    async fn seed_pending_owner(&self, name: &str) -> AllocStatusRow {
+        let plan = self
+            .pool
+            .assign(alloc(name), &[], crate::shared_network_test_ports::test_owner_flow_ports())
+            .expect("the owner's lease is admitted");
+        let row = AllocStatusRow {
+            alloc_id: alloc(name),
+            workload_id: workload_id(),
+            node_id: node_id(),
+            state: AllocState::Pending,
+            updated_at: LogicalTimestamp { counter: 1, writer: node_id() },
+            reason: None,
+            detail: None,
+            terminal: None,
+            stderr_tail: None,
+            kind: WorkloadKind::Service,
+            listeners: Vec::new(),
+            started_at: None,
+            workload_addr: Some(plan.assignment().workload_addr()),
+            last_terminated: None,
+            restart_count: 0,
+        };
+        self.state
+            .obs
+            .write_alloc_lifecycle(row, TransitionSource::Reconciler)
+            .await
+            .expect("seed the owner's Pending row");
+        self.row(name).await.expect("the owner's Pending row is stored")
     }
 
     async fn put_service(&self) {
@@ -1392,6 +1434,312 @@ async fn guard_a_stop_releases_the_lease_at_once_when_no_scope_remains() {
 
     assert_eq!(rig.row(id).await.map(|row| row.state), Some(AllocState::Terminated));
     assert!(!rig.has_lease(id), "no scope, so the lease is released at the stop");
+}
+
+// ---------------------------------------------------------------------------
+// RB-2 over an unreapable VMM: the lease outlives the stop until the scope is
+// removed (feature delta "The guest-address lease outlives an unreaped VMM").
+// ---------------------------------------------------------------------------
+
+/// How many allocations the next-fit walk below assigns and releases: more than
+/// the pool's usable offsets (the `/16` guest prefix minus the network, the
+/// gateway and the broadcast address), so the cursor passes the held offset.
+const WRAPPING_WALK: u32 = 65_600;
+
+/// A VMM the stop killed and the host cannot reap, with the scope it still
+/// occupies. The reap is `SimVmm::exit_process`; the scope's hold reads the
+/// same fact, so one call ends both.
+struct UnreapedVm {
+    vmm: SimVmm,
+    pid: u32,
+    cid: GuestCid,
+    root: TempDir,
+    _process: overdrive_core::traits::vmm::VmProcess,
+}
+
+/// A launch config whose rootfs master is a real file under `root`.
+fn vm_config(root: &std::path::Path, name: &str) -> VmConfig {
+    let alloc = alloc(name);
+    let master = root.join(format!("{alloc}-master.img"));
+    std::fs::write(&master, [0_u8; 512]).expect("write the rootfs master");
+    let kernel = KernelImage::validate(root.join("vmlinux"), HostArch::X86_64, b"\x7fELF")
+        .expect("an ELF header validates");
+    VmConfig {
+        volume: None,
+        alloc: alloc.clone(),
+        kernel,
+        rootfs: RootfsPlan::for_alloc(master, 512, &alloc, root, &root.join("clone-index")),
+        cmdline: KernelCmdline::platform_default(HostArch::X86_64),
+        memory: MemoryPlan::derive(128 * 1024 * 1024),
+        vcpus: std::num::NonZeroU8::new(1).expect("nonzero"),
+        run_dir: VmRunDir::for_alloc(root, &alloc),
+        confinement: VmConfinement::confined(
+            VmmIdentity { uid: 1000, gid: Gid::new(994), supplementary: vec![] },
+            1024,
+        ),
+        cgroup_scope: CgroupPath::for_alloc(&alloc),
+    }
+}
+
+/// Launch a VMM on the CID of `id`'s lease, kill it with a SIGKILL it never
+/// reaps (`SimVmm::inject_unreapable_process`, then `terminate`: the outcome is
+/// `KilledNotReaped` after the reap bound on the VMM's injected clock), and
+/// leave its scope in the host, held until the VMM is reaped.
+async fn kill_the_vmm_without_a_reap(rig: &Rig, host: &SimVmHostState, id: &str) -> UnreapedVm {
+    let cid = rig
+        .pool
+        .snapshot()
+        .get(&alloc(id))
+        .expect("the running allocation's lease")
+        .assignment()
+        .cid();
+    let root = TempDir::new().expect("tempdir");
+    let vmm_clock = Arc::new(SimClock::new());
+    let vmm = SimVmm::new(Arc::clone(&vmm_clock) as Arc<dyn Clock>);
+    vmm.inject_unreapable_process();
+    let process = vmm.create(&vm_config(root.path(), id), cid).await.expect("the VMM launches");
+    let pid = process.control.pid;
+    let control = process.control.clone();
+    let killing = tokio::spawn({
+        let vmm = vmm.clone();
+        async move { vmm.terminate(&control, Duration::ZERO).await }
+    });
+    for _ in 0..10_000 {
+        if killing.is_finished() {
+            break;
+        }
+        vmm_clock.tick(VMM_REAP_BOUND);
+        tokio::time::sleep(Duration::from_millis(1)).await;
+    }
+    assert!(
+        matches!(killing.await.expect("the kill task ends"), Ok(VmTermination::KilledNotReaped)),
+        "precondition: the VMM is killed and cannot be reaped"
+    );
+    assert!(vmm.is_unreaped(pid), "precondition: the killed VMM is unreaped");
+    assert_eq!(
+        vmm.vsock_device_holders(),
+        BTreeMap::from([(cid, pid)]),
+        "precondition: the unreaped VMM still holds its CID's device"
+    );
+    host.set_scope(alloc(id), BTreeSet::from([pid]));
+    host.set_run_dir(alloc(id));
+    host.hold_scope_while(&alloc(id), {
+        let vmm = vmm.clone();
+        move || vmm.is_unreaped(pid)
+    });
+    UnreapedVm { vmm, pid, cid, root, _process: process }
+}
+
+impl Rig {
+    /// One real `VmReclamation` tick over the production runtime, on the
+    /// node's own target.
+    async fn reclamation_pass(&self, n: u64) -> Result<(), ConvergenceError> {
+        run_convergence_tick_with_guest_network_provisioner_for_test(
+            &self.state,
+            &ReconcilerName::new("vm-reclamation").expect("reconciler name"),
+            &TargetResource::new(&format!("node/{NODE}")).expect("target"),
+            self.base + Duration::from_millis(n * 100),
+            n,
+            self.base + Duration::from_secs(120),
+            self.owner.as_ref(),
+        )
+        .await
+    }
+
+    /// Advance the injected wall clock past any reclaim backoff.
+    fn elapse_reclaim_backoff(&self) {
+        self.clock.tick(Duration::from_secs(3_600));
+    }
+}
+
+fn operator_stop(id: &str) -> Action {
+    Action::StopAllocation {
+        alloc_id: alloc(id),
+        terminal: Some(TerminalCondition::Stopped { by: StoppedBy::Operator }),
+    }
+}
+
+/// PENDING (RB-2 Tier 1 (a), ADR-0156 amended). A stop whose VMM was killed and
+/// not reaped completes (`Terminated`) and leaves the allocation's lease
+/// Retiring: it counts toward the cap, and an assign that wraps to its offset
+/// takes another, so no launch is handed the CID the unreaped VMM still holds.
+///
+/// Owner path: the production stop arm over `SimDriver`, the production pool,
+/// `SimVmm` (an unreapable process) and `SimVmHostState` (its held scope).
+/// Fault: the unreaped VMM. Oracle: the row, the pool's `observe`, the CIDs the
+/// pool hands out across one full next-fit walk, `SimVmm::vsock_device_holders`.
+#[tokio::test]
+#[should_panic(expected = "the unreaped VM's lease stays held Retiring while its scope is present")]
+async fn a_stop_of_an_unreapable_vm_keeps_its_lease_counted_and_no_wrapping_assign_takes_its_cid() {
+    let id = "alloc-prelaunch-service-0";
+    let (rig, host) = running_vm_over_a_host(id).await;
+    let vm = kill_the_vmm_without_a_reap(&rig, &host, id).await;
+
+    rig.dispatch(operator_stop(id)).await.expect("the stop completes");
+
+    assert_eq!(
+        rig.row(id).await.map(|row| row.state),
+        Some(AllocState::Terminated),
+        "the stop completes while the VMM is unreaped"
+    );
+    let held = rig.pool.observe(&[alloc(id)]);
+    assert_eq!(
+        held.leases.get(&alloc(id)),
+        Some(&overdrive_core::traits::guest_attachment_view::GuestAttachmentLease::Retiring),
+        "the unreaped VM's lease stays held Retiring while its scope is present"
+    );
+    assert_eq!(
+        (held.occupancy.held, held.occupancy.retiring),
+        (1, 1),
+        "the retiring lease counts toward the attachment cap"
+    );
+    for step in 0..WRAPPING_WALK {
+        let walker = alloc(&format!("alloc-wrapping-walk-{step}"));
+        let plan = rig
+            .pool
+            .assign(walker.clone(), &[], crate::shared_network_test_ports::test_owner_flow_ports())
+            .expect("below the cap every assignment succeeds");
+        assert_ne!(
+            plan.assignment().cid(),
+            vm.cid,
+            "an assign that wraps to the held offset takes another (step {step})"
+        );
+        rig.pool.release(&walker);
+    }
+    assert_eq!(
+        vm.vmm.vsock_device_holders(),
+        BTreeMap::from([(vm.cid, vm.pid)]),
+        "the unreaped VMM still holds its CID's device after the walk"
+    );
+}
+
+/// PENDING (RB-2 Tier 1 (b), ADR-0156 amended). After the scripted reap
+/// (`SimVmm::exit_process`), a `VmReclamation` pass removes the scope and a
+/// network reclaim attempt releases the lease; a launch on the freed CID is not
+/// refused by the device, so no launch clashed.
+///
+/// Owner path: the production stop arm, `WorkloadLifecycle`'s reclaim tick and
+/// `VmReclamation`'s pass over `SimVmm` and `SimVmHostState`. Oracle: the pool,
+/// the host's scopes, the device holders and the fresh VMM's liveness.
+#[tokio::test]
+#[should_panic(expected = "the lease is held until the VMM is reaped")]
+async fn after_the_reap_a_reclamation_pass_and_a_reclaim_attempt_release_the_lease_and_no_launch_clashes()
+ {
+    let id = "alloc-prelaunch-service-0";
+    let (rig, host) = running_vm_over_a_host(id).await;
+    let vm = kill_the_vmm_without_a_reap(&rig, &host, id).await;
+    rig.dispatch(operator_stop(id)).await.expect("the stop completes");
+    assert_eq!(rig.row(id).await.map(|row| row.state), Some(AllocState::Terminated));
+    assert!(rig.has_lease(id), "the lease is held until the VMM is reaped");
+
+    assert!(vm.vmm.exit_process(vm.pid, None, Some(9)), "the scripted reap reaches the VMM");
+
+    assert!(vm.vmm.vsock_device_holders().is_empty(), "the reap closed the VMM's device");
+    assert!(host.has_scope(&alloc(id)), "the reap alone removes no scope");
+    assert!(rig.has_lease(id), "the reap alone releases no lease");
+    rig.reclamation_pass(1).await.expect("the reclamation pass removes the empty scope");
+    assert!(!host.has_scope(&alloc(id)), "the pass removed the scope once the VMM was reaped");
+    rig.elapse_reclaim_backoff();
+    rig.tick(2).await.expect("the reclaim attempt releases the lease");
+    assert!(!rig.has_lease(id), "the reclaim attempt after the scope's removal releases the lease");
+    assert_eq!(rig.pool.observe(&[]).occupancy.held, 0, "no lease counts toward the cap");
+
+    let fresh = vm
+        .vmm
+        .create(&vm_config(vm.root.path(), "alloc-prelaunch-service-9"), vm.cid)
+        .await
+        .expect("a launch on the freed CID spawns");
+    assert!(vm.vmm.is_live(fresh.control.pid), "the launch on the freed CID did not clash");
+    assert_eq!(
+        vm.vmm.vsock_device_holders(),
+        BTreeMap::from([(vm.cid, fresh.control.pid)]),
+        "the fresh VMM holds the freed CID's device"
+    );
+}
+
+/// PENDING (RB-2 Tier 1 (c), ADR-0156 amended). When the scope observation at
+/// the stop fails, the stop returns the typed `ShimError::Reclamation` before
+/// any effect: no teardown, no terminal row (the `Running` row stands), and the
+/// replay of the same stop succeeds.
+///
+/// Fault: `SimVmHostState::script_observe_failure`. Oracle: the dispatch
+/// result, the row, the owner's journal, the lease, then the replay's row and
+/// lease. Today the stop reads no scope, so the scripted failure is never met
+/// and the stop completes.
+#[tokio::test]
+#[should_panic(expected = "a failing scope observation at the stop is the typed reclamation error")]
+async fn a_failing_scope_observation_at_the_stop_gives_a_typed_error_with_no_teardown_and_no_row_and_the_replay_succeeds()
+ {
+    let id = "alloc-prelaunch-service-0";
+    let (rig, host) = running_vm_over_a_host(id).await;
+    let running = rig.row(id).await.expect("the running row");
+    host.script_observe_failure(std::io::ErrorKind::PermissionDenied);
+
+    let result = rig.dispatch(operator_stop(id)).await;
+
+    assert!(
+        matches!(
+            &result,
+            Err(ShimError::Reclamation(super::reclamation::ReclamationError::Host(error)))
+                if error.kind() == std::io::ErrorKind::PermissionDenied
+        ),
+        "a failing scope observation at the stop is the typed reclamation error: {result:?}"
+    );
+    assert_eq!(rig.teardowns_of(id), 0, "nothing is torn down before the observation");
+    assert_eq!(
+        rig.row(id).await,
+        Some(running),
+        "no terminal row is written: the Running row stands"
+    );
+    assert!(rig.has_lease(id), "the lease is untouched");
+
+    let replay = rig.dispatch(operator_stop(id)).await;
+
+    assert!(replay.is_ok(), "the replay of the same stop succeeds: {replay:?}");
+    assert_eq!(rig.row(id).await.map(|row| row.state), Some(AllocState::Terminated));
+    assert!(!rig.has_lease(id), "the replay finds no scope and releases the lease");
+    assert_eq!(rig.teardowns_of(id), 1, "the replay tears the network down once");
+}
+
+/// PENDING (RB-2 Tier 1 (d), ADR-0156 amended). While the scope is held, every
+/// reclaim attempt `WorkloadLifecycle` makes leaves the lease held: the scope's
+/// presence, not the number of attempts, decides. The lease is released by the
+/// first attempt after the reap and the pass's removal of the scope.
+///
+/// Oracle: the pool's lease state and occupancy and the host's scope after each
+/// attempt; the view's attempt count proves the attempts were made.
+#[tokio::test]
+#[should_panic(expected = "the lease stays held while the scope is held, attempt 1")]
+async fn the_lease_stays_held_across_several_reclaim_attempts_while_the_scope_is_held() {
+    let id = "alloc-prelaunch-service-0";
+    let (rig, host) = running_vm_over_a_host(id).await;
+    let vm = kill_the_vmm_without_a_reap(&rig, &host, id).await;
+    rig.dispatch(operator_stop(id)).await.expect("the stop completes");
+
+    for attempt in 1..=3_u64 {
+        rig.elapse_reclaim_backoff();
+        rig.tick(attempt).await.expect("a reclaim attempt over a held scope completes");
+        let held = rig.pool.observe(&[alloc(id)]);
+        assert_eq!(
+            held.leases.get(&alloc(id)),
+            Some(&overdrive_core::traits::guest_attachment_view::GuestAttachmentLease::Retiring),
+            "the lease stays held while the scope is held, attempt {attempt}"
+        );
+        assert_eq!(held.occupancy.held, 1, "the held lease still counts, attempt {attempt}");
+        assert!(host.has_scope(&alloc(id)), "the held scope is not removed, attempt {attempt}");
+    }
+    assert_eq!(
+        rig.view().reclaim_attempts.get(&alloc(id)).copied(),
+        Some(3),
+        "three reclaim attempts were made"
+    );
+
+    assert!(vm.vmm.exit_process(vm.pid, None, Some(9)), "the scripted reap reaches the VMM");
+    rig.reclamation_pass(10).await.expect("the pass removes the scope after the reap");
+    assert!(!host.has_scope(&alloc(id)), "the scope is removed after the reap");
+    rig.elapse_reclaim_backoff();
+    rig.tick(4).await.expect("the attempt after the removal completes");
+    assert!(!rig.has_lease(id), "the lease is released after the scope's removal");
 }
 
 // ---------------------------------------------------------------------------
@@ -2170,16 +2518,26 @@ async fn restart_arm_guest_network_provision_failure_writes_a_failed_successor_r
 }
 
 /// GUARD (R9, N-IDEM; passes today). A restart whose successor start reports a
-/// duplicate VM owner is an idempotent stale dispatch: `Ok(())`, no successor
-/// row, and the exact-old predecessor cleanup still runs once. The start arm's
-/// duplicate owner (S7) is covered by `lifecycle_broadcast`.
+/// duplicate VM owner is an idempotent stale dispatch. The owner is a launch of
+/// the same restart that already has its `Pending` row and its lease (an owner
+/// claim with no row is not a state `serve` and `deploy` produce), so the
+/// duplicate dispatch writes no row of its own: it returns `Ok(())`, leaves the
+/// owner's row unchanged, keeps the owner's lease, and the exact-old
+/// predecessor cleanup still runs once. The start arm's duplicate owner (S7) is
+/// covered by `lifecycle_broadcast`.
+///
+/// Owner path: the production restart arm over `ScriptedStartDriver`, the
+/// production pool and `TestSharedOwner`. Oracle: the successor's row and lease
+/// before and after, the driver's records, the owner's journal.
 #[tokio::test]
-async fn restart_arm_duplicate_vm_owner_is_a_no_row_success_that_still_cleans_the_predecessor() {
+async fn restart_arm_duplicate_vm_owner_writes_no_row_of_its_own_keeps_the_owners_row_and_lease_and_still_cleans_the_predecessor()
+ {
     let driver = Arc::new(ScriptedStartDriver::duplicate_owner());
     let rig = Rig::build(Arc::clone(&driver) as Arc<dyn Driver>).await;
     let predecessor = "alloc-prelaunch-service-0";
     let successor = "alloc-prelaunch-service-1";
     rig.seed_crashed_predecessor(predecessor, true).await;
+    let owner_row = rig.seed_pending_owner(successor).await;
     let mut lifecycle = rig.state.lifecycle_events.subscribe();
 
     let result = rig.dispatch(restart_action(predecessor, successor)).await;
@@ -2190,7 +2548,16 @@ async fn restart_arm_duplicate_vm_owner_is_a_no_row_success_that_still_cleans_th
         [alloc(successor)],
         "the launch reached the driver"
     );
-    assert!(rig.row(successor).await.is_none(), "a duplicate owner writes no successor row");
+    assert_eq!(
+        rig.row(successor).await,
+        Some(owner_row),
+        "a duplicate owner writes no row of its own: the owner's row is unchanged"
+    );
+    assert!(
+        rig.has_lease(successor),
+        "a duplicate owner keeps the owner's lease: the dispatch never releases it"
+    );
+    assert_eq!(rig.teardowns_of(successor), 0, "the owner's network is not torn down");
     assert!(
         drain_lifecycle(&mut lifecycle).iter().all(|event| event.alloc_id != alloc(successor)),
         "no lifecycle event names the successor"

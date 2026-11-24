@@ -209,6 +209,8 @@ mod acceptance {
 
     // node-local-persistent-volume (GH #348): the VolumeBacking port contract on the sim twin.
     mod sim_volume_backing_contract;
+    // node-local-persistent-volume (GH #348, ADR-0348, ADR-0349): the stuck-VM sim hooks' contract.
+    mod sim_stuck_vm_contract;
     // node-local-persistent-volume (GH #348): the three seeded volume launch invariants through
     // the DST harness (pending DELIVER: the volume launch path and `SimVolumeBacking`).
     mod volume_launch_invariants;

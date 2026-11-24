@@ -680,3 +680,309 @@ fn the_guest_prefix_and_the_mesh_workload_range_are_disjoint() {
     assert_eq!(mesh, "10.99.0.0/16".parse::<Ipv4Net>().expect("mesh range"));
     assert!(!prefixes_overlap(guest, mesh), "{guest} and {mesh} overlap");
 }
+
+// ---------------------------------------------------------------------------
+// A stuck VM's reservation (ADR-0350, feature delta "Boot proceeds past a stuck
+// VM", Pool API). `reserve_leftover` inserts a Retiring lease with no plan at
+// the offset a leftover row's `workload_addr` names. Layer 1-2, in-process.
+// Driving port: `reserve_leftover`, `assign`, `release`; observation:
+// `lease_observation`, `observe`, `snapshot`.
+// ---------------------------------------------------------------------------
+
+use crate::action_shim::reclamation::CorruptLeftoverRow;
+
+/// Four-offset prefix: usable offsets 2..=6 (gateway at 1), so a wrap is reached
+/// in a few assigns.
+const SMALL_PREFIX: &str = "100.95.0.0/29";
+
+fn address_at(prefix: Ipv4Net, offset: u32) -> Ipv4Addr {
+    Ipv4Addr::from(u32::from(prefix.network()) + offset)
+}
+
+fn leftover_id(index: usize) -> AllocationId {
+    AllocationId::new(&format!("nd295-stuck-{index:05}")).expect("allocation id")
+}
+
+/// ADR-0350, QPROJ-2. A reservation is one Retiring lease that counts toward
+/// the cap: with every other slot reserved, a new allocation is refused with the
+/// held and retiring counts the reservations make.
+/// CONTRACT_SHAPE: bounded-change. Universe: the pool's occupancy and leases.
+#[test]
+fn reservations_count_toward_the_cap_and_refuse_the_next_assign_at_it() {
+    let prefix: Ipv4Net = "100.95.0.0/16".parse().expect("node prefix");
+    let pool = pool();
+    let offsets = usable_offsets(prefix);
+    for (index, offset) in offsets.iter().take(CAP - 1).enumerate() {
+        pool.reserve_leftover(&leftover_id(index), address_at(prefix, *offset))
+            .expect("a free leased offset reserves");
+    }
+    let below = pool.observe(&[]);
+    assert_eq!(below.occupancy.held, MAX_GUEST_NETWORK_ATTACHMENTS - 1, "each reservation is held");
+    assert_eq!(
+        below.occupancy.retiring,
+        MAX_GUEST_NETWORK_ATTACHMENTS - 1,
+        "each reservation is Retiring"
+    );
+    pool.assign(alloc(1), &[], test_owner_flow_ports())
+        .expect("one slot below the cap still admits a launch");
+
+    let before = pool.lease_observation();
+    let refusal = pool.assign(alloc(2), &[], test_owner_flow_ports());
+    assert!(
+        matches!(
+            refusal,
+            Err(GuestNetworkError::AdmissionCapReached { held, retiring, cap })
+                if held == MAX_GUEST_NETWORK_ATTACHMENTS
+                    && retiring == MAX_GUEST_NETWORK_ATTACHMENTS - 1
+                    && cap == MAX_GUEST_NETWORK_ATTACHMENTS
+        ),
+        "reservations count toward the cap: {refusal:?}"
+    );
+    assert_eq!(pool.lease_observation(), before, "the refusal changes nothing");
+}
+
+/// ADR-0350. `assign` for the reserved allocation returns the existing
+/// `LeaseRetiring` and changes nothing; the reservation is not a plan.
+/// CONTRACT_SHAPE: unbounded-preservation.
+#[test]
+fn assign_for_a_reserved_allocation_is_refused_as_retiring_and_changes_nothing() {
+    let prefix: Ipv4Net = "100.95.0.0/16".parse().expect("node prefix");
+    let pool = pool();
+    let stuck = leftover_id(0);
+    pool.reserve_leftover(&stuck, address_at(prefix, 9)).expect("reserve");
+    let before = pool.lease_observation();
+
+    let refusal = pool.assign(stuck.clone(), &[], test_owner_flow_ports());
+
+    assert!(
+        matches!(&refusal, Err(GuestNetworkError::LeaseRetiring { alloc }) if *alloc == stuck),
+        "a reserved allocation's assign is LeaseRetiring: {refusal:?}"
+    );
+    assert_eq!(pool.lease_observation(), before, "the refusal changes nothing");
+}
+
+/// ADR-0350, QPROJ-2. `observe` reports the reservation as a Retiring lease
+/// and `lease_observation` as `Reserved`: the CID the offset derives and no
+/// launch token; `snapshot` (the plans) omits it. A repeat for the same
+/// allocation and address changes nothing.
+/// CONTRACT_SHAPE: bounded-change. Universe: leases, snapshot, cursor.
+#[test]
+fn a_reservation_is_a_retiring_reserved_lease_with_the_offsets_cid_and_no_plan() {
+    let prefix: Ipv4Net = "100.95.0.0/16".parse().expect("node prefix");
+    let pool = pool();
+    let stuck = leftover_id(0);
+    let fresh_cursor = pool.lease_observation().next_fit;
+
+    pool.reserve_leftover(&stuck, address_at(prefix, 9)).expect("reserve");
+    let launched = pool.assign(alloc(1), &[], test_owner_flow_ports()).expect("a launch admits");
+
+    let observation = pool.lease_observation();
+    assert_eq!(
+        observation.leases[&stuck],
+        GuestLeaseView::Reserved {
+            cid: GuestCid::new(GUEST_CID_BASE + 9).expect("an in-range CID")
+        },
+        "the reservation is Reserved at GUEST_CID_BASE + offset"
+    );
+    assert_eq!(observation.leases[&stuck].state(), GuestAttachmentLease::Retiring);
+    assert_eq!(observation.leases[&stuck].launch(), None, "a reservation has no launch token");
+    assert_eq!(
+        pool.observe(std::slice::from_ref(&stuck)).leases.get(&stuck),
+        Some(&GuestAttachmentLease::Retiring),
+        "the attachment view reports it Retiring"
+    );
+    let plans = pool.snapshot();
+    assert_eq!(
+        plans.keys().cloned().collect::<Vec<_>>(),
+        vec![alloc(1)],
+        "snapshot lists only the launch's plan: the reservation has none"
+    );
+    assert_eq!(plans[&alloc(1)].assignment().cid(), launched.assignment().cid());
+    assert_ne!(
+        observation.next_fit, fresh_cursor,
+        "the launch moved the cursor; the reservation did not"
+    );
+
+    pool.reserve_leftover(&stuck, address_at(prefix, 9)).expect("a repeat is idempotent");
+    assert_eq!(pool.lease_observation(), observation, "a repeat reservation changes nothing");
+}
+
+/// ADR-0350. A reserved offset is never handed to a launch, including after
+/// next-fit wraps past the end of the prefix, and it stays reserved: with the
+/// other four offsets taken the pool is exhausted, and a released launch's
+/// offset is the one the next assign takes.
+/// CONTRACT_SHAPE: bounded-change. Universe: assigned CIDs, the reservation.
+#[test]
+fn a_reserved_offset_survives_a_next_fit_wrap_and_is_never_assigned() {
+    let prefix: Ipv4Net = SMALL_PREFIX.parse().expect("small prefix");
+    let pool = pool_over(SMALL_PREFIX, 0x295);
+    let usable = usable_offsets(prefix);
+    assert_eq!(usable, vec![2, 3, 4, 5, 6], "precondition: five usable offsets");
+    let stuck = leftover_id(0);
+    pool.reserve_leftover(&stuck, address_at(prefix, 4)).expect("reserve offset 4");
+    let reserved_cid = GuestCid::new(GUEST_CID_BASE + 4).expect("an in-range CID");
+
+    let mut offsets = Vec::new();
+    for key in 1..=4 {
+        let plan = pool.assign(alloc(key), &[], test_owner_flow_ports()).expect("a free offset");
+        assert_ne!(plan.assignment().cid(), reserved_cid, "the reserved CID is never handed out");
+        offsets.push(offset_of(prefix, plan.assignment().workload_addr()));
+    }
+    assert_eq!(offsets, vec![2, 3, 5, 6], "next-fit skips the reserved offset");
+    let exhausted = pool.assign(alloc(5), &[], test_owner_flow_ports());
+    assert!(
+        matches!(exhausted, Err(GuestNetworkError::PoolExhausted { .. })),
+        "a full prefix of leases and one reservation is exhausted: {exhausted:?}"
+    );
+
+    // The cursor is past offset 6: releasing offset 5 and assigning wraps.
+    pool.release(&alloc(3));
+    let wrapped = pool.assign(alloc(6), &[], test_owner_flow_ports()).expect("the released offset");
+    assert_eq!(offset_of(prefix, wrapped.assignment().workload_addr()), 5);
+    assert_eq!(pool.lease_observation().leases[&stuck].cid(), reserved_cid, "still reserved");
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(128))]
+
+    /// ADR-0350. Over any sequence of assigns and releases, a reserved offset's
+    /// CID is never in a launch's plan and the reservation is still there at
+    /// the end: only an explicit release of the reserved allocation frees it.
+    /// CONTRACT_SHAPE: unbounded-preservation.
+    #[test]
+    fn no_assign_sequence_ever_hands_out_a_reserved_cid(
+        reserved_index in 0_usize..14,
+        operations in prop::collection::vec(lease_op(), 0..96),
+    ) {
+        let small: Ipv4Net = "100.95.0.0/28".parse().expect("small prefix");
+        let pool = pool_over("100.95.0.0/28", 0x295);
+        let usable = usable_offsets(small);
+        let reserved_offset = usable[reserved_index % usable.len()];
+        let stuck = leftover_id(0);
+        pool.reserve_leftover(&stuck, address_at(small, reserved_offset)).expect("reserve");
+        let reserved_cid = GuestCid::new(GUEST_CID_BASE + reserved_offset).expect("in range");
+        for op in operations {
+            match op {
+                LeaseOp::Assign(key) => {
+                    if let Ok(plan) = pool.assign(alloc(key), &[], test_owner_flow_ports()) {
+                        prop_assert_ne!(plan.assignment().cid(), reserved_cid);
+                    }
+                }
+                LeaseOp::Retire(key) => {
+                    let _ = pool.retire(&alloc(key));
+                }
+                LeaseOp::Release(key) => pool.release(&alloc(key)),
+            }
+        }
+        prop_assert_eq!(pool.lease_observation().leases[&stuck].cid(), reserved_cid);
+        prop_assert!(pool.snapshot().values().all(|plan| plan.assignment().cid() != reserved_cid));
+    }
+}
+
+/// ADR-0350, ADR-0156 release-last. `release` of the reservation returns its
+/// offset: the occupancy returns to empty and the allocation can be assigned.
+/// CONTRACT_SHAPE: bounded-change.
+#[test]
+fn releasing_a_reservation_returns_its_offset_to_the_pool() {
+    let prefix: Ipv4Net = "100.95.0.0/16".parse().expect("node prefix");
+    let pool = pool();
+    let stuck = leftover_id(0);
+    pool.reserve_leftover(&stuck, address_at(prefix, 9)).expect("reserve");
+
+    pool.release(&stuck);
+
+    let observed = pool.observe(std::slice::from_ref(&stuck));
+    assert_eq!((observed.occupancy.held, observed.occupancy.retiring), (0, 0));
+    assert!(observed.leases.is_empty(), "no lease remains");
+    pool.assign(stuck, &[], test_owner_flow_ports()).expect("the allocation is assignable again");
+}
+
+/// ADR-0350 corrupt rows. An address no pool offset can hold is typed
+/// `AddressOutsidePrefix` naming the allocation and the address, never a panic,
+/// and the pool is unchanged. The cases are the address outside the prefix, the
+/// gateway, and the prefix's network and broadcast addresses.
+/// CONTRACT_SHAPE: unbounded-preservation.
+#[test]
+fn a_reservation_outside_the_leased_range_is_a_typed_error_naming_the_allocation() {
+    let prefix: Ipv4Net = "100.95.0.0/16".parse().expect("node prefix");
+    let pool = pool();
+    let before = pool.lease_observation();
+    for (index, address) in [
+        Ipv4Addr::new(10, 0, 0, 5),
+        Ipv4Addr::new(100, 96, 0, 5),
+        GATEWAY,
+        prefix.network(),
+        prefix.broadcast(),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let stuck = leftover_id(index);
+        let error = pool
+            .reserve_leftover(&stuck, address)
+            .expect_err("an address the pool does not lease is corrupt");
+        assert!(
+            matches!(
+                &error,
+                CorruptLeftoverRow::AddressOutsidePrefix { allocation, address: named }
+                    if *allocation == stuck && *named == address
+            ),
+            "{address}: {error:?}"
+        );
+        assert!(error.to_string().contains(stuck.as_str()), "the message names the allocation");
+        assert_eq!(pool.lease_observation(), before, "a corrupt row reserves nothing");
+    }
+}
+
+/// ADR-0350 corrupt rows. An offset another allocation already holds (an
+/// Admitted launch's, or an earlier reservation's) and the same allocation at a
+/// second offset are typed `OffsetAlreadyHeld`, naming the allocation and the
+/// holder; the pool keeps its earlier lease.
+/// CONTRACT_SHAPE: unbounded-preservation.
+#[test]
+fn a_reservation_on_a_held_offset_is_a_typed_error_naming_both_allocations() {
+    let prefix: Ipv4Net = "100.95.0.0/16".parse().expect("node prefix");
+    let pool = pool();
+    let launched = pool.assign(alloc(1), &[], test_owner_flow_ports()).expect("a launch admits");
+    let launched_addr = launched.assignment().workload_addr();
+    let first = leftover_id(1);
+    let second = leftover_id(2);
+    pool.reserve_leftover(&first, address_at(prefix, 9)).expect("reserve");
+    let before = pool.lease_observation();
+
+    let on_launch = pool.reserve_leftover(&second, launched_addr).expect_err("held by a launch");
+    assert!(
+        matches!(
+            &on_launch,
+            CorruptLeftoverRow::OffsetAlreadyHeld { allocation, held_by, .. }
+                if *allocation == second && *held_by == alloc(1)
+        ),
+        "{on_launch:?}"
+    );
+    let on_reservation =
+        pool.reserve_leftover(&second, address_at(prefix, 9)).expect_err("held by a reservation");
+    assert!(
+        matches!(
+            &on_reservation,
+            CorruptLeftoverRow::OffsetAlreadyHeld { allocation, held_by, .. }
+                if *allocation == second && *held_by == first
+        ),
+        "{on_reservation:?}"
+    );
+    let moved = pool.reserve_leftover(&first, address_at(prefix, 10)).expect_err("a second offset");
+    assert!(
+        matches!(
+            &moved,
+            CorruptLeftoverRow::OffsetAlreadyHeld { allocation, held_by, .. }
+                if *allocation == first && *held_by == first
+        ),
+        "{moved:?}"
+    );
+    for error in [&on_launch, &on_reservation, &moved] {
+        assert!(
+            error.to_string().contains(second.as_str())
+                || error.to_string().contains(first.as_str())
+        );
+    }
+    assert_eq!(pool.lease_observation(), before, "a corrupt row changes nothing");
+}

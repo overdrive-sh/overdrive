@@ -630,3 +630,87 @@ today. An armed `arm_observe_barrier` is honoured first (the call signals `enter
 1. **ADR-0353 for the restart arm.** The design states "a Start whose prior row is already non-terminal writes no `Pending` row" and gives the restart successor `dominating(.., None)`. A duplicate dispatch of one restart (the R9 shape: the driver answers `AllocationAlreadyOwned`) would write `Pending` over the successor's `Running` row if `dominating(.., None)` wins, and `restart_arm_duplicate_vm_owner_is_a_no_row_success_that_still_cleans_the_predecessor` asserts no successor row at all, which the `Pending` write (made before `start`) contradicts when no first launch exists. S-RB-11 pins the safe half (a second dispatch after a `Running` row never regresses it). The R9 test is **not changed**: the contract for a duplicate owner with no prior row is not stated, so DESIGN must say whether the `Pending` row is ended (and with which reason) or never written.
 2. **The fail-closed `Failed` row after `Running` (`assert_superseding_failed_row`, `action_shim/mod.rs`, A-4)** asserts the row does not inherit the `Running` row's address. ADR-0353 says "every other row the shim or the observers write copies it from the prior row" but its table does not list this producer. Left unchanged; DESIGN to confirm.
 3. **Test seams the design names but the tree does not give.** An injectable cgroup filesystem for `RealVmHostState`; a way to choose the launch wrapper in `CloudHypervisorVmm::create`; a compiled stand-in hypervisor for guest tests. The design's wording ("through `with_binary` and the existing `create` seams") cannot arrange `executing the launch program` or a stand-in's first-act record, because `with_binary` replaces only the program the wrapper runs. DISTILL did not add a seam.
+
+### N7. N3 authored after the stuck-VM API compiled (commit following 5d553dd6c)
+
+Each test is a complete body. PENDING = `#[should_panic(expected = ...)]` with the first assertion the body reaches today; GUARD = passes now and keeps passing. All rows
+verified on metal (`cargo xtask metal run`, ordinary grammar, `OVERDRIVE_METAL_LEASE_TIMEOUT_SECONDS=3600`): 221 tests of the new and touched files passed across
+core, reconcilers, cli, control-plane, host and sim; worker 16 passed; clippy `-D warnings` clean on all seven crates; `placement-lint` exit 0.
+
+| N3 row | Tests (file) | Tier, placement | Status |
+|---|---|---|---|
+| ADR-0348 Tier 1 (a) to (e) | `overdrive-worker/tests/acceptance/vm_driver_stop_unreaped.rs`: seven `guard_*` over the production `VmDriver::stop` and an unreapable `SimVmm` (bound, claim and CID held until `exit_process`, late reap emits no event, replacement waits and attaches, no `kill_scope` after `KilledNotReaped` in the stop and the start-failure cleanup, reapable VMM unchanged) | layer 2, host-pure | GUARD: the driver already ignores the termination value and the sim owns the bound |
+| stop-totality | `vm_driver_stop_totality.rs::stop_is_total_over_a_killed_not_reaped_termination` | layer 2 | GUARD |
+| ADR-0351 Tier 1, ADR-0349 driver side, ADR-0352 no `place_pid` | `vm_driver_scope_single_remover.rs`: `a_reaped_stop_removes_the_scope_through_the_host_state_port`, `a_start_failure_cleanup_removes_the_scope_through_the_host_state_port`, `the_driver_never_removes_a_scope_directory_through_the_cgroup_port`, `a_busy_scope_leaves_the_stop_outcome_and_the_other_cleanup_steps_unchanged`, `a_busy_scope_leaves_the_reported_start_failure_unchanged`, `the_driver_does_not_place_the_vmm_pid_in_its_scope`; guards `guard_a_held_scope_leaves_the_stop_outcome_and_artifacts_unchanged`, `guard_a_failed_create_leaves_no_vmm_process` | layer 2, host-pure | 6 PENDING (09-02, 09-05), 2 GUARD |
+| sim hook contract | `overdrive-sim/tests/acceptance/sim_stuck_vm_contract.rs` (15 tests: unreapable bound, device held, reap, second terminate, one-shot arming, held scope `ResourceBusy` and the queue, hold read per call, release, scripted observe failure and its barrier) | layer 2, host-pure | 15 GUARD |
+| `VmHostState` equivalence (ADR-0349), host-adapter units over a tempdir cgroup root | `overdrive-host/tests/integration/vm_host_state_equivalence.rs`: `a_failed_removal_with_a_non_busy_kind_returns_at_once_without_retry` (PENDING, "a removal failure that is not busy must return at once": today it retries for the 3 s bound), three guards | layer 3 file, tests host-pure over a tempdir | 1 PENDING, 3 GUARD |
+| `Vmm` equivalence (ADR-0348 already-gone pid, ADR-0352 membership) | `vmm_equivalence.rs`: two guards; `a_created_vmm_is_a_member_of_its_scope_on_the_real_adapter`, `create_into_a_missing_scope_fails_on_the_real_adapter` (PENDING) | layer 3, `cgroup-default` / `nested-launch` guest | 2 PENDING, 2 GUARD |
+| ADR-0350 pool: `reserve_leftover`, `CorruptLeftoverRow`, `GuestLeaseView::Reserved` | `guest_network/pool_acceptance.rs` (7 tests plus one proptest of 128 cases) | layer 1-2, host-pure | GUARD (09-01 built the pool surface) |
+| ADR-0350 and ADR-0354 boot (busy scope, corrupt rows, sweep never receives the CID, one bound for several stuck VMs, one scope's failure keeps another's reservation) | `vm_reclamation_boot.rs::stuck_vm_boot` (13 PENDING, 3 GUARD) | layer 2, host-pure | PENDING: first RED "a busy scope never refuses the boot" (`converge` returns `Host(ResourceBusy)`), or the named assertion where distinct |
+| one release site over a reservation; `VmReclamation` tick over a held scope; unremovable-scope pass | `stuck_vm_boot`: `repeated_reclaim_attempts_over_a_reservation_...`, `a_reservation_is_released_by_a_reclaim_attempt_after_the_reap_...` (PENDING behind the boot reservation), the three tick and pass `guard_*` | layer 2 | 2 PENDING, 3 GUARD |
+| RB-2 Tier 1 (a) to (d) | `prelaunch_outcome_acceptance.rs`: four PENDING ("the unreaped VM's lease stays held Retiring while its scope is present", "the lease is held until the VMM is reaped", "a failing scope observation at the stop is the typed reclamation error", "the lease stays held while the scope is held, attempt 1") | layer 2, host-pure | 4 PENDING (09-04) |
+| R9 rearrangement | `restart_arm_duplicate_vm_owner_writes_no_row_of_its_own_keeps_the_owners_row_and_lease_and_still_cleans_the_predecessor` (renamed; the old name said "no row", which the owner's `Pending` row now contradicts): the owner has its `Pending` row, the row and lease are unchanged, the predecessor is cleaned | layer 2 | GUARD (holds before and after) |
+| `assert_superseding_failed_row` | `action_shim/mod.rs` A-4 now asserts equality with the `Running` row's address; its one caller `install_failure_supersedes_running_with_failed_and_never_releases_the_gate` is PENDING, "the superseding Failed row must carry the Running row's workload_addr" | layer 2 | PENDING (09-06) |
+| RB-13 count tests 1 to 3, deletion equivalence, `is_natural_exit` | `overdrive-reconcilers/tests/acceptance/launch_abandoned_count.rs`: 7 PENDING examples (the reconciler counts from the newest row, not the newest row that ran; six count cells and the Job cell), the deletion-equivalence proptest PENDING, the `generation_replacement_pending` agreement proptest PENDING (06-01), 5 `last_ran_alloc` / backend guards | layer 2 | PENDING (09-08, 06-01) |
+| `is_launch_abandoned`, wordings | `overdrive-core/tests/acceptance/launch_abandoned_predicates.rs` (6, one a proptest) | layer 1 | GUARD |
+| goldens (`describe`, wordings) | `overdrive-cli/tests/acceptance/workload_describe_abandoned_launch.rs` (3) on `render::workload_describe` | layer 1 | GUARD; schema-evolution fixtures were already added by 09-01 |
+| ADR-0355 Tier 1 relaunch | `restart_generation_invariant.rs`: two Job cells, seeds 348001 to 348006 | Tier 1 seeded | GUARD today; they bind once the shim writes the abandoned rows (09-06) |
+| ADR-0352 Tier 3 with a stand-in; serve-crash test | `overdrive-cli/tests/integration/vm_crash_mid_launch.rs::a_serve_crash_just_after_the_vmm_is_spawned_leaves_nothing_outside_a_scope_boot_reclaims` | layer 3, `cgroup-default` / `nested-launch-rustc` | PENDING: "the hypervisor's first act must run inside its allocation's cgroup scope"; it recorded `["0::/overdrive.slice/control-plane.slice"]`, so the VMM spent its first instructions in `serve`'s slice. Every assertion before it passes today (the stand-in recorded and claimed its CID, survived the crash, was reclaimed by the second boot with its scope removed, and the relaunch claimed its CID with no clash) |
+| S-VOL-T3-12 boot variant | `volume_survives.rs::a_node_boots_past_a_vm_stuck_in_exit_left_over_by_a_serve_crash` | layer 3, `cgroup-default` / `volume-pool` | PENDING: "a node must boot past a VM whose scope cannot be removed; boot refused: ... reclamation executor failed: VmHostState operation failed: Device or resource busy (os error 16)" (09-07) |
+
+#### The two test hooks
+
+**(a) Abrupt crash of the in-process `serve`: it already exists; nothing was added.** `ServeLifetime` with `ServeSignal::Kill` is the in-process stand-in for `SIGKILL`
+(`ServeHandle::kill_for_test` is `pub(crate)`; the lifetime port is the public route), and `overdrive-cli/tests/integration/serve_lifetime_support.rs::kill_serve_owner` is the
+test-side call (`vsock_support.rs` already boots, kills and reboots through it). It runs `ServerHandle::kill_for_test`: the gateway stops with a zero grace, every
+control-plane task is aborted and joined, the convergence, exit-observer and interest-router tasks, the shared-network supervisor, the guest flow owner and the
+resolver are released, and the mTLS worker is dropped on a thread that has given up every capability, so its destructors cannot touch the kernel state the dead owner held.
+Workloads, cgroups, and the kernel objects stay. **What it cannot model:** the owner's memory is dropped, not torn away, so a destructor that runs only on an orderly
+path still runs; no signal or exit status reaches a parent; a descriptor leaked to a child process would be released here by the drop, not held by the child. For this
+feature (a crash between spawn and the first reconciliation) none of those matter: the observable is the surviving VMM and its scope, which the kill leaves exactly as
+`SIGKILL` does. The facility is used by both new Tier-3 tests.
+
+**(b) Stand-in hypervisor.** Source: `crates/overdrive-cli/tests/fixtures/standin_hypervisor.rs` (a test fixture directory; Cargo does not discover it as a test target and no
+`crates/*/src` file holds it). Delivery to the guest: the source is embedded with `include_str!` in `vm_crash_mid_launch.rs`, which writes it into a staging-root tempdir and
+builds it with the `nested-launch-rustc` guest's own `rustc` for `x86_64-unknown-linux-musl` (the target that guest's sysroot carries), so the guest kit gains no artifact
+and no kit change is needed. The test passes it to `CloudHypervisorVmm::with_binary`. The program answers `--version` and `--help` (naming `--landlock`), as the launch
+probes require. Launched with the real argument list, its first act is to append `/proc/self/cgroup` and its pid to `standin.record` in its run directory (the parent of
+`--api-socket`, which the launcher chowns to the confined identity, so no environment variable or extra path crosses the launch chain); it then opens
+`/dev/vhost-vsock`, takes ownership and sets the guest CID from `--vsock cid=<n>,backend=vhost-kernel`, records the outcome, and blocks holding the device. It reaches
+the real kernel CID table, so a CID clash between a survivor and a new launch is `EADDRINUSE` in its record. Limits: it never boots a guest, so `start` waits on its
+beacon until the boot deadline (the tests do not wait for `Running`); the wrapper-chooser seam (§ N6 question 3, `executing the launch program`) is still not available.
+
+#### Corrections to the earlier sections
+
+- N3 "injectable cgroup filesystem": `RealVmHostState::new(cgroup_root, run_root, index_dir)` takes the root; the tempdir units were authored against it. What a tempdir cannot show
+  is removal only after a `0` reading from `cgroup.events` (a regular file is not pollable); that stays on the kernel (S-RB-18).
+- N3 "`render::alloc_status` goldens": `render::alloc_status` no longer exists; the live renderer is `render::workload_describe` (the goldens target it).
+- N3 hook (a) "crash facility on the CLI `ServeHandle`": exists as above.
+- N6 questions 1 and 2 are settled by the design (09-06 notes): the R9 test and `assert_superseding_failed_row` are changed as in N7.
+- `SimVmm::terminate` ignores its `grace` argument, so "exactly `VMM_REAP_BOUND` beyond the grace" is asserted as the bound after the kill on the shared clock.
+- `hold_scope_while`: the sim doc says it panics if the allocation already has a hold; the code asserts only that the scope was seeded and a second call overwrites. Not tested; one of them should change.
+
+#### Not authored
+
+| Test | Missing | Why |
+|---|---|---|
+| `LaunchStep` codec round trip; siginfo-to-`VmmExit` mapping; unresolvable wrapper is `ConfinementUnavailable` with no child; descriptors not inherited; closed stdio; pidfd reap; cancellation of a dropped `create` | `launch_clone.rs`, `LaunchStep` and the pidfd reaper (09-05) | the types do not exist; the design pins the behaviour, not a signature a test can compile against. `CloudHypervisorVmm::with_cgroup_root` exists and is exercised by the membership tests above |
+| `SimVmm` scope membership equivalence, absent-scope create refused by the sim, "a failed create leaves no scope member" | a membership observable on `SimVmm` and its refusal of an absent scope (09-05 names the behaviour: "SimVmm records membership ... and fails create for an absent scope") | no accessor is pinned; a test-support method is not invented here (CLAUDE.md "agents propose, the user adds"). **Proposal for the orchestrator:** `SimVmm::scope_members(&self, scope: &CgroupPath) -> BTreeSet<u32>`, test-hook only, with the 09-05 behaviour |
+| a call recorder on `SimVmHostState` (`kill_scope` calls) | none pinned | detected through the scripted-failure queue (a probe `kill_scope` returns `Ok` exactly when the driver consumed the queued failure first) |
+| `ADR-0352` step naming `executing the launch program` | a seam that chooses the wrapper (N6 question 3) | unchanged: surfaced, not invented |
+| `restart_status_for_alloc` reads attempts through the count basis; `restart_after_failure`'s `ran` parameter | the signature in the tree has no `ran` and `restart_status_for_alloc` gets only `failed`; the runtime holds no observation store | the design must say where the rows are read (feature delta says "signature unchanged"): a DESIGN question, not authored |
+| backend hydration through `ServiceLifecycle` for a never-ran `Service` row | only the `ServiceAllocPhase::from_row` guard was written; the existing totality test covers non-`Running` states | no row shape beyond today's reaches the reconciler's count basis |
+| S-VOL-T3-12 retarget (09-03) | the retarget moves the marker to the next RED, which exists only once 09-03 bounds the reap | to be done at 09-03's gate; the scope assertions are already in the body (N1) |
+| CID-reuse oracle in the boot variant | the not-yet-started launch's CID is not observable through `serve` + `deploy` while the claim is held | covered at Tier 1 by `a_launch_sweep_across_the_whole_offset_range_never_receives_the_stuck_vmms_cid` |
+| real-adapter `ResourceBusy` and `KilledNotReaped` | no producer on demand without the held-device fixture | `vm_host_state_scope_kill.rs` (S-RB-18) owns the real busy case; the unreapable VMM is sim-only |
+
+#### One production line touched (flagged for the orchestrator)
+
+`crates/overdrive-control-plane/src/guest_network.rs`: `#[expect(dead_code, ...)]` on `GuestAddressPool::reserve_leftover` became `#[cfg_attr(not(test), expect(dead_code, ...))]`.
+The 09-01 scaffold's expectation is unfulfilled in the test build as soon as any test calls the method, which fails `clippy -D warnings` for the whole `overdrive-control-plane` lib-test
+target; the tests that call it are the required reservation tests. A lint attribute only, no API; 09-07 removes the attribute when it adds the caller.
+
+#### Stale names to update when the tests are activated
+
+The roadmap, N1 and `red-classification.md` still cite `restart_arm_duplicate_vm_owner_is_a_no_row_success_that_still_cleans_the_predecessor`; its name is now
+`restart_arm_duplicate_vm_owner_writes_no_row_of_its_own_keeps_the_owners_row_and_lease_and_still_cleans_the_predecessor`.

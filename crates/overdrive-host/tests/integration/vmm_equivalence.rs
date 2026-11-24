@@ -28,7 +28,7 @@ use std::time::Duration;
 use overdrive_core::AllocationId;
 use overdrive_core::cgroup::CgroupPath;
 use overdrive_core::guest_transport::{GUEST_CID_BASE, GuestCid};
-use overdrive_core::traits::vmm::{VmTermination, Vmm};
+use overdrive_core::traits::vmm::{VmControl, VmTermination, Vmm};
 use overdrive_core::vm::config::{
     HostArch, KERNEL_MAGIC_WINDOW, KernelCmdline, KernelImage, MemoryPlan, OVERDRIVE_VMM_UID,
     RootfsPlan, VmConfig, VmConfinement, VmRunDir,
@@ -440,4 +440,154 @@ async fn vmm_early_exit_preserves_code_signal_and_stderr_tail_for_both_adapters(
         ch_exit.exit_code.is_some() || ch_exit.signal.is_some(),
         "a real ending must report a code or a signal, not silence: {ch_exit:?}",
     );
+}
+
+// ---------------------------------------------------------------------
+// Node-local persistent volume (GH #348, ADR-0348, ADR-0352) — the
+// `terminate` outcomes and scope membership on both adapters.
+//
+// `KilledNotReaped` cannot be produced by the real adapter on demand: it
+// needs a process the kernel will not reap after SIGKILL, which only a
+// held device or a failing disk gives. It is not faked here. The outcome
+// and its late reap are covered on `SimVmm` alone, in
+// `overdrive-sim` `tests/acceptance/sim_stuck_vm_contract.rs`, and on the
+// real kernel by the held-scope fixture in `vm_host_state_scope_kill.rs`.
+// ---------------------------------------------------------------------
+
+/// A control handle for a process this adapter never spawned.
+fn control_of_an_unknown_process() -> VmControl {
+    VmControl { pid: u32::MAX - 1, api_socket: PathBuf::from("/nonexistent/never-spawned.sock") }
+}
+
+/// ADR-0348 item 4 ("an already-gone pid is `Ok(Killed)`"; "`terminate` is idempotent"). Owner
+/// path: `Vmm::terminate`. Fault: a process neither adapter ever tracked. Oracle: `Killed` from
+/// both, and `Killed` again for the same handle. Neither adapter signals a pid it does not own.
+/// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(host_pure)]
+#[tokio::test]
+async fn terminate_of_a_process_the_adapter_never_spawned_is_killed_on_both_adapters() {
+    let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
+    let real = CloudHypervisorVmm::new();
+    let control = control_of_an_unknown_process();
+
+    for (kind, vmm) in [("sim", &sim as &dyn Vmm), ("real", &real as &dyn Vmm)] {
+        for grace in [Duration::ZERO, Duration::from_secs(5)] {
+            let outcome = vmm
+                .terminate(&control, grace)
+                .await
+                .unwrap_or_else(|error| panic!("{kind}: an unknown pid is Ok, got {error:?}"));
+            assert_eq!(
+                outcome,
+                VmTermination::Killed,
+                "{kind}: an already-gone pid must report Killed with grace {grace:?}"
+            );
+        }
+    }
+}
+
+/// ADR-0348 item 4 ("on `Ok(Killed)` the process is reaped"). Owner path: `Vmm::terminate` over a
+/// live launch. Oracle: `Killed`; the exit watch reports an ending; the process is gone (the real
+/// adapter's pid no longer exists, the sim's is neither live nor unreaped and holds no device).
+/// `Killed` must mean reaped on both adapters.
+/// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch")]
+#[tokio::test]
+async fn a_killed_vmm_is_reaped_before_terminate_returns_on_both_adapters() {
+    let staging_root = default_staging_root();
+    let fixture = VmFixture::provision(&staging_root).expect("fixture provisions on this host");
+
+    // --- SimVmm ---
+    let sim = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
+    let sim_config = sample_vm_config(&fixture, &staging_root.join("run-sim-reaped"), "vmmeq-rp-s");
+    std::fs::create_dir_all(sim_config.run_dir.path()).expect("create run dir");
+    let mut sim_process = sim.create(&sim_config, cid(0x0330)).await.expect("sim create");
+    let sim_pid = sim_process.control.pid;
+
+    let sim_outcome = sim
+        .terminate(&sim_process.control, Duration::ZERO)
+        .await
+        .expect("terminate succeeds against a live sim VMM");
+
+    assert_eq!(sim_outcome, VmTermination::Killed);
+    assert!(!sim.is_live(sim_pid) && !sim.is_unreaped(sim_pid), "the sim VMM is reaped");
+    assert!(sim.vsock_device_holders().is_empty(), "a reaped sim VMM holds no device");
+    sim_process.exit.recv().await.expect("the reaped sim VMM reports its ending");
+
+    // --- CloudHypervisorVmm ---
+    let ch = CloudHypervisorVmm::new();
+    let ch_config = sample_vm_config(&fixture, &staging_root.join("run-ch-reaped"), "vmmeq-rp-c");
+    std::fs::create_dir_all(ch_config.run_dir.path()).expect("create run dir");
+    let mut ch_process = ch.create(&ch_config, cid(0x0331)).await.expect("real CH spawns");
+    let ch_pid = ch_process.control.pid;
+
+    let ch_outcome = ch
+        .terminate(&ch_process.control, Duration::ZERO)
+        .await
+        .expect("terminate succeeds against a live VMM");
+
+    assert_eq!(ch_outcome, VmTermination::Killed);
+    assert!(
+        !Path::new(&format!("/proc/{ch_pid}")).exists(),
+        "Killed means reaped: the real VMM pid {ch_pid} must be gone when terminate returns"
+    );
+    ch_process.exit.recv().await.expect("the reaped real VMM reports its ending");
+}
+
+/// ADR-0352 ("`Vmm::create` creates the VMM process inside its allocation's scope"; "a member of
+/// `config.cgroup_scope` until reaped"). Owner path: `CloudHypervisorVmm::create` over the real
+/// cgroup root (`with_cgroup_root`). The driver makes the scope before `create`; the test plays
+/// that part. Oracle: the VMM's pid is listed in the scope's `cgroup.procs` right after `create`.
+/// The `SimVmm` half of the equivalence waits for a scope-membership observable on `SimVmm`.
+/// PENDING until `create` places the VMM into the scope itself.
+/// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch")]
+#[tokio::test]
+#[should_panic(expected = "the VMM must be a member of config.cgroup_scope")]
+async fn a_created_vmm_is_a_member_of_its_scope_on_the_real_adapter() {
+    let staging_root = default_staging_root();
+    let fixture = VmFixture::provision(&staging_root).expect("fixture provisions on this host");
+    let config = sample_vm_config(&fixture, &staging_root.join("run-ch-member"), "vmmeq-member");
+    std::fs::create_dir_all(config.run_dir.path()).expect("create run dir");
+    let scope_dir = config.cgroup_scope.resolve(Path::new("/sys/fs/cgroup"));
+    std::fs::create_dir_all(&scope_dir).expect("the driver creates the scope before create");
+
+    let ch = CloudHypervisorVmm::new().with_cgroup_root(PathBuf::from("/sys/fs/cgroup"));
+    let process = ch.create(&config, cid(0x0332)).await.expect("create into an existing scope");
+    let pid = process.control.pid;
+    let members = std::fs::read_to_string(scope_dir.join("cgroup.procs"))
+        .expect("read the scope's cgroup.procs");
+    ch.terminate(&process.control, Duration::ZERO).await.expect("terminate the VMM");
+    std::fs::remove_dir(&scope_dir).expect("remove the emptied scope");
+
+    assert!(
+        members.lines().any(|line| line.trim() == pid.to_string()),
+        "the VMM must be a member of config.cgroup_scope from create, \
+         but pid {pid} is not in the scope's cgroup.procs: {members:?}"
+    );
+}
+
+/// ADR-0352 ("a refused placement (a scope that is gone ...) fails `create` and creates no
+/// process"). Owner path: `CloudHypervisorVmm::create` over the real cgroup root. Fault: the scope
+/// directory does not exist. Oracle: `create` is `Err`; any process it did create is reaped before
+/// the assertion so a failing run leaks nothing. PENDING until `create` owns the placement.
+/// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch")]
+#[tokio::test]
+#[should_panic(expected = "create into a scope that does not exist must fail")]
+async fn create_into_a_missing_scope_fails_on_the_real_adapter() {
+    let staging_root = default_staging_root();
+    let fixture = VmFixture::provision(&staging_root).expect("fixture provisions on this host");
+    let config = sample_vm_config(&fixture, &staging_root.join("run-ch-missing"), "vmmeq-missing");
+    std::fs::create_dir_all(config.run_dir.path()).expect("create run dir");
+    let scope_dir = config.cgroup_scope.resolve(Path::new("/sys/fs/cgroup"));
+    assert!(!scope_dir.exists(), "precondition: no scope for this allocation");
+
+    let ch = CloudHypervisorVmm::new().with_cgroup_root(PathBuf::from("/sys/fs/cgroup"));
+    let result = ch.create(&config, cid(0x0333)).await;
+    let refused = result.is_err();
+    if let Ok(process) = result {
+        ch.terminate(&process.control, Duration::ZERO).await.expect("terminate the stray VMM");
+    }
+
+    assert!(refused, "create into a scope that does not exist must fail, and it succeeded");
 }

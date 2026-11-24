@@ -76,6 +76,8 @@ mod acceptance {
     // node-local-persistent-volume (GH #348): the volume section of describe.
     mod workload_describe_capacity_wait;
     mod workload_describe_volume;
+    // ADR-0355 — describe shows a launch that ended before it ran.
+    mod workload_describe_abandoned_launch;
     // service-kind-vm-workloads (GH #257) — both existing Service deploy
     // lanes must project the parser-selected driver arm identically.
     mod service_kind_vm_workloads;

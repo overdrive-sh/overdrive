@@ -48,6 +48,7 @@ mod acceptance {
     // node-local-persistent-volume (GH #348, ADR-0310) — the intent → `VolumePayload`
     // projection at the three `WorkloadLifecycle` sites.
     mod generation_replacement_pending;
+    mod launch_abandoned_count;
     mod restart_generation_reconcile;
     mod start_blocked_only_by_capacity;
     mod workload_volume_projection;

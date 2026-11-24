@@ -881,6 +881,84 @@ async fn a_workload_stop_during_a_held_claim_returns_promptly_with_no_failed_row
     handle.shutdown().await.expect("shutdown");
 }
 
+/// S-VOL-T3-12, boot variant (ADR-0350, ADR-0354; boundary 4 after a crash): `serve` dies while a
+/// VMM it launched cannot be reaped (its flush is held by a suspended device, so its scope cannot
+/// be removed), and a second `serve` boots on the same directories. The boot proceeds past the
+/// stuck VM instead of refusing: it ends the dead VM's row as platform-reclaimed, keeps its
+/// scope for the reclamation pass and reserves its guest address. After the device drains, the
+/// scope is removed and the workload is launched again with its volume and its data, with no
+/// `Failed` row and nothing charged.
+/// Shape: example. Owner: `serve` boot reclamation + `VmReclamation` + `WorkloadLifecycle`.
+/// Oracle: whether the second boot returns, the scope directory, CLI describe rows, the volume
+/// device contents. Tier 3.
+/// CONTRACT_SHAPE: bounded-change.
+#[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
+#[tokio::test]
+#[serial(cgroup)]
+#[should_panic(expected = "a node must boot past a VM whose scope cannot be removed")]
+async fn a_node_boots_past_a_vm_stuck_in_exit_left_over_by_a_serve_crash() {
+    let journey = Journey::new();
+    let handle = serve_at(&journey.data_dir(), &journey.config_dir()).await;
+    let id = journey.deploy_running("/sbin/boots-writing", "vol-boot-held").await;
+    let first = running_other_than(&journey.cfg(), &id, None, Duration::from_secs(120)).await;
+    let first_alloc = running_alloc(&first);
+    let device = volume_device();
+    wait_for_records(&device, 1, Duration::from_secs(60)).await;
+    let name = device.file_name().expect("node name").to_string_lossy().into_owned();
+    let old_vmm = cloud_hypervisor_pid(&first_alloc);
+    suspend_with_a_flush_held(&name, old_vmm).await;
+    kill(old_vmm);
+
+    // serve dies without a graceful drain; the stuck VMM and its scope survive it.
+    super::serve_lifetime_support::kill_serve_owner(handle).await.expect("the killed mode");
+    assert!(
+        workload_scope(&first_alloc).exists(),
+        "the stuck VM's scope outlives the crashed serve while its flush is held"
+    );
+
+    // The second boot must not refuse for a VM it cannot remove.
+    let args = super::serve_fixture::serve_args(
+        "127.0.0.1:0".parse().expect("bind addr"),
+        journey.data_dir(),
+        journey.config_dir(),
+    );
+    let second = super::serve_fixture::serve(args, super::serve_fixture::DataplaneChoice::Sim)
+        .await
+        .unwrap_or_else(|error| {
+            panic!(
+                "a node must boot past a VM whose scope cannot be removed; boot refused: {error}"
+            )
+        });
+    assert!(
+        workload_scope(&first_alloc).exists(),
+        "boot keeps the scope of the VM it could not remove for the reclamation pass"
+    );
+
+    // The device drains: the scope is removed and the workload is launched again with its data.
+    assert!(
+        Command::new("dmsetup").args(["resume", &name]).status().expect("dmsetup").success(),
+        "dmsetup resume"
+    );
+    let scope = workload_scope(&first_alloc);
+    let removal_deadline = tokio::time::Instant::now() + Duration::from_secs(90);
+    while scope.exists() && tokio::time::Instant::now() < removal_deadline {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    assert!(
+        !scope.exists(),
+        "after the drain the emptied scope is removed by the reclamation pass"
+    );
+    let relaunched =
+        running_other_than(&journey.cfg(), &id, Some(&first_alloc), Duration::from_secs(120)).await;
+    assert_nothing_failed_or_charged(&relaunched, Some(&first_alloc), "boot past a stuck VM");
+    assert_eq!(
+        wait_for_records(&device, 2, Duration::from_secs(60)).await,
+        expected(2),
+        "the relaunch attaches the volume with the first allocation's record and its own"
+    );
+    second.shutdown().await.expect("shutdown");
+}
+
 /// S-VOL-T3-13 (boundary 4, a stop during the guest boot; the Tier-3 twin of the volume driver's
 /// `alive[a]` read in the Quint conformance driver): the VMM has been created and the guest has
 /// not yet reported ready when `workload stop` arrives. The launch is abandoned, the VMM process
