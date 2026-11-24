@@ -2,7 +2,7 @@
 
 ## Status
 
-**Accepted** 2026-11-18 (decision SD-6 of the node-local persistent volume feature, GH #348; user ruling of 2026-11-18, option A). The
+**Accepted** 2026-11-18 (decision SD-6 of the node-local persistent volume feature, GH #348; user ruling of 2026-11-18, option A; item 4 by the user ruling of 2026-11-24, RB-13). The
 finished-Job rule (Decision, item 3) is **Accepted** 2026-11-19 by user ruling (H1, option A). ADR-0073 is implemented, so its amendment
 section links here; this ADR is not implemented and is stated in the present tense. Two neighbouring rules are their own decisions: the
 recording of a failure before the driver runs ([ADR-0337](adr-0337-a-launch-failure-before-the-driver-runs-is-a-recorded-charged-failed-row.md))
@@ -27,12 +27,12 @@ down.
 ## Decision
 
 **The reconciler records what it issued, never that a launch happened. A restart's generation is handled once the allocation issued for it
-has an allocation row, and a generation that the shim cannot honour is not pending.**
+has an allocation row that ran, and a generation that the shim cannot honour is not pending.**
 
 1. **The View records issuance.** For each allocation id the reconciler issues, the View holds the generation that id serves. Nothing is
    stamped when the placement is emitted.
-2. **"Restart pending" is derived from observation.** A generation is pending while the observed current allocation (the highest id that has a
-   row) serves a generation below the desired one. With no row there is nothing to replace.
+2. **"Restart pending" is derived from observation.** A generation is pending while the newest allocation that ran (the highest id that has a
+   row that is not an abandoned launch, ADR-0355) serves a generation below the desired one. With no such row there is nothing to replace.
 3. **A finished Job is never replaced.** When the current allocation of a Job carries a terminal claim (it completed, failed, or was stopped by
    the operator), the generation is not pending. `workload restart` of it advances the generation and nothing is
    issued: the same outcome as today, now decided by the reconciler, which emits nothing, rather than by a shim fence that returns after the
@@ -42,13 +42,16 @@ has an allocation row, and a generation that the shim cannot honour is not pendi
    decision keeps today's behaviour, and #301 changes it so that an operator restart of a stopped Job starts a new attempt while a Job that
    finished on its own is not re-run by crash replacement. The handler adds no answer for the no-op; the `restarted` answer it gives is #301's
    symptom.
-4. **A relaunch of an abandoned launch charges nothing.** An abandoned launch (superseded, or lost with the control plane) ends its row with a
-   `Terminated` row of reason `LaunchSuperseded` or `LaunchLostWithControlPlane` and no `terminal` (ADR-0355). That row is the
-   allocation's row, so a generation whose issued id ended this way is handled and the relaunch runs through the ordinary restartable path, or
-   as a generation replacement when a newer generation is pending. The relaunch carries the abandoned row's own count and
-   `last_failure_seen_at` and adds nothing, so an abandoned crash-restart successor is charged once and not twice. An abandoned row is not a
-   natural exit and is exempt from the restart ceiling, like a platform-reclaimed row. The lane exclusivity of ADR-0102 and the dispatch awaited
-   inside the tick mean no launch is in flight when the next evaluation hydrates, so one generation is never launched twice.
+4. **A launch that never ran does not count.** An abandoned launch (superseded, or lost with the control plane) ends its row with a
+   `Terminated` row of reason `LaunchSuperseded` or `LaunchLostWithControlPlane` and no `terminal` (ADR-0355). The row stays in history and is
+   the allocation's row, but it handles no generation and gives no count. Every derivation reads the newest row that ran, the **count basis**:
+   the restart count, the `last_failure_seen_at` and the ceiling decision of a new launch, and whether a generation is pending. The new launch's
+   count is the basis row's count plus one for a crash restart (no generation pending); the basis row's count for a generation replacement, which
+   forgives a `Failed` basis row; and 0 when no row ran (a fresh placement). A generation whose issued id ended abandoned is therefore still
+   pending, and its relaunch is a generation replacement. Deleting the abandoned rows from a chain changes no later launch's count, `charged` or
+   `exhausted`. An abandoned row is not a natural exit. A relaunch of a platform-reclaimed basis row is unchanged (no ceiling check, no charge). The
+   lane exclusivity of ADR-0102 and the dispatch awaited inside the tick mean no launch is in flight when the next evaluation hydrates, so one
+   generation is never launched twice.
 5. **Bounds.** The View's per-id entries are never pruned (true on `main` for `restart_counts`). An id is issued only when the observed state
    changed since the last issue: a launch that wrote a row, a supersession (one per operator commit or shutdown), an admission refusal
    (ADR-0338), a stale-dispatch fence (one per observed state change). No outcome issues an id on every tick while the observed state is
@@ -65,6 +68,8 @@ successor is observed". The test obligations: `distill/upstream-issues.md` of th
 - **Carry the generation on the allocation row (an `AllocStatusRow` field and an envelope bump).** Rejected: the allocation id and the View's
   issuance record already identify "the successor for generation N" without changing a persisted, gossiped observation row.
 - **Leave the defect and correct only the text.** Rejected: a stop, a restart and a shutdown leave a workload down while intent says run.
+- **Let an abandoned row handle the generation and carry its own count.** Rejected by the user (2026-11-24): an operator restart that supersedes a
+  crash restart's launch would inherit the crash restart's charge, and the crash would never be forgiven.
 - **Charge every issued id that never gets a row.** Rejected: a supersession is indistinguishable from a fault by the View alone, so an
   operator's stop or a shutdown would spend the restart budget.
 - **Leave a finished Job's generation pending and let the shim's fence return.** Rejected: the generation would stay pending forever, the

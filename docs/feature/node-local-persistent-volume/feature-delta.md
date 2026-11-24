@@ -1165,6 +1165,9 @@ the VMM exists"), so a launch that ends before it runs (superseded by a stop, a 
 with a terminal row that names why. `WorkloadLifecycle`'s current-allocation logic is unchanged. Not chosen: skipping `Pending` rows in
 `current_alloc` and `generation_replacement_pending`, and relaunching a `Pending` row after a timeout; both are in ADR-0355.
 
+**The ruling (user, 2026-11-24, RB-13): a launch that never ran does not count.** The abandoned rows stay in history and `current_alloc` still
+returns the newest row; the derivation of a new launch's count, of whether a generation is pending and of a natural exit skips them (§ 2).
+
 **1. The state and the reasons.**
 
 - State `Terminated`; `terminal: None`; `started_at: None`; `workload_addr`, `kind` and `listeners` carried from the `Pending` row; `detail` and
@@ -1174,20 +1177,41 @@ with a terminal row that names why. `WorkloadLifecycle`'s current-allocation log
 - Two fieldless `TransitionReason` variants, appended after `VmVolumeUnavailable`: `LaunchSuperseded` ("launch abandoned: superseded by a stop, a
   restart or node shutdown") and `LaunchLostWithControlPlane` ("launch abandoned: lost with the control plane"). Both `is_failure() == false`;
   `human_readable` carries the wordings. `From<&DriverStartFailure>` is untouched.
-- **One predicate.** `overdrive_core::transition_reason::is_platform_reclaimed` also reads `true` for a `Terminated` row whose `reason` is one of the
-  two variants; its rustdoc says the platform ended one runtime instance or one launch while the workload's intent stands. No `is_launch_abandoned`
-  exists. Every caller of `is_platform_reclaimed` (`workload_lifecycle.rs:411`, `:468`, `:1173`, `:1789`, `:1821`; the `reclamation.rs:554` test)
-  wants the abandoned row treated like a platform-reclaimed row, and `vm_reclamation.rs` names the predicate only in comments, so none must
-  exclude it.
+- **One predicate, on the row's reason.** `pub fn is_launch_abandoned(row: &AllocStatusRow) -> bool` in `overdrive_core::transition_reason`
+  (beside `is_platform_reclaimed`, `#[must_use]`): true iff `row.state == Terminated` and `row.reason` is `LaunchSuperseded` or
+  `LaunchLostWithControlPlane`. It is the one place the two reasons are named as a set; no other site enumerates them (`rust.md` § "A key prefix and
+  its record classifier are ONE SSOT"). `is_platform_reclaimed` does **not** read the two reasons: a platform reclamation ran, and it stays a count
+  basis (§ 2). Its callers (`workload_lifecycle.rs:411`, `:468`, `:1173`, `:1789`, `:1821`; the `reclamation.rs:554` test) are unchanged in meaning.
 
-**2. Charge: an abandoned launch charges nothing.** Through the one predicate, an abandoned row is (i) not a natural exit (`is_natural_exit` is
-false), so a Job whose launch never ran is not finalised `Failed { exit_code: Some(0) }`; (ii) exempt from the restart ceiling
-(`restart_decision`'s `platform_reclaimed` argument is true); (iii) relaunched with the abandoned allocation's own `restart_counts` entry and
-`last_failure_seen_at`, adding nothing (`workload_lifecycle.rs:1316-1325`). The abandoned id's entry holds what its issue assigned (0 for a first
-placement, the predecessor's value for a generation replacement, the predecessor's + 1 for a crash-restart successor), so an abandoned crash-restart
-successor is charged once and not twice (ADR-0335 item 4). The row is `is_restartable` (`Terminated`, not an intentional stop), so the existing
-restart path relaunches it with no new branch: after a shutdown or a lost launch through the ordinary path, after a restart commit (generation
-pending) as a generation replacement. After `stop` the stop intent is set and nothing is relaunched.
+**2. Count: a launch that never ran does not count (user ruling 2026-11-24, RB-13).** The restart count of a new launch is derived from the
+**count basis**, the newest row that ran: `last_ran_alloc(rows)` (§ "Restart generation is handled when its successor is observed"), which is
+`current_alloc` over the rows for which `is_launch_abandoned` is false. The new launch's count is:
+
+- a **crash restart** (no generation pending): the basis row's `restart_counts` entry plus one;
+- an **operator restart** (a generation replacement): the basis row's entry unchanged, so a `Failed` basis row is forgiven (ADR-0335);
+- a **fresh placement** (no row ran, including a first launch that was abandoned): 0.
+
+A platform-reclaimed basis row keeps its existing treatment: no ceiling check and no `+ 1` (ADR-0083). The never-ran rows stay in history; only the
+derivation skips them. **Invariant:** for any chain of rows, deleting the abandoned rows changes no later launch's count, `charged` or `exhausted`.
+It holds because every read of the derivation below takes the basis row and never the abandoned row, whatever its View entries hold:
+
+- `attempts` (`view.restart_counts[basis]`, 0 with no basis), `last_failure_seen_at[basis]` and its carry to the successor, the backoff gate, the
+  ceiling decision (`restart_decision(attempts, is_platform_reclaimed(basis), generation_replacement)`) and the finalisation of an exhausted
+  budget (`FinalizeFailed` names the basis row) at `workload_lifecycle.rs:410`, `:467`, `:1156`, `:1173`, `:1315-1325`;
+- whether a generation is pending: `generation_replacement_pending(view, desired.generation, last_ran_alloc(rows))`, at `:366`, `:451`, `:925` and
+  in `restart_status_for_alloc`;
+- the natural-exit test: `is_natural_exit` excludes an abandoned row (`&& !is_launch_abandoned(row)`), so a Job whose launch never ran is not
+  finalised `Failed { exit_code: Some(0) }`.
+
+`current_alloc` is **unchanged**: it returns the newest row, abandoned or not. The abandoned row is the workload's current allocation for
+`describe`, for the restartable filter (`is_restartable`: `Terminated`, not an intentional stop), for the id minted above it and for the
+predecessor a `RestartAllocation` names, so the existing restart path relaunches it with no new branch: after a shutdown or a lost launch as a
+crash restart of the basis row (count + 1, the charge its crash already carries, once), after a restart commit as a generation replacement
+(the basis row's count). After `stop` the stop intent is set and nothing is relaunched.
+
+*Why a crash is forgiven.* The operator's restart of a launch that was itself a crash restart: the crash row #1 (count 0) is restarted as #2
+(count 1), the commit abandons #2, and the operator's #3 takes the count of #1, 0. With the abandoned row's own count it would start at 1 and the
+crash would never be forgiven. A lost launch with no operator action relaunches as #3 with #1's count + 1 = 1, the same count #2 held.
 
 **3. Persisted format.** `TransitionReason` is archived inside `AllocStatusRowV1`. The two variants are fieldless and appended at the tail, so every
 discriminant is unchanged and the archived size is unchanged (neither exceeds `VmKernelFormatUnsupported`). No envelope version changes:
@@ -1232,9 +1256,10 @@ the interest router's List reach the closed rows. A read or write failure refuse
 |---|---|
 | ADR-0276 backend hydration, the exit observer, the scheduler (`Running` rows only) | none: `Terminated` is `NotRunning`, no `ExitEvent` exists, no capacity is counted |
 | probes, readiness, `ServiceLifecycle`, `SvidLifecycle` | the allocation never reached `Running`; their `AllocStatus` interest wakes evaluate it and emit nothing; the SVID was dropped by the shim |
-| `WorkloadLifecycle` | `current_alloc` returns the abandoned row; § 2 is the whole change; `next_allocation_attempt` mints above it, so the id is no longer a gap |
+| `WorkloadLifecycle` | `current_alloc` returns the abandoned row; § 2 is the whole change (the count basis is the newest row that ran); `next_allocation_attempt` mints above it, so the id is no longer a gap |
 | LWW counter, ADR-0077 and ADR-0078 | `Pending -> Terminated` is neither a terminal-to-`Running` transition nor a terminal row superseded by a non-terminal one: `restart_count` and `last_terminated` stay the `Pending` row's and are never counted twice; the relaunch takes a new id |
-| ADR-0335 handled-generation rule | unchanged: a generation is handled when its issued id has a row, and the abandoned row is a row; a restart commit that supersedes a launch still leaves the generation pending and relaunches uncharged |
+| ADR-0335 handled-generation rule | a generation is handled when its issued id has a row that ran; an abandoned row handles nothing, so a generation whose successor was abandoned is still pending and its relaunch is a generation replacement with the count basis's count |
+| `describe`, the restart-budget answer of the handlers | `describe` shows the newest row, abandoned or not; `restart_status_for_alloc` reads attempts and pending through the count basis |
 | `describe` and the API | state `Terminated` with the reason through `TransitionReason::human_readable`; the OpenAPI enum gains two reasons |
 
 **6. Tests.** Tier 1 seeded unless stated, over the production shim and observation store.
@@ -1242,9 +1267,24 @@ the interest router's List reach the closed rows. A read or write failure refuse
 - A superseded Start and a superseded Restart each end with one `Terminated` row carrying `LaunchSuperseded`, `terminal: None`, the lease's address, no
   `Running` and no `Failed` row, the `Pending` row's `restart_count` and `last_terminated`; a failing teardown still writes the row and returns the
   error; a failing row write returns the typed error.
-- After a restart commit, a shutdown and a boot, the workload is relaunched once with the abandoned allocation's count (Service and Job; the Job is
-  not finalised); after a stop nothing is relaunched; the budget is never advanced by an abandoned launch (the carry assertion over seeds and
-  schedules).
+- After a restart commit, a shutdown and a boot, the workload is relaunched once (Service and Job; the Job is not finalised); after a stop nothing
+  is relaunched; the budget is never advanced by an abandoned launch (the carry assertion over seeds and schedules).
+- **Count tests (RB-13).** Tier 1, pure `reconcile` over generated rows and a hand-built View, beside the existing
+  `workload_lifecycle_restart.rs` acceptance tests:
+  1. *A crash restart abandoned by an operator restart forgives the crash.* Row #1 crashed (`Failed`, count 0); #2 is its crash restart (count 1);
+     #2 ends `LaunchSuperseded`; the generation committed after #2's issue is pending. The relaunch #3 carries count 0 (the basis is #1), on the
+     generation-replacement path. The same chain with #2 `LaunchLostWithControlPlane` gives the same count.
+  2. *A lost launch with no operator action charges the crash once.* Same chain, no generation pending: the relaunch carries #1's count + 1 = 1, and
+     the same count after two consecutive abandoned rows (#2 and #3 both `LaunchLostWithControlPlane` give #4 the count 1, not 2).
+  3. *A launch abandoned before anything ran* (no basis): the relaunch carries 0; an operator restart of a `Running` workload stops it (R2) and its successor is abandoned
+     by shutdown after the generation was handed that successor: the relaunch is still a generation replacement carrying the stopped row's
+     count, not `+ 1`.
+- **Deletion-equivalence (proptest).** Over generated chains of rows (`Failed`, `Terminated` by crash, platform-reclaimed, operator-stopped,
+  `Running`, and runs of consecutive abandoned rows of both reasons at arbitrary positions), generated desired generations and a View whose
+  `restart_counts`, `last_failure_seen_at` and `issued_generation` entries for abandoned ids are arbitrary: the `reconcile` output over the chain
+  and over the chain with its abandoned rows deleted agree on whether a restart or `FinalizeFailed` is emitted, on the successor's `restart_counts`
+  entry and on `last_failure_seen_at` of the successor, and `restart_after_failure` / `generation_replacement_pending` agree likewise. The
+  generator draws ids from one counter so the deleted chain keeps its order; the property fails if any read takes the abandoned row.
 - **Every crash-left `Pending` row ends with `LaunchLostWithControlPlane`** (RB-11). Tier 1, seeded, production `converge` over `SimVmm`,
   `SimVmHostState` and the production observation store, one case per kind of leftover: a `Pending` row with no host artifact; one whose VM left a
   settled scope, a run directory and a clone; one whose VM left a busy scope (an unreaped `SimVmm` process). In each, the row ends `Terminated`,
@@ -1256,7 +1296,8 @@ the interest router's List reach the closed rows. A read or write failure refuse
   crash between the closing step and the executors leaves terminal rows the next boot's executors discard, with the same reservation. The
   two-boot cell `mid_boot_volume_reclamation` asserts the row, not "no row".
 - S8 and R10 write a `Failed` `DriverInternalError` row.
-- `is_platform_reclaimed` unit and mutation targets for the two reasons; the two schema-evolution fixtures; the `render::alloc_status` and
+- `is_launch_abandoned` unit tests for the two reasons (and `false` for every other reason and for a `Failed` row carrying
+  neither); `last_ran_alloc` unit tests (skips abandoned rows, `None` when none ran); the two schema-evolution fixtures; the `render::alloc_status` and
   `human_readable` goldens for both reasons; `api/openapi.yaml` regenerated.
 
 ### Quint changes for the guest-flow-owner and restart models
@@ -1309,7 +1350,22 @@ The modeler edits the specs; none is edited here. `specs/quint/guest-flow-owner/
    Any further growth returns to the user.
 
 `restart-generation` (ADR-0355): the model's `W_LOST` (a launch lost or superseded, "no row") becomes a row: the allocation ends `ABANDONED`, a
-terminal, restartable, uncharged class that is not a natural exit, with `cnt` carried to the relaunch. `PENDING` is the same state, now projected as a
+terminal, restartable class that is not a natural exit and that no derivation reads (RB-13). The shared rule `restart_budget.qnt` takes the count
+basis: its `cur` argument is the newest allocation that is not `ABANDONED` (0 when none), and `pendingGen` is the staleness `old` of that row, not
+of the newest row; `budgetCharged`, `budgetExhausted`, `budgetStartCnt` and `budgetMayRestart` keep their bodies, so the importing specs
+(`restart-generation` and `node-local-volume`) change only the argument they pass, through one shared definition of "the newest non-abandoned
+allocation" in `restart_budget.qnt` (the module stays definitions-only). The `ABANDONED` allocation's own `cnt` is carried by no one. The rule's
+header comment states the three cases of § "Launches that end before running", item 2. **Hazard `abandonedRowCounts`** (the one hazard of RB-13):
+the count basis is the newest allocation, abandoned or not; the deletion-equivalence invariant over chains of several consecutive `ABANDONED`
+allocations (the count, `charged` and `exhausted` equal those of the chain with the `ABANDONED` allocations removed) must be violated. The
+invariant is `I_ABANDONED_ROWS_DO_NOT_COUNT`, in the `restart-generation` spec only (RA9 is its assumption; the volume spec imports the rule and
+adds no invariant or hazard, so `vol-safety-tlc` grows by the changed argument only, a cost the modeler reports); `exhausted` is read from the
+count basis. The
+`node-local-volume` run `superseded_launch_result_discarded` regains its expectation that the relaunch charges 0 (`charged(st) == 0` after
+`WlStart(3)`: the crash of allocation 1 is forgiven by the operator's restart, the abandoned allocation 2 not counted). No other run, check or
+witness is added: the two count scenarios of § 6 are Tier-1 tests, and the existing runs
+`control_plane_crash_during_restart_launch_relaunches_once` and `second_restart_loses_launch_then_one_placement` pass through the new rule. `PENDING`
+is the same state, now projected as a
 `Pending` row. `CpCrash` and `NodeReboot` take every `PENDING` allocation to `ABANDONED` at the boot step. RA2's premise ("a launch in flight is
 invisible ... `canStart` requires no `PENDING` allocation") is unchanged; RA4 reads "delivers nothing: an uncharged abandoned row, no VMM". One hazard,
 `abandonWritesNoRow` (an abandoned launch leaves its row `PENDING`): the checker must find `RunIntentProgress` violated. No new named run: the
@@ -1333,7 +1389,7 @@ The two independent design reviews of the stuck-VM design are resolved as follow
 | F5, A1, A2 one decision per ADR | ADR-0348 to ADR-0355, one decision each |
 | A3, B, E restated prose and history | contracts moved here; ADR text states the current decision only |
 | C1 one site closes `Pending` rows at boot | the first step of boot, before the executors; the executor has no `Pending` branch |
-| C2 one predicate | `is_launch_abandoned` removed; `is_platform_reclaimed` covers both reasons |
+| C2 one predicate | one structural predicate on the two reasons, `is_launch_abandoned`; no site enumerates them (RB-13) |
 | C3, C4 boot reserves only busy scopes, as a `late` entry | § "Boot proceeds past a stuck VM"; § "Quint changes" item 2 |
 | C5 one hazard per decision | § "Quint changes" item 4 |
 | D1, D2, D3 | no `ReservationRefused` (`unreachable!`); no `vm.reclamation.scope_busy`, `vm.reclamation.boot_stuck` or `vm.lifecycle.stop_not_reaped` event (an unreaped stop is visible as a `Terminated` allocation whose scope is still observed); the `terminate` edge case is "an already-gone pid is `Killed`" |
@@ -1342,7 +1398,7 @@ The two independent design reviews of the stuck-VM design are resolved as follow
 ### Restart generation is handled when its successor is observed (SD-6; ADR-0335, which amends ADR-0073, with ADR-0337 and ADR-0338)
 
 **Decision.** Whether a generation has been handled is derived from observation: a generation is handled once the allocation issued for it **has
-an allocation row**. The View records only what was issued (an input), never that a launch happened. Today `WorkloadLifecycle` stamps
+an allocation row that ran** (an abandoned row, ADR-0355, ran nothing and handles nothing; RB-13). The View records only what was issued (an input), never that a launch happened. Today `WorkloadLifecycle` stamps
 `observed_generation` on the tick that emits a replacement (`workload_lifecycle.rs:1309`, `:1437-1439`) and the runtime fsyncs the View before it
 dispatches (`reconciler_runtime.rs:1557-1561`); a launch that ends with no row (superseded, or lost with the control plane) then leaves the
 workload down beside the old operator-stopped or replaced row (veto `:1069`, restartable filter `:1146-1148`).
@@ -1354,15 +1410,24 @@ workload down beside the old operator-stopped or replaced row (veto `:1069`, res
   `:1305-1335` and the placement arm `:1370-1440`) in the same `next_view` as the id's `restart_counts` entry and with the same lifetime. The
   value is `desired.generation` at issue in every case. It is never consulted to decide whether a launch happened. CBOR additive field per
   `development.md` § "Reconciler I/O" -> "Schema evolution"; no rkyv envelope: `AllocStatusRow` carries no generation and gains none.
-- `pub fn generation_replacement_pending(view: &WorkloadLifecycleView, desired_generation: u64, current: Option<&AllocStatusRow>) -> bool` in
-  `overdrive-reconcilers`: true iff `current` is `Some(row)`, **`row` is not a finished Job row (`row.kind == WorkloadKind::Job &&
+- `pub fn last_ran_alloc<'a>(allocs: &[&'a AllocStatusRow]) -> Option<&'a AllocStatusRow>` in `overdrive-reconcilers`, beside `current_alloc`
+  (RB-13): `current_alloc` over the rows for which `overdrive_core::transition_reason::is_launch_abandoned` is false. It is the **count basis**,
+  the one definition of "the newest row that ran". It names no reason itself; `current_alloc` is unchanged.
+- `pub fn generation_replacement_pending(view: &WorkloadLifecycleView, desired_generation: u64, ran: Option<&AllocStatusRow>) -> bool` in
+  `overdrive-reconcilers`: true iff `ran` is `Some(row)`, **`row` is not a finished Job row (`row.kind == WorkloadKind::Job &&
   row.terminal.is_some()`, H1)**, and `view.issued_generation.get(&row.alloc_id)` (absent reads `0`) is less than `desired_generation`. The
   finished-Job test is the action shim's own (`allocation_attempt_transition` returns `NoChange` for a Job row with a terminal;
-  `workload_lifecycle.rs:131-139`). `current` is `current_alloc(..)` over the **observed** rows (the row whose id has the numerically highest
-  `-<N>` suffix among rows whose suffix parses, `workload_lifecycle.rs:1506`), so an issued id with no row is invisible to it. With no row at all
-  it is false. It is the only definition of `restart_pending`: it replaces the three expressions in `workload_lifecycle.rs` (`:366`, `:451`,
-  `:925`) and the one in `ReconcilerRuntime::restart_status_for_alloc` (`reconciler_runtime.rs:514-534`), whose signature and that of
-  `restart_after_failure` are unchanged.
+  `workload_lifecycle.rs:131-139`). Every caller passes `last_ran_alloc(..)` over the **observed** rows (the row whose id has the numerically
+  highest `-<N>` suffix among rows whose suffix parses and that are not abandoned, `workload_lifecycle.rs:1506`), so an issued id with no row, and
+  an issued id whose row is abandoned, are invisible to it. With no such row it is false. It is the only definition of `restart_pending`: it
+  replaces the three expressions in `workload_lifecycle.rs` (`:366`, `:451`, `:925`) and the one in
+  `ReconcilerRuntime::restart_status_for_alloc` (`reconciler_runtime.rs:514-534`), whose signature is unchanged and which reads attempts and
+  pending through `last_ran_alloc`.
+- `pub fn restart_after_failure(kind: WorkloadKind, run_desired: bool, failed: &AllocStatusRow, ran: Option<&AllocStatusRow>, attempts: u32,
+  generation_replacement: bool) -> bool` gains `ran`, the count basis, and nothing else: `failed` is still the current row, named as the
+  `RestartAllocation` predecessor and tested for `Draining`, restartability and a Job's natural exit; `attempts` is
+  `view.restart_counts[ran]` (0 with none); the ceiling decision reads `ran.is_some_and(is_platform_reclaimed)`. When the current row is not
+  abandoned, callers pass `Some(failed)` and the function is as before.
 - `ReconcilerRuntime::issued_generation_for_alloc(&self, target: &TargetResource, alloc_id: &AllocationId) -> Option<u64>`: the conformance and
   test read of `issued_generation`, in the shape of `attempt_index_for_alloc` (`reconciler_runtime.rs:546`).
 - Where `restart_pending` is false, behaviour is unchanged. Where it is true, ADR-0073's R2 stop and R3/R4 placement are unchanged, except that
@@ -1383,21 +1448,24 @@ answer for the no-op; the misleading `restarted` answer is #301's symptom. The s
 **Why a successor is never launched twice for one generation.** The runtime persists the View, then awaits the whole dispatch, including
 `driver.start`, inside the tick (`reconciler_runtime.rs:1557-1628`); the lane is held to the end of the tick, and ADR-0102 admits the next
 evaluation of the target only after the lane is released and hydrates after admission. So when an evaluation hydrates, the previous launch for
-the target has returned, and exactly one of two things is true: it wrote a row (`current_alloc` is that id, its entry equals the desired
-generation, nothing is pending), or it wrote none and its outcome is one of the named no-row outcomes of § Launch outcomes, the current
-allocation is still the older row, the generation is still pending, and **this** evaluation issues one new id and launches once.
+the target has returned, and exactly one of three things is true: it wrote a row that ran (`last_ran_alloc` is that id, its entry equals the
+desired generation, nothing is pending); it wrote an abandoned row (ADR-0355: the count basis is still the older row, the generation is still
+pending if it was, and **this** evaluation issues one new id and launches once); or it wrote none and its outcome is one of the named no-row
+outcomes of § Launch outcomes, the current allocation is still the older row, the generation is still pending, and **this** evaluation issues one
+new id and launches once.
 
-**Relaunch.** The next evaluation places one fresh allocation for the committed generation, charging nothing. This is the one statement of
-the rule; every other section, scenario and gate points here. It holds after a superseded launch, a launch lost with the control plane and a
+**Relaunch.** The next evaluation places one fresh allocation for the committed generation, adding no charge of its own. This is the one statement
+of the rule; every other section, scenario and gate points here. It holds after a superseded launch, a launch lost with the control plane and a
 node shutdown, for a first placement, a restart of a `Running` workload and a resume of a stopped one alike (a crash-restart successor is
 charged once, § Budget below).
 
-**Budget.** A relaunch of an abandoned generation replacement charges nothing: the path carries the predecessor's `restart_counts` value and
-`last_failure_seen_at` unchanged (`workload_lifecycle.rs:1313-1322`). An abandoned launch leaves a row (ADR-0355), so the current row of
-the relaunch is the abandoned row itself (`Terminated`, `LaunchSuperseded` or `LaunchLostWithControlPlane`), and the relaunch carries that row's
-`restart_counts` and `last_failure_seen_at` and adds nothing (§ "Launches that end before running", item 2: `is_platform_reclaimed` reads true for
-the abandoned row). That entry already holds what the abandoned issue assigned, so an abandoned crash-restart successor is charged once and
-**not twice**. The abandoned id's `restart_counts` and `issued_generation` entries stay with it.
+**Budget.** A launch that never ran does not count (§ "Launches that end before running", item 2). The abandoned row is the current row of the
+relaunch (`Terminated`, `LaunchSuperseded` or `LaunchLostWithControlPlane`) and is the predecessor the `RestartAllocation` names, but the
+relaunch derives its count from the count basis, `last_ran_alloc`: the basis row's `restart_counts` value plus one for a crash restart; unchanged
+for a generation replacement, which forgives a `Failed` basis row (`workload_lifecycle.rs:1313-1322` reads the basis row, not the current row); 0
+with no basis. `last_failure_seen_at`, the backoff gate, the ceiling decision and its finalisation are the basis row's too. An abandoned
+crash-restart successor is thereby charged once and **not twice**, and a crash restart abandoned by an operator restart is forgiven. The abandoned
+id's `restart_counts` and `issued_generation` entries are written at its issue and stay with it, never read again.
 
 **Growth of the View.** `restart_counts`, `last_failure_seen_at` and `issued_generation` entries are never pruned (true on `main` for the first
 two). An id is issued only when the observed state changed since the last issue: a launch that writes a row (bounded by the restart ceiling per
@@ -1406,8 +1474,8 @@ stale-dispatch fence (one per observed state change). A finished Job issues none
 state is unchanged.
 
 **Operator-stop veto and the other states.** The veto (`:1069`) is `!restart_pending && current is operator-stopped`; after stop -> restart ->
-abandoned launch the current row is the old operator-stopped one and the generation is pending, so the veto is overridden and the relaunch
-happens. Bug 3 stays: a same-spec `deploy` bumps nothing. R1-crash stays. The Job terminal fence (`:938-951`), `next_evaluation_at` and
+abandoned launch the current row is the abandoned one (not operator-stopped, a restartable row), the count basis is the old operator-stopped row
+and the generation is pending against it, so the relaunch happens as a generation replacement. Bug 3 stays: a same-spec `deploy` bumps nothing. R1-crash stays. The Job terminal fence (`:938-951`), `next_evaluation_at` and
 `pending_restart_owner` use the same helper.
 
 **Assumption A10** (§ Formal protocol model): after an abandoned launch the reconciler places a fresh allocation for the generation, once.
@@ -1436,7 +1504,7 @@ supersession arm of § Superseding a launch is added).
 | S8 | Start `:1948` | `Err(other)` from `driver.start`: `Err`, no row | **`Failed` row** `DriverInternalError` (N-4, W3; the `Pending` row is ended). Reached only by a `SimDriver` script (DE-1): `VmDriver::start` returns only `StartRejected` and `GuestTransportMissing`, a composition error placement never issues (`driver.rs:272-274`); only a `SimDriver` script produces another. The arm stays an internal typed error. The captured `rejected_network_cleanup` is returned after the row on the `StartRejected` path (`:2189-2191`), the one reachable path |
 | S9 | Start `:2043-2097` | the row write fails: `Err` | **N-REC** |
 | S10 | Start `:2123-2168` | mTLS install or guest-network activation fails after `Running`: `Failed` row superseding it. Activation `Ok(false)` (`:2151-2152`): the Running row exists, hooks are skipped | a row exists; the fail-stop exit is **N-FAILSTOP** |
-| S11 | Start (SD-3) | `StartSuperseded` | **abandoned row** (N-4): `Terminated`, `LaunchSuperseded`, uncharged, relaunched uncharged |
+| S11 | Start (SD-3) | `StartSuperseded` | **abandoned row** (N-4): `Terminated`, `LaunchSuperseded`, never counted, relaunched from the count basis (the newest row that ran) |
 | R0 | Restart `:2200` | `find_prior_alloc_row(..).await?` fails: `Err`, no row, no effect taken yet | **N-REC (read side)** |
 | R1 | Restart `:2200-2202` | predecessor row absent: `HandleMissing`, no row | **N-UNR**: the arm is emitted only for the current allocation of the observed rows, under the lane, and no code deletes an allocation row |
 | R2 | Restart `:2203-2210` | predecessor `NoChange` (a Job row with a terminal), or not `Failed`/`Terminated`: `Ok(())`, no successor | **N-STALE**: not reached through the reconciler for a finished Job (H1: a reconciler-side no-emit); the fence fires only when the row changed between hydration and dispatch |
@@ -1456,7 +1524,7 @@ supersession arm of § Superseding a launch is added).
 The no-row outcomes and their handling:
 
 - **N-SUP (supersession).** Caused only by an operator commit or by shutdown. Ends in the abandoned row (N-4, `LaunchSuperseded`), so it is no
-  longer a no-row outcome. Relaunched by the next evaluation, uncharged. One id per commit or shutdown. A launch lost with the control plane is
+  longer a no-row outcome. Relaunched by the next evaluation from the count basis, never counted. One id per commit or shutdown. A launch lost with the control plane is
   closed the same way at boot (`LaunchLostWithControlPlane`).
 - **N-ADM (admission refusal; ADR-0338).** The pool refuses an admission that the reconciler's occupancy check, made at hydration, had allowed
   (`guest_network.rs:541-591`; the cap comparison at `:569`). `AdmissionCapReached` is reachable: other targets admit concurrently up to the cap
@@ -1758,7 +1826,7 @@ methods; the payload it submits is `Vm::to_payload` output.
 | `hasRow(a)` and the row's state | `ObservationStore::alloc_status_rows()` lists `a` and its `state`; an issued id with no row projects as "minted, no row" |
 | `cnt[a]` (the per-allocation restart count at issue; R-1) | the existing `ReconcilerRuntime::attempt_index_for_alloc(&self, target, alloc_id) -> u32` (`reconciler_runtime.rs:544`): `cnt[a] == attempt_index_for_alloc(target, a) - 1` for every id `a` for which `issued_generation_for_alloc` is `Some`. No new surface |
 | `charged` | not a state variable: the spec derives it from `cnt` and the current row, both projected, so it is compared by construction (the carry relation is checked at every `WlStart`) |
-| `exhausted` | `alloc_status_rows()`: the current row (the highest id with a row, `current_alloc`) carries `terminal == BackoffExhausted { attempts }`, read after the evaluation that observes that row has run; the model's `exhausted(s)` must equal it at every step. It is the one comparison that checks the production ceiling against the model's `LIMIT` (= ceiling + 1) |
+| `exhausted` | `alloc_status_rows()`: the count basis (the highest id with a row that is not abandoned, `last_ran_alloc`) carries `terminal == BackoffExhausted { attempts }`, read after the evaluation that observes that row has run; the model's `exhausted(s)` must equal it at every step. It is the one comparison that checks the production ceiling against the model's `LIMIT` (= ceiling + 1) |
 | `why[a] == W_PREFAIL` | `alloc_status_rows()`: a `Failed` row for `a` whose `reason` is `MtlsInterceptInstallFailed { stage: "identity_issue", .. }` or `DriverInternalError { .. }`; `Driver::live_allocations()` does not list `a`; the dispatch result is `Ok(())` |
 | `why[a] == W_REFUSED` (D-1) | no row for `a`, `Driver::live_allocations()` does not list `a`, the dispatch result is `Err(ShimError::GuestNetwork(AdmissionCapReached { .. }))`, and `GuestAddressPool` occupancy is unchanged by `a` |
 | `why[a] == W_LOST`, now `as[a] == ABANDONED` (a launch that ended before running without a failure: superseded, or lost with the control plane; N-4) | `alloc_status_rows()` holds a `Terminated` row for `a` with `terminal == None` and `reason` `LaunchSuperseded` (the held tick completed with dispatch `Ok(())`) or `LaunchLostWithControlPlane` (after a rebuild, `CpCrash` or `NodeReboot`, and the boot `converge`, whose first step ends every `Pending` row this way whether or not its VM left a scope); `Driver::live_allocations()` does not list `a` |
@@ -1900,7 +1968,7 @@ prove it.
    allocation and a non-launch evaluation are unaffected; `supersede_lane` never cancels the shutdown token.
 5. Disconnect/reconnect: control-plane crash between `ensure` and VMM spawn: the next launch's `ensure` finds the volume and proceeds; a
    surviving VMM is reclaimed, its claim drains, the wait covers it. A launch that died with the control plane leaves its `Pending` row (N-2); boot
-   ends it (ADR-0355, W4: `LaunchLostWithControlPlane`, the first step of boot, whether or not its VM left a scope) and the next evaluation relaunches it uncharged (§ Restart generation, "Relaunch"). A surviving VMM's run directory or clone is reaped by `VmReclamation` (`plan_reclamation`: `DiscardStrandedArtifacts`, or `ReclaimAllocation`
+   ends it (ADR-0355, W4: `LaunchLostWithControlPlane`, the first step of boot, whether or not its VM left a scope) and the next evaluation relaunches it, the abandoned row not counted (§ Restart generation, "Budget"). A surviving VMM's run directory or clone is reaped by `VmReclamation` (`plan_reclamation`: `DiscardStrandedArtifacts`, or `ReclaimAllocation`
    when a non-terminal row exists), booted by `vm_reclamation_boot::converge`. That sweep runs in `run_server` before the convergence loop, the
    interest router and the HTTP listener start (`lib.rs:4530` before `:4813`, `:4861`, `:5032`), fails the boot closed on error, and ends every
    VMM the restarted process does not supervise, whether or not its allocation has a row (`vm_reclamation_boot.rs:92-148`), so no launch for the
@@ -1926,9 +1994,9 @@ figure; `cargo xtask quint verify-evidence` is the authority on whether the reco
 | Decisions modelled | VD-2, VD-8, VD-9, SD-1 to SD-5 | SD-6, SD-6b/J-1, D-1, H1, R-1 |
 | State | the volume and claim, the launch phases, `alive`, `orphan`; the lane signal `sup` and `down`; ghosts `afterSup`, `delivered`, `chg`; the restart budget by the **shared rule** `specs/quint/restart-generation/restart_budget.qnt` (imported, not reimplemented): the per-allocation count `cnt` and the staleness `old` (issued for an earlier generation) of the current row and a `PENDING` launch, from which `charged` and `exhausted` are derived; `exh` materialises `exhausted` for the driver. A generation bump (`OpResume`, `WorkloadRestart`) makes every issued allocation stale | the generation `dg`, the issued generation `ig` and count `cnt` per id (the View's `restart_counts` at issue; `charged` and `exhausted` are derived), ghost `gl`, hazard marker `og`, environment flags `idFault` and `capFull`, the constants `JOB` and `LIMIT` (= the production ceiling + 1). **No lane signal**: for the generation rule a superseded launch and a lost launch are identical (no row, no charge) |
 | The launch | phases `LP_*`: `ensure`, the claim poll, the VMM spawn, the boot wait; a launch that observes the lane signal abandons in the step that reaches the observation point (the step that raises the signal for a launch in a claim wait, at the create gate or in the boot wait; `LaunchEnsureActivate` for a launch whose `ensure` was in flight; `WlStart` for a lane born after shutdown), so the model has no separate abandon action; outcomes `LaunchHeldFail`, `LaunchUnavailable`, `LaunchCmdFail`, `VmmSpawnFail`, `GuestReady`; a launch that cannot provide the volume at all (no pool, no free extent) fails typed inside `WlStart`, in the same step, with no observable `PENDING` | one held dispatch, resolved by one of: `LaunchRunning`, `LaunchStartFail` (the one charged start-failure class, volume causes included), `LaunchPreFail` (a row, `W_PREFAIL`), `LaunchRefused` (no row, `W_REFUSED`), `LaunchLost` (no row, `W_LOST`, no charge: a launch superseded by a stop, a restart or shutdown, or lost with the control plane); `CpCrash` and `NodeReboot` also lose a pending launch |
-| Invariants (`Safety`) | `I_SINGLE_WRITER`, `I_DATA_SURVIVES_RESTART`, `I_ENSURE_IDEMPOTENT_UNDER_CRASH`, `I_NO_DRAIN_FAILURE_CHARGES_BUDGET`, `I_STOP_KEEPS_VOLUME`, `I_SUPERSEDE_ABANDONS_WAITS`, `I_SUPERSEDED_LAUNCH_DELIVERS_NOTHING`, `I_SIGNAL_NEVER_LEAKS_ACROSS_ALLOCATIONS`; "a typed failure never attaches" and "shutdown signals every launch" are asserted by named runs, not invariants (2026-11-19) | `I_FINISHED_JOB_ISSUES_NO_ID`, `I_CAPACITY_WAIT_NEVER_EXHAUSTS` (`exhausted` implies the current row ended by a charged cause: `W_CRASH`, `W_STARTFAIL` or `W_PREFAIL`) |
+| Invariants (`Safety`) | `I_SINGLE_WRITER`, `I_DATA_SURVIVES_RESTART`, `I_ENSURE_IDEMPOTENT_UNDER_CRASH`, `I_NO_DRAIN_FAILURE_CHARGES_BUDGET`, `I_STOP_KEEPS_VOLUME`, `I_SUPERSEDE_ABANDONS_WAITS`, `I_SUPERSEDED_LAUNCH_DELIVERS_NOTHING`, `I_SIGNAL_NEVER_LEAKS_ACROSS_ALLOCATIONS`; "a typed failure never attaches" and "shutdown signals every launch" are asserted by named runs, not invariants (2026-11-19) | `I_FINISHED_JOB_ISSUES_NO_ID`, `I_CAPACITY_WAIT_NEVER_EXHAUSTS` (`exhausted` implies the count basis ended by a charged cause: `W_CRASH`, `W_STARTFAIL` or `W_PREFAIL`), `I_ABANDONED_ROWS_DO_NOT_COUNT` (RB-13: deleting the `ABANDONED` allocations from a chain changes no count, `charged` or `exhausted`) |
 | Temporal | `EveryStartLiveness` | `RunIntentProgress`, `PreFailExhausts` |
-| Hazards, one per decision | `noWait` (VD-8), `recreate` (VD-9), `stopDeletes` (VD-2), `noInterrupt` (SD-1 to SD-5) | `stampOnEmit` (ADR-0335: the stamp on emit decides, violates `RunIntentProgress`), `prefailNoRow` (ADR-0337: a pre-driver failure writes no row, so an id is issued per tick, violates `PreFailExhausts`), `refusalCharged` (ADR-0338: an admission refusal is charged, so a node held at the cap exhausts a healthy workload's budget, violates `I_CAPACITY_WAIT_NEVER_EXHAUSTS`) |
+| Hazards, one per decision | `noWait` (VD-8), `recreate` (VD-9), `stopDeletes` (VD-2), `noInterrupt` (SD-1 to SD-5) | `stampOnEmit` (ADR-0335: the stamp on emit decides, violates `RunIntentProgress`), `prefailNoRow` (ADR-0337: a pre-driver failure writes no row, so an id is issued per tick, violates `PreFailExhausts`), `refusalCharged` (ADR-0338: an admission refusal is charged, so a node held at the cap exhausts a healthy workload's budget, violates `I_CAPACITY_WAIT_NEVER_EXHAUSTS`), `abandonWritesNoRow` (ADR-0355), `abandonedRowCounts` (RB-13: the count basis is the newest allocation, abandoned or not; violates `I_ABANDONED_ROWS_DO_NOT_COUNT`) |
 | Checks | `vol-safety-tlc` (the only check outside CI, VB-1; user ruling 2026-11-23, decision 10, VB-2: the exhaustive check is accepted at about 19 min, 16 workers and a 16 GB heap, `specs/quint/node-local-volume/checks.toml`, and stays `ci = false`; the earlier "~271 s" is superseded), `vol-live-start`, one `vol-hazard-*` per hazard, one `vol-run-*` per run | `rg-safety-tlc` (~65 s), `rg-live-replacement` (~29 s), `rg-live-prefail`, one `rg-hazard-*` per hazard, one `rg-run-*` per run; all `ci = true` under the two-minute rule |
 
 Boundary scenarios 3 (unrelated state) and 6 (feature disabled) are not protocol behaviour and have no model run: seeded simulation and Tier 3
@@ -2009,7 +2077,7 @@ Assumptions of the restart-generation spec (ids are stable; RA3 is not an assump
 | RA6 | a launch failure caused by the volume is one typed start failure that writes a charged `Failed` row | the volume spec's runs `no_space_fails_typed_and_never_attaches`, `launch_bound_exceeded_fails_typed_and_charges_budget` and `store_absent_fails_typed_and_never_attaches`, and the volume launch tests |
 | RA7 | `LaunchPreFail` and `LaunchRefused` have the production order and effects of the table | shim tests of the pre-driver paths and of the refusal; `guest_network.rs:541-591` |
 | RA8 | after `CpCrash` or `NodeReboot` the View, the intent and the observation rows survive and the runtime is rebuilt with a new lane table | ADR-0035 (View persistence), `vm_reclamation_boot::converge` before the loop |
-| RA9 | the budget abstraction (R-1): the model carries production's per-allocation count and derives `charged` and `exhausted`, with `LIMIT` = the production ceiling + 1 (`workload_lifecycle.rs:51`, `:408`, `:465`, `:1311-1318`) | the conformance driver compares `cnt` through `attempt_index_for_alloc` and `exhausted` through the rows; the run `generation_replacement_forgives_predecessor_failure` |
+| RA9 | the budget abstraction (R-1, RB-13): the model carries production's per-allocation count and derives `charged` and `exhausted` from the newest allocation that ran, with `LIMIT` = the production ceiling + 1 (`workload_lifecycle.rs:51`, `:408`, `:465`, `:1311-1318`); an abandoned allocation is never that allocation | the conformance driver compares `cnt` through `attempt_index_for_alloc` and `exhausted` through the rows; the run `generation_replacement_forgives_predecessor_failure`; the invariant `I_ABANDONED_ROWS_DO_NOT_COUNT` and its hazard `abandonedRowCounts`; the Tier-1 deletion-equivalence proptest (§ "Launches that end before running", item 6) |
 | RA10 | a Job row with a terminal claim is never replaced: the generation is not pending against it, matching the action shim's `allocation_attempt_transition` | the pure property asserting the two predicates equal over generated rows; the Job dimension of the seeded invariant; the two `rg_conf_job` runs |
 | RA11 | a Job's failure before the driver is final: production finalises any ended Job row (`workload_lifecycle.rs:1091-1113`; natural exit through `is_natural_exit` `:1757-1775` and `classify_natural_exit_terminal` `:1781-1794`) and places a Job only while it has no row. The one production path that re-drives a Job row is a platform-reclaimed row (`is_natural_exit` excludes it, `:1775`), which the spec does not model; a pre-driver failure of that re-drive's successor is final in the same way | the `JOB` conjunct of `canStart` (`curA == 0`) and `I_FINISHED_JOB_ISSUES_NO_ID` model it; the Job pre-driver case of the seeded invariant and the shim tests |
 
@@ -2109,8 +2177,8 @@ DISTILL: boundary scenarios above; the conformance drivers per § Observable pro
 Two specs, `specs/quint/node-local-volume/` and `specs/quint/restart-generation/` (checked on the metal host). Verdicts, counts, durations and
 memory are in each spec's `evidence/summary.md`; none is restated here. Model assumptions that are not decisions of this feature: a VMM that
 survives a control-plane crash keeps its allocation `Running` until `VmReclamation` kills it; the volume spec applies the restart budget rule
-of `specs/quint/restart-generation/restart_budget.qnt` (a lost or superseded launch ends in an uncharged abandoned row, N-4; a generation replacement
-inherits its predecessor's count). The model
+of `specs/quint/restart-generation/restart_budget.qnt` (a lost or superseded launch ends in an abandoned row that no derivation reads, N-4, RB-13; a generation replacement
+inherits the count of the newest row that ran). The model
 creates a volume inactive and activates it by a second effect (M1), a conservative refinement of LVM, where `lvcreate` returns an active volume;
 inactive volumes arise from a node reboot (run `node_reboot_reactivates_and_data_survives`), which `ensure` absorbs.
 
