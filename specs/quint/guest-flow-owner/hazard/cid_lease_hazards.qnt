@@ -32,3 +32,9 @@ module lease_bugTickDuringPredecessorTeardown { import cid_lease(OFF = Set("tick
 // decision 12 off (releaseUnreapedAtStop): the stop of an unreaped VMM frees its lease with the stop, as for a reaped VMM;
 // the stuck VMM still holds its CID's device, so next-fit hands the CID to a new launch
 module lease_bugReleaseUnreapedAtStop { import cid_lease(OFF = Set("releaseUnreapedAtStop"), CFG = "ok", REC = false).* from "../cid_lease" }
+// decisions 16 and N-1 off (removeScopeWhilePopulated): `RemoveScope` loses its `populated 0` guard, so the scope is removed under
+// a live stuck task; its absence then releases the lease while the VMM still holds the CID's device
+module lease_bugRemoveScopeWhilePopulated { import cid_lease(OFF = Set("removeScopeWhilePopulated"), CFG = "ok", REC = false).* from "../cid_lease" }
+// decision N-2 off (launchBeforeRecord): the VMM exists before its guest address is on record; a serve crash during guest boot
+// leaves an orphan that boot reclamation cannot reserve, so next-fit hands its CID to a new launch
+module lease_bugLaunchBeforeRecord { import cid_lease(OFF = Set("launchBeforeRecord"), CFG = "ok", REC = false).* from "../cid_lease" }

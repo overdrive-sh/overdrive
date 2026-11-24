@@ -31,7 +31,7 @@ State 1: <Initial predicate>
   dstart |-> 0 ]
 /\ vol_bugNoWait_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 
-State 2: <vol_bugNoWait_node_volume_Declare line 824, col 3 to line 828, col 44 of module vol_bugNoWait>
+State 2: <vol_bugNoWait_node_volume_Declare line 846, col 3 to line 850, col 44 of module vol_bugNoWait>
 /\ vol_bugNoWait_node_volume_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   storeUp |-> TRUE,
@@ -64,7 +64,7 @@ State 2: <vol_bugNoWait_node_volume_Declare line 824, col 3 to line 828, col 44 
   dstart |-> 0 ]
 /\ vol_bugNoWait_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 
-State 3: <vol_bugNoWait_node_volume_WlStart line 1198, col 3 to line 1227, col 69 of module vol_bugNoWait>
+State 3: <vol_bugNoWait_node_volume_WlStart line 1221, col 3 to line 1250, col 69 of module vol_bugNoWait>
 /\ vol_bugNoWait_node_volume_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   storeUp |-> TRUE,
@@ -97,7 +97,7 @@ State 3: <vol_bugNoWait_node_volume_WlStart line 1198, col 3 to line 1227, col 6
   dstart |-> 0 ]
 /\ vol_bugNoWait_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 
-State 4: <vol_bugNoWait_node_volume_LaunchEnsureCreate line 1291, col 3 to line 1336, col 80 of module vol_bugNoWait>
+State 4: <vol_bugNoWait_node_volume_LaunchEnsureCreate line 1314, col 3 to line 1359, col 80 of module vol_bugNoWait>
 /\ vol_bugNoWait_node_volume_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   storeUp |-> TRUE,
@@ -130,7 +130,7 @@ State 4: <vol_bugNoWait_node_volume_LaunchEnsureCreate line 1291, col 3 to line 
   dstart |-> 0 ]
 /\ vol_bugNoWait_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 
-State 5: <vol_bugNoWait_node_volume_LaunchEnsureActivate line 1342, col 3 to line 1365, col 44 of module vol_bugNoWait>
+State 5: <vol_bugNoWait_node_volume_LaunchEnsureActivate line 1365, col 3 to line 1388, col 44 of module vol_bugNoWait>
 /\ vol_bugNoWait_node_volume_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   storeUp |-> TRUE,
@@ -163,7 +163,7 @@ State 5: <vol_bugNoWait_node_volume_LaunchEnsureActivate line 1342, col 3 to lin
   dstart |-> 0 ]
 /\ vol_bugNoWait_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 
-State 6: <vol_bugNoWait_node_volume_LaunchCheck line 1388, col 3 to line 1402, col 72 of module vol_bugNoWait>
+State 6: <vol_bugNoWait_node_volume_LaunchCheck line 1411, col 3 to line 1425, col 72 of module vol_bugNoWait>
 /\ vol_bugNoWait_node_volume_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   storeUp |-> TRUE,
@@ -196,7 +196,7 @@ State 6: <vol_bugNoWait_node_volume_LaunchCheck line 1388, col 3 to line 1402, c
   dstart |-> 0 ]
 /\ vol_bugNoWait_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 
-State 7: <vol_bugNoWait_node_volume_VmmSpawn line 1456, col 3 to line 1486, col 69 of module vol_bugNoWait>
+State 7: <vol_bugNoWait_node_volume_VmmSpawn line 1479, col 3 to line 1509, col 69 of module vol_bugNoWait>
 /\ vol_bugNoWait_node_volume_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   storeUp |-> TRUE,
@@ -229,7 +229,7 @@ State 7: <vol_bugNoWait_node_volume_VmmSpawn line 1456, col 3 to line 1486, col 
   dstart |-> 0 ]
 /\ vol_bugNoWait_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 
-State 8: <vol_bugNoWait_node_volume_CpCrash line 1061, col 3 to line 1080, col 44 of module vol_bugNoWait>
+State 8: <vol_bugNoWait_node_volume_CpCrash line 1083, col 3 to line 1102, col 44 of module vol_bugNoWait>
 /\ vol_bugNoWait_node_volume_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   storeUp |-> TRUE,
@@ -241,7 +241,7 @@ State 8: <vol_bugNoWait_node_volume_CpCrash line 1061, col 3 to line 1080, col 4
   maxDv |-> 0,
   nCreated |-> 1,
   claim |-> 1,
-  as |-> <<3, 0, 0>>,
+  as |-> <<4, 0, 0>>,
   alive |-> <<TRUE, FALSE, FALSE>>,
   orphan |-> <<TRUE, FALSE, FALSE>>,
   why |-> <<7, 0, 0>>,
@@ -262,7 +262,7 @@ State 8: <vol_bugNoWait_node_volume_CpCrash line 1061, col 3 to line 1080, col 4
   dstart |-> 0 ]
 /\ vol_bugNoWait_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 
-State 9: <vol_bugNoWait_node_volume_Reclaim line 1545, col 3 to line 1611, col 74 of module vol_bugNoWait>
+State 9: <vol_bugNoWait_node_volume_Reclaim line 1568, col 3 to line 1634, col 74 of module vol_bugNoWait>
 /\ vol_bugNoWait_node_volume_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   storeUp |-> TRUE,
@@ -274,7 +274,7 @@ State 9: <vol_bugNoWait_node_volume_Reclaim line 1545, col 3 to line 1611, col 7
   maxDv |-> 0,
   nCreated |-> 1,
   claim |-> 1,
-  as |-> <<3, 0, 0>>,
+  as |-> <<4, 0, 0>>,
   alive |-> <<FALSE, FALSE, FALSE>>,
   orphan |-> <<FALSE, FALSE, FALSE>>,
   why |-> <<7, 0, 0>>,
@@ -295,7 +295,7 @@ State 9: <vol_bugNoWait_node_volume_Reclaim line 1545, col 3 to line 1611, col 7
   dstart |-> 0 ]
 /\ vol_bugNoWait_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 
-State 10: <vol_bugNoWait_node_volume_WlStart line 1198, col 3 to line 1227, col 69 of module vol_bugNoWait>
+State 10: <vol_bugNoWait_node_volume_WlStart line 1221, col 3 to line 1250, col 69 of module vol_bugNoWait>
 /\ vol_bugNoWait_node_volume_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   storeUp |-> TRUE,
@@ -307,7 +307,7 @@ State 10: <vol_bugNoWait_node_volume_WlStart line 1198, col 3 to line 1227, col 
   maxDv |-> 0,
   nCreated |-> 1,
   claim |-> 1,
-  as |-> <<3, 1, 0>>,
+  as |-> <<4, 1, 0>>,
   alive |-> <<FALSE, FALSE, FALSE>>,
   orphan |-> <<FALSE, FALSE, FALSE>>,
   why |-> <<7, 0, 0>>,
@@ -328,7 +328,7 @@ State 10: <vol_bugNoWait_node_volume_WlStart line 1198, col 3 to line 1227, col 
   dstart |-> 0 ]
 /\ vol_bugNoWait_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 
-State 11: <vol_bugNoWait_node_volume_LaunchEnsureCreate line 1291, col 3 to line 1336, col 80 of module vol_bugNoWait>
+State 11: <vol_bugNoWait_node_volume_LaunchEnsureCreate line 1314, col 3 to line 1359, col 80 of module vol_bugNoWait>
 /\ vol_bugNoWait_node_volume_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   storeUp |-> TRUE,
@@ -340,7 +340,7 @@ State 11: <vol_bugNoWait_node_volume_LaunchEnsureCreate line 1291, col 3 to line
   maxDv |-> 0,
   nCreated |-> 1,
   claim |-> 1,
-  as |-> <<3, 1, 0>>,
+  as |-> <<4, 1, 0>>,
   alive |-> <<FALSE, FALSE, FALSE>>,
   orphan |-> <<FALSE, FALSE, FALSE>>,
   why |-> <<7, 0, 0>>,
@@ -361,7 +361,7 @@ State 11: <vol_bugNoWait_node_volume_LaunchEnsureCreate line 1291, col 3 to line
   dstart |-> 0 ]
 /\ vol_bugNoWait_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 
-State 12: <vol_bugNoWait_node_volume_LaunchEnsureActivate line 1342, col 3 to line 1365, col 44 of module vol_bugNoWait>
+State 12: <vol_bugNoWait_node_volume_LaunchEnsureActivate line 1365, col 3 to line 1388, col 44 of module vol_bugNoWait>
 /\ vol_bugNoWait_node_volume_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   storeUp |-> TRUE,
@@ -373,7 +373,7 @@ State 12: <vol_bugNoWait_node_volume_LaunchEnsureActivate line 1342, col 3 to li
   maxDv |-> 0,
   nCreated |-> 1,
   claim |-> 1,
-  as |-> <<3, 1, 0>>,
+  as |-> <<4, 1, 0>>,
   alive |-> <<FALSE, FALSE, FALSE>>,
   orphan |-> <<FALSE, FALSE, FALSE>>,
   why |-> <<7, 0, 0>>,
@@ -394,7 +394,7 @@ State 12: <vol_bugNoWait_node_volume_LaunchEnsureActivate line 1342, col 3 to li
   dstart |-> 0 ]
 /\ vol_bugNoWait_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 
-State 13: <vol_bugNoWait_node_volume_LaunchCheck line 1388, col 3 to line 1402, col 72 of module vol_bugNoWait>
+State 13: <vol_bugNoWait_node_volume_LaunchCheck line 1411, col 3 to line 1425, col 72 of module vol_bugNoWait>
 /\ vol_bugNoWait_node_volume_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   storeUp |-> TRUE,
@@ -406,7 +406,7 @@ State 13: <vol_bugNoWait_node_volume_LaunchCheck line 1388, col 3 to line 1402, 
   maxDv |-> 0,
   nCreated |-> 1,
   claim |-> 1,
-  as |-> <<3, 1, 0>>,
+  as |-> <<4, 1, 0>>,
   alive |-> <<FALSE, FALSE, FALSE>>,
   orphan |-> <<FALSE, FALSE, FALSE>>,
   why |-> <<7, 0, 0>>,
@@ -427,7 +427,7 @@ State 13: <vol_bugNoWait_node_volume_LaunchCheck line 1388, col 3 to line 1402, 
   dstart |-> 0 ]
 /\ vol_bugNoWait_node_volume_conf_step = [Init |-> [tag |-> "UNIT"]]
 
-State 14: <vol_bugNoWait_node_volume_VmmSpawnFail line 1526, col 3 to line 1539, col 73 of module vol_bugNoWait>
+State 14: <vol_bugNoWait_node_volume_VmmSpawnFail line 1549, col 3 to line 1562, col 73 of module vol_bugNoWait>
 /\ vol_bugNoWait_node_volume_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   storeUp |-> TRUE,
@@ -439,7 +439,7 @@ State 14: <vol_bugNoWait_node_volume_VmmSpawnFail line 1526, col 3 to line 1539,
   maxDv |-> 0,
   nCreated |-> 1,
   claim |-> 1,
-  as |-> <<3, 3, 0>>,
+  as |-> <<4, 3, 0>>,
   alive |-> <<FALSE, FALSE, FALSE>>,
   orphan |-> <<FALSE, FALSE, FALSE>>,
   why |-> <<7, 4, 0>>,

@@ -1,0 +1,215 @@
+State 1: <Initial predicate>
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_bootLeft = -1
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_reclaimed = TRUE
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_cursor = 0
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_up = TRUE
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_att = <<0, 0>>
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_recorded = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_al = << [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {},
+  lastEnd |-> <<"none", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {},
+  unreapedOrphans |-> {} ]
+
+State 2: <lease_bugRemoveScopeWhilePopulated_cid_lease_Assign line 1603, col 3 to line 1699, col 66 of module lease_bugRemoveScopeWhilePopulated>
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_bootLeft = -1
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_reclaimed = TRUE
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_cursor = 1
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_up = TRUE
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_att = <<0, 0>>
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_recorded = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_al = << [ st |-> "leased",
+     off |-> 0,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {},
+  lastEnd |-> <<"none", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {},
+  unreapedOrphans |-> {} ]
+
+State 3: <lease_bugRemoveScopeWhilePopulated_cid_lease_Launch line 1769, col 3 to line 1878, col 66 of module lease_bugRemoveScopeWhilePopulated>
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_dev = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_bootLeft = -1
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_reclaimed = TRUE
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_cursor = 1
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_up = TRUE
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_att = <<0, 0>>
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_recorded = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_al = << [ st |-> "running",
+     off |-> 0,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {},
+  lastEnd |-> <<"none", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {},
+  unreapedOrphans |-> {} ]
+
+State 4: <lease_bugRemoveScopeWhilePopulated_cid_lease_StopUnreaped line 917, col 3 to line 1007, col 66 of module lease_bugRemoveScopeWhilePopulated>
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_dev = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_bootLeft = -1
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_reclaimed = TRUE
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_cursor = 1
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_up = TRUE
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_scope = (0 :> TRUE @@ 1 :> FALSE @@ 2 :> FALSE)
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_att = <<0, 0>>
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_late = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_recorded = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_al = << [ st |-> "done",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {1},
+  lastEnd |-> <<"stop", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {},
+  unreapedOrphans |-> {} ]
+
+State 5: <lease_bugRemoveScopeWhilePopulated_cid_lease_RemoveScope line 1013, col 3 to line 1045, col 66 of module lease_bugRemoveScopeWhilePopulated>
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_dev = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_bootLeft = -1
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_reclaimed = TRUE
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_cursor = 1
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_up = TRUE
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_att = <<0, 0>>
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_late = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_recorded = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_al = << [ st |-> "done",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {1},
+  lastEnd |-> <<"stop", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {},
+  unreapedOrphans |-> {} ]
+
+State 6: <lease_bugRemoveScopeWhilePopulated_cid_lease_LateRelease line 2345, col 3 to line 2383, col 66 of module lease_bugRemoveScopeWhilePopulated>
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_dev = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_bootLeft = -1
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_reclaimed = TRUE
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_cursor = 1
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_up = TRUE
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_att = <<0, 0>>
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_recorded = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_al = << [ st |-> "done",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
+/\ lease_bugRemoveScopeWhilePopulated_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {1},
+  lastEnd |-> <<"stop", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {},
+  unreapedOrphans |-> {} ]

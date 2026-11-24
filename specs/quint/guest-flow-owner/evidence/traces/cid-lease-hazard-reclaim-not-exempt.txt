@@ -2,6 +2,7 @@
 
 State 1
   conf_step = [init |-> [tag |-> "UNIT"]]
+  recorded = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
   bootLeft = -1
   att = <<0, 0>>
   cursor = 0
@@ -12,8 +13,10 @@ State 1
   lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
   g = [ clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE, stopped |-> {}, lastEnd |-> <<"none", "none">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {}, unreapedOrphans |-> {} ]
   al = << [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
+  scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
 
 State 2 [Assign]
+  recorded = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
   cursor = 1
   lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
   al = << [ st |-> "leased", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
@@ -28,6 +31,7 @@ State 4 [VmmCrash]
   al = << [ st |-> "ended", off |-> 0, retry |-> TRUE, ex |-> FALSE, chg |-> TRUE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
 
 State 5 [Assign]
+  recorded = (0 :> 1 @@ 1 :> 1 @@ 2 :> 0)
   att = <<1, 0>>
   cursor = 2
   lease = (0 :> 1 @@ 1 :> 1 @@ 2 :> 0)
@@ -42,10 +46,12 @@ State 7 [VmmCrash]
   al = << [ st |-> "ended", off |-> 1, retry |-> TRUE, ex |-> FALSE, chg |-> TRUE, pred |-> 0, pst |-> "retiring" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
 
 State 8 [Release]
+  recorded = (0 :> 0 @@ 1 :> 1 @@ 2 :> 0)
   lease = (0 :> 0 @@ 1 :> 1 @@ 2 :> 0)
   al = << [ st |-> "ended", off |-> 1, retry |-> TRUE, ex |-> FALSE, chg |-> TRUE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
 
 State 9 [Assign]
+  recorded = (0 :> 0 @@ 1 :> 1 @@ 2 :> 1)
   att = <<2, 0>>
   cursor = 0
   lease = (0 :> 0 @@ 1 :> 1 @@ 2 :> 1)
@@ -56,6 +62,7 @@ State 10 [Launch]
   al = << [ st |-> "running", off |-> 2, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> 1, pst |-> "retiring" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
 
 State 11 [Crash]
+  recorded = (0 :> 0 @@ 1 :> 0 @@ 2 :> 1)
   up = FALSE
   reclaimed = FALSE
   dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> -2)

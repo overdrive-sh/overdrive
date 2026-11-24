@@ -69,26 +69,32 @@
 //! | `Redeploy(a)` | `restart_workload`; its outcome is checked against the pre-state (`done` → `Resumed`, `failed` → `Restarted`) |
 //! | `Crash` | the `serve` process dies (its runtime and composition dropped); every running VMM survives as an orphan holding its device |
 //! | `Restart` | a new `serve` process over the same node: `WorkloadLifecycle` registered again (its views bulk-loaded), the VM driver and exit observer started; its boot reclamation (`converge`) starts and parks on its first held kill |
-//! | `Reclaim` | D-UP-19: the driver grants each kill `converge` requests until it returns; then one tick of every stopped workload, each of which must take no lease |
+//! | `Reclaim(s)` | D-UP-19: the driver grants each kill `converge` requests until it returns; then one tick of every stopped workload, each of which must take no lease. `s` is the set of orphans whose kill leaves the scope busy (decision 14, ADR-0350). PENDING OWNER API for a non-empty `s`: the boot reservation (`GuestAddressPool::reserve_leftover` from the busy-scope branch of `converge`, from the `workload_addr` the allocation's `Pending` row recorded, ADR-0353) over an unreapable `SimVmm` process; the handler for an empty `s` is the production path |
 //! | `OrphanExit(o)` | the orphan holding offset `o`'s CID exits by itself |
 //! | `StopUnreaped(a)` | decision 12 (RB-1 item 11). PENDING OWNER API (the crafter's): `stop_workload` then one tick over an unreapable `SimVmm` process (`VmTermination::KilledNotReaped`, `VMM_REAP_BOUND`, the scripted unreapable process, the shim's scope-gated lease release). Until then the handler checks `a` is running and fails naming what it awaits |
 //! | `Reap(o)` | decision 12. PENDING OWNER API: the scripted `SimVmm::exit_process` of the unreapable process holding offset `o`'s CID |
-//! | `LateRelease(o)` | decision 12. PENDING OWNER API: the production convergence tick that dispatches `ReclaimAllocationNetwork` for the terminal allocation whose lease is held, once `SimVmHostState` reports its scope absent (it removes the scope only after `SimVmm` reaped the process) |
+//! | `LateRelease(o)` | decision 12 (and the release of a boot reservation, decision 14). PENDING OWNER API: the production convergence tick that dispatches `ReclaimAllocationNetwork` for the terminal allocation whose lease is held (or the reserved allocation of a boot reservation), once `SimVmHostState` reports its scope absent (it removes the scope only after `SimVmm` reaped the process) |
+//! | `RemoveScope(o)` | decisions 16 and N-1 (ADR-0349, ADR-0351). PENDING OWNER API: the populated-first scope kill, the one remover of a VM scope, which waits for `cgroup.events` to report `populated 0` before it removes the scope (`SimVmHostState` scope removal gated on `SimVmm`'s reap) |
 //! | `AssignPick(a)`, `AssignTake(a)` | hazard-only (`assignSplit`); an error |
 //!
-//! **Pending owner API (decision 12; the crafter's).** The three actions above
-//! and the model variable `late` have no owner port yet. The pins that reach
-//! them (`StopOfAnUnreapedVmmHoldsItsLeaseUntilTheReap`,
-//! `NextFitSkipsAnUnreapedLease`,
-//! `ServeCrashWithAnUnreapedVmmBlocksAssignUntilItExits`) and the randomized
-//! `lease_conf_ok` traces carry `#[should_panic(expected = "awaits owner
-//! API")]`: each runs and fails at the first such step, naming the missing
-//! port. The crafter lands the ports, wires the three handlers to them,
-//! projects `late` from `GuestAddressPool::lease_observation()` (the leases
-//! that are Retiring for a terminal allocation row and no workload tracks as
-//! its placement or predecessor lease) and the `dev` of an unreaped process
-//! from `SimVmm::vsock_device_holders` (the existing marked arbiter read),
-//! adds `late` to [`CidLeaseState`], and removes the markers.
+//! **Pending owner API (the stuck-VM design, ADR-0348 to ADR-0355; the
+//! crafter's).** `StopUnreaped`, `Reap`, `LateRelease`, `RemoveScope` and
+//! `Reclaim` with a non-empty busy set have no owner port yet, and the model
+//! variables `late`, `scope` and `recorded` have no projection. The pins that
+//! reach them (`ScopeIsRemovedOnlyAfterItIsEmpty`,
+//! `ServeCrashDuringGuestBootReservesFromTheRecordedAddress`,
+//! `NextFitSkipsAnUnreapedLease`) and the randomized `lease_conf_ok` traces
+//! carry `#[should_panic(expected = "awaits owner API")]`: each runs and fails
+//! at the first such step, naming the missing port. The crafter lands the
+//! ports, wires the handlers to them, projects `late` and `lease` from
+//! `GuestAddressPool::observe` and `snapshot` (the leases that are Retiring
+//! for a terminal allocation row and no workload tracks as its placement or
+//! predecessor lease, a boot reservation included), `recorded` from
+//! `ObservationStore::alloc_status_rows()` (the `workload_addr` of the
+//! allocation's row), `scope` from `VmHostState::observe`, and the `dev` of an
+//! unreaped process from `SimVmm::vsock_device_holders` (the existing marked
+//! arbiter read); adds the three to [`CidLeaseState`]; and removes the
+//! markers.
 //!
 //! Projection (QPROJ-1 sources). `lease`, `cursor`, `al(a).off`, `.pred`,
 //! `.pst` and the lease part of `al(a).st` ← O
@@ -294,7 +300,7 @@ enum DriverError {
     #[error("hazard-only action `{0}` is not mapped (it is never reached by the design)")]
     HazardOnly(&'static str),
     #[error(
-        "action `{action}` awaits owner API that does not exist yet (decision 12, RB-1 item 11): {awaits}"
+        "action `{action}` awaits owner API that does not exist yet (stuck-VM design, ADR-0348 to ADR-0355): {awaits}"
     )]
     OwnerApiPending { action: &'static str, awaits: &'static str },
     #[error("the step did not settle within the settle bound: {0}")]
@@ -1429,7 +1435,21 @@ impl CidLeaseDriver {
     /// D-UP-19: the one boot reclamation (the `converge` this process
     /// started) kills every orphan before any `assign`; then every stopped
     /// workload's tick takes no lease.
-    fn reclaim(&mut self) -> std::result::Result<(), DriverError> {
+    ///
+    /// A non-empty `s` is the set of orphans whose kill leaves the scope busy
+    /// (decision 14, ADR-0350): boot reserves each one's offset from the
+    /// recorded address. PENDING OWNER API: the busy-scope branch of
+    /// `converge`, `GuestAddressPool::reserve_leftover` and an unreapable
+    /// `SimVmm` process exist in no owner yet, so the step fails here naming
+    /// them and the pins that reach it carry `#[should_panic]`.
+    fn reclaim(&mut self, s: &BTreeSet<i64>) -> std::result::Result<(), DriverError> {
+        if !s.is_empty() {
+            self.serve("Reclaim")?;
+            return Err(DriverError::OwnerApiPending {
+                action: "Reclaim",
+                awaits: "the busy-scope branch of vm_reclamation_boot::converge, GuestAddressPool::reserve_leftover from the Pending row's workload_addr, and an unreapable SimVmm process",
+            });
+        }
         if self.serve("Reclaim")?.reclaim.is_none() {
             return Err(not_enabled("Reclaim", "this process's boot reclamation already returned"));
         }
@@ -1504,6 +1524,20 @@ impl CidLeaseDriver {
         Err(DriverError::OwnerApiPending {
             action: "LateRelease",
             awaits: "the shim's scope-gated lease release and SimVmHostState.kill_scope gated on SimVmm's reap",
+        })
+    }
+
+    /// `RemoveScope(o)` (decisions 16 and N-1): the one remover of a VM scope
+    /// removes it after `cgroup.events` reports `populated 0`. PENDING OWNER
+    /// API: the populated-first scope kill (ADR-0351) and
+    /// `SimVmHostState` scope removal gated on `SimVmm`'s reap exist in no
+    /// owner yet, so the step fails here naming them.
+    fn remove_scope(&mut self, o: i64) -> std::result::Result<(), DriverError> {
+        let _serve = self.serve("RemoveScope")?;
+        let _ = o;
+        Err(DriverError::OwnerApiPending {
+            action: "RemoveScope",
+            awaits: "the populated-first scope kill (the one scope remover, ADR-0351) and SimVmHostState scope removal gated on SimVmm's reap",
         })
     }
 
@@ -1734,11 +1768,12 @@ impl CidLeaseDriver {
             Redeploy(a: i64) => self.redeploy(a)?,
             Crash => self.crash(),
             Restart => self.restart()?,
-            Reclaim => self.reclaim()?,
+            Reclaim(s: BTreeSet<i64>) => self.reclaim(&s)?,
             OrphanExit(o: i64) => self.orphan_exit(o)?,
             StopUnreaped(a: i64) => self.stop_unreaped(a)?,
             Reap(o: i64) => self.reap(o)?,
             LateRelease(o: i64) => self.late_release(o)?,
+            RemoveScope(o: i64) => self.remove_scope(o)?,
             AssignPick => return Err(DriverError::HazardOnly("AssignPick").into()),
             AssignTake => return Err(DriverError::HazardOnly("AssignTake").into()),
         })
@@ -2222,20 +2257,22 @@ fn quint_cid_lease_pool_exhausted_restart_cleans_the_predecessor_then_places() -
     CidLeaseThreeDriver { inner: CidLeaseDriver::over(THREE) }
 }
 
-/// Named run `StopOfAnUnreapedVmmHoldsItsLeaseUntilTheReap` (`lease_conf_ok`,
-/// decision 12): the stop of a killed-not-reaped VMM completes and holds its
-/// lease; the reap frees the device and a later reclaim attempt releases the
-/// lease. PENDING OWNER API (see the module docs): `StopUnreaped` awaits
-/// `VmTermination::KilledNotReaped` and the unreapable `SimVmm` process.
+/// Named run `ScopeIsRemovedOnlyAfterItIsEmpty` (`lease_conf_ok`, decisions
+/// 12, 16 and N-1): the stop of a killed-not-reaped VMM completes and holds
+/// its lease; removing the scope is disabled until the reap (`populated 0`);
+/// after the reap, the removal and the release, a wrap-around assign takes the
+/// offset without a clash. PENDING OWNER API (see the module docs):
+/// `StopUnreaped` awaits `VmTermination::KilledNotReaped` and the unreapable
+/// `SimVmm` process.
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/guest-flow-owner/cid_lease.qnt",
     main = "lease_conf_ok",
     max_samples = 1,
-    test = "StopOfAnUnreapedVmmHoldsItsLeaseUntilTheReap"
+    test = "ScopeIsRemovedOnlyAfterItIsEmpty"
 )]
 #[should_panic(expected = "awaits owner API")]
-fn quint_cid_lease_stop_of_an_unreaped_vmm_holds_its_lease_until_the_reap() -> impl Driver {
+fn quint_cid_lease_scope_is_removed_only_after_it_is_empty() -> impl Driver {
     CidLeaseDriver::new()
 }
 
@@ -2255,27 +2292,32 @@ fn quint_cid_lease_next_fit_skips_an_unreaped_lease() -> impl Driver {
     CidLeaseThreeDriver { inner: CidLeaseDriver::over(THREE) }
 }
 
-/// Named run `ServeCrashWithAnUnreapedVmmBlocksAssignUntilItExits`
-/// (`lease_conf_ok`, decision 12): a `serve` crash with an unreaped VMM drops
-/// the pool; the stuck VMM is an orphan boot reclamation cannot kill, so no
-/// assign runs until it exits. PENDING OWNER API (see the module docs).
+/// Named run `ServeCrashDuringGuestBootReservesFromTheRecordedAddress`
+/// (`lease_conf_ok`, decisions 14 and N-2): a `serve` crash with a launch
+/// parked in guest boot; the allocation's address is on record; boot kills the
+/// VMM, its scope stays busy and its offset is reserved from the record before
+/// the first assign, which skips it; the orphan exits, the scope is removed
+/// and the reservation is released. PENDING OWNER API (see the module docs):
+/// `Reclaim` with a busy set awaits the boot reservation.
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/guest-flow-owner/cid_lease.qnt",
     main = "lease_conf_ok",
     max_samples = 1,
-    test = "ServeCrashWithAnUnreapedVmmBlocksAssignUntilItExits"
+    test = "ServeCrashDuringGuestBootReservesFromTheRecordedAddress"
 )]
 #[should_panic(expected = "awaits owner API")]
-fn quint_cid_lease_serve_crash_with_an_unreaped_vmm_blocks_assign_until_it_exits() -> impl Driver {
+fn quint_cid_lease_serve_crash_during_guest_boot_reserves_from_the_recorded_address() -> impl Driver
+{
     CidLeaseDriver::new()
 }
 
 // ----- randomized traces -----------------------------------------------------------
 
 /// Randomized traces of the conformance main (seed printed on failure).
-/// PENDING OWNER API (decision 12): a trace that takes `StopUnreaped`,
-/// `Reap` or `LateRelease` fails at that step naming the missing port, so the
+/// PENDING OWNER API (the stuck-VM design): a trace that takes `StopUnreaped`,
+/// `Reap`, `LateRelease`, `RemoveScope` or a `Reclaim` with a busy set fails
+/// at that step naming the missing port, so the
 /// run is marked `#[should_panic]` until the crafter wires them.
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_run(spec = "../../specs/quint/guest-flow-owner/cid_lease.qnt", main = "lease_conf_ok")]

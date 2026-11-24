@@ -65,15 +65,19 @@
 //! | `exhausted` | `alloc_status_rows`: the current row carries `BackoffExhausted` |
 //! | `why == W_PREFAIL` | a `Failed` row with an identity-issue or driver-internal reason |
 //! | `why == W_REFUSED` | no row, not live in the driver, the dispatch's own `Err(AdmissionCapReached)` |
-//! | `why == W_LOST` | no row, not live in the driver, the held tick over (completed `Ok`, or dropped by a rebuild) |
-//! | `as == PENDING` | issued, no row, the held tick future has not completed |
+//! | `as == ABANDONED` (`why == W_LOST`) | a `Terminated` row with `terminal == None` and reason `LaunchSuperseded` or `LaunchLostWithControlPlane` (ADR-0355), not live in the driver, the held tick over (completed `Ok`, or dropped by a rebuild). PENDING OWNER API: neither the row nor the reasons exist yet; the projection fails naming them |
+//! | `as == PENDING` | issued, the `Pending` row of the allocation (ADR-0353), the held tick future has not completed. PENDING OWNER API: no `Pending` row is written yet; the projection fails naming it |
 //! | `jobTerm(a)` | a `kind == Job` row with a `terminal` |
 //!
 //! `faults`, `declared`, `idFault`, `capFull`, `conf_step`, `og` and `gl` are model-only.
 //!
 //! **Status: pending.** The driver is compiled. A run whose trace reaches behaviour DELIVER has
 //! not built carries `#[should_panic(expected = ...)]` naming its own divergence; a run that
-//! passes against production today is a GUARD and carries none. See each test's doc.
+//! passes against production today is a GUARD and carries none. See each test's doc. Every
+//! `rg_conf` / `rg_conf_job` run reaches a `PENDING` allocation, whose `Pending` row (ADR-0353) no
+//! owner writes yet, so every pin carries `#[should_panic(expected = "awaits owner API")]` until
+//! the crafter lands the row (then the abandoned row of ADR-0355) and reads both through
+//! `alloc_status_rows()`.
 //!
 //! Lane: `integration-tests` (it spawns the `quint` CLI through quint-connect).
 
@@ -193,6 +197,11 @@ enum RgError {
     Step { step: u64, action: &'static str, why: String },
     #[error("restart-generation divergence at step {step} projection: {why}")]
     Projection { step: u64, why: String },
+    /// The owner has no port or row for what the model now says (ADR-0353, ADR-0355): the step names it.
+    #[error(
+        "restart-generation step {step} awaits owner API that does not exist yet (ADR-0353, ADR-0355): {awaits}"
+    )]
+    OwnerApiPending { step: u64, awaits: &'static str },
     #[error("ITF: {0}")]
     Itf(#[from] ItfError),
 }
@@ -1236,14 +1245,14 @@ enum WhyClass {
     PreFail,
     /// An admission refusal: no row, no charge (`W_REFUSED`).
     Refused,
-    /// A launch with no row and no failure (`W_LOST`).
+    /// A launch that ended before running without a failure: an abandoned row (`W_LOST`, ADR-0355).
     Lost,
 }
 
 /// The compared facts of one model allocation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct AllocFacts {
-    /// 0 unminted, 1 pending, 2 running, 3 failed, 4 terminated.
+    /// 0 unminted, 1 pending, 2 running, 3 failed, 4 terminated, 5 abandoned (ADR-0355).
     state: i64,
     why: WhyClass,
     /// The generation the allocation was issued for.
@@ -1277,11 +1286,9 @@ impl RgState {
         let ig = quint_itf::int_map(quint_itf::field(st, "ig")?, quint_itf::int)?;
         let cnt = quint_itf::int_map(quint_itf::field(st, "cnt")?, quint_itf::int)?;
         // The spec's derived defs, over its own state: `hasRow`, `curA`, `charged`, `exhausted`.
-        let has_row = |a: i64| {
-            matches!(as_.get(&a), Some(2..=4))
-                && why_.get(&a) != Some(&7)
-                && why_.get(&a) != Some(&10)
-        };
+        // A PENDING allocation has its `Pending` row (ADR-0353), an abandoned launch (state 5) its terminal row
+        // (ADR-0355); only a refused launch (`W_REFUSED`) has none.
+        let has_row = |a: i64| matches!(as_.get(&a), Some(1..=5)) && why_.get(&a) != Some(&10);
         let cur_a = (1..=NA).filter(|a| has_row(*a)).max().unwrap_or(0);
         let charged = if cur_a == 0 {
             0
@@ -1289,6 +1296,7 @@ impl RgState {
             cnt.get(&cur_a).copied().unwrap_or(0) + i64::from(as_.get(&cur_a) == Some(&3))
         };
         let non_terminal = as_.values().any(|state| *state == 1 || *state == 2);
+        let abandoned_cur = cur_a != 0 && as_.get(&cur_a) == Some(&5);
         let mut allocs = BTreeMap::new();
         for a in 1..=NA {
             let state = as_.get(&a).copied().unwrap_or(0);
@@ -1312,7 +1320,7 @@ impl RgState {
             dg: quint_itf::int(quint_itf::field(st, "dg")?)?,
             stopped: quint_itf::boolean(quint_itf::field(st, "stopped")?)?,
             allocs,
-            exhausted: charged >= LIMIT && !non_terminal,
+            exhausted: charged >= LIMIT && !non_terminal && !abandoned_cur,
         })
     }
 
@@ -1367,9 +1375,10 @@ impl RgState {
                     AllocState::Running => 2,
                     AllocState::Failed => 3,
                     AllocState::Terminated => 4,
+                    AllocState::Pending => 1,
                     other => {
                         return Err(fail(format!(
-                            "allocation {a} has a {other:?} row: the model has no row before the dispatch resolves"
+                            "allocation {a} has a {other:?} row the model has no state for"
                         )));
                     }
                 };
@@ -1385,26 +1394,36 @@ impl RgState {
             } else {
                 let held = serve.ticks.get(&a).is_some_and(|(tick, _)| !tick.is_finished());
                 if held {
-                    (1, WhyClass::Other)
-                } else {
-                    if live.contains(alloc) {
+                    // PENDING is the allocation's `Pending` row (ADR-0353); production writes none yet.
+                    return Err(RgError::OwnerApiPending {
+                        step,
+                        awaits: "the `Pending` row written before the VMM exists, read through alloc_status_rows() (ADR-0353)",
+                    });
+                }
+                if live.contains(alloc) {
+                    return Err(fail(format!(
+                        "allocation {a} has no row but is live in the driver"
+                    )));
+                }
+                match core.ends.get(&a) {
+                    Some(TickEnd::Refused) => (3, WhyClass::Refused),
+                    Some(TickEnd::Done | TickEnd::Lost) => {
+                        // ABANDONED is a `Terminated` row with `LaunchSuperseded` or `LaunchLostWithControlPlane`
+                        // (ADR-0355); production writes none yet.
+                        return Err(RgError::OwnerApiPending {
+                            step,
+                            awaits: "the abandoned `Terminated` row (`LaunchSuperseded`, `LaunchLostWithControlPlane`) written by the shim and by converge's first step, read through alloc_status_rows() (ADR-0355)",
+                        });
+                    }
+                    Some(TickEnd::Failed(error)) => {
                         return Err(fail(format!(
-                            "allocation {a} has no row but is live in the driver"
+                            "allocation {a}: the dispatch ended with `{error}` and wrote no row"
                         )));
                     }
-                    match core.ends.get(&a) {
-                        Some(TickEnd::Refused) => (3, WhyClass::Refused),
-                        Some(TickEnd::Done | TickEnd::Lost) => (3, WhyClass::Lost),
-                        Some(TickEnd::Failed(error)) => {
-                            return Err(fail(format!(
-                                "allocation {a}: the dispatch ended with `{error}` and wrote no row"
-                            )));
-                        }
-                        None => {
-                            return Err(fail(format!(
-                                "allocation {a} has no row and no recorded dispatch end"
-                            )));
-                        }
+                    None => {
+                        return Err(fail(format!(
+                            "allocation {a} has no row and no recorded dispatch end"
+                        )));
                     }
                 }
             };
@@ -1443,7 +1462,7 @@ impl<'de> Deserialize<'de> for RgState {
 // ----- named runs (critical scenarios, one per `rg_conf` / `rg_conf_job` run) ----------
 
 /// Named run `control_plane_crash_during_restart_launch_relaunches_once`.
-/// PENDING (SD-6, ADR-0335): the restart generation is stamped when emitted, so after the control plane lost the replacement launch (step 7) the next evaluation (step 8) places nothing; it waits for "a generation is handled when its successor is observed".
+/// PENDING (ADR-0353, ADR-0355: no `Pending` row, no abandoned row; awaits owner API). Also SD-6, ADR-0335: the restart generation is stamped when emitted, so after the control plane lost the replacement launch (step 7) the next evaluation (step 8) places nothing; it waits for "a generation is handled when its successor is observed".
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/restart-generation/restart_generation.qnt",
@@ -1451,15 +1470,13 @@ impl<'de> Deserialize<'de> for RgState {
     test = "control_plane_crash_during_restart_launch_relaunches_once",
     max_samples = 1
 )]
-#[should_panic(
-    expected = "restart-generation divergence at step 8 WlStart: the evaluation reached no launch dispatch for allocation 3"
-)]
+#[should_panic(expected = "awaits owner API")]
 fn quint_rg_control_plane_crash_during_restart_launch_relaunches_once() -> impl QuintDriver {
     RgDriver::new()
 }
 
 /// Named run `second_restart_loses_launch_then_one_placement`.
-/// PENDING (ADR-0334): `ReconcilerRuntime::supersede_lane` is a scaffold; it waits for the convergence lane table (step 10). SD-6 (the steps after the loss) is unobserved until it lands.
+/// PENDING (ADR-0353, ADR-0355: no `Pending` row, no abandoned row; awaits owner API). Also ADR-0334: `ReconcilerRuntime::supersede_lane` is a scaffold; it waits for the convergence lane table (step 10). SD-6 (the steps after the loss) is unobserved until it lands.
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/restart-generation/restart_generation.qnt",
@@ -1467,12 +1484,13 @@ fn quint_rg_control_plane_crash_during_restart_launch_relaunches_once() -> impl 
     test = "second_restart_loses_launch_then_one_placement",
     max_samples = 1
 )]
+#[should_panic(expected = "awaits owner API")]
 fn quint_rg_second_restart_loses_launch_then_one_placement() -> impl QuintDriver {
     RgDriver::new()
 }
 
 /// Named run `resume_while_running_stops_and_replaces`.
-/// GUARD: passes against production today (a restart with no lost launch); keeps passing once SD-6 lands.
+/// PENDING (ADR-0353: the `Pending` row of a launch in flight is not written yet, step 3 awaits owner API); a GUARD once it is (passes against production before ADR-0353: a restart with no lost launch); keeps passing once SD-6 lands.
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/restart-generation/restart_generation.qnt",
@@ -1480,12 +1498,13 @@ fn quint_rg_second_restart_loses_launch_then_one_placement() -> impl QuintDriver
     test = "resume_while_running_stops_and_replaces",
     max_samples = 1
 )]
+#[should_panic(expected = "awaits owner API")]
 fn quint_rg_resume_while_running_stops_and_replaces() -> impl QuintDriver {
     RgDriver::new()
 }
 
 /// Named run `restart_of_exhausted_workload_relaunches_uncharged`.
-/// PENDING (ADR-0337): a pre-driver failure (identity issuance) returns `Err` and writes no row (step 5); it waits for the charged `Failed` row. Later steps (SD-6 replacement of an exhausted row) are unobserved until it lands.
+/// PENDING (ADR-0353: no `Pending` row; awaits owner API). Also ADR-0337: a pre-driver failure (identity issuance) returns `Err` and writes no row (step 5); it waits for the charged `Failed` row. Later steps (SD-6 replacement of an exhausted row) are unobserved until it lands.
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/restart-generation/restart_generation.qnt",
@@ -1493,9 +1512,7 @@ fn quint_rg_resume_while_running_stops_and_replaces() -> impl QuintDriver {
     test = "restart_of_exhausted_workload_relaunches_uncharged",
     max_samples = 1
 )]
-#[should_panic(
-    expected = "restart-generation divergence at step 5 projection: allocation 1: the dispatch ended with `shim failure: issue_svid dispatch failed` and wrote no row"
-)]
+#[should_panic(expected = "awaits owner API")]
 fn quint_rg_restart_of_exhausted_workload_relaunches_uncharged() -> impl QuintDriver {
     RgDriver::new()
 }
@@ -1509,9 +1526,7 @@ fn quint_rg_restart_of_exhausted_workload_relaunches_uncharged() -> impl QuintDr
     test = "generation_replacement_forgives_predecessor_failure",
     max_samples = 1
 )]
-#[should_panic(
-    expected = "restart-generation divergence at step 5 projection: allocation 1: the dispatch ended with `shim failure: issue_svid dispatch failed` and wrote no row"
-)]
+#[should_panic(expected = "awaits owner API")]
 fn quint_rg_generation_replacement_forgives_predecessor_failure() -> impl QuintDriver {
     RgDriver::new()
 }
@@ -1525,9 +1540,7 @@ fn quint_rg_generation_replacement_forgives_predecessor_failure() -> impl QuintD
     test = "persistent_prelaunch_failure_ends_in_backoff_exhausted",
     max_samples = 1
 )]
-#[should_panic(
-    expected = "restart-generation divergence at step 5 projection: allocation 1: the dispatch ended with `shim failure: issue_svid dispatch failed` and wrote no row"
-)]
+#[should_panic(expected = "awaits owner API")]
 fn quint_rg_persistent_prelaunch_failure_ends_in_backoff_exhausted() -> impl QuintDriver {
     RgDriver::new()
 }
@@ -1541,15 +1554,13 @@ fn quint_rg_persistent_prelaunch_failure_ends_in_backoff_exhausted() -> impl Qui
     test = "transient_prelaunch_failure_recovers",
     max_samples = 1
 )]
-#[should_panic(
-    expected = "restart-generation divergence at step 5 projection: allocation 1: the dispatch ended with `shim failure: issue_svid dispatch failed` and wrote no row"
-)]
+#[should_panic(expected = "awaits owner API")]
 fn quint_rg_transient_prelaunch_failure_recovers() -> impl QuintDriver {
     RgDriver::new()
 }
 
 /// Named run `admission_refusal_leaves_no_row_and_waits_for_capacity`.
-/// GUARD: passes against production today (the refusal already writes no row and charges nothing, ADR-0338); keeps passing once the occupancy gate lands.
+/// PENDING (ADR-0353: the `Pending` row of a launch in flight is not written yet, step 3 awaits owner API); a GUARD once it is (passes against production before ADR-0353: the refusal already writes no row and charges nothing, ADR-0338); keeps passing once the occupancy gate lands.
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/restart-generation/restart_generation.qnt",
@@ -1557,12 +1568,13 @@ fn quint_rg_transient_prelaunch_failure_recovers() -> impl QuintDriver {
     test = "admission_refusal_leaves_no_row_and_waits_for_capacity",
     max_samples = 1
 )]
+#[should_panic(expected = "awaits owner API")]
 fn quint_rg_admission_refusal_leaves_no_row_and_waits_for_capacity() -> impl QuintDriver {
     RgDriver::new()
 }
 
 /// Named run `restart_of_completed_job_does_nothing_and_issues_no_id`.
-/// GUARD: passes against production today (a finished Job's row is final and a restart issues no id, ADR-0335 item 3).
+/// PENDING (ADR-0353: the `Pending` row of a launch in flight is not written yet, step 3 awaits owner API); a GUARD once it is (passes against production before ADR-0353: a finished Job's row is final and a restart issues no id, ADR-0335 item 3).
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/restart-generation/restart_generation.qnt",
@@ -1570,12 +1582,13 @@ fn quint_rg_admission_refusal_leaves_no_row_and_waits_for_capacity() -> impl Qui
     test = "restart_of_completed_job_does_nothing_and_issues_no_id",
     max_samples = 1
 )]
+#[should_panic(expected = "awaits owner API")]
 fn quint_rg_restart_of_completed_job_does_nothing_and_issues_no_id() -> impl QuintDriver {
     RgJobDriver::new()
 }
 
 /// Named run `resume_of_stopped_job_does_nothing_and_issues_no_id`.
-/// PENDING: today production gives a resumed operator-stopped Job a new allocation id (the check that the
+/// PENDING (ADR-0353: no `Pending` row; awaits owner API). Also: today production gives a resumed operator-stopped Job a new allocation id (the check that the
 /// Job issues no id the model names was vacuous before); DELIVER step 9 (generation helper) ends it.
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
@@ -1584,21 +1597,17 @@ fn quint_rg_restart_of_completed_job_does_nothing_and_issues_no_id() -> impl Qui
     test = "resume_of_stopped_job_does_nothing_and_issues_no_id",
     max_samples = 1
 )]
-#[should_panic(expected = "the Job issued allocation id")]
+#[should_panic(expected = "awaits owner API")]
 fn quint_rg_resume_of_stopped_job_does_nothing_and_issues_no_id() -> impl QuintDriver {
     RgJobDriver::new()
 }
 
-/// PENDING: random traces reach the divergences of the named runs above (the first one a seed hits
-/// decides the step). `should_panic` takes one substring, and the first divergence a seed hits is one
-/// of: `the evaluation reached no launch dispatch for allocation` (SD-6, step 8 of the crash run),
-/// `supersede_lane must raise the signal of the lane` (the lane table), or `the dispatch ended with
-/// `shim failure: issue_svid dispatch failed` and wrote no row` (the charged `Failed` row); the one
-/// substring common to all three is the driver's own `restart-generation divergence at step`.
+/// PENDING (ADR-0353, ADR-0355): every trace that places an allocation reaches the `Pending` row no owner writes yet, so
+/// the first divergence a seed hits is the owner-API pending error (`awaits owner API`), at a projection.
 /// Randomized `rg_conf` traces (seed printed on failure).
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_run(spec = "../../specs/quint/restart-generation/restart_generation.qnt", main = "rg_conf")]
-#[should_panic(expected = "restart-generation divergence at step")]
+#[should_panic(expected = "awaits owner API")]
 fn quint_rg_randomized() -> impl QuintDriver {
     RgDriver::new()
 }

@@ -1,0 +1,40 @@
+# cid-lease-hazard-remove-scope-while-populated: counterexample, 6 state(s) (from the TLC trace)
+
+State 1
+  dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  bootLeft = -1
+  reclaimed = TRUE
+  lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  cursor = 0
+  up = TRUE
+  scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
+  att = <<0, 0>>
+  conf_step = [init |-> [tag |-> "UNIT"]]
+  late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  recorded = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  al = << [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
+  g = [ clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE, stopped |-> {}, lastEnd |-> <<"none", "none">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {}, unreapedOrphans |-> {} ]
+
+State 2 [Assign]
+  lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+  cursor = 1
+  recorded = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+  al = << [ st |-> "leased", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
+
+State 3 [Launch]
+  dev = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+  al = << [ st |-> "running", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
+
+State 4 [StopUnreaped]
+  scope = (0 :> TRUE @@ 1 :> FALSE @@ 2 :> FALSE)
+  late = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+  al = << [ st |-> "done", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
+  g = [ clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE, stopped |-> {1}, lastEnd |-> <<"stop", "none">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {}, unreapedOrphans |-> {} ]
+
+State 5 [RemoveScope]
+  scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
+
+State 6 [LateRelease]
+  lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  recorded = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)

@@ -8,7 +8,9 @@ State 1
   conf_step = [init |-> [tag |-> "UNIT"]]
   late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
   dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
   up = TRUE
+  recorded = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
   reclaimed = TRUE
   bootLeft = -1
   al = << [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
@@ -16,6 +18,7 @@ State 1
 State 2 [Assign]
   cursor = 1
   lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+  recorded = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
   al = << [ st |-> "leased", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
 
 State 3 [Launch]

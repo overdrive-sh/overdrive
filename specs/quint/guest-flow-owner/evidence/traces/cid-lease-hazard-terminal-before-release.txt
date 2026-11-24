@@ -8,6 +8,8 @@ State 1
   dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
   g = [ clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE, stopped |-> {}, lastEnd |-> <<"none", "none">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {}, unreapedOrphans |-> {} ]
   late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  recorded = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
   al = << [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
   bootLeft = -1
   cursor = 0
@@ -15,6 +17,7 @@ State 1
 
 State 2 [Assign]
   lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+  recorded = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
   al = << [ st |-> "leased", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
   cursor = 1
 
@@ -30,6 +33,7 @@ State 4 [VmmCrash]
 State 5 [Assign]
   att = <<1, 0>>
   lease = (0 :> 1 @@ 1 :> 1 @@ 2 :> 0)
+  recorded = (0 :> 1 @@ 1 :> 1 @@ 2 :> 0)
   al = << [ st |-> "leased", off |-> 1, retry |-> FALSE, ex |-> FALSE, chg |-> TRUE, pred |-> 0, pst |-> "held" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
   cursor = 2
 
@@ -41,27 +45,32 @@ State 7 [VmmCrash]
   dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
   al = << [ st |-> "ended", off |-> 1, retry |-> TRUE, ex |-> FALSE, chg |-> TRUE, pred |-> 0, pst |-> "retiring" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
 
-State 8 [Release]
-  lease = (0 :> 0 @@ 1 :> 1 @@ 2 :> 0)
-  al = << [ st |-> "ended", off |-> 1, retry |-> TRUE, ex |-> FALSE, chg |-> TRUE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
-
-State 9 [Assign]
-  att = <<2, 0>>
-  lease = (0 :> 0 @@ 1 :> 1 @@ 2 :> 1)
-  al = << [ st |-> "leased", off |-> 2, retry |-> FALSE, ex |-> FALSE, chg |-> TRUE, pred |-> 1, pst |-> "held" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
+State 8 [Crash]
+  up = FALSE
+  lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  reclaimed = FALSE
+  recorded = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  al = << [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> TRUE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
   cursor = 0
 
-State 10 [Launch]
-  dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 1)
-  al = << [ st |-> "running", off |-> 2, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> 1, pst |-> "retiring" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
+State 9 [Restart]
+  up = TRUE
+  reclaimed = TRUE
 
-State 11 [VmmCrash]
+State 10 [Assign]
+  att = <<2, 0>>
+  lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+  recorded = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+  al = << [ st |-> "leased", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> TRUE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
+  cursor = 1
+
+State 11 [Launch]
+  dev = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+  al = << [ st |-> "running", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
+
+State 12 [VmmCrash]
   dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
-  al = << [ st |-> "ended", off |-> 2, retry |-> FALSE, ex |-> TRUE, chg |-> FALSE, pred |-> 1, pst |-> "retiring" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
-
-State 12 [Release]
-  lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 1)
-  al = << [ st |-> "ended", off |-> 2, retry |-> FALSE, ex |-> TRUE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
+  al = << [ st |-> "ended", off |-> 0, retry |-> FALSE, ex |-> TRUE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
 
 State 13 [Finalize]
-  al = << [ st |-> "failed", off |-> 2, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
+  al = << [ st |-> "failed", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>

@@ -1,6 +1,7 @@
 # cid-lease-hazard-tick-during-predecessor-teardown: counterexample, 8 state(s) (from the TLC trace)
 
 State 1
+  recorded = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
   cursor = 0
   g = [ clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE, stopped |-> {}, lastEnd |-> <<"none", "none">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {}, unreapedOrphans |-> {} ]
   al = << [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
@@ -12,8 +13,10 @@ State 1
   reclaimed = TRUE
   dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
   late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
 
 State 2 [Assign]
+  recorded = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
   cursor = 1
   al = << [ st |-> "leased", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
   lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
@@ -28,6 +31,7 @@ State 4 [VmmCrash]
   dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 
 State 5 [Assign]
+  recorded = (0 :> 1 @@ 1 :> 1 @@ 2 :> 0)
   cursor = 2
   al = << [ st |-> "leased", off |-> 1, retry |-> FALSE, ex |-> FALSE, chg |-> TRUE, pred |-> 0, pst |-> "held" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
   att = <<1, 0>>
@@ -42,6 +46,7 @@ State 7 [VmmCrash]
   dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 
 State 8 [Assign]
+  recorded = (0 :> 1 @@ 1 :> 1 @@ 2 :> 1)
   cursor = 0
   al = << [ st |-> "leased", off |-> 2, retry |-> FALSE, ex |-> FALSE, chg |-> TRUE, pred |-> 1, pst |-> "held" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
   att = <<2, 0>>

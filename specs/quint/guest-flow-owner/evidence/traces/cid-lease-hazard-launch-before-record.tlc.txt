@@ -1,0 +1,287 @@
+State 1: <Initial predicate>
+/\ lease_bugLaunchBeforeRecord_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_bugLaunchBeforeRecord_cid_lease_up = TRUE
+/\ lease_bugLaunchBeforeRecord_cid_lease_att = <<0, 0>>
+/\ lease_bugLaunchBeforeRecord_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugLaunchBeforeRecord_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {},
+  lastEnd |-> <<"none", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {},
+  unreapedOrphans |-> {} ]
+/\ lease_bugLaunchBeforeRecord_cid_lease_reclaimed = TRUE
+/\ lease_bugLaunchBeforeRecord_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugLaunchBeforeRecord_cid_lease_recorded = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugLaunchBeforeRecord_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugLaunchBeforeRecord_cid_lease_al = << [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
+/\ lease_bugLaunchBeforeRecord_cid_lease_cursor = 0
+/\ lease_bugLaunchBeforeRecord_cid_lease_bootLeft = -1
+/\ lease_bugLaunchBeforeRecord_cid_lease_scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
+
+State 2: <lease_bugLaunchBeforeRecord_cid_lease_Assign line 1584, col 3 to line 1672, col 59 of module lease_bugLaunchBeforeRecord>
+/\ lease_bugLaunchBeforeRecord_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_bugLaunchBeforeRecord_cid_lease_up = TRUE
+/\ lease_bugLaunchBeforeRecord_cid_lease_att = <<0, 0>>
+/\ lease_bugLaunchBeforeRecord_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugLaunchBeforeRecord_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {},
+  lastEnd |-> <<"none", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {},
+  unreapedOrphans |-> {} ]
+/\ lease_bugLaunchBeforeRecord_cid_lease_reclaimed = TRUE
+/\ lease_bugLaunchBeforeRecord_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugLaunchBeforeRecord_cid_lease_recorded = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugLaunchBeforeRecord_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugLaunchBeforeRecord_cid_lease_al = << [ st |-> "leased",
+     off |-> 0,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
+/\ lease_bugLaunchBeforeRecord_cid_lease_cursor = 1
+/\ lease_bugLaunchBeforeRecord_cid_lease_bootLeft = -1
+/\ lease_bugLaunchBeforeRecord_cid_lease_scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
+
+State 3: <lease_bugLaunchBeforeRecord_cid_lease_Launch line 1742, col 3 to line 1847, col 59 of module lease_bugLaunchBeforeRecord>
+/\ lease_bugLaunchBeforeRecord_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_bugLaunchBeforeRecord_cid_lease_up = TRUE
+/\ lease_bugLaunchBeforeRecord_cid_lease_att = <<0, 0>>
+/\ lease_bugLaunchBeforeRecord_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugLaunchBeforeRecord_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {},
+  lastEnd |-> <<"none", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {},
+  unreapedOrphans |-> {} ]
+/\ lease_bugLaunchBeforeRecord_cid_lease_reclaimed = TRUE
+/\ lease_bugLaunchBeforeRecord_cid_lease_dev = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugLaunchBeforeRecord_cid_lease_recorded = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugLaunchBeforeRecord_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugLaunchBeforeRecord_cid_lease_al = << [ st |-> "running",
+     off |-> 0,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
+/\ lease_bugLaunchBeforeRecord_cid_lease_cursor = 1
+/\ lease_bugLaunchBeforeRecord_cid_lease_bootLeft = -1
+/\ lease_bugLaunchBeforeRecord_cid_lease_scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
+
+State 4: <lease_bugLaunchBeforeRecord_cid_lease_Crash line 2072, col 3 to line 2191, col 59 of module lease_bugLaunchBeforeRecord>
+/\ lease_bugLaunchBeforeRecord_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_bugLaunchBeforeRecord_cid_lease_up = FALSE
+/\ lease_bugLaunchBeforeRecord_cid_lease_att = <<0, 0>>
+/\ lease_bugLaunchBeforeRecord_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugLaunchBeforeRecord_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {},
+  lastEnd |-> <<"reclaim", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {},
+  unreapedOrphans |-> {} ]
+/\ lease_bugLaunchBeforeRecord_cid_lease_reclaimed = FALSE
+/\ lease_bugLaunchBeforeRecord_cid_lease_dev = (0 :> -2 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugLaunchBeforeRecord_cid_lease_recorded = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugLaunchBeforeRecord_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugLaunchBeforeRecord_cid_lease_al = << [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
+/\ lease_bugLaunchBeforeRecord_cid_lease_cursor = 0
+/\ lease_bugLaunchBeforeRecord_cid_lease_bootLeft = -1
+/\ lease_bugLaunchBeforeRecord_cid_lease_scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
+
+State 5: <lease_bugLaunchBeforeRecord_cid_lease_Restart line 1460, col 3 to line 1487, col 59 of module lease_bugLaunchBeforeRecord>
+/\ lease_bugLaunchBeforeRecord_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_bugLaunchBeforeRecord_cid_lease_up = TRUE
+/\ lease_bugLaunchBeforeRecord_cid_lease_att = <<0, 0>>
+/\ lease_bugLaunchBeforeRecord_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugLaunchBeforeRecord_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> FALSE,
+  stopped |-> {},
+  lastEnd |-> <<"reclaim", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {},
+  unreapedOrphans |-> {} ]
+/\ lease_bugLaunchBeforeRecord_cid_lease_reclaimed = FALSE
+/\ lease_bugLaunchBeforeRecord_cid_lease_dev = (0 :> -2 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugLaunchBeforeRecord_cid_lease_recorded = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugLaunchBeforeRecord_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugLaunchBeforeRecord_cid_lease_al = << [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
+/\ lease_bugLaunchBeforeRecord_cid_lease_cursor = 0
+/\ lease_bugLaunchBeforeRecord_cid_lease_bootLeft = -1
+/\ lease_bugLaunchBeforeRecord_cid_lease_scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
+
+State 6: <lease_bugLaunchBeforeRecord_cid_lease_Reclaim line 2197, col 3 to line 2291, col 50 of module lease_bugLaunchBeforeRecord>
+/\ lease_bugLaunchBeforeRecord_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_bugLaunchBeforeRecord_cid_lease_up = TRUE
+/\ lease_bugLaunchBeforeRecord_cid_lease_att = <<0, 0>>
+/\ lease_bugLaunchBeforeRecord_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugLaunchBeforeRecord_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> TRUE,
+  stopped |-> {},
+  lastEnd |-> <<"reclaim", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {},
+  unreapedOrphans |-> {0} ]
+/\ lease_bugLaunchBeforeRecord_cid_lease_reclaimed = TRUE
+/\ lease_bugLaunchBeforeRecord_cid_lease_dev = (0 :> -2 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugLaunchBeforeRecord_cid_lease_recorded = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugLaunchBeforeRecord_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugLaunchBeforeRecord_cid_lease_al = << [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
+/\ lease_bugLaunchBeforeRecord_cid_lease_cursor = 0
+/\ lease_bugLaunchBeforeRecord_cid_lease_bootLeft = -1
+/\ lease_bugLaunchBeforeRecord_cid_lease_scope = (0 :> TRUE @@ 1 :> FALSE @@ 2 :> FALSE)
+
+State 7: <lease_bugLaunchBeforeRecord_cid_lease_Assign line 1584, col 3 to line 1672, col 59 of module lease_bugLaunchBeforeRecord>
+/\ lease_bugLaunchBeforeRecord_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_bugLaunchBeforeRecord_cid_lease_up = TRUE
+/\ lease_bugLaunchBeforeRecord_cid_lease_att = <<0, 0>>
+/\ lease_bugLaunchBeforeRecord_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugLaunchBeforeRecord_cid_lease_g = [ clash |-> FALSE,
+  rebooted |-> FALSE,
+  reclaimed |-> TRUE,
+  stopped |-> {},
+  lastEnd |-> <<"reclaim", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {},
+  unreapedOrphans |-> {0} ]
+/\ lease_bugLaunchBeforeRecord_cid_lease_reclaimed = TRUE
+/\ lease_bugLaunchBeforeRecord_cid_lease_dev = (0 :> -2 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugLaunchBeforeRecord_cid_lease_recorded = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugLaunchBeforeRecord_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugLaunchBeforeRecord_cid_lease_al = << [ st |-> "leased",
+     off |-> 0,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
+/\ lease_bugLaunchBeforeRecord_cid_lease_cursor = 1
+/\ lease_bugLaunchBeforeRecord_cid_lease_bootLeft = -1
+/\ lease_bugLaunchBeforeRecord_cid_lease_scope = (0 :> TRUE @@ 1 :> FALSE @@ 2 :> FALSE)
+
+State 8: <lease_bugLaunchBeforeRecord_cid_lease_Launch line 1742, col 3 to line 1847, col 59 of module lease_bugLaunchBeforeRecord>
+/\ lease_bugLaunchBeforeRecord_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_bugLaunchBeforeRecord_cid_lease_up = TRUE
+/\ lease_bugLaunchBeforeRecord_cid_lease_att = <<0, 0>>
+/\ lease_bugLaunchBeforeRecord_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugLaunchBeforeRecord_cid_lease_g = [ clash |-> TRUE,
+  rebooted |-> FALSE,
+  reclaimed |-> TRUE,
+  stopped |-> {},
+  lastEnd |-> <<"crash", "none">>,
+  preEnd |-> <<"none", "none">>,
+  pendingGen |-> <<"", "">>,
+  fin |-> {},
+  unreapedOrphans |-> {0} ]
+/\ lease_bugLaunchBeforeRecord_cid_lease_reclaimed = TRUE
+/\ lease_bugLaunchBeforeRecord_cid_lease_dev = (0 :> -2 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugLaunchBeforeRecord_cid_lease_recorded = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugLaunchBeforeRecord_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugLaunchBeforeRecord_cid_lease_al = << [ st |-> "retiring",
+     off |-> 0,
+     retry |-> TRUE,
+     ex |-> FALSE,
+     chg |-> TRUE,
+     pred |-> -1,
+     pst |-> "none" ],
+   [ st |-> "wait",
+     off |-> -1,
+     retry |-> FALSE,
+     ex |-> FALSE,
+     chg |-> FALSE,
+     pred |-> -1,
+     pst |-> "none" ] >>
+/\ lease_bugLaunchBeforeRecord_cid_lease_cursor = 1
+/\ lease_bugLaunchBeforeRecord_cid_lease_bootLeft = -1
+/\ lease_bugLaunchBeforeRecord_cid_lease_scope = (0 :> TRUE @@ 1 :> FALSE @@ 2 :> FALSE)

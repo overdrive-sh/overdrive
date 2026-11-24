@@ -2,10 +2,13 @@
 
 // SD-6 (ADR-0335): the restart generation is recorded handled when the launch is EMITTED, not when its allocation is
 // observed: `og = dg` at WlStart and `pendingGen` reads `og`. Counterexample: restart of a Running workload, the replacement
-// launch is issued (`og = dg`), the launch is lost (no row), no generation is pending and the operator-stop veto is set:
-// the workload is stranded forever. The smallest bounds that still violate (three ids, one restart commit, no fault).
+// launch is issued (`og = dg`), the pool fills and the launch is refused at admission (no row: ADR-0338), no generation is
+// pending and the operator-stop veto is set: the workload is stranded forever. (A launch lost or superseded no longer
+// qualifies: ADR-0355 ends its `Pending` row with an abandoned row, which is restartable, so the rule's defence is the refused
+// launch, the one launch that still ends with no row.) The smallest bounds that still violate (three ids, one restart commit,
+// no fault).
 module rg_bugStampOnEmit {
-  import restart_generation(OFF = Set("stampOnEmit"), REC = false, OPS = Set("restart", "lost"), NA = 3, FB = 0, LIMIT = 3,
+  import restart_generation(OFF = Set("stampOnEmit"), REC = false, OPS = Set("restart", "capFull"), NA = 3, FB = 0, LIMIT = 3,
     DGMAX = 1, JOB = false).* from "../restart_generation"
 }
 
@@ -20,5 +23,13 @@ module rg_bugPrefailNoRow {
 // row, so a node held at the cap exhausts a healthy workload's budget. Three refusals suffice (LIMIT = 3).
 module rg_bugRefusalCharged {
   import restart_generation(OFF = Set("refusalCharged"), REC = false, OPS = Set("capFull"), NA = 4, FB = 0, LIMIT = 3,
+    DGMAX = 1, JOB = false).* from "../restart_generation"
+}
+
+// ADR-0355: a launch that ends before running ends its `Pending` row with an abandoned terminal row. Hazard: the row is left
+// `Pending` (boot, a supersession and a loss write nothing): the dead row blocks every placement as any non-terminal row does and
+// nothing resolves it, so the workload is never relaunched. The smallest bounds that still violate (one fault, two ids).
+module rg_bugAbandonWritesNoRow {
+  import restart_generation(OFF = Set("abandonWritesNoRow"), REC = false, OPS = Set("lost"), NA = 2, FB = 1, LIMIT = 3,
     DGMAX = 1, JOB = false).* from "../restart_generation"
 }

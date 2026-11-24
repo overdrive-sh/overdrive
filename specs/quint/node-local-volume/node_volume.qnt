@@ -21,9 +21,13 @@
  *   workload-lifecycle       mints a successor only when no allocation row is non-terminal (ADR-0109); it does not wait
  *                            for cleanup or claim release (ADR-0106). Operator stop, `workload restart`.
  *
- * Lane signal (SD-1..SD-5, ADR-0334): a PENDING allocation stands for "a launch holds the lane" (production writes no row
- * before `driver.start` returns). `sup[a]` is raised by OpStop, WorkloadRestart (on a PENDING allocation) and Shutdown
- * (`down`). A launch that observes it abandons: no row result, no charge, the VMM terminated, the volume kept. The
+ * Lane signal (SD-1..SD-5, ADR-0334): a PENDING allocation stands for "a launch holds the lane" (production writes its
+ * `Pending` row before the VMM exists, ADR-0353). `sup[a]` is raised by OpStop, WorkloadRestart (on a PENDING allocation) and
+ * Shutdown (`down`). A launch that observes it abandons: its `Pending` row ends `Terminated` (`LaunchSuperseded`, ADR-0355;
+ * `W_SUPERSEDED`), with no `Running` row, no `Failed` row, no charge and no budget input, the VMM terminated, the volume kept.
+ * A launch lost with the control plane (CpCrash, NodeReboot, and `Boot`, whose first step closes every `Pending` row) ends
+ * the same way with `W_LOST` (`LaunchLostWithControlPlane`). The allocation gains no state: both are TERMINATED, and the
+ * reason is the projection. An abandoned row is the current row, restartable, uncharged, and carries its count to the relaunch. The
  * abandonment is the same step as the signal reaching an observation point: a launch parked at a claim-poll boundary,
  * at the create gate or in the boot wait abandons in the step that raises the signal; a launch whose `ensure` is in
  * flight abandons in the step that ends `ensure` (`LaunchEnsureActivate`); a lane born after shutdown abandons in
@@ -87,15 +91,15 @@ module node_volume {
   val W_OPENLOST = 4    // the VMM's own open lost
   val W_STOP = 5
   val W_RESTART = 6
-  val W_LOST = 7        // launch lost to a control-plane crash
-  val W_SUPERSEDED = 8  // the launch observed the lane signal and abandoned; no row result, no charge
+  val W_LOST = 7        // launch lost with the control plane: a TERMINATED row (LaunchLostWithControlPlane), no charge
+  val W_SUPERSEDED = 8  // the launch observed the lane signal and abandoned: a TERMINATED row (LaunchSuperseded), no charge
   // launch phase (control-plane memory)
   val LP_NONE = 0
   val LP_SUP = 1        // supervision claimed
   val LP_CREATED = 2    // ensure: create-if-absent done
   val LP_ENSURED = 3    // ensure: activated
   val LP_FREE = 4       // claim_state reported Free
-  val LP_BOOT = 5       // VMM spawned, claim held, guest not ready, no row
+  val LP_BOOT = 5       // VMM spawned, claim held, guest not ready, row Pending
 
   type S = {
     declared: bool, stopped: bool, storeUp: bool, spaceFree: bool,
@@ -154,19 +158,23 @@ module node_volume {
   def nonTerminal(s: S): bool = AL.exists(a => s.as.get(a) == PENDING or s.as.get(a) == RUNNING)
   def deadHolder(s: S): bool = s.claim > 0 and not(s.alive.get(s.claim))
   def isPending(s: S, a: int): bool = s.as.get(a) == PENDING
-  // "an allocation row exists for a" (production `current_alloc` reads rows): a PENDING launch, a launch lost to a control-plane
-  // crash and a superseded launch have none; every other ended or running allocation has one
-  def hasRow(s: S, a: int): bool = and {
-    s.as.get(a) == RUNNING or s.as.get(a) == FAILED or s.as.get(a) == TERMINATED,
-    s.why.get(a) != W_LOST, s.why.get(a) != W_SUPERSEDED,
-  }
+  // "an allocation row exists for a" (production `current_alloc` reads rows): every minted allocation has one (a PENDING launch
+  // its `Pending` row, ADR-0353; an abandoned launch its terminal row, ADR-0355)
+  def hasRow(s: S, a: int): bool =
+    s.as.get(a) == PENDING or s.as.get(a) == RUNNING or s.as.get(a) == FAILED or s.as.get(a) == TERMINATED
   def curA(s: S): int = AL.fold(0, (m, a) => if (hasRow(s, a) and a > m) a else m)
+  // the current row is an abandoned launch (superseded, or lost with the control plane): the platform ended it, the workload's
+  // intent stands (`is_platform_reclaimed`)
+  def abandonedCur(s: S): bool =
+    curA(s) != 0 and s.as.get(curA(s)) == TERMINATED and (s.why.get(curA(s)) == W_SUPERSEDED or s.why.get(curA(s)) == W_LOST)
   // a generation is pending until the allocation issued for it has a row (ADR-0335)
   def pendingGen(s: S): bool = curA(s) != 0 and s.old.get(curA(s))
   // the restart budget rule is restart_budget.qnt's; this spec only says which row is current
   def charged(s: S): int = budgetCharged(curA(s), s.cnt, curA(s) != 0 and s.as.get(curA(s)) == FAILED)
-  def exhausted(s: S): bool = budgetExhausted(charged(s), LIMIT, nonTerminal(s))
-  def startCnt(s: S): int = budgetStartCnt(curA(s), s.cnt, pendingGen(s))
+  // an abandoned current row is exempt from the ceiling, so it is never BackoffExhausted
+  def exhausted(s: S): bool = budgetExhausted(charged(s), LIMIT, nonTerminal(s)) and not(abandonedCur(s))
+  // an abandoned launch charges nothing: the relaunch carries the abandoned row's own count unchanged (ADR-0355 item 2)
+  def startCnt(s: S): int = if (abandonedCur(s)) s.cnt.get(curA(s)) else budgetStartCnt(curA(s), s.cnt, pendingGen(s))
   // the placement of allocation a: issued for the current generation, carrying the budget rule's count
   def place(s: S, a: int): S = { ...s, as: s.as.set(a, PENDING), old: s.old.set(a, false), cnt: s.cnt.set(a, startCnt(s)) }
 
@@ -182,8 +190,8 @@ module node_volume {
   // ghost: a step taken while the signal is up counts against I_SUPERSEDE_ABANDONS_WAITS
   def bump(s: S, a: int): int -> int = s.afterSup.set(a, s.afterSup.get(a) + (if (s.sup.get(a)) 1 else 0))
   // SD-1 / SD-3: the launch observes the lane signal at an observation point (claim poll, create gate, boot wait, end of
-  // `ensure`, birth of a lane after shutdown) and abandons: the allocation ends TERMINATED with W_SUPERSEDED, no row result,
-  // no budget charge; the VMM, if spawned, is terminated and its claim lingers until Drain; the volume is kept.
+  // `ensure`, birth of a lane after shutdown) and abandons: the allocation ends TERMINATED with W_SUPERSEDED (its row names
+  // why), no Running or Failed row, no budget charge; the VMM, if spawned, is terminated and its claim lingers until Drain; the volume is kept.
   def abandon(s: S, a: int): S =
     { ...s, as: s.as.set(a, TERMINATED), why: s.why.set(a, W_SUPERSEDED), ph: s.ph.set(a, LP_NONE),
       sup: s.sup.set(a, false), alive: s.alive.set(a, false), orphan: s.orphan.set(a, false) }
@@ -227,7 +235,7 @@ module node_volume {
 
   // ---------------------------------------------------------------- workload-lifecycle
   def canStart(s: S, a: int): bool = and {
-    s.declared, not(s.stopped), budgetMayRestart(charged(s), LIMIT, pendingGen(s)), not(nonTerminal(s)),
+    s.declared, not(s.stopped), budgetMayRestart(charged(s), LIMIT, pendingGen(s) or abandonedCur(s)), not(nonTerminal(s)),
     // M7: the boot sweep reclaims a VMM that survived a control-plane crash before any launch starts (feature delta,
     // boundary scenario 5); a Running orphan already blocked minting through its non-terminal row, a booting one does not
     AL.forall(x => not(s.orphan.get(x))),
@@ -362,7 +370,7 @@ module node_volume {
     isPending(s, a), s.ph.get(a) == LP_FREE, s.lv, s.active, s.claim == 0, sg(s, a),
   }
   def canGuestReady(s: S, a: int): bool = and { isPending(s, a), s.ph.get(a) == LP_BOOT, s.alive.get(a), sg(s, a) }
-  // the allocation stays Pending (no row): the VMM is spawned and holds the claim, the guest is booting (LP_BOOT)
+  // the allocation stays Pending (its `Pending` row): the VMM is spawned and holds the claim, the guest is booting (LP_BOOT)
   action VmmSpawn(a: int): bool = all {
     canSpawn(cur, a),
     commit({ ...cur, claim: a, alive: cur.alive.set(a, true), ran: cur.ran.set(a, true),
@@ -405,8 +413,8 @@ module node_volume {
     commit({ ...cur, claim: 0, slow: false }, variant("Drain", ())),
   }
   // the boot reclamation sweep (M7) kills a VMM that survived a control-plane crash; its claim drains. A Running row fails
-  // (charged). A booting VMM (LP_BOOT) whose launch was lost to the crash is marked Failed(W_LOST) with no row and no
-  // charge (M3): the sweep only kills it (DiscardStrandedArtifacts), so it charges nothing either.
+  // (charged). A booting VMM (LP_BOOT) whose launch was lost to the crash is already TERMINATED(W_LOST), uncharged (M3): the
+  // sweep only kills it (DiscardStrandedArtifacts), so it charges nothing either.
   action Reclaim(a: int): bool = all {
     cur.alive.get(a), cur.orphan.get(a),
     any {
@@ -422,13 +430,14 @@ module node_volume {
       },
     },
   }
-  // environment: control plane crash. Every in-flight launch is lost (a Pending allocation ends Failed(W_LOST)), a spawned
+  // environment: control plane crash. Every in-flight launch is lost (a Pending allocation ends TERMINATED(W_LOST)), a spawned
   // VMM keeps running (orphan) until Reclaim; the volume and its data persist.
-  // the loss a control-plane death inflicts on in-flight launches (shared with `Boot`). A lost launch has NO row in
-  // production, so it charges nothing (review finding M3): `charged` and `chg` are unchanged.
+  // the loss a control-plane death inflicts on in-flight launches (shared with `Boot`, whose first step closes every
+  // `Pending` row, ADR-0355). A lost launch's row is Terminated, not Failed, so it charges nothing (review finding M3):
+  // `charged` and `chg` are unchanged.
   def crashLoss(s: S): S =
     { ...s, ph: AL.mapBy(a => LP_NONE),
-      as: AL.mapBy(a => if (s.as.get(a) == PENDING) FAILED else s.as.get(a)),
+      as: AL.mapBy(a => if (s.as.get(a) == PENDING) TERMINATED else s.as.get(a)),
       why: AL.mapBy(a => if (s.as.get(a) == PENDING) W_LOST else s.why.get(a)),
       orphan: AL.mapBy(a => s.alive.get(a) or s.orphan.get(a)) }
   action CpCrash = all {
@@ -438,13 +447,13 @@ module node_volume {
   }
 
   // environment: node reboot. The volume is inactive, every VMM is gone and its claim released, launch state is lost,
-  // the allocation that was Running fails (W_CRASH, a Failed row: charged); one that was Pending is a lost launch (W_LOST, no
-  // row: not charged, M3).
+  // the allocation that was Running fails (W_CRASH, a Failed row: charged); one that was Pending is a lost launch (TERMINATED,
+  // W_LOST: not charged, M3).
   action NodeReboot = all {
     cur.faults > 0,
     commit({ ...cur, active: false, claim: 0, slow: false, ph: AL.mapBy(a => LP_NONE),
              alive: AL.mapBy(a => false), orphan: AL.mapBy(a => false),
-             as: AL.mapBy(a => if (cur.as.get(a) == PENDING or cur.as.get(a) == RUNNING) FAILED else cur.as.get(a)),
+             as: AL.mapBy(a => if (cur.as.get(a) == RUNNING) FAILED else if (cur.as.get(a) == PENDING) TERMINATED else cur.as.get(a)),
              why: AL.mapBy(a => if (cur.as.get(a) == PENDING) W_LOST else if (cur.as.get(a) == RUNNING) W_CRASH else cur.why.get(a)),
              chg: AL.mapBy(a => cur.chg.get(a) + (if (cur.as.get(a) == RUNNING) 1 else 0)),
              sup: AL.mapBy(a => false), down: false, dstart: 0, faults: cur.faults - 1 }, variant("NodeReboot", ())),
@@ -486,7 +495,7 @@ module node_volume {
   // SD-1: once the lane signal is up a launch takes no wait-continuing or result-producing step (a signalled launch at an
   // observation point is abandoned in the step that raises the signal)
   val I_SUPERSEDE_ABANDONS_WAITS = AL.forall(a => st.afterSup.get(a) == 0)
-  // SD-3: a superseded launch delivers nothing: no Running row, no charge, no phase left, no VMM alive
+  // SD-3: a superseded launch delivers nothing: no `Running`, no `Failed`, no budget input, no phase left, no VMM alive
   val I_SUPERSEDED_LAUNCH_DELIVERS_NOTHING = AL.forall(a =>
     st.why.get(a) == W_SUPERSEDED implies
       and { not(st.delivered.get(a)), st.chg.get(a) == 0, st.ph.get(a) == LP_NONE, not(st.alive.get(a)),
@@ -583,7 +592,7 @@ module node_volume {
   run crash_after_create_before_attach_reuses_volume = init.then(Declare).then(WlStart(1)).then(LaunchEnsureCreate(1))
     .expect(st.lv and not(st.active) and st.nCreated == 1 and st.ph.get(1) == LP_CREATED and Safety)
     .then(CpCrash)
-    .expect(st.lv and st.nCreated == 1 and st.as.get(1) == FAILED and st.why.get(1) == W_LOST
+    .expect(st.lv and st.nCreated == 1 and st.as.get(1) == TERMINATED and st.why.get(1) == W_LOST
             and st.ph.get(1) == LP_NONE and charged(st) == 0 and st.chg.get(1) == 0 and Safety)
     .then(WlStart(2)).then(LaunchEnsureCreate(2))
     .expect(st.nCreated == 1 and st.vid == 1 and Safety)
@@ -642,7 +651,7 @@ module node_volume {
             and charged(st) == 1 and st.claim == 0 and not(st.ran.get(1)) and Safety)
 
   // SD-1 / SD-3 / SD-4: `workload restart` while a launch waits on the claim. The handler raises the signal and the
-  // waiting launch abandons in that same step: no poll taken, no row result, no charge, no VMM; the successor attaches
+  // waiting launch abandons in that same step: no poll taken, a `Terminated` row (`LaunchSuperseded`), no charge, no VMM; the successor attaches
   // after the drain.
   run superseded_launch_result_discarded = running1
     .then(VmmSigkill(1)).then(WlStart(2)).then(LaunchEnsureCreate(2)).then(LaunchEnsureActivate(2))
@@ -657,12 +666,13 @@ module node_volume {
     .then(LaunchCheck(3)).then(VmmSpawn(3)).then(GuestReady(3))
     .expect(st.as.get(3) == RUNNING and st.claim == 3 and not(st.ran.get(2)) and st.dv == 1 and st.nCreated == 1
             and vmms(st).size() == 1 and Safety)
-    // the restart is a generation replacement: the successor of the superseded launch carries the Failed predecessor's
-    // count unchanged and forgives it (restart_budget.qnt), where a crash restart would carry count + 1
-    .expect(not(st.old.get(3)) and charged(st) == 0)
+    // the superseded launch is an abandoned row (ADR-0355): its id was issued as a crash-restart successor, so it holds count 1,
+    // and the relaunch carries that count unchanged (charged once, not twice): the restart does not forgive the failure it
+    // never replaced, where a generation replacement of the Failed row itself would carry 0
+    .expect(not(st.old.get(3)) and charged(st) == 1)
 
   // SD-1 / SD-3 / SD-4: an operator stop while the guest boots (point 5): the VMM is terminated, its claim lingers until
-  // the drain, the volume is kept, no Running row, no charge; resume reattaches the same volume
+  // the drain, the volume is kept, a Terminated row (LaunchSuperseded), no Running row, no charge; resume reattaches the same volume
   run stop_during_boot_wait_terminates_vmm_and_keeps_volume = ensured1
     .then(LaunchCheck(1)).then(VmmSpawn(1))
     .expect(st.ph.get(1) == LP_BOOT and st.alive.get(1) and st.as.get(1) == PENDING and st.claim == 1 and Safety)
@@ -689,7 +699,7 @@ module node_volume {
 
   // SD-5: node shutdown raises the signal for every pending launch, and a lane opened after it is born raised. The
   // launch waiting on the claim abandons in the Shutdown step; the launch whose lane opens after the shutdown abandons in
-  // its `WlStart` step, before the volume step. Both abandon: no row, no charge, the
+  // its `WlStart` step, before the volume step. Both abandon: a `Terminated` row each, no charge, the
   // volume kept; the next boot (`Boot`) clears the shutdown, then a launch attaches. The late launch is minted after the
   // first one ends: the model's one lane per workload (canStart, ADR-0109) does not allow two Pending allocations.
   run shutdown_abandons_every_launch_including_one_admitted_late = running1

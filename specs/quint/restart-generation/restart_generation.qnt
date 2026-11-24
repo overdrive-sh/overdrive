@@ -14,11 +14,19 @@
  *   LaunchPreFail    not capFull, idFault          a Failed row (SVID issuance or a non-start driver error; ADR-0337)
  *   LaunchRunning    no flag                       a Running row
  *   LaunchStartFail  no flag                       a Failed row (any typed start failure, volume causes included)
- *   LaunchLost       environment event (OPS "lost") no row, no charge: a launch superseded by a stop, a restart or shutdown,
- *                                                  or lost with the control plane. No lane signal is modelled: for the
- *                                                  generation rule a superseded launch and a lost one are identical.
- * `hasRow` is the model of "an allocation row exists": a PENDING allocation and the rows of a lost or refused launch stand
- * for NO row (production writes none for them); `ig` is the View's issued-generation map, `dg` the
+ *   LaunchLost       environment event (OPS "lost") an ABANDONED row, no charge: a launch superseded by a stop, a restart or
+ *                                                  shutdown, or lost with the control plane (ADR-0355: the `Pending` row it
+ *                                                  wrote before the VMM existed ends `Terminated`, `terminal: None`, reason
+ *                                                  `LaunchSuperseded` or `LaunchLostWithControlPlane`). No lane signal is
+ *                                                  modelled: for the generation rule a superseded launch and a lost one are
+ *                                                  identical. CpCrash and NodeReboot take every PENDING allocation to ABANDONED
+ *                                                  at the boot step (`converge`'s first step, RB-11).
+ * ABANDONED is a terminal, restartable, uncharged class that is not a natural exit: the row is the current row, the relaunch
+ * carries its `cnt` unchanged, and it is exempt from the restart ceiling (the platform ended the launch, the workload's intent
+ * stands); after a stop nothing is relaunched (`canStart` needs no stop intent).
+ * `hasRow` is the model of "an allocation row exists": a PENDING allocation has its `Pending` row (ADR-0353) and an abandoned
+ * launch its terminal row; only a refused launch (the guest-network pool refused admission before any row is written) has NONE.
+ * `ig` is the View's issued-generation map, `dg` the
  * `workloads/<id>/generation` key, `og` a marker no production rule reads (the hazard's stamp on emit).
  *
  * Restart budget (user decision R-1 = option A, 2026-11-18): the rule is `restart_budget.qnt`, owned here and imported by
@@ -55,7 +63,7 @@ module restart_generation_conf {
 module restart_generation {
   import restart_generation_conf.ConfStep from "./restart_generation"
   import restart_budget.* from "./restart_budget"   // the restart budget rule, shared with specs/quint/node-local-volume/
-  const OFF: Set[str]   // rules off: "stampOnEmit" (ADR-0335), "prefailNoRow" (ADR-0337), "refusalCharged" (ADR-0338)
+  const OFF: Set[str]   // rules off: "stampOnEmit" (ADR-0335), "prefailNoRow" (ADR-0337), "refusalCharged" (ADR-0338), "abandonWritesNoRow" (ADR-0355)
   const REC: bool       // true on the runs' main: conf_step records the action taken
   const OPS: Set[str]   // enabled operator / environment actions: "stop" "restart" "lost" "idFault" (toggles IdFaultOn/Off) "idFaultHeld" (idFault true from init, never toggled) "capFull" (toggles CapFill/CapDrain)
   const NA: int         // allocation ids 1..NA (an id is minted once)
@@ -72,12 +80,13 @@ module restart_generation {
   val RUNNING = 2
   val FAILED = 3
   val TERMINATED = 4
+  val ABANDONED = 5     // a launch that ended before running: a Terminated row, `terminal: None`, uncharged (ADR-0355)
   // why an allocation ended (the numbering of the volume spec where the code exists there)
   val W_NONE = 0
   val W_CRASH = 1       // the VMM crashed, or was lost to a node reboot
   val W_STOP = 5
   val W_RESTART = 6
-  val W_LOST = 7        // launch superseded or lost (control-plane crash, node reboot): no row, no charge
+  val W_LOST = 7        // launch superseded or lost (control-plane crash, node reboot): an ABANDONED row, no charge
   val W_PREFAIL = 9     // a pre-driver failure (SVID issuance, non-start driver error): a Failed row
   val W_REFUSED = 10    // the guest-network pool refused admission: no row, no charge
   val W_STARTFAIL = 11  // one typed start failure (volume unavailable, held, driver rejection): a Failed row
@@ -118,13 +127,21 @@ module restart_generation {
 
   // ---------------------------------------------------------------- definitions
   def nonTerminal(s: S): bool = AL.exists(a => s.as.get(a) == PENDING or s.as.get(a) == RUNNING)
+  // abandonWritesNoRow (ADR-0355): an abandoned launch is left `Pending` although nothing will ever resolve it
+  def dead(s: S, a: int): bool = s.as.get(a) == PENDING and s.why.get(a) == W_LOST
+  // a launch or an allocation is in flight: a live PENDING launch or a RUNNING allocation (a dead PENDING row blocks a
+  // placement, like any non-terminal row, but nothing is in flight)
+  def inFlight(s: S): bool = AL.exists(a => (s.as.get(a) == PENDING and not(dead(s, a))) or s.as.get(a) == RUNNING)
+  // the current row is an abandoned launch (the platform ended it; the workload's intent stands)
+  def abandonedCur(s: S): bool = curA(s) != 0 and s.as.get(curA(s)) == ABANDONED
   def mintedIds(s: S): int = AL.filter(a => s.as.get(a) != UNMINTED).size()
-  // "an allocation row exists for a": a PENDING allocation and a lost or refused launch have none; a pre-launch failure
-  // (W_PREFAIL) has one. Hazard "prefailNoRow" (ADR-0337): a pre-driver failure writes no row. Hazard "refusalCharged"
-  // (ADR-0338): an admission refusal writes a (charged) row.
+  // "an allocation row exists for a": a PENDING allocation has its `Pending` row (ADR-0353), an abandoned launch its terminal
+  // row (ADR-0355) and a pre-launch failure (W_PREFAIL) its Failed row; an admission refusal (W_REFUSED) has none.
+  // Hazard "prefailNoRow" (ADR-0337): a pre-driver failure writes no row. Hazard "refusalCharged" (ADR-0338): an admission
+  // refusal writes a (charged) row.
   def hasRow(s: S, a: int): bool = and {
-    s.as.get(a) == RUNNING or s.as.get(a) == FAILED or s.as.get(a) == TERMINATED,
-    s.why.get(a) != W_LOST,
+    s.as.get(a) == PENDING or s.as.get(a) == RUNNING or s.as.get(a) == FAILED or s.as.get(a) == TERMINATED
+      or s.as.get(a) == ABANDONED,
     OFF.contains("refusalCharged") or s.why.get(a) != W_REFUSED,
     not(OFF.contains("prefailNoRow")) or s.why.get(a) != W_PREFAIL,
   }
@@ -150,9 +167,13 @@ module restart_generation {
   // is one failure beyond its count at issue (R-1 = A)
   def charged(s: S): int =
     budgetCharged(curA(s), s.cnt, curA(s) != 0 and s.as.get(curA(s)) == FAILED)
-  def exhausted(s: S): bool = budgetExhausted(charged(s), LIMIT, nonTerminal(s))
-  // the count the next issued allocation carries (the shared rule, `restart_budget.qnt`)
-  def startCnt(s: S): int = budgetStartCnt(curA(s), s.cnt, pendingGen(s))
+  // an abandoned current row is exempt from the ceiling (`is_platform_reclaimed`), so it is never BackoffExhausted
+  def exhausted(s: S): bool = budgetExhausted(charged(s), LIMIT, nonTerminal(s)) and not(abandonedCur(s))
+  // a placement is admitted below the ceiling, for a generation replacement, and after an abandoned launch (ADR-0355 item 2)
+  def mayRestart(s: S): bool = budgetMayRestart(charged(s), LIMIT, pendingGen(s) or abandonedCur(s))
+  // the count the next issued allocation carries (the shared rule, `restart_budget.qnt`); an abandoned row's own count is
+  // carried unchanged (it charges nothing: the abandoned id's entry already holds what its issue assigned)
+  def startCnt(s: S): int = if (abandonedCur(s)) s.cnt.get(curA(s)) else budgetStartCnt(curA(s), s.cnt, pendingGen(s))
 
   // ---------------------------------------------------------------- operator and environment facts
   action Declare = all {
@@ -185,20 +206,24 @@ module restart_generation {
     OPS.contains("capFull"), cur.capFull,
     commit({ ...cur, capFull: false }, variant("CapDrain", ())),
   }
-  // the loss a control-plane death inflicts on in-flight launches: a PENDING launch has no row, so it is lost without changing
-  // the count; a RUNNING allocation stays RUNNING (the VMM survives the crash)
+  // the loss a control-plane death inflicts on in-flight launches: boot's first step ends every PENDING row ABANDONED (reason
+  // `LaunchLostWithControlPlane`, no charge, the count unchanged); a RUNNING allocation stays RUNNING (the VMM survives the
+  // crash). abandonWritesNoRow: the row is left PENDING (and nothing resolves it)
+  def abandonedAs: int = if (OFF.contains("abandonWritesNoRow")) PENDING else ABANDONED
   def crashLoss(s: S): S =
-    { ...s, as: AL.mapBy(a => if (s.as.get(a) == PENDING) FAILED else s.as.get(a)),
+    { ...s, as: AL.mapBy(a => if (s.as.get(a) == PENDING) abandonedAs else s.as.get(a)),
       why: AL.mapBy(a => if (s.as.get(a) == PENDING) W_LOST else s.why.get(a)) }
 
   // ---------------------------------------------------------------- workload-lifecycle
   def canStart(s: S, a: int): bool = and {
     s.declared, not(s.stopped), not(nonTerminal(s)), not(vetoed(s)),
-    // a `workload restart` is a generation replacement, admitted whatever the attempt count (restart_decision(.., true))
-    budgetMayRestart(charged(s), LIMIT, pendingGen(s)),
+    // a `workload restart` is a generation replacement, admitted whatever the attempt count (restart_decision(.., true)); so
+    // is a relaunch after an abandoned launch (platform_reclaimed)
+    mayRestart(s),
     // H1, RA11: a Job is placed once; any row ends it (its natural exit is finalised, never restarted, a pre-driver failure
-    // included), so no crash or failure restarts it
-    not(JOB) or curA(s) == 0,
+    // included), so no crash or failure restarts it. A launch that never ran is not a finished Job: its abandoned row
+    // (`terminal: None`, not a natural exit) is relaunched
+    not(JOB) or curA(s) == 0 or abandonedCur(s),
     s.as.get(a) == UNMINTED, AL.forall(x => s.as.get(x) != UNMINTED or a <= x),
   }
   // the evaluation's placement (the occupancy check at hydration: not while the pool is at its cap, ADR-0338)
@@ -243,28 +268,29 @@ module restart_generation {
 
   // ---------------------------------------------------------------- the launch resolutions (shim order: admission, identity, driver)
   action LaunchRefused(a: int): bool = all {
-    cur.as.get(a) == PENDING, cur.capFull,
+    cur.as.get(a) == PENDING, not(dead(cur, a)), cur.capFull,
     commit({ ...cur, as: cur.as.set(a, FAILED), why: cur.why.set(a, W_REFUSED) },
       variant("LaunchRefused", { a: a })),
   }
   action LaunchPreFail(a: int): bool = all {
-    cur.as.get(a) == PENDING, not(cur.capFull), cur.idFault,
+    cur.as.get(a) == PENDING, not(dead(cur, a)), not(cur.capFull), cur.idFault,
     commit({ ...cur, as: cur.as.set(a, FAILED), why: cur.why.set(a, W_PREFAIL) },
       variant("LaunchPreFail", { a: a })),
   }
   // environment event (OPS "lost"): the launch is superseded by a stop, a restart or shutdown, or lost with the control plane:
-  // no row, no charge. Guarded in the shim's order (admission, identity issuance, then the driver observes the signal), so it
-  // needs no flag; CpCrash / NodeReboot lose a launch at any moment. No fairness; not part of `Progress`.
+  // its `Pending` row ends ABANDONED (ADR-0355), no charge. Guarded in the shim's order (admission, identity issuance, then the
+  // driver observes the signal), so it needs no flag; CpCrash / NodeReboot lose a launch at any moment. No fairness; not part
+  // of `Progress`. abandonWritesNoRow: the row is left PENDING
   action LaunchLost(a: int): bool = all {
-    OPS.contains("lost"), cur.as.get(a) == PENDING, not(cur.capFull), not(cur.idFault),
-    commit({ ...cur, as: cur.as.set(a, FAILED), why: cur.why.set(a, W_LOST) }, variant("LaunchLost", { a: a })),
+    OPS.contains("lost"), cur.as.get(a) == PENDING, not(dead(cur, a)), not(cur.capFull), not(cur.idFault),
+    commit({ ...cur, as: cur.as.set(a, abandonedAs), why: cur.why.set(a, W_LOST) }, variant("LaunchLost", { a: a })),
   }
   action LaunchRunning(a: int): bool = all {
-    cur.as.get(a) == PENDING, not(cur.capFull), not(cur.idFault),
+    cur.as.get(a) == PENDING, not(dead(cur, a)), not(cur.capFull), not(cur.idFault),
     commit({ ...cur, as: cur.as.set(a, RUNNING) }, variant("LaunchRunning", { a: a })),
   }
   action LaunchStartFail(a: int): bool = all {
-    cur.as.get(a) == PENDING, not(cur.capFull), not(cur.idFault),
+    cur.as.get(a) == PENDING, not(dead(cur, a)), not(cur.capFull), not(cur.idFault),
     commit({ ...cur, as: cur.as.set(a, FAILED), why: cur.why.set(a, W_STARTFAIL) }, variant("LaunchStartFail", { a: a })),
   }
 
@@ -281,7 +307,7 @@ module restart_generation {
     JOB, cur.as.get(a) == RUNNING,
     commit({ ...cur, as: cur.as.set(a, TERMINATED), why: cur.why.set(a, W_DONE) }, variant("JobExit", { a: a })),
   }
-  // control-plane crash: a PENDING launch is lost (no row, no charge); a RUNNING allocation stays RUNNING (a RUNNING row
+  // control-plane crash: a PENDING launch is lost (its row ends ABANDONED, no charge); a RUNNING allocation stays RUNNING (a RUNNING row
   // blocks a placement as in production; RA5)
   action CpCrash = all {
     cur.faults > 0,
@@ -290,8 +316,8 @@ module restart_generation {
   // node reboot: as CpCrash, and a RUNNING allocation ends Failed (W_CRASH)
   action NodeReboot = all {
     cur.faults > 0,
-    commit({ ...crashLoss(cur), as: AL.mapBy(a => if (cur.as.get(a) == PENDING or cur.as.get(a) == RUNNING) FAILED else cur.as.get(a)),
-             why: AL.mapBy(a => if (cur.as.get(a) == PENDING) W_LOST else if (cur.as.get(a) == RUNNING) W_CRASH else cur.why.get(a)),
+    commit({ ...crashLoss(cur), as: AL.mapBy(a => if (cur.as.get(a) == RUNNING) FAILED else crashLoss(cur).as.get(a)),
+             why: AL.mapBy(a => if (cur.as.get(a) == RUNNING) W_CRASH else crashLoss(cur).why.get(a)),
              faults: cur.faults - 1 }, variant("NodeReboot", ())),
   }
 
@@ -317,7 +343,7 @@ module restart_generation {
   // once the current row is finished no further id is minted (ids that end with no row, a supersession or a refusal, are not
   // counted: they leave no row). Vacuous for JOB = false.
   val I_FINISHED_JOB_ISSUES_NO_ID = not(JOB) or and {
-    AL.filter(a => hasRow(st, a)).size() <= 1,
+    AL.filter(a => hasRow(st, a) and st.as.get(a) != ABANDONED).size() <= 1,
     jobTerm(st, curA(st)) implies not(AL.exists(a => a > curA(st) and (st.as.get(a) == PENDING or hasRow(st, a)))),
   }
   val Safety = and { I_FINISHED_JOB_ISSUES_NO_ID, I_CAPACITY_WAIT_NEVER_EXHAUSTS }
@@ -338,7 +364,7 @@ module restart_generation {
   // must eventually be issued
   val stranded = and {
     st.declared, not(st.stopped), not(st.capFull), not(st.idFault),
-    charged(st) < LIMIT or pendingGen(st), not(nonTerminal(st)), AL.exists(a => st.as.get(a) == UNMINTED),
+    mayRestart(st), not(inFlight(st)), AL.exists(a => st.as.get(a) == UNMINTED),
   }
   temporal RunIntentProgress = FairProgress.implies(always(stranded.implies(eventually(not(stranded)))))
   // under `idFault` held true forever a declared workload ends in BackoffExhausted, and the ids minted stay bounded: the
@@ -355,24 +381,25 @@ module restart_generation {
   action prefail2 = init.then(Declare).then(IdFaultOn).then(WlStart(1)).then(LaunchPreFail(1))
     .then(WlStart(2)).then(LaunchPreFail(2))
 
-  // SD-6: a control-plane crash during the replacement launch loses the launch: no row, no charge,
-  // the generation is still pending, one fresh allocation is placed
+  // SD-6, ADR-0355: a control-plane crash during the replacement launch loses the launch: boot ends its `Pending` row ABANDONED,
+  // no charge; the abandoned row is restartable, so one fresh allocation is placed carrying its count
   run control_plane_crash_during_restart_launch_relaunches_once = running1
     .then(WorkloadRestart(1)).then(WlStart(2)).then(CpCrash)
-    .expect(st.why.get(2) == W_LOST and not(hasRow(st, 2)) and charged(st) == 0 and pendingGen(st) and Safety)
+    .expect(st.as.get(2) == ABANDONED and st.why.get(2) == W_LOST and hasRow(st, 2) and curA(st) == 2 and charged(st) == 0
+            and not(pendingGen(st)) and canStart(st, 3) and Safety)
     .then(WlStart(3))
-    .expect(st.ig.get(3) == 1 and Safety)
+    .expect(st.ig.get(3) == 1 and st.cnt.get(3) == st.cnt.get(2) and Safety)
     .then(LaunchRunning(3))
     .expect(st.as.get(3) == RUNNING and curA(st) == 3 and not(pendingGen(st)) and charged(st) == 0 and Safety)
 
   // SD-6: stop, resume, a second restart that loses the launch (superseded; for the generation rule a superseded launch is a
-  // lost one): no row, no charge, the generation stays pending, and exactly one launch is placed for the latest generation.
+  // lost one): an ABANDONED row, no charge, the generation stays pending, and exactly one launch is placed for the latest generation.
   // A restart commit enables the loss but does not force it.
   run second_restart_loses_launch_then_one_placement = running1
     .then(OpStop).then(StopAlloc(1)).then(OpResume).then(WlStart(2)).then(WorkloadRestart(2))
     .expect(st.dg == 2 and Safety)
     .then(LaunchLost(2))
-    .expect(st.why.get(2) == W_LOST and not(hasRow(st, 2)) and pendingGen(st) and charged(st) == 0 and Safety)
+    .expect(st.as.get(2) == ABANDONED and st.why.get(2) == W_LOST and hasRow(st, 2) and pendingGen(st) and charged(st) == 0 and Safety)
     .then(WlStart(3))
     .expect(st.ig.get(3) == 2 and Safety)
     .then(LaunchRunning(3))

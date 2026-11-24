@@ -8,14 +8,17 @@ State 1
   g = [ clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE, stopped |-> {}, lastEnd |-> <<"none", "none">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {}, unreapedOrphans |-> {} ]
   reclaimed = TRUE
   lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  recorded = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
   dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
   up = TRUE
   cursor = 0
+  scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
   bootLeft = -1
 
 State 2 [Assign]
   al = << [ st |-> "leased", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
   lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+  recorded = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
   cursor = 1
 
 State 3 [Launch]
@@ -25,3 +28,4 @@ State 3 [Launch]
 State 4 [Release]
   al = << [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
   lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  recorded = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)

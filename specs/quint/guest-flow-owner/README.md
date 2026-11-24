@@ -511,10 +511,11 @@ allocation, `WorkloadLifecycleView::restart_counts`, persisted), `up` / `reclaim
 Each workload's `al` carries its placement lease (`off`) and at most one predecessor lease (`pred`, state `pst`:
 `held` / `retiring` / `none`). Actions:
 `Assign`, `AssignRefused`, `Launch`, `Stop`, `VmmCrash`, `GuestReset`, `Finalize`, `Release`, `Redeploy`, `Crash`,
-`Restart`, `Reclaim` (D-UP-19:
+`Restart`, `Reclaim(s)` (D-UP-19:
 one `vm_reclamation_boot::converge` call kills every orphan in one step; the order it kills them in is not
-modelled, since no invariant depends on it; enabled only when no orphan is unreaped), `OrphanExit` (an orphan that exits by itself, which also covers one
-killed before a later crash, and an unreaped orphan's exit), `StopUnreaped`, `Reap`, `LateRelease` (decision 12, below). Invariants: `CidUnique` (ADR-0156; every placement and predecessor lease),
+modelled, since no invariant depends on it; enabled whenever boot runs, never waiting on an orphan; `s` is the set of
+orphans whose kill leaves the scope busy, decision 14, below), `OrphanExit` (an orphan that exits by itself, which also covers one
+killed before a later crash, and a stuck orphan's exit), `StopUnreaped`, `Reap`, `RemoveScope`, `LateRelease` (decisions 12, 14, 16 and N-1, below). Invariants: `CidUnique` (ADR-0156; every placement and predecessor lease),
 `NoLaunchClash` (CID-NOCLAIM), `LeaseOutlivesVmm`
 (release-last, ADR-0133), `AssignAfterReclaim` (NO-SURVIVE), `GuestResetEndsVmm` (RESET-EXIT),
 `StoppedWorkloadNotPlaced` (the T-5 ruling: a stopped workload is not placed again until it is redeployed, across a
@@ -536,265 +537,50 @@ An unreaped VMM's lease (decision 12, RB-1 item 11; ADR-0348, the ADR-0156 amend
 so the shim releases a lease only once the allocation's scope is absent. `StopUnreaped(a)` is the stop of a running
 allocation with that outcome: the stop completes (the workload is `done`) while the device stays held by `a` and the lease
 stays held, recorded in the model-level map `late` (offset to the workload; a workload can accumulate several, so it is
-not a per-workload field). `Reap(o)` is the process's reap, which frees its device; `LateRelease(o)` is a later
-network-reclaim attempt, which frees the lease and the `late` entry only when the device is free (the scope is absent,
-K-C7; the guard has the shape of `canRelease`). A serve crash drops `late` with the pool and turns the held device into an
-orphan that boot reclamation cannot kill (`kill_scope` does not return on a scope an unreaped VMM still holds): `Reclaim`
-is enabled only when no orphan is unreaped (ghost `g.unreapedOrphans`, model-only: the kernel's holder table does not
-tell a stuck process from a running one), and an unreaped orphan leaves through `OrphanExit`, after which `assign` may
-run. `CidUnique` and `NoUntrackedLease` range over `late` as well; `LeaseOutlivesVmm` is unchanged and is the invariant
+not a per-workload field). `Reap(o)` is the process's reap, which frees its device and does not remove the scope.
+
+The scope (decisions 16 and N-1; ADR-0349, ADR-0351). `scope` (per offset) is present from a kill that did not reap
+(`StopUnreaped`, or a boot kill that left a busy scope) and is removed only by `RemoveScope(o)`, enabled only when the
+device is free (`populated 0`; the guard is `dev(o) == 0`). `LateRelease(o)` and the release at an ordinary stop read the
+scope's absence (`canLateRelease`: `late(o) != 0` and the scope absent; `canRelease` keeps its device guard beside the scope
+guard, equivalent for an ordinary stop because `scope` is false there). K-C7, restated: a workload scope is removed only
+after `cgroup.events` reports `populated 0` for it, so the scope's absence implies the device is released; the running
+kernel removes a scope under a live stuck task when `rmdir` is issued without that wait (spike `findings-cgroup-events.md`)
+and the model never does. K-C8 is new: a VMM holds its device only while its process is a member of its scope, because it
+is born inside it (ADR-0352, `clone3` with `CLONE_INTO_CGROUP`); no model action distinguishes that from the write form, so
+it is an assumption. Hazard `removeScopeWhilePopulated` (one hazard for decisions 16 and N-1): `RemoveScope` loses its guard,
+the scope is removed under the stuck task, and `LateRelease` frees the lease while the VMM still holds the device;
+`LeaseOutlivesVmm` is violated.
+
+Boot reserves a stuck VM's offset (decision 14; ADR-0350). `Reclaim(s)` is no longer blocked by an unreaped orphan: it kills
+every orphan, and for each orphan in `s` (the kill left the scope busy: a stuck exit, or a launch parked in guest boot; the
+orphans stuck before the crash, ghost `g.unreapedOrphans`, are always in `s`) it keeps the device (-2) and the scope and puts
+the offset in the existing `late` map as a Retiring lease for the allocation `recorded` for that offset, before the first
+`assign`. `Assign` already skips it (the lease), `LateRelease` already frees it once the scope is absent (after `OrphanExit`
+and `RemoveScope`), and `CidUnique` and `NoUntrackedLease` already range over `late`; there is no `reserved` set and no
+release action. `AssignAfterReclaim` excludes a `late` lease on an orphan's offset (the reservation is the one lease allowed
+there). Hazard `assignBeforeReclaim` is the one for this decision. On the `five` instance no orphan is stuck (decision 15).
+
+The record precedes the VMM (decision N-2; ADR-0353). `recorded` (offset to allocation; the `workload_addr` of the allocation's
+`Pending` row): `Assign` writes it (the row write is merged into the assign step: a crash between the lease and the record
+creates no VMM, so nothing observable differs), `Launch(a)` is enabled only when `a`'s offset is recorded, `Crash` keeps it
+for every offset a VMM still holds, and `Reclaim` fills `late` from it. It is cleared where the lease it describes is
+released (the VMM is gone and the row terminal: a state reduction, not a rule). Hazard `launchBeforeRecord`: the record is not
+written before the VMM exists (`Assign` writes none and `Launch` does not require one), so a crash during guest boot leaves
+an orphan `Reclaim` cannot reserve, its offset is assignable and `NoLaunchClash` is violated.
+
+A serve crash drops `late` with the pool and turns every held device into an orphan; `scope` and `recorded` outlive it
+while a VMM holds the device (a scope whose VMM was already reaped is removed by boot reclamation; the model clears it at
+`Crash`). `CidUnique` and `NoUntrackedLease` range over `late` as well; `LeaseOutlivesVmm` is unchanged and is the invariant
 with teeth. `FailedHoldsNoLease` excludes a `late` lease: it belongs to an earlier allocation of the workload. Progress
-(on `lease_live`): `LateLeaseEventuallyReleased`, a held lease whose device is free is eventually released. Hazard
-`releaseUnreapedAtStop`: the stop frees the lease with the stop, as for a reaped VMM; `LeaseOutlivesVmm` is violated
-(and a later launch on that CID would clash). Scope of `lease_five`: it is `conf_ok` without `StopUnreaped` (CFG
-`five`), because with it the five-offset exhaustive check did not finish in 3600 s (over 35M distinct states, 277 s
-without); the stop is exhaustive on `lease_ok` / `lease_live` (three offsets) and, on five offsets, covered by the named
-runs and the randomized conformance traces of `lease_conf_ok`.
-
-Crash-class restart granularity (feature delta, the `cid_lease` map, item 7; DR5-CLOSE), production's dispatch
-boundaries: `VmmCrash` / `GuestReset` free the device and run no tick, so the workload is `ended` with its lease still
-Admitted (below the attachment cap the reclaim pass skips the pending restart owner). `Assign` from `ended` with `retry`
-is the `RestartAllocation` tick: it leases the successor first and holds the old lease as the predecessor
-(`pst` = `held`); `Launch` then retires the predecessor (`retiring`) and its `Release` frees it. No tick of the workload
-(`Assign`, `Stop`, `Finalize`) runs while a predecessor teardown is held, and none runs before boot reclamation:
-`run_server` calls `vm_reclamation_boot::converge` (`lib.rs:3955`) before it spawns the convergence loop (`:4212`), so
-`Assign`, `AssignRefused` and `Finalize` require `reclaimed` (DR6-CLOSE; `assignBeforeReclaim` bypasses it for `Assign`
-only). `Redeploy` requires it too: the HTTP listener that serves the restart verb binds (`lib.rs:4368`) after that
-`converge`. The `Finalize` and `Redeploy` guards keep randomized conformance traces to production's boot order; they
-are not load-bearing for `Safety` (after a `serve` crash no workload holds a lease, and `Assign` still needs `reclaimed`). `AssignRefused` is the same tick when the pool
-has no free offset: the predecessor is cleaned at once and the workload waits with its count. At the ceiling,
-`Finalize` (`FinalizeFailed`) retires the lease (`retiring` with `ex`) and its `Release` writes the terminal
-(`failed`); without a lease (after a `serve` crash) it writes the terminal at once. `Stop` of an `ended` workload
-reclaims its lease. A `Crash` loses every predecessor lease; an `ended` / finalising workload with `ex` stays `ended`
-with no lease (the new process finalises it again).
-
-Restart budget (RESTART-SSOT, GH #324; feature delta, the `cid_lease` map, items 2-6). The decision is the
-reconciler's `restart_decision(attempts, platform_reclaimed, generation_replacement)` = `attempts < CEILING ||
-platform_reclaimed || generation_replacement` (`overdrive-reconcilers/src/workload_lifecycle.rs:1114-1119`). `att` is
-the restart count of the workload's current allocation (`WorkloadLifecycleView::restart_counts`, persisted; projected
-through `attempt_index_for_alloc − 1`), and it changes only at placement, as `restart_counts` does (`:1214-1221`,
-`:1339`): `Assign` gives the new allocation `att + 1` when the predecessor is a crash-class row (the model-only field
-`chg`), `att` under either exemption, and 0 on a first placement. A `VmmCrash`, a `GuestReset` and a `Launch` clash
-are crash-class failures: `retry = att < CEIL`, `ex = not(retry)`; a crash leads to the restart above (`retry`) or to
-`Finalize` then `Release` (`failed`, `FinalizeFailed`, `BackoffExhausted`); a clash's `Release` gives `wait` (with
-`chg`) or `ended` (`ex`); a stop's gives `done`. A `Crash` with a running VMM leaves an orphan that boot
-reclamation kills (platform-reclaimed: the workload waits whatever its count, `chg` false). `Redeploy`, enabled from
-`done` and `failed`, is a generation replacement (waits whatever its count, `chg` false). A failed workload stays
-failed across a serve crash. A workload leased but not launched at a serve crash has no row, so it goes back to `wait`
-with its predecessor's count and `chg` (item 3). A generation replacement leased at the crash is placed again: the
-behaviour GH #325 is to deliver (RESTART-GEN-CRASH: production loses it today and #295 does not
-fix it; pending #325). `lease_conf_ok` does not enable `Crash` in that window; `lease_conf_325` keeps it (item 9). The
-ghost `g.pendingGen` records the
-`Redeploy`'s pre-state until the placed allocation's first row (`Launch`); it does not affect behaviour in the
-design, and hazard `crashLosesPlacedGeneration` uses it. `att` stops at the ceiling, so the state space is finite.
-`CEIL` is the production 5 on `lease_conf_ok` / `lease_five` (the fifth crash-class failure, at `att` = 4, is placed
-again; the sixth, at `att` = 5, exhausts the budget) and is scaled to 2 on `lease_ok`, `lease_live` and the `lease_bug*`
-instances; the predicate's shape is the same. The pre-fix `restart_status_for_alloc` (`attempts + 1 < CEILING`, no
-exemptions) is hazard `retryOffByOne`. Hazard `reclaimNotExempt` removes the platform-reclaim exemption alone.
-
-Item-7 hazards (DR6-CLOSE): `refusalKeepsPredecessor` (7.4: a pool refusal leaves the predecessor held until the next launch),
-`terminalBeforeRelease` (7.5: FinalizeFailed writes the terminal before it releases the lease) and
-`tickDuringPredecessorTeardown` (the 7.3 step boundary: the `predRetiring` guard dropped from `Assign`, `Stop` and
-`Finalize`). Those change the dispatch order without leaking a CID, so `Safety` holds on them and the named run is the
-discriminator. The #325-window guard of item 9 has its own checks: the
-run `CrashIsNotEnabledInThe325Window` (its last `expect` before `Crash` establishes every other precondition of
-`Crash`) holds on `lease_conf_ok` and is violated on `lease_conf_325`, and its positive twin
-`CrashIsEnabledInThe325WindowWithoutTheGuard` (the same prefix, then `Crash` taken) holds on `lease_conf_325` and is
-violated on `lease_conf_ok`, which pins both violations to the guard.
-
-## `quiescence`: counted hold and boot refusal
-
-`up` / `stop` / `table` (serve process and the shared mTLS nft table), `cnt` (hold count), `latch`, `rec`
-(per-component recovery: idle / held / repaired), `dmg`, `att`, `repLeft`, `flowsOpen`, `leaked` (D-UP-3: the
-owner's leaked-hold count, process-scoped), `foreign` (D-UP-4: the supervisor's `restore` returned `ForeignHold`;
-process-scoped, until the fail-stop), model-only RECROUND1 `roundState` (`outside` / `pending` / `keep` / `restore`),
-ghosts, `conf_step`. Actions: `Damage`, `OpenFlow`, `ForeignRestore` (D-UP-4,
-PD-1: the supervisor restores a hold another `QuiescenceLedger` issued — a composition defect, no recovery involved;
-nothing in the owner changes, `foreign` is set), `LeakHold` (D-UP-3:
-a hold taken from the owner and dropped without a restore — an Overdrive defect, no recovery involved: count + 1, the
-first hold latches and aborts the flows, leaked + 1), `Crash`, `Restart` (boot step 8 writes the table, or boot is
-refused), `RecQuiesce`, `RecRepair`, `RepFail` (the only failed-repair cause: counted, the hold kept, UP-7),
-`RecRedo`, `RecRestore`, `FailStop` (the supervisor's audit tick: c's attempt budget spent, or — whatever any recovery
-does — a leaked-hold count above zero, cause `LeakedQuiescenceHold`, or a `ForeignHold` result, cause
-`ForeignQuiescenceHold`). Invariants: `ForeignRestoreChangesNothing` (D-UP-4: a foreign restore changes neither the
-count, nor the latch, nor the leaked-hold count), `LeakedHoldKeepsForwardingQuiesced`,
-`LatchIffCount`, `CountCoversRecoveries` (the count is the recoveries holding a hold plus the leaked holds),
-`NoReopenBeforeRepair`, `QuiescedHoldsNoFlow` (QHOLD), `ServeRunsOnlyWithTable` (ADR-0184),
-`RoundStateIsRecovery` (RECROUND1 membership/result consistency).
-`RecQuiesce` factors its exact start guard as `canRecQuiesce`: on a normal
-instance, a nonzero leaked-hold count disables the next periodic audit before
-it can start another recovery because that same supervisor tick fail-stops
-first. Otherwise `nextDamagedIdle` selects C1 before C2 while skipping a
-component whose recovery already exists, matching the full audit's first
-eligible finding and still allowing a later component to begin an overlapping
-recovery on a following tick. The `leakIgnored` hazard keeps recovery start
-enabled, preserving the counterexample in which the supervisor does not
-consult the ledger. An already-started recovery may still repair, audit and
-restore its own hold;
-`DroppedHoldKeepsForwardingQuiescedThenFailStops` retains that sequence.
-RECROUND1 represents the supervisor's private attempt round without extending
-QPROJ-6. `pending` is an active-round task with no result; `keep` / `restore`
-are collected unhealthy / healthy results waiting for another pending member;
-`outside` is idle or a recovery that joined after the round started.
-`RecQuiesce` starts a round from every then-held recovery only when no round
-exists; a later joiner stays outside. `RecRepair`, `RepFail`, `RecRedo` and
-`RecRestore` require `pending`. Result actions mark `keep` / `restore`; only
-the last pending result publishes one barrier: keeps return to held and gain
-one attempt, restores become idle and consume one hold, outside joiners remain
-uncharged, and every remaining held recovery enters the next round. The
-`boolLatch` hazard retains its first-restore defect at that barrier.
-
-The post-repair audit remains the production full-component audit.
-`auditFinding` selects C1 before C2. A finding at or before the repaired
-component is `RecRedo`; a later finding is `RecRestore`. A different idle
-finding takes its own hold immediately but stays outside the completing round,
-so it is neither restored nor charged by that barrier. `waitingOnRound(c)`
-extends canonical fail-stop/deadline liveness for a joiner or collected result
-waiting behind another pending member. That deadline is not added to the
-recording conformance handler. `roundState` is absent from driver projection,
-QPROJ-6, production and API state.
-The named disabled-flow witness factors `OpenFlow`'s exact guard as
-`canOpenFlow` and asserts it false while a counted hold remains. This avoids
-quint-connect's empty terminal state for `.fail()` without changing the
-action, state sequence or refusal outcome. QUIESCENCEOPEN1 also requires C1,
-the flow-listener component, to be undamaged: a queued child cannot become the
-admitted/paired flow represented by `OpenFlow` while that accept task is dead.
-Temporal: `C1EpisodeEnds`, `C2EpisodeEnds`, `C1Repaired` (QHOLD, ADR-0124, UP-7), `LeakedHoldEndsInFailStop` (D-UP-3),
-`ForeignHoldEndsInFailStop` (D-UP-4, PD-1).
-`OwnFair(c)` includes `roundState` in the tuples of result/deadline actions
-whose enabledness reads it, preserving each recovery's eventual restore or
-fail-stop independently of another round member.
-The recording conformance main's randomized `step` selection does not choose
-`FailStop` solely from its driver-owned `ForeignRestore`: no production path
-hands that foreign hold to the supervisor. The `FailStop` action itself stays
-canonical, so the direct evaluator run and model-checking instances retain the
-`ForeignQuiescenceHold` transition/property; the production supervisor cell
-drives its real `restore -> ForeignHold` input (FHOLD-CHECK).
-The same recording selector chooses `RecQuiesce` only while no episode is
-`repaired`: the composed fixture's one held DNS gate releases every pending
-full audit, so attempting a periodic detection then would simultaneously
-complete the repaired episode. That combined result is already represented by
-`RecRedo` / `RecRestore`, including discovery of another component. Direct
-named actions and every non-`conf` model-checking/hazard instance retain the
-canonical concurrent `RecQuiesce` transition.
-
-## `udp_slots`: guest UDP slots
-
-Slot claim (`SlotHeldOnce`), release (`ReleasedSlotCarriesNoData`), route currency (`RouteCurrent`: an attached slot
-forwards to its own current association), SLOT-ABORT (`LatePairedAborted`), U-2 (`NoReassociationWithoutNewDatagram`);
-temporal `ReleasedSlotBecomesFree`. EVMOD-DGRAM: datagrams the application sends before `Paired` wait in the slot
-socket's own receive queue (`parked`); on `Paired` the guest attaches the pair (`attached`) and the attach-time run
-forwards them; every end of an association discards the queue without reading it; readiness (`GuestReady`) is the
-level-triggered readability of an unattached slot socket, so an emptied queue starts nothing until a new datagram
-arrives. The end of an association as the guest learns it — `Abort` / `Refused`, or the pair's end record — is one
-handling (`GuestRecvEnd`). D-UP-20: `GuestAuditIdle(idle)` releases as idle only an attached (`Paired`) slot — a slot
-awaiting `Paired` reaches its 5 s pairing deadline (`FLOW_PAIRING_DEADLINE`) long before its 120 s idle
-(`GUEST_DATAGRAM_SLOT_IDLE`) — with no condition on the other slots; the orphan release stays in the same tick.
-
-## Critical scenarios ↔ named runs
-
-Every run holds (`expect = "holds"`) in `checks.toml`; the run-based hazards expect a violation. Every run is
-checked on its module's conformance main (D-UP-1), the main a driver pins it on with `#[quint_test]`.
-
-### `owner_flows` (conformance main `flows_conf` unless noted)
-
-| Scenario | Run |
-|---|---|
-| happy path: lease, VM start, control session claimed on the live token, activation | `ControlSessionOpensAndCidActivates` |
-| guest-opened flow admitted, request read in full, connected, attached, paired (EVMOD-PAIR) | `GuestOpenedFlowIsAdmittedReadAttachedAndPaired` |
-| request in two pieces: nothing connected or attached before the whole request is read (H-1) | `RequestReadInPiecesAttachesOnlyAfterFullRead` |
-| the guest's first connect and a racing first connect opened by a workload (`WorkloadOpenSession`) race: one live session (L-3, R5-18, D-UP-8) | `RacingFirstConnectsLeaveOneLiveSession` |
-| session loss aborts flows; the guest observes the loss, reconnects; the CID serves again | `SessionLossAbortsFlowsAndReconnectRestores` |
-| the guest holds its session until it observes the loss and re-opens only then (D-UP-8, DG-5-F) | `GuestReopensSessionOnlyAfterObservingItsLoss`, `GuestObservesSessionLossThenReopens` |
-| the guest owner dies with its VM: `VmStop` clears the session it held (D-UP-8) | `VmStopClearsTheGuestSession` |
-| quiescence aborts flows, refuses admission, restore reopens | `QuiesceAbortsFlowsAndRefusesAdmissionUntilRestore` |
-| activation waits for quiescence to end (gate boundary) | `ActivationWaitsForQuiescenceToEnd` |
-| in-flight connect of an aborted flow is discarded (U-1) | `InFlightConnectOfAbortedFlowIsDiscarded` |
-| attributed flow ends, CID keeps serving | `AttributedFlowEndsAndCidKeepsServing` |
-| teardown aborts everything, CID leased again | `TeardownAbortsEverythingThenCidIsLeasedAgain` |
-| dead launch's queued session closed at read (K-A2') | `StaleLaunchSessionIsClosedAtReadAndDoesNotPoisonClaim` |
-| teardown between accept and read (ATTR-LIVE-CLAIM) | `TeardownBetweenAcceptAndReadClosesWithoutClaim` |
-| dead launch's queued flow closed at request read (ATTR-TOKEN) | `StaleLaunchFlowIsClosedAtRequestReadWithNoMessage` |
-| VMM death makes a live session dead, then loss is processed | `VmDeathMakesLiveSessionDeadThenLossIsProcessed` |
-| dial pairs and returns the stream (INB-1) | `DialPairsAndReturnsStream` |
-| dial refused: typed error | `DialRefusedReturnsTypedError` |
-| dial aborted before the guest accepts V_g (U-5, K-A4) | `DialAbortedBeforeGuestAcceptsEndsByHostClose` |
-| queued V_g reset by the host's close (K-A4) | `DialQueuedVgIsResetByHostClose` |
-| late Paired for a closed flow discarded (U-5) | `LatePairedForClosedHostFlowIsDiscarded` |
-| session loss aborts the dial on both sides | `SessionLossAbortsDialOnBothSides` |
-| quiescence aborts the dial and sends Abort | `QuiesceAbortsDialAndSendsAbort` |
-| session loss aborts every flow before any reconnect (DG-5-F) | `SessionLossAbortsAllFlowsBeforeReconnect` |
-| accepted, unattached V_g, host close: silent end (DG-5-E) | `AcceptedVgHostCloseEndsFlowSilently` |
-| accepted, unattached V_g error: Abort (DG-5-E) | `AcceptedVgErrorAbortsWithAbort` |
-| guest connect timeout: `TimedOut` | `DialTimedOutReturnsTypedError` |
-| `NotServing`, `Quiesced`, `NoSession`: typed, no state change | `DialNotServingIsATypedResultWithNoStateChange`, `DialWhileQuiescedIsATypedResultWithNoStateChange`, `DialWithoutLiveSessionIsATypedResultWithNoStateChange` |
-| VM gone, session loss not yet observed by the owner: `Unreachable` (vsock connect fails), no state change; not `NoSession` | `DialToAGoneVmIsUnreachable` |
-| VM gone, session loss observed by the owner: `NoSession` (the owner never reaches the vsock connect), no state change; not `Unreachable` | `DialAfterObservedSessionLossWithVmGoneReturnsNoSession` |
-| pairing deadline above the guest timeout (INB-1) | `PairingDeadlineWaitsForTheGuestAnswer`, `PairingDeadlineFiresOnlyAfterGuestTimeoutAndLateReplyIsDiscarded` |
-| VMM exit during an in-flight dial: the orphan sweep resets the host dial vsock; `Unreachable { ECONNRESET }` at once, not `PairingDeadline`, no message (H-1, K-C4) | `VmExitDuringDialReturnsUnreachableReset`, `VmExitDuringDialLeavesNoPairingDeadline` |
-| live VM whose guest never replies: `PairingDeadline`, V_h closed, `Abort` on the live session | `PairingDeadlineEndsDialToALiveVmWhoseGuestNeverReplies` |
-| in-flight dial ended by the owner reports the admission variant of its cause (L-9): quiescence `Quiesced`, teardown `NotServing`, observed session loss `NoSession`; never `Unreachable { ECONNABORTED }` | `QuiesceAbortsDialAndSendsAbort`, `TeardownEndsPendingDialWithNotServing`, `SessionLossAbortsDialOnBothSides` |
-| the dialer drops the dial future: ends like the pairing deadline, no result | `DroppedDialFutureEndsLikeThePairingDeadline` |
-| a dial after the guest reconnects pairs (G-V3 dial row 5, L-7) | `DialAfterReconnectPairs` |
-| activation while the control session is pending: refused, changes nothing, activates once the session is live (G-V3, L-7) | `ActivationIsImpossibleWhileTheSessionIsPending`, `ActivationWithSessionPendingReturnsPendingThenActivates` |
-| activate after teardown (`Retiring`): refused, changes nothing, never activates (G-V3, L-7) | `ActivateAfterTeardownIsRefusedAndChangesNothing`, `ActivateAfterTeardownNeverActivates` |
-| beacon happy path (`flows_beacon_conf`) | `BeaconReadyReleasedThenDriverStopReleasesClaim` |
-| beacon after driver.stop; stop between accept and read; stale launch; second connection; VMM death (`flows_beacon_conf`) | `BeaconAfterDriverStopIsRefusedAtAccept`, `DriverStopBetweenAcceptAndReadyClosesWithoutClaim`, `StaleLaunchBeaconIsClosedAtReadyAndDoesNotPoisonClaim`, `SecondBeaconConnectionOfSameLaunchIsHeld`, `VmDeathClosesUnreadBeaconConnection` |
-| VMM exit with READY released: one step ends the launch and releases the claim; the next launch's READY takes it (D-UP-9) | `VmExitEndsLaunchAndReleasesBeaconClaim` (`flows_beacon_conf`) |
-
-### `fwd_pair` (conformance main `pair_conf`)
-
-| Scenario | Run |
-|---|---|
-| the pinned attach order: host first, guest on `Paired` (prefixes) | `Paired`, `DgramPaired` |
-| happy path: bytes both ways, a FIN each way, both pairs complete, each owner reads its record and closes; the close's {S, R} reaches an ended pair and changes nothing | `CleanBothWaysCompletes` |
-| a stopped reader stops the forwarder and then the writer; nothing grows; reading resumes everything | `TargetStallBlocksSenderThenResumes` |
-| bytes before attach — the application's write before `Paired`, the far peer's server-first banner before the host attached — wait in their own queue and are forwarded (EVMOD-PAIR, P-22 / P-23) | `EarlyBytesBeforeAttachDelivered` |
-| the application's write and FIN before `Paired` are carried out after attach (EVMOD-PAIR) | `EarlyFinBeforeAttachCarriedOut` |
-| the guest application resets: the guest pair aborts, the host classifies the 0x3 and resets the far peer, never an EOF (R2-END) | `GuestAppResetReachesRemoteAsReset` |
-| the far peer resets: the guest application sees a reset | `RemoteResetReachesGuestAppAsReset` |
-| the peer's 0x2 and later 0x3 (its close after this side shut its send) arrive before this side drained: the half-close stays clean (CLEAN-FULL-END) | `HalfCloseThenPeerCloseIsClean` |
-| the peer closes with this side's incoming direction open: abort (R2-END) | `PeerCloseWithDirectionOpenAborts` |
-| a far peer that shuts down only its read side stalls like a slow reader; no deadline, no abort (owner policy: none) | `ReadShutdownPeerStallsLikeSlowReader` |
-| the owner's abort resets both far ends | `OwnerAbortResetsBothFarEnds` |
-| the owner's death: the context's release aborts its pair with no record; both far ends see resets (EVMOD-CTL) | `ContextReleaseResetsEveryPair` |
-| the VMM exits: the host vsock's error aborts the host pair and resets the far peer | `VmmExitAbortsHostHalf` |
-| an RST after the pair completed is inert (END-IDEMPOTENT) | `TrailingRstAfterCompletionIsInert` |
-| a dial: the guest application resets; the watch queues an abort record, the raw holder end is observable but the stream waits until the owner reads that record, then `GuestStream` returns `Err(ConnectionReset)` | `WatchedStreamSeesGuestResetAsAbort` |
-| datagrams of sizes 1, 0 and 2 delivered once, whole and in order (EVMOD-DGRAM) | `DatagramsInOrderWithEmpty` |
-| the vsock accepts part of a frame; the datagram stays queued and the run resumes, nothing duplicated or lost | `PartialFrameResumedNotDuplicated` |
-| the target's send blocks: the vsock fills, the source queue fills, the next datagram is dropped there only | `StalledUdpTargetDropsAtSource` |
-| the host forwards the destination's FIN as 0x2 and then aborts (0x3) before the guest TcpConnect attaches: the guest's attach classifies the end once, at attach, as an abort (EVMOD-PAIR, U-EV-2) | `HostHalfCloseThenAbortBeforeGuestAttachIsAbort` |
-| the guest owner closes a flow before the host attached, its 0x3 still in flight at the host's attach: the attach is accepted and the callback classifies the 0x3 as an abort; the far peer sees a reset (T-4, the in-flight branch; U-EV3-1) | `GuestCloseBeforeHostAttachAborts` |
-| the same close processed before the host attaches: V_h is `CLOSING`, the attach is refused `HalfEnded`, the far peer sees a reset, `Abort { flow }` written (T-4, EVMOD-ATTACH-END) | `GuestCloseWithEmptyQueueBeforeHostAttachIsRefusedAndFlowAborts` |
-| the destination resets before the host attaches (`eg-drst`): refused `HalfEnded`; the guest closes its unattached flow on `Abort { flow }` (T-4) | `DestinationResetBeforeHostAttachIsRefusedAndFlowAborts` |
-| the intake child resets before `Paired` (`eg-rst`): the guest attach is refused `HalfEnded`; the host pair aborts on V_g's 0x3 (T-4) | `IntakeChildResetBeforePairedIsRefusedAndFlowAborts` |
-| the destination's banner and the host's 0x2 reach V_g before the guest attaches (`eg-sffin`): the attach seeds a clean half-close and both pairs complete (T-2) | `EarlyVsockHalfCloseBeforeGuestAttachCompletes` |
-| the application's write and FIN on the intake child before `Paired` (`eg-wf`): the guest attaches in `CLOSE_WAIT`, every unit delivered, records `Completed` (T-3) | `AppWriteAndFinBeforePairedAttachesInCloseWaitAndCompletes` |
-| the far peer's FIN and then a reset with the guest→remote direction open: the guest application reads the FIN's end-of-stream, then the pair aborts `SocketError` `EPIPE` in the reset's step and it sees a reset (EVMOD-END, T-1) | `RemoteFinThenResetAbortsPair` |
-| the guest application's FIN and then its reset with the host→guest direction open (`g-rst-hg-only`): `SocketError` `EPIPE`; the host classifies the 0x3 after the 0x2 as an abort (T-1) | `GuestAppFinThenResetAbortsPairWithEpipe` |
-| crossing half-closes: each side's 0x2 sent before it processes the other's; the host completes and closes; the guest classifies the 0x3 as none and completes (T-8, CLEAN-FULL-END) | `PeerCloseRacingOwnHalfCloseIsClean` |
-| the host's `Forwarder` recovery: abort-all, close of the old context (its step 1 closed the flow's descriptors), a new context opened; the old record is never read (EVMOD-CTL, U-EV-4, D-5) | `ForwarderRecoveryAbortsThenReopens` |
-| the host owner's death (a release with its pair live) is final: the pair ends with no record and no recovery reopen follows (D-5) | `HostOwnerDeathIsFinal` |
-| the owner aborts a dial's watched stream: record queued, V_h untouched, the stream reports `OwnerAbort` at once and passes no unit; `Abort { flow }` makes the guest abort its pair (WATCH-ABORT, EVMOD-STREAM-ABORT, T-5) | `OwnerAbortOfWatchLeavesVhAndStreamReportsAborted` |
-| after the owner's abort and the guest's `Abort { flow }`, the holder's drop only closes V_h; its 0x3 reaches an ended guest pair (T-5, T-6) | `OwnerAbortSendsGuestAbortThenHolderDropIsInert` |
-| the guest's 0x3 leaves V_h non-`ESTABLISHED` with `SOCK_DONE` (the holder reads 0), then the holder's `shutdown_write` clears `SOCK_DONE`: its next read fails `ENOTCONN` (F11 corrected) | `HolderShutdownAfterGuestResetReadsNotConnected` |
-| U-R1: the watch already ended (the guest reset, the stream reported `GuestAbort`); the `Forwarder` recovery's close ends the held stream as an owner abort (`strmAbort`, `Abort { flow }` written), the reported end stays `GuestAbort`, and the new context opens | `RecoveryEndsHeldStreamWhoseWatchEnded` |
-| the context's release ends a watch with no record: the `GuestStream` resolves the holder's end from the owner's own end of the watch, `OwnerAbort` (EVMOD-STREAM-END) | `ReleasedWatchWithNoRecordReadsAsAbort` |
-| the holder drops its stream: the watch is aborted and V_h closed; the guest aborts on the 0x3 (T-6) | `DroppedStreamAbortsWatchThenGuestSeesAbort` |
-| the VMM exits with a dial live: the orphan sweep's end is readable before its `sk_error_report`; the holder reads the error, finds no record and no owner end and waits; the callback queues the record and wakes it, but the stream continues waiting until the owner reads that record, then reports its abort (EV-END change 3, EVMOD-STREAM-END) | `VmmExitWithWatchRecordInFlightResolvesFromRecord` |
-| a datagram vsock's peer ends the direction (0x2) with only the header of a frame queued: the run aborts the pair `FrameInvalid` instead of waiting (EV-DGRAM D1) | `TruncatedFrameAtPeerEndAbortsFrameInvalid` |
-
-### `flow_quota` (`quota_conf`)
-
-| Scenario | Run |
-|---|---|
-| admission stops at the allocation quota (typed capacity outcome) | `AdmissionStopsAtTheAllocationQuota` |
-| a half-closed flow still counts | `DrainingFlowStillCountsAgainstTheQuota` |
-| a half-closed flow holds its quota place like an open flow; a withholding guest holds at most its own quota | `WithholdingGuestHoldsAtMostItsOwnQuota` |
-| the pair completes; the place is released at the owner's read of its end record, then reused (EVMOD-AB) | `CompletedPairReleasesTheSlotAtItsEndRecord` |
-| an abort of a half-closed flow; the place is released at the end record (EVMOD-AB) | `AbortOfHalfClosedFlowReleasesTheSlotAtItsEndRecord` |
-| two pairs end; their records are read in queue order and the later one is not readable first (M-1) | `EndRecordsAreReadInQueueOrder`, `EndRecordsAreReleasedInQueueOrder` |
+(on `lease_live`): `LateLeaseEventuallyReleased`, a held lease whose device is free is eventually released (weak fairness on
+`RemoveScope` and `LateRelease`). Hazard `releaseUnreapedAtStop`: the stop frees the lease with the stop, as for a reaped VMM;
+`LeaseOutlivesVmm` is violated (and a later launch on that CID would clash). Scope of `lease_five`: it is `conf_ok` without
+`StopUnreaped` and without a stuck orphan (CFG `five`, decision 15), because with them the five-offset exhaustive check did
+not finish in 3600 s; the unreaped stop and the boot reservation are exhaustive on `lease_ok` / `lease_live` (three offsets)
+and, on five offsets, covered by the named runs and the randomized conformance traces of `lease_conf_ok`. The new hazards run
+on three offsets only. The busy set `s` is chosen inside its own branch of `step` (`reclaimAny`), not beside the other
+actions' parameters: bound outside, TLC enumerated every action once per subset and the checks took 14 times longer.
 
 ### `cid_lease` (`lease_conf_ok`), `quiescence` (`quiesce_conf`)
 
@@ -814,9 +600,9 @@ checked on its module's conformance main (D-UP-1), the main a driver pins it on 
 | a successor leased but not launched at a serve crash is placed again with the same count | `ServeCrashBeforeLaunchPlacesTheSuccessorAgainWithItsCount` |
 | serve crash while FinalizeFailed's teardown is held: the restarted process finalises it (item 7) | `ServeCrashDuringFinalizeFinalizesAfterRestart` |
 | a stop of a workload whose VMM crashed reclaims its lease (item 7) | `StopOfAnEndedWorkloadReclaimsItsLease` |
-| decision 12: the stop of a killed-not-reaped VMM completes and holds its lease; the reap frees the device, a later reclaim attempt releases the lease (hazard `releaseUnreapedAtStop`) | `StopOfAnUnreapedVmmHoldsItsLeaseUntilTheReap` |
+| decisions 12, 16, N-1: the stop of a killed-not-reaped VMM completes and holds its lease; a redeploy waits; removing the scope is disabled until the reap (`populated 0`); after the reap, the removal and the release, a wrap-around assign takes the offset without a clash (hazards `releaseUnreapedAtStop`, `removeScopeWhilePopulated`) | `ScopeIsRemovedOnlyAfterItIsEmpty` |
 | decision 12 (`lease_ok`, and replayed on the recording main `lease_conf_three`; three offsets): next-fit skips an unreaped VMM's held lease where the cursor wraps onto it | `NextFitSkipsAnUnreapedLease` |
-| decision 12: a serve crash with an unreaped VMM drops the pool; the stuck VMM is an unreaped orphan, boot reclamation cannot run and no assign runs until it exits | `ServeCrashWithAnUnreapedVmmBlocksAssignUntilItExits` |
+| decisions 14, N-2: a serve crash during guest boot; the recorded address survives; boot reclaims, the orphan's scope stays busy and its offset is reserved from the record; assign skips it; the orphan exits, the scope is removed and the reservation is released (hazards `launchBeforeRecord`, `assignBeforeReclaim`) | `ServeCrashDuringGuestBootReservesFromTheRecordedAddress` |
 | **pending GH #325** (`lease_conf_325`): a generation replacement leased at a crash is not lost (hazard `crashLosesPlacedGeneration`) | `RedeployLeasedAtServeCrashIsPlacedAgain` |
 | `lease_ok`, and replayed on the recording main `lease_conf_three` (D-18; `ok`'s three offsets, since the five-offset pool never exhausts here): a pool refusal of a restart's successor cleans the predecessor, then the workload is placed with its count (item 7; hazard `refusalKeepsPredecessor`) | `PoolExhaustedRestartCleansThePredecessorThenPlaces` |
 | model only, not a `#[quint_test]` (holds on `lease_conf_ok`, violated on `lease_conf_325`): the #325-window guard refuses a `serve` crash while a `Redeploy`'s placement is leased and not launched (item 9) | `CrashIsNotEnabledInThe325Window` |
@@ -873,7 +659,8 @@ Nothing below is a modelled fact. Each is an input the model takes as given.
 | K-C1 | a duplicate CID is refused at device creation, the first holder unaffected; a CID is free right after the last reference closes | proven: P-16, V-30 Q2d (`findings-v30-guest-reset.md`). Unreachable in the design (lease uniqueness); reached only by hazards |
 | K-C4 | the VMM is the only holder of its vhost-vsock fd; no Overdrive process keeps a copy past VMM exit, so the device is released and host flows reset at VMM exit | proven: V-30 Q2c, Q2d |
 | K-C5 | Boot reclamation kills every VMM the new process does not supervise before any `assign`, and a reclaimed VMM's device is released before its cgroup can be removed. Source: an exiting task drops its files (kernel/exit.c:971 @ v7.0) and runs its task work (kernel/exit.c:976 @ v7.0), where the final fput of a user task is deferred (fs/file_table.c:528-530 @ v7.0) and reaches vhost_vsock_dev_release; cgroup_rmdir waits in cgroup_drain_dying until every task has passed cgroup_task_dead (kernel/cgroup/cgroup.c:6309 @ v7.0). OPEN: the Tier-3 serve-restart reclamation scenario V-RECLAIM; not contract-shaping | OPEN validation item V-RECLAIM (Tier-3 serve-restart reclamation scenario of NO-SURVIVE; not contract-shaping) |
-| K-C7 | the allocation's cgroup scope is absent only after the VMM's vhost-vsock device is released (the shim releases a lease only when the scope is absent; a killed-not-reaped VMM keeps both). Source: `cgroup_rmdir` succeeds only when no task is left (`cgroup_rmdir` -> `cgroup_drain_dying`, kernel/cgroup/cgroup.c:6254-6272, :6309-6311 @ v7.0); a task leaves its cgroup only after it dropped its files (kernel/exit.c:971, :976 @ v7.0; fs/file_table.c:528-530 @ v7.0, the K-C5 chain), the last close of the device file reaching `vhost_vsock_dev_release` (drivers/vhost/vsock.c:753-760 @ v7.0); a launch whose CID is still hashed fails -EADDRINUSE (`vhost_vsock_set_cid`, drivers/vhost/vsock.c:804-813 @ v7.0) | discharged by the source above; real-kernel check: Tier-3 S-VOL-T3-12 (no lease released while the held-flush VMM is unreaped; released after the drain) |
+| K-C7 | a workload scope is removed only after `cgroup.events` reports `populated 0` for it; the scope's absence therefore implies the VMM's vhost-vsock device is released (the shim releases a lease only when the scope is absent; a killed-not-reaped VMM keeps both). The running kernel removes a scope under a live stuck task when `rmdir` is issued without that wait (spike `findings-cgroup-events.md`); the model never does. Source: `cgroup_rmdir` succeeds only when no task is left (`cgroup_rmdir` -> `cgroup_drain_dying`, kernel/cgroup/cgroup.c:6254-6272, :6309-6311 @ v7.0); a task leaves its cgroup only after it dropped its files (kernel/exit.c:971, :976 @ v7.0; fs/file_table.c:528-530 @ v7.0, the K-C5 chain), the last close of the device file reaching `vhost_vsock_dev_release` (drivers/vhost/vsock.c:753-760 @ v7.0); a launch whose CID is still hashed fails -EADDRINUSE (`vhost_vsock_set_cid`, drivers/vhost/vsock.c:804-813 @ v7.0) | discharged by the source above and the spike; real-kernel check: Tier-3 S-VOL-T3-12 (no lease released while the held-flush VMM is unreaped; released after the drain) |
+| K-C8 | a VMM holds its vhost-vsock device only while its process is a member of its scope: the VMM is created inside its scope with `clone3` and `CLONE_INTO_CGROUP`, so it is a member from its first instruction (ADR-0352) | discharged by the Tier-3 test of feature-delta § "A VMM is born inside its scope" (a VMM holding its device is listed in its scope's `cgroup.procs`) |
 | K-C6 | a guest reset (PID-1 crash, triple fault) ends the VMM in the pinned fork | validation item of ADR-0182: fork build with the change, PID-1 crash under `panic=1` and triple fault; not contract-shaping, blocks DELIVER of the fork step (V-30 Q3 is a reading, not a result) |
 | K-B1 | closing T_g / Q_g is observed by the host as the association's end, even when accepted after the guest closed | P-22; P-37 |
 | K-B2 | the guest `sock_release` report may be lost; the level-triggered audit finds the slot | R5-14 (Tier-3) |
@@ -1133,6 +920,8 @@ and `lease_conf_three` (D-18), which carry one run each and no invariant that se
 | `cid-lease-hazard-assign-before-reclaim` | `lease_bugAssignBeforeReclaim` | NO-SURVIVE off: assign runs before boot reclamation killed the previous process's VMMs | `NoLaunchClash` |
 | `cid-lease-hazard-reset-reboots` | `lease_bugResetReboots` | RESET-EXIT off: a guest reset reboots the guest inside the same VMM | `GuestResetEndsVmm` |
 | `cid-lease-hazard-release-unreaped-at-stop` | `lease_bugReleaseUnreapedAtStop` | decision 12 off: the stop of an unreaped VMM frees its lease with the stop while the VMM still holds the CID's device | `LeaseOutlivesVmm` |
+| `cid-lease-hazard-remove-scope-while-populated` | `lease_bugRemoveScopeWhilePopulated` | decisions 16 and N-1 off: `RemoveScope` loses its `populated 0` guard, so the scope is removed under a stuck task and its absence releases the lease while the VMM holds the device | `LeaseOutlivesVmm` |
+| `cid-lease-hazard-launch-before-record` | `lease_bugLaunchBeforeRecord` | decision N-2 off: the VMM exists before its address is recorded; a crash during guest boot leaves an orphan boot reclamation cannot reserve | `NoLaunchClash` |
 | `cid-lease-hazard-crash-forgets-stop` | `lease_bugCrashForgetsStop` | T-5 ruling off: a serve crash forgets the stop intent, so a stopped workload is placed again after the restart | `StoppedWorkloadNotPlaced` |
 | `cid-lease-hazard-retry-off-by-one` | `lease_bugRetryOffByOne` | RESTART-SSOT off (retryOffByOne): the full pre-fix `restart_status_for_alloc` as the restart decision — restart iff attempts + 1 < CEILING, with no exemptions | `ExhaustsOnlyAtCeiling` |
 | `cid-lease-hazard-reclaim-not-exempt` | `lease_bugReclaimNotExempt` | RESTART-SSOT off (reclaimNotExempt): only the platform-reclaim exemption removed | `ExhaustsOnlyOnACrashClassFailure` |

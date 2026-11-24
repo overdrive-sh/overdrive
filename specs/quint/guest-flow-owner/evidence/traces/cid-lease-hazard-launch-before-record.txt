@@ -1,0 +1,51 @@
+# cid-lease-hazard-launch-before-record: counterexample, 8 state(s) (from the TLC trace)
+
+State 1
+  conf_step = [init |-> [tag |-> "UNIT"]]
+  up = TRUE
+  att = <<0, 0>>
+  late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  g = [ clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE, stopped |-> {}, lastEnd |-> <<"none", "none">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {}, unreapedOrphans |-> {} ]
+  reclaimed = TRUE
+  dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  recorded = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  al = << [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
+  cursor = 0
+  bootLeft = -1
+  scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
+
+State 2 [Assign]
+  lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+  al = << [ st |-> "leased", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
+  cursor = 1
+
+State 3 [Launch]
+  dev = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+  al = << [ st |-> "running", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
+
+State 4 [Crash]
+  up = FALSE
+  g = [ clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE, stopped |-> {}, lastEnd |-> <<"reclaim", "none">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {}, unreapedOrphans |-> {} ]
+  reclaimed = FALSE
+  dev = (0 :> -2 @@ 1 :> 0 @@ 2 :> 0)
+  lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+  al = << [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
+  cursor = 0
+
+State 5 [Restart]
+  up = TRUE
+
+State 6 [Reclaim]
+  g = [ clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> TRUE, stopped |-> {}, lastEnd |-> <<"reclaim", "none">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {}, unreapedOrphans |-> {0} ]
+  reclaimed = TRUE
+  scope = (0 :> TRUE @@ 1 :> FALSE @@ 2 :> FALSE)
+
+State 7 [Assign]
+  lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+  al = << [ st |-> "leased", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
+  cursor = 1
+
+State 8 [Launch]
+  g = [ clash |-> TRUE, rebooted |-> FALSE, reclaimed |-> TRUE, stopped |-> {}, lastEnd |-> <<"crash", "none">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {}, unreapedOrphans |-> {0} ]
+  al = << [ st |-> "retiring", off |-> 0, retry |-> TRUE, ex |-> FALSE, chg |-> TRUE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>

@@ -12,7 +12,7 @@ State 1: <Initial predicate>
   idFault |-> FALSE,
   capFull |-> FALSE ]
 
-State 2: <rg_bugStampOnEmit_restart_generation_Declare line 263, col 3 to line 267, col 44 of module rg_bugStampOnEmit>
+State 2: <rg_bugStampOnEmit_restart_generation_Declare line 294, col 3 to line 298, col 44 of module rg_bugStampOnEmit>
 /\ rg_bugStampOnEmit_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ rg_bugStampOnEmit_restart_generation_st = [ declared |-> TRUE,
   stopped |-> FALSE,
@@ -26,7 +26,7 @@ State 2: <rg_bugStampOnEmit_restart_generation_Declare line 263, col 3 to line 2
   idFault |-> FALSE,
   capFull |-> FALSE ]
 
-State 3: <rg_bugStampOnEmit_restart_generation_WlStart line 928, col 3 to line 960, col 78 of module rg_bugStampOnEmit>
+State 3: <rg_bugStampOnEmit_restart_generation_WlStart line 1001, col 3 to line 1033, col 79 of module rg_bugStampOnEmit>
 /\ rg_bugStampOnEmit_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ rg_bugStampOnEmit_restart_generation_st = [ declared |-> TRUE,
   stopped |-> FALSE,
@@ -40,7 +40,7 @@ State 3: <rg_bugStampOnEmit_restart_generation_WlStart line 928, col 3 to line 9
   idFault |-> FALSE,
   capFull |-> FALSE ]
 
-State 4: <rg_bugStampOnEmit_restart_generation_LaunchRunning line 570, col 3 to line 585, col 54 of module rg_bugStampOnEmit>
+State 4: <rg_bugStampOnEmit_restart_generation_LaunchRunning line 607, col 3 to line 624, col 54 of module rg_bugStampOnEmit>
 /\ rg_bugStampOnEmit_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ rg_bugStampOnEmit_restart_generation_st = [ declared |-> TRUE,
   stopped |-> FALSE,
@@ -54,7 +54,7 @@ State 4: <rg_bugStampOnEmit_restart_generation_LaunchRunning line 570, col 3 to 
   idFault |-> FALSE,
   capFull |-> FALSE ]
 
-State 5: <rg_bugStampOnEmit_restart_generation_WorkloadRestart line 625, col 3 to line 686, col 60 of module rg_bugStampOnEmit>
+State 5: <rg_bugStampOnEmit_restart_generation_WorkloadRestart line 682, col 3 to line 743, col 60 of module rg_bugStampOnEmit>
 /\ rg_bugStampOnEmit_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ rg_bugStampOnEmit_restart_generation_st = [ declared |-> TRUE,
   stopped |-> FALSE,
@@ -68,7 +68,7 @@ State 5: <rg_bugStampOnEmit_restart_generation_WorkloadRestart line 625, col 3 t
   idFault |-> FALSE,
   capFull |-> FALSE ]
 
-State 6: <rg_bugStampOnEmit_restart_generation_WlStart line 928, col 3 to line 960, col 78 of module rg_bugStampOnEmit>
+State 6: <rg_bugStampOnEmit_restart_generation_WlStart line 1001, col 3 to line 1033, col 79 of module rg_bugStampOnEmit>
 /\ rg_bugStampOnEmit_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ rg_bugStampOnEmit_restart_generation_st = [ declared |-> TRUE,
   stopped |-> FALSE,
@@ -82,12 +82,40 @@ State 6: <rg_bugStampOnEmit_restart_generation_WlStart line 928, col 3 to line 9
   idFault |-> FALSE,
   capFull |-> FALSE ]
 
-State 7: <rg_bugStampOnEmit_restart_generation_LaunchLost line 316, col 3 to line 339, col 82 of module rg_bugStampOnEmit>
+State 7: <rg_bugStampOnEmit_restart_generation_CapFill line 400, col 3 to line 405, col 44 of module rg_bugStampOnEmit>
+/\ rg_bugStampOnEmit_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
+/\ rg_bugStampOnEmit_restart_generation_st = [ declared |-> TRUE,
+  stopped |-> FALSE,
+  as |-> <<4, 1, 0>>,
+  why |-> <<6, 0, 0>>,
+  faults |-> 0,
+  dg |-> 1,
+  ig |-> <<0, 1, 0>>,
+  cnt |-> <<0, 0, 0>>,
+  og |-> 1,
+  idFault |-> FALSE,
+  capFull |-> TRUE ]
+
+State 8: <rg_bugStampOnEmit_restart_generation_LaunchRefused line 546, col 3 to line 570, col 54 of module rg_bugStampOnEmit>
 /\ rg_bugStampOnEmit_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ rg_bugStampOnEmit_restart_generation_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   as |-> <<4, 3, 0>>,
-  why |-> <<6, 7, 0>>,
+  why |-> <<6, 10, 0>>,
+  faults |-> 0,
+  dg |-> 1,
+  ig |-> <<0, 1, 0>>,
+  cnt |-> <<0, 0, 0>>,
+  og |-> 1,
+  idFault |-> FALSE,
+  capFull |-> TRUE ]
+
+State 9: <rg_bugStampOnEmit_restart_generation_CapDrain line 411, col 3 to line 416, col 45 of module rg_bugStampOnEmit>
+/\ rg_bugStampOnEmit_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
+/\ rg_bugStampOnEmit_restart_generation_st = [ declared |-> TRUE,
+  stopped |-> FALSE,
+  as |-> <<4, 3, 0>>,
+  why |-> <<6, 10, 0>>,
   faults |-> 0,
   dg |-> 1,
   ig |-> <<0, 1, 0>>,
@@ -96,4 +124,4 @@ State 7: <rg_bugStampOnEmit_restart_generation_LaunchLost line 316, col 3 to lin
   idFault |-> FALSE,
   capFull |-> FALSE ]
 
-State 8: Stuttering
+State 10: Stuttering

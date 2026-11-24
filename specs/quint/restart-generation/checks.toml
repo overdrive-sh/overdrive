@@ -60,6 +60,16 @@ backend = "tlc"
 expect = "violation"
 ci = true
 
+# ADR-0355: an abandoned launch leaves its `Pending` row; the dead row blocks every placement and the workload is never relaunched
+[[check]]
+name = "rg-hazard-abandon-writes-no-row"
+spec = "hazard/restart_generation_hazards.qnt"
+main = "rg_bugAbandonWritesNoRow"
+temporal = "RunIntentProgress"
+backend = "tlc"
+expect = "violation"
+ci = true
+
 [[check]]
 name = "rg-run-control-plane-crash-during-restart-launch-relaunches-once"
 spec = "restart_generation.qnt"

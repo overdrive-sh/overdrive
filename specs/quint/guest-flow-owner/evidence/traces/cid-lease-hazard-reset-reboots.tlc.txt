@@ -14,7 +14,9 @@ State 1: <Initial predicate>
 /\ lease_bugResetReboots_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ lease_bugResetReboots_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugResetReboots_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugResetReboots_cid_lease_scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
 /\ lease_bugResetReboots_cid_lease_up = TRUE
+/\ lease_bugResetReboots_cid_lease_recorded = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugResetReboots_cid_lease_reclaimed = TRUE
 /\ lease_bugResetReboots_cid_lease_bootLeft = -1
 /\ lease_bugResetReboots_cid_lease_al = << [ st |-> "wait",
@@ -32,7 +34,7 @@ State 1: <Initial predicate>
      pred |-> -1,
      pst |-> "none" ] >>
 
-State 2: <lease_bugResetReboots_cid_lease_Assign line 1344, col 3 to line 1423, col 53 of module lease_bugResetReboots>
+State 2: <lease_bugResetReboots_cid_lease_Assign line 1517, col 3 to line 1601, col 53 of module lease_bugResetReboots>
 /\ lease_bugResetReboots_cid_lease_g = [ clash |-> FALSE,
   rebooted |-> FALSE,
   reclaimed |-> FALSE,
@@ -48,7 +50,9 @@ State 2: <lease_bugResetReboots_cid_lease_Assign line 1344, col 3 to line 1423, 
 /\ lease_bugResetReboots_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ lease_bugResetReboots_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugResetReboots_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugResetReboots_cid_lease_scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
 /\ lease_bugResetReboots_cid_lease_up = TRUE
+/\ lease_bugResetReboots_cid_lease_recorded = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugResetReboots_cid_lease_reclaimed = TRUE
 /\ lease_bugResetReboots_cid_lease_bootLeft = -1
 /\ lease_bugResetReboots_cid_lease_al = << [ st |-> "leased",
@@ -66,7 +70,7 @@ State 2: <lease_bugResetReboots_cid_lease_Assign line 1344, col 3 to line 1423, 
      pred |-> -1,
      pst |-> "none" ] >>
 
-State 3: <lease_bugResetReboots_cid_lease_Launch line 1486, col 3 to line 1574, col 53 of module lease_bugResetReboots>
+State 3: <lease_bugResetReboots_cid_lease_Launch line 1668, col 3 to line 1769, col 53 of module lease_bugResetReboots>
 /\ lease_bugResetReboots_cid_lease_g = [ clash |-> FALSE,
   rebooted |-> FALSE,
   reclaimed |-> FALSE,
@@ -82,7 +86,9 @@ State 3: <lease_bugResetReboots_cid_lease_Launch line 1486, col 3 to line 1574, 
 /\ lease_bugResetReboots_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ lease_bugResetReboots_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugResetReboots_cid_lease_dev = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugResetReboots_cid_lease_scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
 /\ lease_bugResetReboots_cid_lease_up = TRUE
+/\ lease_bugResetReboots_cid_lease_recorded = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugResetReboots_cid_lease_reclaimed = TRUE
 /\ lease_bugResetReboots_cid_lease_bootLeft = -1
 /\ lease_bugResetReboots_cid_lease_al = << [ st |-> "running",
@@ -100,7 +106,7 @@ State 3: <lease_bugResetReboots_cid_lease_Launch line 1486, col 3 to line 1574, 
      pred |-> -1,
      pst |-> "none" ] >>
 
-State 4: <lease_bugResetReboots_cid_lease_GuestReset line 1597, col 3 to line 1629, col 53 of module lease_bugResetReboots>
+State 4: <lease_bugResetReboots_cid_lease_GuestReset line 1792, col 3 to line 1828, col 53 of module lease_bugResetReboots>
 /\ lease_bugResetReboots_cid_lease_g = [ clash |-> FALSE,
   rebooted |-> TRUE,
   reclaimed |-> FALSE,
@@ -116,7 +122,9 @@ State 4: <lease_bugResetReboots_cid_lease_GuestReset line 1597, col 3 to line 16
 /\ lease_bugResetReboots_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ lease_bugResetReboots_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugResetReboots_cid_lease_dev = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugResetReboots_cid_lease_scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
 /\ lease_bugResetReboots_cid_lease_up = TRUE
+/\ lease_bugResetReboots_cid_lease_recorded = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugResetReboots_cid_lease_reclaimed = TRUE
 /\ lease_bugResetReboots_cid_lease_bootLeft = -1
 /\ lease_bugResetReboots_cid_lease_al = << [ st |-> "running",

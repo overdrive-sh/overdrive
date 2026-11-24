@@ -35,7 +35,7 @@
 //! | `LaunchUnavailable(a)` / `LaunchCmdFail(a)` | the launch's dispatch returns the typed failure (the shim writes the `Failed` row, no VMM was created) / `SimVolumeBacking::fail_next_command`, then the same |
 //! | `LaunchCheck(a)` | `SimClock::tick` (one second at a time, inside the bound) until the launch observes `Free` and its `Vmm::create` is parked at the driver's create gate (`LP_FREE`) |
 //! | `LaunchPoll(a)` / `LaunchHeldFail(a)` | `SimClock::tick` by a poll step inside the bound / past the 30 s bound, the launch ends `VolumeUnavailable { Held }` |
-//! | abandonment (no model action) | a launch at an observation point (claim wait, create gate, boot wait) abandons in the step that raises the lane signal (`OpStop`, `WorkloadRestart`, `Shutdown`); a launch whose `ensure` was in flight abandons in `LaunchEnsureActivate`; a lane born after shutdown abandons in `WlStart`. The held dispatch returns `Ok(())`: no row, `VmDriver::live_allocations` does not list the allocation, its VMM is gone |
+//! | abandonment (no model action) | a launch at an observation point (claim wait, create gate, boot wait) abandons in the step that raises the lane signal (`OpStop`, `WorkloadRestart`, `Shutdown`); a launch whose `ensure` was in flight abandons in `LaunchEnsureActivate`; a lane born after shutdown abandons in `WlStart`. The held dispatch returns `Ok(())`: a `Terminated` row with `LaunchSuperseded` (ADR-0355), `VmDriver::live_allocations` does not list the allocation, its VMM is gone. PENDING OWNER API: the row is not written yet |
 //! | `VmmSpawn(a)` | the recording `Vmm`'s `VmConfig.volume` is the ensured device with serial `ovd-volume` (production attached it); the gate releases the parked `create`, then `SimVolumeBacking::hold_claim` (the VMM's open: `SimVmm::create` does not touch the pool) |
 //! | `GuestReady(a)` | the guest's READY through `SimBeaconIo`; the shim writes `Running` |
 //! | `VmmSpawnFail(a)` | `SimVmm::inject_create_failure` armed while the launch's `create` is parked at the gate, then the gate releases it: production classifies the refusal and the shim writes the charged `Failed` row; no VMM exists |
@@ -52,9 +52,9 @@
 //! `SimVolumeBacking` the named arbiter (marker below; paired Tier-3 test S-VOL-T3-04,
 //! `volume_pool_backing.rs::claim_state_reports_held_free_and_not_found_as_the_kernel_does`,
 //! ignored until the guest-kit volume pool lands); `alloc[a]` ← `ObservationStore::alloc_status_rows` (`state`); with
-//! no row, the dispatch the driver holds decides: running = PENDING (the launch holds the lane,
-//! production writes no row before `start` returns), returned `Ok(())` = ended by supersession,
-//! dropped with the `serve` process = a lost launch; `booting` (model `ph == LP_BOOT ∧ alive`) ←
+//! no row, the dispatch the driver holds decides, but every launch now has a row in the model: a launch in flight has its `Pending` row (ADR-0353),
+//! one ended by supersession or lost with the `serve` process its `Terminated` row (`LaunchSuperseded`, `LaunchLostWithControlPlane`, ADR-0355).
+//! Production writes none of them yet, so a no-row projection fails with `OwnerApiPending` naming the row; `booting` (model `ph == LP_BOOT ∧ alive`) ←
 //! `Driver::live_allocations()` lists the allocation, no row, the claim `Held`; `exhausted` ← a row whose `terminal` is `BackoffExhausted`. Every other spec variable is
 //! model-only and not compared.
 //!
@@ -68,7 +68,8 @@
 //! after observing `Free`; no pinned owner accessor counts the claim observations. Fresh allocation ids are discovered for labelling only, from the
 //! reconciler view's issued ids, the rows and `live_allocations`.
 //!
-//! **Status: pending.** The driver is compiled and every test carries `#[should_panic]` naming the
+//! **Status: pending (ADR-0353, ADR-0355).** Every run places a launch, whose `Pending` row no owner writes yet, so every pin
+//! carries `#[should_panic(expected = "awaits owner API")]` until the crafter lands the row and the abandoned rows. Earlier status: the driver is compiled and every test carries `#[should_panic]` naming the
 //! divergence it reaches: every run's second step is `Declare`, and the production spec parser
 //! refuses `[vm.volume]` today (`deny_unknown_fields`), so all traces stop there. **Every handler
 //! after `Declare` is compile-checked only**: no trace has executed one. They are exercised once
@@ -239,6 +240,8 @@ const REPOLL_PUMPS: u32 = 5;
 enum DriverError {
     #[error("action `{action}` is not enabled in the production state: {why}")]
     NotEnabled { action: &'static str, why: String },
+    #[error("the projection awaits owner API that does not exist yet (ADR-0353, ADR-0355): {0}")]
+    OwnerApiPending(&'static str),
     #[error("the step did not settle within the settle bound: {0}")]
     Unsettled(String),
     #[error("{0} has no pre-image in the model (the bijection is fixed by the driver)")]
@@ -1572,7 +1575,9 @@ struct NodeVolumeState {
     /// Model `claim != 0` ⇔ `claim_state == Held`.
     claimed: bool,
     /// Allocation id (1..=`NA`) → model state (0 unminted, 1 pending,
-    /// 2 running, 3 failed, 4 terminated).
+    /// 2 running, 3 failed, 4 terminated). A superseded or lost launch is
+    /// terminated (ADR-0355); the reason (`superseded`, `lost`, other) is the
+    /// row's `reason`, not compared yet.
     alloc: BTreeMap<i64, i64>,
     /// `BackoffExhausted` reached.
     exhausted: bool,
@@ -1651,13 +1656,31 @@ impl State<NodeVolumeDriver> for NodeVolumeState {
                             DriverError::NoPreImage(format!("allocation state {other:?}")).into()
                         );
                     }
-                    // No row: the launch holds the lane (PENDING), its dispatch returned
-                    // `Ok(())` with no row (ended by supersession), or its tick was dropped with
-                    // the control plane (a lost launch, no row and no charge).
+                    // No row. The model now has a row for every launch (ADR-0353, ADR-0355): a launch
+                    // that holds the lane (PENDING) has its `Pending` row, one that ended by
+                    // supersession or was lost with the control plane (TERMINATED, the reason is
+                    // the projection) its `Terminated` row with `LaunchSuperseded` or
+                    // `LaunchLostWithControlPlane`. Production writes neither yet, so each
+                    // fails naming the row it awaits.
                     None => match driver.launch_view(a) {
-                        LaunchView::Running => 1,
-                        LaunchView::Ended => 4,
-                        LaunchView::Dropped => 3,
+                        LaunchView::Running => {
+                            return Err(DriverError::OwnerApiPending(
+                                "the `Pending` row written before the VMM exists, read through alloc_status_rows() (ADR-0353)",
+                            )
+                            .into());
+                        }
+                        LaunchView::Ended => {
+                            return Err(DriverError::OwnerApiPending(
+                                "the `Terminated` row with reason `LaunchSuperseded` for a superseded launch (ADR-0355)",
+                            )
+                            .into());
+                        }
+                        LaunchView::Dropped => {
+                            return Err(DriverError::OwnerApiPending(
+                                "the `Terminated` row with reason `LaunchLostWithControlPlane` for a launch lost with the control plane, written by converge's first step (ADR-0355)",
+                            )
+                            .into());
+                        }
                         LaunchView::Unheld => {
                             return Err(DriverError::NoPreImage(format!(
                                 "allocation {id} has no row and no held launch"
@@ -1699,6 +1722,7 @@ impl State<NodeVolumeDriver> for NodeVolumeState {
     test = "happy_path_deploy_to_running",
     max_samples = 1
 )]
+#[should_panic(expected = "awaits owner API")]
 fn quint_vol_happy_path_deploy_to_running() -> impl Driver {
     NodeVolumeDriver::new()
 }
@@ -1711,6 +1735,7 @@ fn quint_vol_happy_path_deploy_to_running() -> impl Driver {
     test = "restart_waits_for_drain_then_attaches",
     max_samples = 1
 )]
+#[should_panic(expected = "awaits owner API")]
 fn quint_vol_restart_waits_for_drain_then_attaches() -> impl Driver {
     NodeVolumeDriver::new()
 }
@@ -1723,6 +1748,7 @@ fn quint_vol_restart_waits_for_drain_then_attaches() -> impl Driver {
     test = "stop_keeps_volume_and_restart_reattaches",
     max_samples = 1
 )]
+#[should_panic(expected = "awaits owner API")]
 fn quint_vol_stop_keeps_volume_and_restart_reattaches() -> impl Driver {
     NodeVolumeDriver::new()
 }
@@ -1735,6 +1761,7 @@ fn quint_vol_stop_keeps_volume_and_restart_reattaches() -> impl Driver {
     test = "crash_after_create_before_attach_reuses_volume",
     max_samples = 1
 )]
+#[should_panic(expected = "awaits owner API")]
 fn quint_vol_crash_after_create_before_attach_reuses_volume() -> impl Driver {
     NodeVolumeDriver::new()
 }
@@ -1747,6 +1774,7 @@ fn quint_vol_crash_after_create_before_attach_reuses_volume() -> impl Driver {
     test = "node_reboot_reactivates_and_data_survives",
     max_samples = 1
 )]
+#[should_panic(expected = "awaits owner API")]
 fn quint_vol_node_reboot_reactivates_and_data_survives() -> impl Driver {
     NodeVolumeDriver::new()
 }
@@ -1759,6 +1787,7 @@ fn quint_vol_node_reboot_reactivates_and_data_survives() -> impl Driver {
     test = "launch_bound_exceeded_fails_typed_and_charges_budget",
     max_samples = 1
 )]
+#[should_panic(expected = "awaits owner API")]
 fn quint_vol_launch_bound_exceeded_fails_typed_and_charges_budget() -> impl Driver {
     NodeVolumeDriver::new()
 }
@@ -1795,6 +1824,7 @@ fn quint_vol_store_absent_fails_typed_and_never_attaches() -> impl Driver {
     test = "superseded_launch_result_discarded",
     max_samples = 1
 )]
+#[should_panic(expected = "awaits owner API")]
 fn quint_vol_superseded_launch_result_discarded() -> impl Driver {
     NodeVolumeDriver::new()
 }
@@ -1807,6 +1837,7 @@ fn quint_vol_superseded_launch_result_discarded() -> impl Driver {
     test = "stop_during_boot_wait_terminates_vmm_and_keeps_volume",
     max_samples = 1
 )]
+#[should_panic(expected = "awaits owner API")]
 fn quint_vol_stop_during_boot_wait_terminates_vmm_and_keeps_volume() -> impl Driver {
     NodeVolumeDriver::new()
 }
@@ -1819,6 +1850,7 @@ fn quint_vol_stop_during_boot_wait_terminates_vmm_and_keeps_volume() -> impl Dri
     test = "stop_during_ensure_lets_ensure_finish_then_abandons",
     max_samples = 1
 )]
+#[should_panic(expected = "awaits owner API")]
 fn quint_vol_stop_during_ensure_lets_ensure_finish_then_abandons() -> impl Driver {
     NodeVolumeDriver::new()
 }
@@ -1831,6 +1863,7 @@ fn quint_vol_stop_during_ensure_lets_ensure_finish_then_abandons() -> impl Drive
     test = "shutdown_abandons_every_launch_including_one_admitted_late",
     max_samples = 1
 )]
+#[should_panic(expected = "awaits owner API")]
 fn quint_vol_shutdown_abandons_every_launch_including_one_admitted_late() -> impl Driver {
     NodeVolumeDriver::new()
 }
@@ -1843,6 +1876,7 @@ fn quint_vol_shutdown_abandons_every_launch_including_one_admitted_late() -> imp
     test = "restart_of_failed_row_forgives_the_failure",
     max_samples = 1
 )]
+#[should_panic(expected = "awaits owner API")]
 fn quint_vol_restart_of_failed_row_forgives_the_failure() -> impl Driver {
     NodeVolumeDriver::new()
 }
@@ -1857,6 +1891,7 @@ fn quint_vol_restart_of_failed_row_forgives_the_failure() -> impl Driver {
     main = "vol_conf",
     seed = "1"
 )]
+#[should_panic(expected = "awaits owner API")]
 fn quint_vol_randomized() -> impl Driver {
     NodeVolumeDriver::new()
 }

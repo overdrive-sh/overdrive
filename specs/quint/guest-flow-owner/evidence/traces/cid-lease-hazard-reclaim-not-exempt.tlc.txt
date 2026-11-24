@@ -1,5 +1,6 @@
 State 1: <Initial predicate>
 /\ lease_bugReclaimNotExempt_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_bugReclaimNotExempt_cid_lease_recorded = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugReclaimNotExempt_cid_lease_bootLeft = -1
 /\ lease_bugReclaimNotExempt_cid_lease_att = <<0, 0>>
 /\ lease_bugReclaimNotExempt_cid_lease_cursor = 0
@@ -31,9 +32,11 @@ State 1: <Initial predicate>
      chg |-> FALSE,
      pred |-> -1,
      pst |-> "none" ] >>
+/\ lease_bugReclaimNotExempt_cid_lease_scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
 
-State 2: <lease_bugReclaimNotExempt_cid_lease_Assign line 1408, col 3 to line 1491, col 57 of module lease_bugReclaimNotExempt>
+State 2: <lease_bugReclaimNotExempt_cid_lease_Assign line 1586, col 3 to line 1674, col 57 of module lease_bugReclaimNotExempt>
 /\ lease_bugReclaimNotExempt_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_bugReclaimNotExempt_cid_lease_recorded = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugReclaimNotExempt_cid_lease_bootLeft = -1
 /\ lease_bugReclaimNotExempt_cid_lease_att = <<0, 0>>
 /\ lease_bugReclaimNotExempt_cid_lease_cursor = 1
@@ -65,9 +68,11 @@ State 2: <lease_bugReclaimNotExempt_cid_lease_Assign line 1408, col 3 to line 14
      chg |-> FALSE,
      pred |-> -1,
      pst |-> "none" ] >>
+/\ lease_bugReclaimNotExempt_cid_lease_scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
 
-State 3: <lease_bugReclaimNotExempt_cid_lease_Launch line 1557, col 3 to line 1648, col 57 of module lease_bugReclaimNotExempt>
+State 3: <lease_bugReclaimNotExempt_cid_lease_Launch line 1744, col 3 to line 1848, col 57 of module lease_bugReclaimNotExempt>
 /\ lease_bugReclaimNotExempt_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_bugReclaimNotExempt_cid_lease_recorded = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugReclaimNotExempt_cid_lease_bootLeft = -1
 /\ lease_bugReclaimNotExempt_cid_lease_att = <<0, 0>>
 /\ lease_bugReclaimNotExempt_cid_lease_cursor = 1
@@ -99,9 +104,11 @@ State 3: <lease_bugReclaimNotExempt_cid_lease_Launch line 1557, col 3 to line 16
      chg |-> FALSE,
      pred |-> -1,
      pst |-> "none" ] >>
+/\ lease_bugReclaimNotExempt_cid_lease_scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
 
-State 4: <lease_bugReclaimNotExempt_cid_lease_VmmCrash line 1654, col 3 to line 1665, col 57 of module lease_bugReclaimNotExempt>
+State 4: <lease_bugReclaimNotExempt_cid_lease_VmmCrash line 1854, col 3 to line 1865, col 57 of module lease_bugReclaimNotExempt>
 /\ lease_bugReclaimNotExempt_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_bugReclaimNotExempt_cid_lease_recorded = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugReclaimNotExempt_cid_lease_bootLeft = -1
 /\ lease_bugReclaimNotExempt_cid_lease_att = <<0, 0>>
 /\ lease_bugReclaimNotExempt_cid_lease_cursor = 1
@@ -133,9 +140,11 @@ State 4: <lease_bugReclaimNotExempt_cid_lease_VmmCrash line 1654, col 3 to line 
      chg |-> FALSE,
      pred |-> -1,
      pst |-> "none" ] >>
+/\ lease_bugReclaimNotExempt_cid_lease_scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
 
-State 5: <lease_bugReclaimNotExempt_cid_lease_Assign line 1408, col 3 to line 1491, col 57 of module lease_bugReclaimNotExempt>
+State 5: <lease_bugReclaimNotExempt_cid_lease_Assign line 1586, col 3 to line 1674, col 57 of module lease_bugReclaimNotExempt>
 /\ lease_bugReclaimNotExempt_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_bugReclaimNotExempt_cid_lease_recorded = (0 :> 1 @@ 1 :> 1 @@ 2 :> 0)
 /\ lease_bugReclaimNotExempt_cid_lease_bootLeft = -1
 /\ lease_bugReclaimNotExempt_cid_lease_att = <<1, 0>>
 /\ lease_bugReclaimNotExempt_cid_lease_cursor = 2
@@ -167,9 +176,11 @@ State 5: <lease_bugReclaimNotExempt_cid_lease_Assign line 1408, col 3 to line 14
      chg |-> FALSE,
      pred |-> -1,
      pst |-> "none" ] >>
+/\ lease_bugReclaimNotExempt_cid_lease_scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
 
-State 6: <lease_bugReclaimNotExempt_cid_lease_Launch line 1557, col 3 to line 1648, col 57 of module lease_bugReclaimNotExempt>
+State 6: <lease_bugReclaimNotExempt_cid_lease_Launch line 1744, col 3 to line 1848, col 57 of module lease_bugReclaimNotExempt>
 /\ lease_bugReclaimNotExempt_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_bugReclaimNotExempt_cid_lease_recorded = (0 :> 1 @@ 1 :> 1 @@ 2 :> 0)
 /\ lease_bugReclaimNotExempt_cid_lease_bootLeft = -1
 /\ lease_bugReclaimNotExempt_cid_lease_att = <<1, 0>>
 /\ lease_bugReclaimNotExempt_cid_lease_cursor = 2
@@ -201,9 +212,11 @@ State 6: <lease_bugReclaimNotExempt_cid_lease_Launch line 1557, col 3 to line 16
      chg |-> FALSE,
      pred |-> -1,
      pst |-> "none" ] >>
+/\ lease_bugReclaimNotExempt_cid_lease_scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
 
-State 7: <lease_bugReclaimNotExempt_cid_lease_VmmCrash line 1654, col 3 to line 1665, col 57 of module lease_bugReclaimNotExempt>
+State 7: <lease_bugReclaimNotExempt_cid_lease_VmmCrash line 1854, col 3 to line 1865, col 57 of module lease_bugReclaimNotExempt>
 /\ lease_bugReclaimNotExempt_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_bugReclaimNotExempt_cid_lease_recorded = (0 :> 1 @@ 1 :> 1 @@ 2 :> 0)
 /\ lease_bugReclaimNotExempt_cid_lease_bootLeft = -1
 /\ lease_bugReclaimNotExempt_cid_lease_att = <<1, 0>>
 /\ lease_bugReclaimNotExempt_cid_lease_cursor = 2
@@ -235,9 +248,11 @@ State 7: <lease_bugReclaimNotExempt_cid_lease_VmmCrash line 1654, col 3 to line 
      chg |-> FALSE,
      pred |-> -1,
      pst |-> "none" ] >>
+/\ lease_bugReclaimNotExempt_cid_lease_scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
 
-State 8: <lease_bugReclaimNotExempt_cid_lease_Release line 1710, col 3 to line 1838, col 57 of module lease_bugReclaimNotExempt>
+State 8: <lease_bugReclaimNotExempt_cid_lease_Release line 1914, col 3 to line 2059, col 57 of module lease_bugReclaimNotExempt>
 /\ lease_bugReclaimNotExempt_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_bugReclaimNotExempt_cid_lease_recorded = (0 :> 0 @@ 1 :> 1 @@ 2 :> 0)
 /\ lease_bugReclaimNotExempt_cid_lease_bootLeft = -1
 /\ lease_bugReclaimNotExempt_cid_lease_att = <<1, 0>>
 /\ lease_bugReclaimNotExempt_cid_lease_cursor = 2
@@ -269,9 +284,11 @@ State 8: <lease_bugReclaimNotExempt_cid_lease_Release line 1710, col 3 to line 1
      chg |-> FALSE,
      pred |-> -1,
      pst |-> "none" ] >>
+/\ lease_bugReclaimNotExempt_cid_lease_scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
 
-State 9: <lease_bugReclaimNotExempt_cid_lease_Assign line 1408, col 3 to line 1491, col 57 of module lease_bugReclaimNotExempt>
+State 9: <lease_bugReclaimNotExempt_cid_lease_Assign line 1586, col 3 to line 1674, col 57 of module lease_bugReclaimNotExempt>
 /\ lease_bugReclaimNotExempt_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_bugReclaimNotExempt_cid_lease_recorded = (0 :> 0 @@ 1 :> 1 @@ 2 :> 1)
 /\ lease_bugReclaimNotExempt_cid_lease_bootLeft = -1
 /\ lease_bugReclaimNotExempt_cid_lease_att = <<2, 0>>
 /\ lease_bugReclaimNotExempt_cid_lease_cursor = 0
@@ -303,9 +320,11 @@ State 9: <lease_bugReclaimNotExempt_cid_lease_Assign line 1408, col 3 to line 14
      chg |-> FALSE,
      pred |-> -1,
      pst |-> "none" ] >>
+/\ lease_bugReclaimNotExempt_cid_lease_scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
 
-State 10: <lease_bugReclaimNotExempt_cid_lease_Launch line 1557, col 3 to line 1648, col 57 of module lease_bugReclaimNotExempt>
+State 10: <lease_bugReclaimNotExempt_cid_lease_Launch line 1744, col 3 to line 1848, col 57 of module lease_bugReclaimNotExempt>
 /\ lease_bugReclaimNotExempt_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_bugReclaimNotExempt_cid_lease_recorded = (0 :> 0 @@ 1 :> 1 @@ 2 :> 1)
 /\ lease_bugReclaimNotExempt_cid_lease_bootLeft = -1
 /\ lease_bugReclaimNotExempt_cid_lease_att = <<2, 0>>
 /\ lease_bugReclaimNotExempt_cid_lease_cursor = 0
@@ -337,9 +356,11 @@ State 10: <lease_bugReclaimNotExempt_cid_lease_Launch line 1557, col 3 to line 1
      chg |-> FALSE,
      pred |-> -1,
      pst |-> "none" ] >>
+/\ lease_bugReclaimNotExempt_cid_lease_scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
 
-State 11: <lease_bugReclaimNotExempt_cid_lease_Crash line 1844, col 3 to line 1938, col 57 of module lease_bugReclaimNotExempt>
+State 11: <lease_bugReclaimNotExempt_cid_lease_Crash line 2065, col 3 to line 2184, col 57 of module lease_bugReclaimNotExempt>
 /\ lease_bugReclaimNotExempt_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_bugReclaimNotExempt_cid_lease_recorded = (0 :> 0 @@ 1 :> 0 @@ 2 :> 1)
 /\ lease_bugReclaimNotExempt_cid_lease_bootLeft = -1
 /\ lease_bugReclaimNotExempt_cid_lease_att = <<2, 0>>
 /\ lease_bugReclaimNotExempt_cid_lease_cursor = 0
@@ -371,3 +392,4 @@ State 11: <lease_bugReclaimNotExempt_cid_lease_Crash line 1844, col 3 to line 19
      chg |-> FALSE,
      pred |-> -1,
      pst |-> "none" ] >>
+/\ lease_bugReclaimNotExempt_cid_lease_scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)

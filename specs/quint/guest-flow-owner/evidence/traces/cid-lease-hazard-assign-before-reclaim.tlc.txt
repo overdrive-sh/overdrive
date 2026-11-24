@@ -6,6 +6,7 @@ State 1: <Initial predicate>
 /\ lease_bugAssignBeforeReclaim_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugAssignBeforeReclaim_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugAssignBeforeReclaim_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_bugAssignBeforeReclaim_cid_lease_scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
 /\ lease_bugAssignBeforeReclaim_cid_lease_al = << [ st |-> "wait",
      off |-> -1,
      retry |-> FALSE,
@@ -20,6 +21,7 @@ State 1: <Initial predicate>
      chg |-> FALSE,
      pred |-> -1,
      pst |-> "none" ] >>
+/\ lease_bugAssignBeforeReclaim_cid_lease_recorded = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugAssignBeforeReclaim_cid_lease_cursor = 0
 /\ lease_bugAssignBeforeReclaim_cid_lease_g = [ clash |-> FALSE,
   rebooted |-> FALSE,
@@ -32,7 +34,7 @@ State 1: <Initial predicate>
   unreapedOrphans |-> {} ]
 /\ lease_bugAssignBeforeReclaim_cid_lease_bootLeft = -1
 
-State 2: <lease_bugAssignBeforeReclaim_cid_lease_Assign line 1407, col 3 to line 1490, col 60 of module lease_bugAssignBeforeReclaim>
+State 2: <lease_bugAssignBeforeReclaim_cid_lease_Assign line 1585, col 3 to line 1674, col 60 of module lease_bugAssignBeforeReclaim>
 /\ lease_bugAssignBeforeReclaim_cid_lease_reclaimed = TRUE
 /\ lease_bugAssignBeforeReclaim_cid_lease_att = <<0, 0>>
 /\ lease_bugAssignBeforeReclaim_cid_lease_up = TRUE
@@ -40,6 +42,7 @@ State 2: <lease_bugAssignBeforeReclaim_cid_lease_Assign line 1407, col 3 to line
 /\ lease_bugAssignBeforeReclaim_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugAssignBeforeReclaim_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugAssignBeforeReclaim_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_bugAssignBeforeReclaim_cid_lease_scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
 /\ lease_bugAssignBeforeReclaim_cid_lease_al = << [ st |-> "leased",
      off |-> 0,
      retry |-> FALSE,
@@ -54,6 +57,7 @@ State 2: <lease_bugAssignBeforeReclaim_cid_lease_Assign line 1407, col 3 to line
      chg |-> FALSE,
      pred |-> -1,
      pst |-> "none" ] >>
+/\ lease_bugAssignBeforeReclaim_cid_lease_recorded = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugAssignBeforeReclaim_cid_lease_cursor = 1
 /\ lease_bugAssignBeforeReclaim_cid_lease_g = [ clash |-> FALSE,
   rebooted |-> FALSE,
@@ -66,7 +70,7 @@ State 2: <lease_bugAssignBeforeReclaim_cid_lease_Assign line 1407, col 3 to line
   unreapedOrphans |-> {} ]
 /\ lease_bugAssignBeforeReclaim_cid_lease_bootLeft = -1
 
-State 3: <lease_bugAssignBeforeReclaim_cid_lease_Launch line 1556, col 3 to line 1652, col 60 of module lease_bugAssignBeforeReclaim>
+State 3: <lease_bugAssignBeforeReclaim_cid_lease_Launch line 1744, col 3 to line 1853, col 60 of module lease_bugAssignBeforeReclaim>
 /\ lease_bugAssignBeforeReclaim_cid_lease_reclaimed = TRUE
 /\ lease_bugAssignBeforeReclaim_cid_lease_att = <<0, 0>>
 /\ lease_bugAssignBeforeReclaim_cid_lease_up = TRUE
@@ -74,6 +78,7 @@ State 3: <lease_bugAssignBeforeReclaim_cid_lease_Launch line 1556, col 3 to line
 /\ lease_bugAssignBeforeReclaim_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugAssignBeforeReclaim_cid_lease_dev = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugAssignBeforeReclaim_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_bugAssignBeforeReclaim_cid_lease_scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
 /\ lease_bugAssignBeforeReclaim_cid_lease_al = << [ st |-> "running",
      off |-> 0,
      retry |-> FALSE,
@@ -88,6 +93,7 @@ State 3: <lease_bugAssignBeforeReclaim_cid_lease_Launch line 1556, col 3 to line
      chg |-> FALSE,
      pred |-> -1,
      pst |-> "none" ] >>
+/\ lease_bugAssignBeforeReclaim_cid_lease_recorded = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugAssignBeforeReclaim_cid_lease_cursor = 1
 /\ lease_bugAssignBeforeReclaim_cid_lease_g = [ clash |-> FALSE,
   rebooted |-> FALSE,
@@ -100,7 +106,7 @@ State 3: <lease_bugAssignBeforeReclaim_cid_lease_Launch line 1556, col 3 to line
   unreapedOrphans |-> {} ]
 /\ lease_bugAssignBeforeReclaim_cid_lease_bootLeft = -1
 
-State 4: <lease_bugAssignBeforeReclaim_cid_lease_Crash line 1862, col 3 to line 1956, col 60 of module lease_bugAssignBeforeReclaim>
+State 4: <lease_bugAssignBeforeReclaim_cid_lease_Crash line 2084, col 3 to line 2203, col 60 of module lease_bugAssignBeforeReclaim>
 /\ lease_bugAssignBeforeReclaim_cid_lease_reclaimed = FALSE
 /\ lease_bugAssignBeforeReclaim_cid_lease_att = <<0, 0>>
 /\ lease_bugAssignBeforeReclaim_cid_lease_up = FALSE
@@ -108,6 +114,7 @@ State 4: <lease_bugAssignBeforeReclaim_cid_lease_Crash line 1862, col 3 to line 
 /\ lease_bugAssignBeforeReclaim_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugAssignBeforeReclaim_cid_lease_dev = (0 :> -2 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugAssignBeforeReclaim_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_bugAssignBeforeReclaim_cid_lease_scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
 /\ lease_bugAssignBeforeReclaim_cid_lease_al = << [ st |-> "wait",
      off |-> -1,
      retry |-> FALSE,
@@ -122,6 +129,7 @@ State 4: <lease_bugAssignBeforeReclaim_cid_lease_Crash line 1862, col 3 to line 
      chg |-> FALSE,
      pred |-> -1,
      pst |-> "none" ] >>
+/\ lease_bugAssignBeforeReclaim_cid_lease_recorded = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugAssignBeforeReclaim_cid_lease_cursor = 0
 /\ lease_bugAssignBeforeReclaim_cid_lease_g = [ clash |-> FALSE,
   rebooted |-> FALSE,
@@ -134,7 +142,7 @@ State 4: <lease_bugAssignBeforeReclaim_cid_lease_Crash line 1862, col 3 to line 
   unreapedOrphans |-> {} ]
 /\ lease_bugAssignBeforeReclaim_cid_lease_bootLeft = -1
 
-State 5: <lease_bugAssignBeforeReclaim_cid_lease_Restart line 1309, col 3 to line 1332, col 60 of module lease_bugAssignBeforeReclaim>
+State 5: <lease_bugAssignBeforeReclaim_cid_lease_Restart line 1461, col 3 to line 1488, col 60 of module lease_bugAssignBeforeReclaim>
 /\ lease_bugAssignBeforeReclaim_cid_lease_reclaimed = FALSE
 /\ lease_bugAssignBeforeReclaim_cid_lease_att = <<0, 0>>
 /\ lease_bugAssignBeforeReclaim_cid_lease_up = TRUE
@@ -142,6 +150,7 @@ State 5: <lease_bugAssignBeforeReclaim_cid_lease_Restart line 1309, col 3 to lin
 /\ lease_bugAssignBeforeReclaim_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugAssignBeforeReclaim_cid_lease_dev = (0 :> -2 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugAssignBeforeReclaim_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_bugAssignBeforeReclaim_cid_lease_scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
 /\ lease_bugAssignBeforeReclaim_cid_lease_al = << [ st |-> "wait",
      off |-> -1,
      retry |-> FALSE,
@@ -156,6 +165,7 @@ State 5: <lease_bugAssignBeforeReclaim_cid_lease_Restart line 1309, col 3 to lin
      chg |-> FALSE,
      pred |-> -1,
      pst |-> "none" ] >>
+/\ lease_bugAssignBeforeReclaim_cid_lease_recorded = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugAssignBeforeReclaim_cid_lease_cursor = 0
 /\ lease_bugAssignBeforeReclaim_cid_lease_g = [ clash |-> FALSE,
   rebooted |-> FALSE,
@@ -168,7 +178,7 @@ State 5: <lease_bugAssignBeforeReclaim_cid_lease_Restart line 1309, col 3 to lin
   unreapedOrphans |-> {} ]
 /\ lease_bugAssignBeforeReclaim_cid_lease_bootLeft = -1
 
-State 6: <lease_bugAssignBeforeReclaim_cid_lease_Assign line 1407, col 3 to line 1490, col 60 of module lease_bugAssignBeforeReclaim>
+State 6: <lease_bugAssignBeforeReclaim_cid_lease_Assign line 1585, col 3 to line 1674, col 60 of module lease_bugAssignBeforeReclaim>
 /\ lease_bugAssignBeforeReclaim_cid_lease_reclaimed = FALSE
 /\ lease_bugAssignBeforeReclaim_cid_lease_att = <<0, 0>>
 /\ lease_bugAssignBeforeReclaim_cid_lease_up = TRUE
@@ -176,6 +186,7 @@ State 6: <lease_bugAssignBeforeReclaim_cid_lease_Assign line 1407, col 3 to line
 /\ lease_bugAssignBeforeReclaim_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugAssignBeforeReclaim_cid_lease_dev = (0 :> -2 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugAssignBeforeReclaim_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_bugAssignBeforeReclaim_cid_lease_scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
 /\ lease_bugAssignBeforeReclaim_cid_lease_al = << [ st |-> "leased",
      off |-> 0,
      retry |-> FALSE,
@@ -190,6 +201,7 @@ State 6: <lease_bugAssignBeforeReclaim_cid_lease_Assign line 1407, col 3 to line
      chg |-> FALSE,
      pred |-> -1,
      pst |-> "none" ] >>
+/\ lease_bugAssignBeforeReclaim_cid_lease_recorded = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugAssignBeforeReclaim_cid_lease_cursor = 1
 /\ lease_bugAssignBeforeReclaim_cid_lease_g = [ clash |-> FALSE,
   rebooted |-> FALSE,
@@ -202,7 +214,7 @@ State 6: <lease_bugAssignBeforeReclaim_cid_lease_Assign line 1407, col 3 to line
   unreapedOrphans |-> {} ]
 /\ lease_bugAssignBeforeReclaim_cid_lease_bootLeft = -1
 
-State 7: <lease_bugAssignBeforeReclaim_cid_lease_Launch line 1556, col 3 to line 1652, col 60 of module lease_bugAssignBeforeReclaim>
+State 7: <lease_bugAssignBeforeReclaim_cid_lease_Launch line 1744, col 3 to line 1853, col 60 of module lease_bugAssignBeforeReclaim>
 /\ lease_bugAssignBeforeReclaim_cid_lease_reclaimed = FALSE
 /\ lease_bugAssignBeforeReclaim_cid_lease_att = <<0, 0>>
 /\ lease_bugAssignBeforeReclaim_cid_lease_up = TRUE
@@ -210,6 +222,7 @@ State 7: <lease_bugAssignBeforeReclaim_cid_lease_Launch line 1556, col 3 to line
 /\ lease_bugAssignBeforeReclaim_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugAssignBeforeReclaim_cid_lease_dev = (0 :> -2 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugAssignBeforeReclaim_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
+/\ lease_bugAssignBeforeReclaim_cid_lease_scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
 /\ lease_bugAssignBeforeReclaim_cid_lease_al = << [ st |-> "retiring",
      off |-> 0,
      retry |-> TRUE,
@@ -224,6 +237,7 @@ State 7: <lease_bugAssignBeforeReclaim_cid_lease_Launch line 1556, col 3 to line
      chg |-> FALSE,
      pred |-> -1,
      pst |-> "none" ] >>
+/\ lease_bugAssignBeforeReclaim_cid_lease_recorded = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugAssignBeforeReclaim_cid_lease_cursor = 1
 /\ lease_bugAssignBeforeReclaim_cid_lease_g = [ clash |-> TRUE,
   rebooted |-> FALSE,

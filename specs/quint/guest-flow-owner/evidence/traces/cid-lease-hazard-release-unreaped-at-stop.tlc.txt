@@ -2,6 +2,7 @@ State 1: <Initial predicate>
 /\ lease_bugReleaseUnreapedAtStop_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugReleaseUnreapedAtStop_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugReleaseUnreapedAtStop_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugReleaseUnreapedAtStop_cid_lease_recorded = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugReleaseUnreapedAtStop_cid_lease_al = << [ st |-> "wait",
      off |-> -1,
      retry |-> FALSE,
@@ -18,6 +19,7 @@ State 1: <Initial predicate>
      pst |-> "none" ] >>
 /\ lease_bugReleaseUnreapedAtStop_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ lease_bugReleaseUnreapedAtStop_cid_lease_cursor = 0
+/\ lease_bugReleaseUnreapedAtStop_cid_lease_scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
 /\ lease_bugReleaseUnreapedAtStop_cid_lease_bootLeft = -1
 /\ lease_bugReleaseUnreapedAtStop_cid_lease_att = <<0, 0>>
 /\ lease_bugReleaseUnreapedAtStop_cid_lease_reclaimed = TRUE
@@ -32,10 +34,11 @@ State 1: <Initial predicate>
   unreapedOrphans |-> {} ]
 /\ lease_bugReleaseUnreapedAtStop_cid_lease_up = TRUE
 
-State 2: <lease_bugReleaseUnreapedAtStop_cid_lease_Assign line 1420, col 3 to line 1507, col 62 of module lease_bugReleaseUnreapedAtStop>
+State 2: <lease_bugReleaseUnreapedAtStop_cid_lease_Assign line 1598, col 3 to line 1690, col 62 of module lease_bugReleaseUnreapedAtStop>
 /\ lease_bugReleaseUnreapedAtStop_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugReleaseUnreapedAtStop_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugReleaseUnreapedAtStop_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugReleaseUnreapedAtStop_cid_lease_recorded = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugReleaseUnreapedAtStop_cid_lease_al = << [ st |-> "leased",
      off |-> 0,
      retry |-> FALSE,
@@ -52,6 +55,7 @@ State 2: <lease_bugReleaseUnreapedAtStop_cid_lease_Assign line 1420, col 3 to li
      pst |-> "none" ] >>
 /\ lease_bugReleaseUnreapedAtStop_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ lease_bugReleaseUnreapedAtStop_cid_lease_cursor = 1
+/\ lease_bugReleaseUnreapedAtStop_cid_lease_scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
 /\ lease_bugReleaseUnreapedAtStop_cid_lease_bootLeft = -1
 /\ lease_bugReleaseUnreapedAtStop_cid_lease_att = <<0, 0>>
 /\ lease_bugReleaseUnreapedAtStop_cid_lease_reclaimed = TRUE
@@ -66,10 +70,11 @@ State 2: <lease_bugReleaseUnreapedAtStop_cid_lease_Assign line 1420, col 3 to li
   unreapedOrphans |-> {} ]
 /\ lease_bugReleaseUnreapedAtStop_cid_lease_up = TRUE
 
-State 3: <lease_bugReleaseUnreapedAtStop_cid_lease_Launch line 1573, col 3 to line 1669, col 62 of module lease_bugReleaseUnreapedAtStop>
+State 3: <lease_bugReleaseUnreapedAtStop_cid_lease_Launch line 1760, col 3 to line 1869, col 62 of module lease_bugReleaseUnreapedAtStop>
 /\ lease_bugReleaseUnreapedAtStop_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugReleaseUnreapedAtStop_cid_lease_dev = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugReleaseUnreapedAtStop_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugReleaseUnreapedAtStop_cid_lease_recorded = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugReleaseUnreapedAtStop_cid_lease_al = << [ st |-> "running",
      off |-> 0,
      retry |-> FALSE,
@@ -86,6 +91,7 @@ State 3: <lease_bugReleaseUnreapedAtStop_cid_lease_Launch line 1573, col 3 to li
      pst |-> "none" ] >>
 /\ lease_bugReleaseUnreapedAtStop_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ lease_bugReleaseUnreapedAtStop_cid_lease_cursor = 1
+/\ lease_bugReleaseUnreapedAtStop_cid_lease_scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
 /\ lease_bugReleaseUnreapedAtStop_cid_lease_bootLeft = -1
 /\ lease_bugReleaseUnreapedAtStop_cid_lease_att = <<0, 0>>
 /\ lease_bugReleaseUnreapedAtStop_cid_lease_reclaimed = TRUE
@@ -100,10 +106,11 @@ State 3: <lease_bugReleaseUnreapedAtStop_cid_lease_Launch line 1573, col 3 to li
   unreapedOrphans |-> {} ]
 /\ lease_bugReleaseUnreapedAtStop_cid_lease_up = TRUE
 
-State 4: <lease_bugReleaseUnreapedAtStop_cid_lease_StopUnreaped line 823, col 3 to line 904, col 62 of module lease_bugReleaseUnreapedAtStop>
+State 4: <lease_bugReleaseUnreapedAtStop_cid_lease_StopUnreaped line 913, col 3 to line 1003, col 62 of module lease_bugReleaseUnreapedAtStop>
 /\ lease_bugReleaseUnreapedAtStop_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugReleaseUnreapedAtStop_cid_lease_dev = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugReleaseUnreapedAtStop_cid_lease_lease = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
+/\ lease_bugReleaseUnreapedAtStop_cid_lease_recorded = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugReleaseUnreapedAtStop_cid_lease_al = << [ st |-> "done",
      off |-> -1,
      retry |-> FALSE,
@@ -120,6 +127,7 @@ State 4: <lease_bugReleaseUnreapedAtStop_cid_lease_StopUnreaped line 823, col 3 
      pst |-> "none" ] >>
 /\ lease_bugReleaseUnreapedAtStop_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ lease_bugReleaseUnreapedAtStop_cid_lease_cursor = 1
+/\ lease_bugReleaseUnreapedAtStop_cid_lease_scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
 /\ lease_bugReleaseUnreapedAtStop_cid_lease_bootLeft = -1
 /\ lease_bugReleaseUnreapedAtStop_cid_lease_att = <<0, 0>>
 /\ lease_bugReleaseUnreapedAtStop_cid_lease_reclaimed = TRUE

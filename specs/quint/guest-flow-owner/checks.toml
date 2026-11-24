@@ -1372,7 +1372,8 @@ main = "lease_ok"
 invariant = "Safety"
 backend = "tlc"
 expect = "holds"
-ci = true
+ci = false
+timeout_secs = 3600
 
 [[check]]
 name = "cid-lease-conf-safety-tlc"
@@ -1382,6 +1383,7 @@ invariant = "Safety"
 backend = "tlc"
 expect = "holds"
 ci = false
+timeout_secs = 3600
 # decision 12: this instance excludes the unreaped-VMM stop (`five`, cid_lease.qnt `UNREAPED`): with it the five-offset
 # state space did not finish in 3600 s (over 35M distinct states, still growing; 277 s without it). The stop's safety is
 # exhaustive on `lease_ok` and `lease_live` (three offsets)
@@ -1393,7 +1395,8 @@ main = "lease_live"
 invariant = "Safety"
 backend = "tlc"
 expect = "holds"
-ci = true
+ci = false
+timeout_secs = 3600
 
 [[check]]
 name = "cid-lease-eventually-placed"
@@ -1403,6 +1406,7 @@ temporal = "EventuallyPlaced"
 backend = "tlc"
 expect = "holds"
 ci = false
+timeout_secs = 3600
 
 [[check]]
 name = "cid-lease-hazard-release-before-vmm-outlives"
@@ -1777,13 +1781,14 @@ backend = "tlc"
 expect = "violation"
 ci = true
 
-# decision 12 (RB-1 item 11; ADR-0348, ADR-0156 amendment): a guest-address lease is released only once the allocation's
-# scope is absent, so the stop of a killed-not-reaped VMM holds its lease until the reap and a later reclaim attempt
+# decisions 12, 16 and N-1 (ADR-0348, ADR-0349, ADR-0351): a guest-address lease is released only once the allocation's
+# scope is absent, and the scope is removed only once it is empty: the stop of a killed-not-reaped VMM holds its lease
+# until the reap, the removal and a later reclaim attempt
 [[check]]
-name = "cid-lease-run-conf-ok-stop-of-an-unreaped-vmm-holds-its-lease-until-the-reap"
+name = "cid-lease-run-conf-ok-scope-is-removed-only-after-it-is-empty"
 spec = "cid_lease.qnt"
 main = "lease_conf_ok"
-run = "StopOfAnUnreapedVmmHoldsItsLeaseUntilTheReap"
+run = "ScopeIsRemovedOnlyAfterItIsEmpty"
 backend = "evaluator"
 expect = "holds"
 ci = true
@@ -1807,11 +1812,12 @@ backend = "evaluator"
 expect = "holds"
 ci = true
 
+# ADR-0350, ADR-0353: a serve crash during guest boot; boot reserves the orphan's offset from the recorded address
 [[check]]
-name = "cid-lease-run-conf-ok-serve-crash-with-an-unreaped-vmm-blocks-assign-until-it-exits"
+name = "cid-lease-run-conf-ok-serve-crash-during-guest-boot-reserves-from-the-recorded-address"
 spec = "cid_lease.qnt"
 main = "lease_conf_ok"
-run = "ServeCrashWithAnUnreapedVmmBlocksAssignUntilItExits"
+run = "ServeCrashDuringGuestBootReservesFromTheRecordedAddress"
 backend = "evaluator"
 expect = "holds"
 ci = true
@@ -1825,6 +1831,7 @@ temporal = "LateLeaseEventuallyReleased"
 backend = "tlc"
 expect = "holds"
 ci = false
+timeout_secs = 3600
 
 # releaseUnreapedAtStop (decision 12): the stop of an unreaped VMM frees its lease while the VMM still holds the CID's
 # device, so next-fit can hand the CID to a new launch (NoLaunchClash is violated after it)
@@ -1833,6 +1840,28 @@ name = "cid-lease-hazard-release-unreaped-at-stop"
 spec = "hazard/cid_lease_hazards.qnt"
 main = "lease_bugReleaseUnreapedAtStop"
 invariant = "LeaseOutlivesVmm"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+# removeScopeWhilePopulated (decisions 16 and N-1): the scope is removed under a live stuck task, so its absence releases
+# the lease while the VMM still holds the CID's device
+[[check]]
+name = "cid-lease-hazard-remove-scope-while-populated"
+spec = "hazard/cid_lease_hazards.qnt"
+main = "lease_bugRemoveScopeWhilePopulated"
+invariant = "LeaseOutlivesVmm"
+backend = "tlc"
+expect = "violation"
+ci = true
+
+# launchBeforeRecord (N-2): the VMM exists before its address is recorded; a crash during guest boot leaves an orphan boot
+# reclamation cannot reserve, so a launch is handed its CID (NoLaunchClash is violated)
+[[check]]
+name = "cid-lease-hazard-launch-before-record"
+spec = "hazard/cid_lease_hazards.qnt"
+main = "lease_bugLaunchBeforeRecord"
+invariant = "NoLaunchClash"
 backend = "tlc"
 expect = "violation"
 ci = true

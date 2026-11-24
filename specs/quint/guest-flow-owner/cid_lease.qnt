@@ -86,10 +86,23 @@
  *     stop of a running allocation with that outcome: the stop completes (the workload is `done`) while the device
  *     stays held by `a` and the lease stays held, recorded in the model-level map `late` (offset -> workload; a
  *     workload can accumulate several). `Reap(o)` is the process's reap, which frees its device; `LateRelease(o)` is a
- *     later network-reclaim attempt, which frees the lease and the `late` entry only when the device is free (the
- *     scope is absent: K-C7). A serve crash drops `late` with the pool; the stuck VMM is an orphan that boot
- *     reclamation cannot kill (`kill_scope` does not return on its scope), so `Reclaim` is enabled only when no orphan
- *     is unreaped (ghost `g.unreapedOrphans`), and such an orphan leaves through `OrphanExit`.
+ *     later network-reclaim attempt, which frees the lease and the `late` entry only when the scope is absent (K-C7).
+ *   - Decisions 16 and N-1 (ADR-0349, ADR-0351): the scope. `scope` (per offset) is present from a kill that did not reap
+ *     and is removed only by `RemoveScope(o)`, enabled only when the device is free (`populated 0`); `Reap(o)` is the
+ *     task's exit and does not remove the scope; `LateRelease(o)` and the release at an ordinary stop read the scope's
+ *     absence. K-C8: a VMM holds its device only while it is a member of its scope, because it is born inside it
+ *     (ADR-0352); no model action distinguishes that from the write form, so it is an assumption, not an action.
+ *   - Decision 14 (ADR-0350): boot reclamation never waits on an orphan. `Reclaim(s)` runs whenever boot runs; it kills
+ *     every orphan, and for each orphan whose scope is still busy (the set `s`: a stuck exit, or a launch parked in guest
+ *     boot; always including the orphans stuck before the crash) puts its offset in the existing `late` map, as a
+ *     Retiring lease for the allocation recorded for that offset. `Assign` already skips it, `LateRelease` already frees
+ *     it once the scope is absent, `CidUnique` and `NoUntrackedLease` already range over `late`. There is no separate
+ *     reserved set and no release action. The orphan leaves through `OrphanExit`.
+ *   - Decision N-2 (ADR-0353): `recorded` (offset -> allocation) is the guest address on the allocation's `Pending` row:
+ *     `Assign` writes it, `Launch(a)` is enabled only when `a`'s offset is recorded, `Crash` keeps it for every offset a
+ *     VMM still holds, and `Reclaim` fills `late` from it. The row write is merged into `Assign` (a crash between the
+ *     lease and the record creates no VMM, so nothing observable differs); `launchBeforeRecord` removes the record before
+ *     the VMM exists.
  *
  * OFF names the design rules switched off (teeth; instances in hazard/):
  *   releaseBeforeVmm    the lease is released while the VMM still holds the device
@@ -107,6 +120,10 @@
  *   refusalKeepsPredecessor     (item 7.4) a pool refusal leaves the predecessor held until the next launch
  *   terminalBeforeRelease       (item 7.5) FinalizeFailed writes the terminal before it releases the lease
  *   releaseUnreapedAtStop  (decision 12) the stop of an unreaped VMM frees its lease with the stop, as for a reaped VMM
+ *   removeScopeWhilePopulated  (decisions 16, N-1) `RemoveScope` loses its `populated 0` guard: the scope is removed under
+ *                       a live stuck task, its absence no longer implies the device is free, and the lease is released
+ *   launchBeforeRecord  (N-2) the VMM exists before the guest address is on record: a crash during guest boot leaves an
+ *                       orphan boot reclamation cannot reserve
  *   tickDuringPredecessorTeardown  (item 7.3 step boundary) a tick of the workload runs while its dispatch is held at a
  *                       predecessor teardown (the guard dropped from Assign, Stop and Finalize)
  *
@@ -123,7 +140,11 @@
  *         cgroup_task_dead (kernel/cgroup/cgroup.c:6309 @ v7.0). OPEN: the Tier-3 serve-restart
  *         reclamation scenario V-RECLAIM; not contract-shaping
  *   K-C6  A guest reset ends the VMM in the pinned fork ....................... ADR-0182 (fork validation item)
- *   K-C7  The allocation's cgroup scope is absent only after the VMM's device is released: `cgroup_rmdir` succeeds
+ *   K-C7  A workload scope is removed only after `cgroup.events` reports `populated 0` for it; the scope's absence
+ *         therefore implies the VMM's device is released. The running kernel removes a scope under a live stuck task
+ *         when `rmdir` is issued without that wait (spike `findings-cgroup-events.md`); the model never does
+ *         (`RemoveScope` is guarded by the device being free). The allocation's cgroup scope is absent only after
+ *         the VMM's device is released: `cgroup_rmdir` succeeds
  *         only when no task is left (`cgroup_rmdir` -> `cgroup_drain_dying`, kernel/cgroup/cgroup.c:6254-6272 and
  *         :6309-6311 @ v7.0), and a task leaves its cgroup only after it dropped its files (kernel/exit.c:971, :976
  *         @ v7.0; fs/file_table.c:528-530 @ v7.0; the K-C5 chain), the last close of the device file reaching
@@ -131,6 +152,9 @@
  *         -EADDRINUSE (`vhost_vsock_set_cid`, drivers/vhost/vsock.c:804-813 @ v7.0). Discharged by the source above
  *         and, as a real-kernel check, the Tier-3 scenario S-VOL-T3-12 (no lease released while the held-flush VMM is
  *         unreaped; released after the drain)
+ *   K-C8  A VMM holds its device only while its process is a member of its scope (ADR-0352: the VMM is created inside
+ *         its scope with `clone3`, so it is a member from its first instruction). Discharged by the Tier-3 test of
+ *         feature-delta § "A VMM is born inside its scope"
  */
 // D-UP-1: the variants of `conf_step` (a module of its own: a constructor would clash with the action of the same
 // name, so the actions build their variant with the builtin `variant`)
@@ -150,11 +174,12 @@ module cid_lease_conf {
     | Redeploy({ a: int })
     | Crash
     | Restart
-    | Reclaim
+    | Reclaim({ s: Set[int] })
     | OrphanExit({ o: int })
     | StopUnreaped({ a: int })
     | Reap({ o: int })
     | LateRelease({ o: int })
+    | RemoveScope({ o: int })
 }
 
 module cid_lease {
@@ -196,6 +221,9 @@ module cid_lease {
   val BUG_TICK_DURING_PREDECESSOR_TEARDOWN: bool = OFF.contains("tickDuringPredecessorTeardown")
   // decision 12 (RB-1 item 11): one hazard
   val BUG_RELEASE_UNREAPED_AT_STOP: bool = OFF.contains("releaseUnreapedAtStop")
+  // decisions 16 and N-1 (ADR-0351): one hazard; N-2 (ADR-0353): one hazard
+  val BUG_REMOVE_SCOPE_WHILE_POPULATED: bool = OFF.contains("removeScopeWhilePopulated")
+  val BUG_LAUNCH_BEFORE_RECORD: bool = OFF.contains("launchBeforeRecord")
 
   // st (the placement lease's state, feature-delta `cid_lease` map): wait | picked (assignSplit only: an offset chosen,
   // not yet taken) | leased (lease, VMM not launched) | running (the VMM holds the device) | ended (the placement
@@ -234,6 +262,16 @@ module cid_lease {
   // the reap and a later network-reclaim attempt release it. Model-level, not a per-workload field: a workload can
   // accumulate several. Dropped with the pool at a serve crash
   var late: int -> int
+  // decisions 16 and N-1 (ADR-0349, ADR-0351): offset -> the VM scope that must be removed before its lease is released is
+  // present. Set where a VMM is killed and not reaped (`StopUnreaped`, a boot kill that leaves a busy scope); cleared only by
+  // `RemoveScope`, which is enabled only when the device is free (`populated 0`). The scope is host kernel state: a serve
+  // crash keeps it. A scope whose VMM was reaped before a crash is removed by boot reclamation (the model clears it at `Crash`)
+  var scope: int -> bool
+  // decision N-2 (ADR-0353): offset -> the allocation whose `Pending` row carries that guest address (0 = none). Durable:
+  // `Assign` writes it before any VMM can exist, a serve crash keeps it for every offset a VMM still holds, and boot
+  // reclamation reads it to reserve the offset of a busy scope. It is cleared where the lease it describes is released (the
+  // VMM is gone and the row is terminal; a state reduction, not a rule)
+  var recorded: int -> int
   var cursor: int
   var al: int -> A
   var up: bool                   // the serve process is up
@@ -279,6 +317,11 @@ module cid_lease {
   def hasPred(a: int): bool = al.get(a).pst != "none"
   val orphans: Set[int] = OFFS.filter(o => dev.get(o) == -2)
   def devAt(o: int): int = if (OFFS.contains(o)) dev.get(o) else 0
+  // the VM scope of offset `o` is absent: the lease gate of ADR-0156 (decision 12) reads this, not the device (K-C7)
+  def scopeAbsent(o: int): bool = not(OFFS.contains(o) and scope.get(o))
+  // ADR-0353: `Assign` records the guest address on the allocation's `Pending` row before any VMM can exist.
+  // launchBeforeRecord: the record is written only after the VMM exists (never, in the model)
+  def recordAt(o: int, a: int): int -> int = if (BUG_LAUNCH_BEFORE_RECORD) recorded else recorded.set(o, a)
   def lateAt(o: int): int = if (OFFS.contains(o)) late.get(o) else 0
   // the workload has a dispatch held at a predecessor teardown: no tick of its workload runs until that is released
   def predRetiring(a: int): bool = al.get(a).pst == "retiring"
@@ -290,6 +333,7 @@ module cid_lease {
 
   action init = all {
     dev' = OFFS.mapBy(o => 0), lease' = OFFS.mapBy(o => 0), late' = OFFS.mapBy(o => 0), cursor' = 0,
+    scope' = OFFS.mapBy(o => false), recorded' = OFFS.mapBy(o => 0),
     al' = ALLOCS.mapBy(a => { st: "wait", off: -1, retry: false, ex: false, chg: false, pred: -1, pst: "none" }),
     up' = true, reclaimed' = true, bootLeft' = BOOTS, g' = g0, att' = ALLOCS.mapBy(a => 0),
     conf_step' = variant("init", ()),
@@ -318,6 +362,7 @@ module cid_lease {
       val o = nextFitIn(freeOffs)
       all {
         lease' = lease.set(o, a), cursor' = (o + 1) % N,
+        recorded' = recordAt(o, a),
         al' = al.set(a, {
           ...x, st: "leased", off: o, retry: false, ex: false,
           pred: if (fromEnded) x.off else x.pred,
@@ -326,6 +371,7 @@ module cid_lease {
       },
     },
     att' = att.set(a, placedAtt(a)),
+    scope' = scope,
     dev' = dev, late' = late, up' = up, reclaimed' = reclaimed, bootLeft' = bootLeft, g' = g,
     conf_step' = if (REC) variant("Assign", { a: a }) else conf_step,
   }
@@ -342,7 +388,7 @@ module cid_lease {
       al' = al.set(a, { ...x, st: "wait", off: -1, retry: false, ex: false, chg: true, pred: x.off,
         pst: if (BUG_REFUSAL_KEEPS_PREDECESSOR) "held" else "retiring" }),
     },
-    lease' = lease, late' = late, cursor' = cursor, att' = att,
+    lease' = lease, late' = late, cursor' = cursor, att' = att, scope' = scope, recorded' = recorded,
     dev' = dev, up' = up, reclaimed' = reclaimed, bootLeft' = bootLeft, g' = g,
     conf_step' = if (REC) variant("AssignRefused", { a: a }) else conf_step,
   }
@@ -352,14 +398,18 @@ module cid_lease {
     BUG_ASSIGN_SPLIT, up, reclaimed, al.get(a).st == "wait", freeOffs != Set(), not(predRetiring(a)),
     al' = al.set(a, { ...al.get(a), st: "picked", off: nextFitIn(freeOffs), retry: false, ex: false }),
     lease' = lease, late' = late, cursor' = cursor, dev' = dev, up' = up, reclaimed' = reclaimed, bootLeft' = bootLeft, g' = g, att' = att,
+    scope' = scope, recorded' = recorded,
     conf_step' = if (REC) variant("AssignPick", { a: a }) else conf_step,
   }
   // ... and takes it in a later step, without re-checking that it is still free
   action AssignTake(a: int): bool = all {
     BUG_ASSIGN_SPLIT, up, al.get(a).st == "picked",
     val o = al.get(a).off
-    all { lease' = lease.set(o, a), cursor' = (o + 1) % N, al' = al.set(a, { ...al.get(a), st: "leased" }) },
-    att' = att.set(a, placedAtt(a)),
+    all {
+      lease' = lease.set(o, a), cursor' = (o + 1) % N, al' = al.set(a, { ...al.get(a), st: "leased" }),
+      recorded' = recordAt(o, a),
+    },
+    att' = att.set(a, placedAtt(a)), scope' = scope,
     dev' = dev, late' = late, up' = up, reclaimed' = reclaimed, bootLeft' = bootLeft, g' = g,
     conf_step' = if (REC) variant("AssignTake", { a: a }) else conf_step,
   }
@@ -374,6 +424,8 @@ module cid_lease {
   // placed allocation now has a row, so a pending generation is observed
   action Launch(a: int): bool = all {
     up, al.get(a).st == "leased",
+    // decision N-2 (ADR-0353): the VMM exists only after the allocation's guest address is on record
+    (recorded.get(al.get(a).off) == a) or BUG_LAUNCH_BEFORE_RECORD,
     val x = al.get(a)
     if (dev.get(x.off) == 0) all {
       dev' = dev.set(x.off, a),
@@ -384,6 +436,7 @@ module cid_lease {
       g' = { ...g, clash: true, lastEnd: endAs(a, "crash"), pendingGen: g.pendingGen.set(a, "") },
     },
     att' = att, lease' = lease, late' = late, cursor' = cursor, up' = up, reclaimed' = reclaimed, bootLeft' = bootLeft,
+    scope' = scope, recorded' = recorded,
     conf_step' = if (REC) variant("Launch", { a: a }) else conf_step,
   }
   // The VMM fails (a crash, or a guest reset: RESET-EXIT): the last close of its device frees the CID and the exit
@@ -399,6 +452,7 @@ module cid_lease {
       lease' = lease, late' = late,
       al' = al.set(a, { ...x, st: "ended", retry: r, ex: not(r), chg: r }),
     },
+    scope' = scope, recorded' = recorded,
     cursor' = cursor, up' = up, reclaimed' = reclaimed, bootLeft' = bootLeft, att' = att,
     g' = { ...g, lastEnd: endAs(a, "crash") },
   }
@@ -415,6 +469,7 @@ module cid_lease {
       al' = al.set(a, { ...x, st: "retiring", retry: false, ex: false, chg: false }),
     },
     lease' = lease, late' = late, cursor' = cursor, up' = up, reclaimed' = reclaimed, bootLeft' = bootLeft, att' = att,
+    scope' = scope, recorded' = recorded,
     g' = { ...g, stopped: g.stopped.union(Set(a)), lastEnd: endAs(a, "stop") },
     conf_step' = if (REC) variant("Stop", { a: a }) else conf_step,
   }
@@ -429,6 +484,7 @@ module cid_lease {
     if (BUG_RESET_REBOOTS) all {
       g' = { ...g, rebooted: true }, att' = att,
       dev' = dev, al' = al, lease' = lease, late' = late, cursor' = cursor, up' = up, reclaimed' = reclaimed, bootLeft' = bootLeft,
+      scope' = scope, recorded' = recorded,
     } else vmmExit(a),
     conf_step' = if (REC) variant("GuestReset", { a: a }) else conf_step,
   }
@@ -454,6 +510,7 @@ module cid_lease {
       },
     },
     lease' = lease, late' = late, cursor' = cursor, dev' = dev, up' = up, reclaimed' = reclaimed, bootLeft' = bootLeft, att' = att,
+    scope' = scope, recorded' = recorded,
     conf_step' = if (REC) variant("Finalize", { a: a }) else conf_step,
   }
   // A held teardown returns and the dispatch runs `pool.release` (action_shim/mod.rs:1596-1600: release only after
@@ -467,7 +524,7 @@ module cid_lease {
     val x = al.get(a)
     up and
       if (x.st == "retiring" or (BUG_RELEASE_BEFORE_VMM and x.st == "running" and x.pst != "retiring"))
-        devAt(x.off) != a or BUG_RELEASE_BEFORE_VMM
+        (scopeAbsent(x.off) and devAt(x.off) != a) or BUG_RELEASE_BEFORE_VMM
       else if (BUG_TERMINAL_BEFORE_RELEASE and x.st == "failed" and x.off >= 0)
         true
       else
@@ -476,7 +533,7 @@ module cid_lease {
     canRelease(a),
     val x = al.get(a)
     if (x.st == "retiring" or (BUG_RELEASE_BEFORE_VMM and x.st == "running" and x.pst != "retiring")) all {
-      lease' = lease.set(x.off, 0),
+      lease' = lease.set(x.off, 0), recorded' = recorded.set(x.off, 0),
       al' = al.set(a, {
         ...x,
         st:
@@ -490,13 +547,13 @@ module cid_lease {
       g' = { ...g, fin: g.fin.exclude(Set(a)) },
     } else if (BUG_TERMINAL_BEFORE_RELEASE and x.st == "failed" and x.off >= 0) all {
       // terminalBeforeRelease only: the lease of a workload whose terminal was written first is released afterwards
-      lease' = lease.set(x.off, 0), al' = al.set(a, { ...x, off: -1 }), g' = g,
+      lease' = lease.set(x.off, 0), recorded' = recorded.set(x.off, 0), al' = al.set(a, { ...x, off: -1 }), g' = g,
     } else all {
-      lease' = lease.set(x.pred, 0),
+      lease' = lease.set(x.pred, 0), recorded' = recorded.set(x.pred, 0),
       al' = al.set(a, { ...x, pred: -1, pst: "none" }),
       g' = g,
     },
-    dev' = dev, late' = late, cursor' = cursor, up' = up, reclaimed' = reclaimed, bootLeft' = bootLeft, att' = att,
+    dev' = dev, late' = late, cursor' = cursor, up' = up, reclaimed' = reclaimed, bootLeft' = bootLeft, att' = att, scope' = scope,
     conf_step' = if (REC) variant("Release", { a: a }) else conf_step,
   }
   // the restart verb's intent write (the stop sentinel deleted, the generation bumped) for a stopped or a failed workload:
@@ -508,6 +565,7 @@ module cid_lease {
     up, reclaimed, al.get(a).st.in(Set("done", "failed")), restartDecision(a, false, true),
     al' = al.set(a, { ...al.get(a), st: "wait", off: -1, retry: false, ex: false, chg: false }), att' = att,
     dev' = dev, lease' = lease, late' = late, cursor' = cursor, up' = up, reclaimed' = reclaimed, bootLeft' = bootLeft,
+    scope' = scope, recorded' = recorded,
     g' = {
       ...g, stopped: g.stopped.exclude(Set(a)), lastEnd: endAs(a, "redeploy"), preEnd: g.preEnd.set(a, g.lastEnd.get(a)),
       pendingGen: g.pendingGen.set(a, al.get(a).st),
@@ -527,11 +585,11 @@ module cid_lease {
     val x = al.get(a)
     all {
       x.st == "running", dev.get(x.off) == a,
-      if (BUG_RELEASE_UNREAPED_AT_STOP) all { lease' = lease.set(x.off, 0), late' = late }
-      else all { lease' = lease, late' = late.set(x.off, a) },
+      if (BUG_RELEASE_UNREAPED_AT_STOP) all { lease' = lease.set(x.off, 0), late' = late, scope' = scope }
+      else all { lease' = lease, late' = late.set(x.off, a), scope' = scope.set(x.off, true) },
       al' = al.set(a, { ...x, st: "done", off: -1, retry: false, ex: false, chg: false }),
     },
-    dev' = dev, cursor' = cursor, up' = up, reclaimed' = reclaimed, bootLeft' = bootLeft, att' = att,
+    dev' = dev, cursor' = cursor, up' = up, reclaimed' = reclaimed, bootLeft' = bootLeft, att' = att, recorded' = recorded,
     g' = { ...g, stopped: g.stopped.union(Set(a)), lastEnd: endAs(a, "stop") },
     conf_step' = if (REC) variant("StopUnreaped", { a: a }) else conf_step,
   }
@@ -540,21 +598,44 @@ module cid_lease {
     up, late.get(o) != 0, dev.get(o) == late.get(o),
     dev' = dev.set(o, 0),
     lease' = lease, late' = late, cursor' = cursor, al' = al, up' = up, reclaimed' = reclaimed, bootLeft' = bootLeft,
-    g' = g, att' = att,
+    g' = g, att' = att, scope' = scope, recorded' = recorded,
     conf_step' = if (REC) variant("Reap", { o: o }) else conf_step,
   }
-  // a network-reclaim attempt after the reap: the scope is absent (K-C7: the device is free), so the shim releases the
-  // lease. The guard has the shape of `canRelease`: the lease's holder no longer holds the device
-  def canLateRelease(o: int): bool = up and late.get(o) != 0 and devAt(o) != late.get(o)
+  // decisions 16 and N-1 (ADR-0349, ADR-0351): the one remover of a VM scope. It removes the scope only after
+  // `cgroup.events` reports `populated 0` for it, i.e. when the VMM's device is free (K-C7). `Reap(o)` is the task's exit
+  // and the model's `populated 0`; it does not remove the scope. The running kernel removes a scope under a live stuck
+  // task when `rmdir` is issued without that wait (spike `findings-cgroup-events.md`); the model never does.
+  // removeScopeWhilePopulated: `RemoveScope` loses its guard
+  def canRemoveScope(o: int): bool = up and scope.get(o) and (dev.get(o) == 0 or BUG_REMOVE_SCOPE_WHILE_POPULATED)
+  action RemoveScope(o: int): bool = all {
+    canRemoveScope(o),
+    scope' = scope.set(o, false),
+    dev' = dev, lease' = lease, late' = late, cursor' = cursor, al' = al, up' = up, reclaimed' = reclaimed,
+    bootLeft' = bootLeft, g' = g, att' = att, recorded' = recorded,
+    conf_step' = if (REC) variant("RemoveScope", { o: o }) else conf_step,
+  }
+  // a network-reclaim attempt once the scope is absent (K-C7: the device is then free), so the shim releases the lease.
+  // It reads the scope, not the device: that is what makes `removeScopeWhilePopulated` reach a violation. It also releases
+  // a boot reservation (an entry of `late` filled by `Reclaim`): the one release site of every lease
+  def canLateRelease(o: int): bool = up and late.get(o) != 0 and scopeAbsent(o)
   action LateRelease(o: int): bool = all {
     canLateRelease(o),
-    lease' = lease.set(o, 0), late' = late.set(o, 0),
+    lease' = lease.set(o, 0), late' = late.set(o, 0), recorded' = recorded.set(o, 0),
     dev' = dev, cursor' = cursor, al' = al, up' = up, reclaimed' = reclaimed, bootLeft' = bootLeft, g' = g, att' = att,
+    scope' = scope,
     conf_step' = if (REC) variant("LateRelease", { o: o }) else conf_step,
   }
-  // boot reclamation can run only when no orphan is unreaped: it kills every orphan and `kill_scope` does not return on a
-  // scope an unreaped VMM still holds. An unreaped orphan leaves through `OrphanExit`
-  def canReclaim: bool = up and not(reclaimed) and orphans != Set() and g.unreapedOrphans == Set()
+  // Boot reclamation (ADR-0350; one `vm_reclamation_boot::converge`, D-UP-19) runs whenever boot runs and never waits on an
+  // orphan. It kills every orphan; `s` is the set of orphans whose kill leaves the scope busy (the VMM is not reaped at the
+  // bound: a stuck exit, or a launch parked in guest boot). The orphans stuck before the crash (`g.unreapedOrphans`) are
+  // always among them. Each such orphan keeps its device and its scope, and its offset is reserved as an entry in `late` (a
+  // Retiring lease), from the address the allocation's `Pending` row recorded (ADR-0353), before the first `assign`. On the
+  // `five` instance (no unreaped VMM, decision 15) no orphan is stuck
+  def canReclaim(s: Set[int]): bool = and {
+    up, not(reclaimed), orphans != Set(),
+    s.subseteq(if (UNREAPED) orphans else Set()),
+    g.unreapedOrphans.subseteq(s),
+  }
 
   // ------------------------------------------------------------------ environment: serve crash, restart, reclamation
   // serve crashes: the pool, its cursor, every held dispatch and the in-memory placement are lost (predecessor leases
@@ -601,6 +682,10 @@ module cid_lease {
     up' = false, reclaimed' = false,
     dev' = OFFS.mapBy(o => if (dev.get(o) > 0) -2 else dev.get(o)),
     lease' = OFFS.mapBy(o => 0), late' = OFFS.mapBy(o => 0), cursor' = 0,
+    // the scope and the record outlive the process while a VMM still holds the device; a scope whose VMM was already
+    // reaped is removed by boot reclamation, and the record of a VMM that is gone describes nothing
+    scope' = OFFS.mapBy(o => scope.get(o) and dev.get(o) != 0),
+    recorded' = OFFS.mapBy(o => if (dev.get(o) != 0) recorded.get(o) else 0),
     al' = al.keys().mapBy(a => crashA(a)),
     att' = al.keys().mapBy(a => crashAtt(a)),
     bootLeft' = if (bootLeft < 0) bootLeft else bootLeft - 1,
@@ -618,23 +703,39 @@ module cid_lease {
     not(up),
     up' = true, reclaimed' = (orphans == Set()),
     dev' = dev, lease' = lease, late' = late, cursor' = cursor, al' = al, bootLeft' = bootLeft, g' = g, att' = att,
+    scope' = scope, recorded' = recorded,
     conf_step' = if (REC) variant("Restart", ()) else conf_step,
   }
-  // boot reclamation (one vm_reclamation_boot::converge call, D-UP-19) kills every orphan VMM it does not supervise;
-  // their devices are released. reclaimNeverCompletes: reclamation never reports completion
-  action Reclaim = all {
-    canReclaim,
-    dev' = OFFS.mapBy(o => if (dev.get(o) == -2) 0 else dev.get(o)), conf_step' = if (REC) variant("Reclaim", ()) else conf_step,
+  // boot reclamation kills every orphan VMM it does not supervise (D-UP-19); a reaped orphan's device is released and its
+  // scope removed, a busy one (`s`) keeps both and is reserved. reclaimNeverCompletes: reclamation never reports completion
+  action Reclaim(s: Set[int]): bool = all {
+    canReclaim(s),
+    dev' = OFFS.mapBy(o => if (dev.get(o) == -2 and not(s.contains(o))) 0 else dev.get(o)),
+    scope' = OFFS.mapBy(o => s.contains(o)),
+    // the reservation: a Retiring lease for the recorded allocation. An offset with no record (launchBeforeRecord) has none
+    lease' = OFFS.mapBy(o => if (s.contains(o) and recorded.get(o) != 0) recorded.get(o) else lease.get(o)),
+    late' = OFFS.mapBy(o => if (s.contains(o) and recorded.get(o) != 0) recorded.get(o) else late.get(o)),
+    recorded' = OFFS.mapBy(o => if (dev.get(o) == -2 and not(s.contains(o))) 0 else recorded.get(o)),
+    conf_step' = if (REC) variant("Reclaim", { s: s }) else conf_step,
     reclaimed' = not(BUG_RECLAIM_NEVER_COMPLETES),
-    lease' = lease, late' = late, cursor' = cursor, al' = al, up' = up, bootLeft' = bootLeft, g' = { ...g, reclaimed: true }, att' = att,
+    cursor' = cursor, al' = al, up' = up, bootLeft' = bootLeft, g' = { ...g, reclaimed: true, unreapedOrphans: s }, att' = att,
   }
   // an orphan exits by itself before it is reclaimed (a guest reset ends the VMM)
   action OrphanExit(o: int): bool = all {
     dev.get(o) == -2,
     dev' = dev.set(o, 0), conf_step' = if (REC) variant("OrphanExit", { o: o }) else conf_step,
     reclaimed' = (reclaimed or (up and orphans.exclude(Set(o)) == Set())),
+    // a reserved orphan (an entry of `late`) keeps its scope and record until the reservation is released
+    scope' = if (late.get(o) != 0) scope else scope.set(o, false),
+    recorded' = if (late.get(o) != 0) recorded else recorded.set(o, 0),
     lease' = lease, late' = late, cursor' = cursor, al' = al, up' = up, bootLeft' = bootLeft, att' = att,
     g' = { ...g, unreapedOrphans: g.unreapedOrphans.exclude(Set(o)) },
+  }
+
+  // the busy set `s` is chosen only inside this branch, so the other actions are not enumerated once per subset
+  action reclaimAny = {
+    nondet s = OFFS.powerset().oneOf()
+    Reclaim(s)
   }
 
   action step = {
@@ -642,7 +743,8 @@ module cid_lease {
     nondet o = OFFS.oneOf()
     any {
       Assign(a), AssignRefused(a), AssignPick(a), AssignTake(a), Launch(a), Stop(a), VmmCrash(a), GuestReset(a),
-      Finalize(a), Release(a), Redeploy(a), Crash, Restart, Reclaim, OrphanExit(o), StopUnreaped(a), Reap(o), LateRelease(o),
+      Finalize(a), Release(a), Redeploy(a), Crash, Restart, reclaimAny, OrphanExit(o), StopUnreaped(a), Reap(o), LateRelease(o),
+      RemoveScope(o),
     }
   }
 
@@ -670,7 +772,8 @@ module cid_lease {
   // the lease outlives the VMM: a running VMM's offset stays leased until the VMM has exited (release-last)
   val LeaseOutlivesVmm: bool = OFFS.forall(o => dev.get(o) > 0 implies lease.get(o) == dev.get(o))
   // assign runs only after boot reclamation: no lease is on an offset a previous process's VMM still holds
-  val AssignAfterReclaim: bool = OFFS.forall(o => lease.get(o) != 0 implies dev.get(o) != -2)
+  // (a boot reservation, an entry of `late`, is the one lease allowed on an orphan's offset: it is held for the orphan)
+  val AssignAfterReclaim: bool = OFFS.forall(o => (lease.get(o) != 0 and late.get(o) == 0) implies dev.get(o) != -2)
   // RESET-EXIT: a guest reset never leaves the VMM alive
   val GuestResetEndsVmm: bool = not(g.rebooted)
   // T-5 ruling: a stopped workload is never placed again until it is redeployed, across serve crashes included (the
@@ -750,7 +853,7 @@ module cid_lease {
     .expect(not(canAssign(1)))
   run ReclamationReleasesTheOrphanDeviceThenAssignProceeds = init
     .then(Assign(1)).then(Launch(1)).then(Crash).then(Restart)
-    .then(Reclaim).expect(Safety and reclaimed and dev.get(0) == 0 and g.reclaimed)
+    .then(Reclaim(Set())).expect(Safety and reclaimed and dev.get(0) == 0 and g.reclaimed)
     .then(Assign(1)).expect(Safety and st(1) == "leased" and al.get(1).off == 0)
     .then(Launch(1)).expect(Safety and st(1) == "running" and dev.get(0) == 1 and not(g.clash))
   // D-UP-19: two orphans; one boot reclamation (one converge call) kills both before any assign, then assign proceeds
@@ -758,7 +861,7 @@ module cid_lease {
     .then(Assign(2)).then(Assign(1)).then(Launch(2)).then(Launch(1))
     .expect(Safety and dev.get(0) == 2 and dev.get(1) == 1)
     .then(Crash).then(Restart).expect(Safety and not(reclaimed) and orphans == Set(0, 1))
-    .then(Reclaim).expect(Safety and reclaimed and orphans == Set() and dev == OFFS.mapBy(o => 0))
+    .then(Reclaim(Set())).expect(Safety and reclaimed and orphans == Set() and dev == OFFS.mapBy(o => 0))
     .then(Assign(1)).expect(Safety and st(1) == "leased")
   // an orphan exits by itself (a guest reset) before reclamation reaches it; reclamation completes with nothing to kill
   run OrphanExitsByItselfBeforeReclamation = init
@@ -826,11 +929,11 @@ module cid_lease {
     .then(Crash)
     .expect(Safety and st(1) == "wait" and not(al.get(1).chg) and att.get(1) == CEIL and pstOf(1) == "none"
       and lease == OFFS.mapBy(o => 0))
-    .then(Restart).then(Reclaim).expect(Safety and reclaimed)
+    .then(Restart).then(Reclaim(Set())).expect(Safety and reclaimed)
     .then(Assign(1)).expect(Safety and st(1) == "leased" and att.get(1) == CEIL)
   // continues: a second reclamation past the ceiling charges nothing either; the next crash-class failure exhausts at once
   run ReclaimedWorkloadPastTheCeilingIsPlacedAgain = ServeCrashPlacesAWorkloadAtTheCeilingAgain
-    .then(Launch(1)).then(Crash).then(Restart).then(Reclaim)
+    .then(Launch(1)).then(Crash).then(Restart).then(Reclaim(Set()))
     .then(Assign(1)).expect(Safety and st(1) == "leased" and att.get(1) == CEIL)
     .then(Launch(1)).then(VmmCrash(1)).expect(Safety and st(1) == "ended" and al.get(1).ex and att.get(1) == CEIL)
   // feature-delta `cid_lease` item 3: a successor leased but not launched at a serve crash has no row; after the restart
@@ -902,17 +1005,28 @@ module cid_lease {
     .then(Release(2)).expect(Safety and st(2) == "wait" and pstOf(2) == "none" and freeOffs != Set())
     .then(Assign(2)).expect(Safety and st(2) == "leased" and att.get(2) == 1)
 
-  // decision 12 (RB-1 item 11; ADR-0348, ADR-0156 amendment): the stop of an unreaped VMM completes, but its lease stays
-  // held until the reap and a later reclaim attempt. The stop outcome (`StopUnreaped`) is the real stop handler and tick
-  // over an unreapable SimVmm process; `Reap` the scripted `SimVmm::exit_process`; `LateRelease` the production
-  // convergence tick that dispatches `ReclaimAllocationNetwork`
-  run StopOfAnUnreapedVmmHoldsItsLeaseUntilTheReap = AssignThenVmmOpensItsOwnDevice
+  // decision 12 (RB-1 item 11; ADR-0348, ADR-0156 amendment) and decisions 16 / N-1 (ADR-0349, ADR-0351): the stop of an
+  // unreaped VMM completes, but its lease stays held until the reap, the scope's removal after `populated 0`, and a later
+  // reclaim attempt. `StopUnreaped` is the real stop handler and tick over an unreapable SimVmm process; `Reap` the scripted
+  // `SimVmm::exit_process`; `RemoveScope` the populated-first scope removal; `LateRelease` the production convergence tick
+  // that dispatches `ReclaimAllocationNetwork`. The wrap-around assign then takes the released offset without a clash
+  run ScopeIsRemovedOnlyAfterItIsEmpty = AssignThenVmmOpensItsOwnDevice
     .then(StopUnreaped(1))
     .expect(Safety and st(1) == "done" and offOf(1) == -1 and dev.get(0) == 1 and lease.get(0) == 1 and late.get(0) == 1
-      and not(canLateRelease(0)))
+      and scope.get(0) and not(canRemoveScope(0)) and not(canLateRelease(0)))
     .then(Redeploy(1)).expect(Safety and st(1) == "wait" and lease.get(0) == 1 and late.get(0) == 1)
-    .then(Reap(0)).expect(Safety and dev.get(0) == 0 and lease.get(0) == 1 and late.get(0) == 1 and canLateRelease(0))
-    .then(LateRelease(0)).expect(Safety and lease.get(0) == 0 and late.get(0) == 0 and dev.get(0) == 0)
+    .expect(not(canRemoveScope(0)))
+    .then(Reap(0))
+    .expect(Safety and dev.get(0) == 0 and scope.get(0) and lease.get(0) == 1 and canRemoveScope(0) and not(canLateRelease(0)))
+    .then(RemoveScope(0))
+    .expect(Safety and not(scope.get(0)) and lease.get(0) == 1 and late.get(0) == 1 and canLateRelease(0))
+    .then(LateRelease(0)).expect(Safety and lease.get(0) == 0 and late.get(0) == 0 and dev.get(0) == 0 and not(scope.get(0)))
+    .then(Assign(1)).then(Launch(1)).then(Assign(2)).then(Launch(2))
+    .then(VmmCrash(1)).then(Assign(1)).then(Launch(1)).then(Release(1))
+    .then(VmmCrash(2)).then(Assign(2)).then(Launch(2)).then(Release(2))
+    .then(VmmCrash(1)).then(Assign(1))
+    .expect(Safety and offOf(1) == 0 and cursor == 1)
+    .then(Launch(1)).expect(Safety and st(1) == "running" and dev.get(0) == 1 and not(g.clash))
   // next-fit skips the held lease: three offsets, the cursor wraps onto the held offset 0 and the walk takes the free
   // offset 1 instead (a launch there would clash with the stuck VMM's CID if the lease were free). On `lease_ok` and its
   // recording twin `lease_conf_three`
@@ -923,17 +1037,26 @@ module cid_lease {
     .then(VmmCrash(2)).then(Assign(2))
     .expect(Safety and offOf(2) == 1 and al.get(2).pred == 2 and cursor == 2 and lease.get(0) == 1 and late.get(0) == 1)
     .then(Launch(2)).expect(Safety and st(2) == "running" and dev.get(1) == 2 and dev.get(0) == 1 and not(g.clash))
-  // NO-SURVIVE with an unreaped VMM: a serve crash drops the pool and `late`, the stuck VMM survives as an orphan, and
-  // boot reclamation cannot run until it exits, so no assign runs before then
-  run ServeCrashWithAnUnreapedVmmBlocksAssignUntilItExits = AssignThenVmmOpensItsOwnDevice
-    .then(StopUnreaped(1))
+  // ADR-0350, ADR-0353: a serve crash while a launch is parked in guest boot. The allocation's guest address was recorded
+  // (its `Pending` row) before the VMM existed; the VMM survives the crash as an orphan; boot reclamation kills it, its scope
+  // stays busy, and the offset is reserved from the record before the first assign, so the next-fit walk (which starts at
+  // the reserved offset, the cursor having reset) skips it and no launch receives that CID. The orphan then exits, the scope
+  // is removed (`populated 0`) and the reservation is released
+  run ServeCrashDuringGuestBootReservesFromTheRecordedAddress = AssignThenVmmOpensItsOwnDevice
+    .expect(Safety and recorded.get(0) == 1)
     .then(Crash)
-    .expect(Safety and not(up) and dev.get(0) == -2 and g.unreapedOrphans == Set(0) and lease == OFFS.mapBy(o => 0)
-      and late == OFFS.mapBy(o => 0) and st(1) == "done")
-    .then(Restart).expect(Safety and up and not(reclaimed) and orphans == Set(0) and not(canReclaim) and not(canAssign(2)))
-    .then(OrphanExit(0)).expect(Safety and reclaimed and dev.get(0) == 0 and g.unreapedOrphans == Set())
-    .then(Assign(2)).expect(Safety and st(2) == "leased" and offOf(2) == 0)
-    .then(Launch(2)).expect(Safety and st(2) == "running" and dev.get(0) == 2 and not(g.clash))
+    .expect(Safety and not(up) and dev.get(0) == -2 and recorded.get(0) == 1 and lease == OFFS.mapBy(o => 0)
+      and late == OFFS.mapBy(o => 0) and st(1) == "wait")
+    .then(Restart).expect(Safety and up and not(reclaimed) and orphans == Set(0) and not(canAssign(2)))
+    .then(Reclaim(Set(0)))
+    .expect(Safety and reclaimed and dev.get(0) == -2 and lease.get(0) == 1 and late.get(0) == 1 and scope.get(0)
+      and not(canLateRelease(0)) and not(canRemoveScope(0)))
+    .then(Assign(2)).expect(Safety and st(2) == "leased" and offOf(2) == 1 and cursor == 2)
+    .then(Launch(2)).expect(Safety and st(2) == "running" and dev.get(1) == 2 and not(g.clash))
+    .then(OrphanExit(0))
+    .expect(Safety and dev.get(0) == 0 and scope.get(0) and late.get(0) == 1 and lease.get(0) == 1 and canRemoveScope(0))
+    .then(RemoveScope(0)).then(LateRelease(0))
+    .expect(Safety and lease.get(0) == 0 and late.get(0) == 0 and recorded.get(0) == 0 and not(scope.get(0)))
 
   // ------------------------------------------------------------------ liveness (TLC)
   // a workload waiting to be placed (`wait`, or `ended` with `retry`) is eventually placed: serve restarts are bounded
@@ -946,7 +1069,7 @@ module cid_lease {
       ALLOCS.forall(a => strongFair(Assign(a), (lease, al, reclaimed, up))),
       ALLOCS.forall(a => weakFair(Release(a), (lease, al, g))),
       weakFair(Restart, (up, reclaimed, dev)),
-      weakFair(Reclaim, (dev, reclaimed, up)),
+      OFFS.powerset().forall(s => weakFair(Reclaim(s), (dev, reclaimed, up, g))),
       OFFS.forall(o => weakFair(OrphanExit(o), dev)),
     }.implies(ALLOCS.forall(a => always((waiting(a) and (freeOffs != Set())).implies(
         eventually(not(waiting(a)) or freeOffs == Set())))))
@@ -954,8 +1077,11 @@ module cid_lease {
   // free): a network-reclaim attempt after the reap releases it (weak fairness: the attempt stays enabled until taken).
   // A serve crash drops the lease with the pool
   temporal LateLeaseEventuallyReleased =
-    OFFS.forall(o => weakFair(LateRelease(o), (late, dev, lease, up)))
-      .implies(OFFS.forall(o => always((late.get(o) != 0 and devAt(o) != late.get(o)).implies(eventually(late.get(o) == 0)))))
+    and {
+      OFFS.forall(o => weakFair(RemoveScope(o), (scope, dev, up))),
+      OFFS.forall(o => weakFair(LateRelease(o), (late, scope, lease, up))),
+    }
+      .implies(OFFS.forall(o => always((late.get(o) != 0 and devAt(o) == 0).implies(eventually(late.get(o) == 0)))))
 }
 
 // The design: two workloads, three offsets, serve crash + restart (VMMs survive each as orphans until reclaimed).

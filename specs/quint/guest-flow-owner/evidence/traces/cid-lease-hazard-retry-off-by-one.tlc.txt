@@ -17,6 +17,8 @@ State 1: <Initial predicate>
      pred |-> -1,
      pst |-> "none" ] >>
 /\ lease_bugRetryOffByOne_cid_lease_reclaimed = TRUE
+/\ lease_bugRetryOffByOne_cid_lease_scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
+/\ lease_bugRetryOffByOne_cid_lease_recorded = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugRetryOffByOne_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugRetryOffByOne_cid_lease_g = [ clash |-> FALSE,
   rebooted |-> FALSE,
@@ -32,7 +34,7 @@ State 1: <Initial predicate>
 /\ lease_bugRetryOffByOne_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ lease_bugRetryOffByOne_cid_lease_up = TRUE
 
-State 2: <lease_bugRetryOffByOne_cid_lease_Assign line 1380, col 3 to line 1462, col 54 of module lease_bugRetryOffByOne>
+State 2: <lease_bugRetryOffByOne_cid_lease_Assign line 1556, col 3 to line 1643, col 54 of module lease_bugRetryOffByOne>
 /\ lease_bugRetryOffByOne_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugRetryOffByOne_cid_lease_att = <<0, 0>>
 /\ lease_bugRetryOffByOne_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
@@ -51,6 +53,8 @@ State 2: <lease_bugRetryOffByOne_cid_lease_Assign line 1380, col 3 to line 1462,
      pred |-> -1,
      pst |-> "none" ] >>
 /\ lease_bugRetryOffByOne_cid_lease_reclaimed = TRUE
+/\ lease_bugRetryOffByOne_cid_lease_scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
+/\ lease_bugRetryOffByOne_cid_lease_recorded = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugRetryOffByOne_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugRetryOffByOne_cid_lease_g = [ clash |-> FALSE,
   rebooted |-> FALSE,
@@ -66,7 +70,7 @@ State 2: <lease_bugRetryOffByOne_cid_lease_Assign line 1380, col 3 to line 1462,
 /\ lease_bugRetryOffByOne_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ lease_bugRetryOffByOne_cid_lease_up = TRUE
 
-State 3: <lease_bugRetryOffByOne_cid_lease_Launch line 1526, col 3 to line 1617, col 54 of module lease_bugRetryOffByOne>
+State 3: <lease_bugRetryOffByOne_cid_lease_Launch line 1711, col 3 to line 1815, col 54 of module lease_bugRetryOffByOne>
 /\ lease_bugRetryOffByOne_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugRetryOffByOne_cid_lease_att = <<0, 0>>
 /\ lease_bugRetryOffByOne_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
@@ -85,6 +89,8 @@ State 3: <lease_bugRetryOffByOne_cid_lease_Launch line 1526, col 3 to line 1617,
      pred |-> -1,
      pst |-> "none" ] >>
 /\ lease_bugRetryOffByOne_cid_lease_reclaimed = TRUE
+/\ lease_bugRetryOffByOne_cid_lease_scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
+/\ lease_bugRetryOffByOne_cid_lease_recorded = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugRetryOffByOne_cid_lease_dev = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugRetryOffByOne_cid_lease_g = [ clash |-> FALSE,
   rebooted |-> FALSE,
@@ -100,7 +106,7 @@ State 3: <lease_bugRetryOffByOne_cid_lease_Launch line 1526, col 3 to line 1617,
 /\ lease_bugRetryOffByOne_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ lease_bugRetryOffByOne_cid_lease_up = TRUE
 
-State 4: <lease_bugRetryOffByOne_cid_lease_VmmCrash line 1623, col 3 to line 1634, col 54 of module lease_bugRetryOffByOne>
+State 4: <lease_bugRetryOffByOne_cid_lease_VmmCrash line 1821, col 3 to line 1832, col 54 of module lease_bugRetryOffByOne>
 /\ lease_bugRetryOffByOne_cid_lease_lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugRetryOffByOne_cid_lease_att = <<0, 0>>
 /\ lease_bugRetryOffByOne_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
@@ -119,6 +125,8 @@ State 4: <lease_bugRetryOffByOne_cid_lease_VmmCrash line 1623, col 3 to line 163
      pred |-> -1,
      pst |-> "none" ] >>
 /\ lease_bugRetryOffByOne_cid_lease_reclaimed = TRUE
+/\ lease_bugRetryOffByOne_cid_lease_scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
+/\ lease_bugRetryOffByOne_cid_lease_recorded = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugRetryOffByOne_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugRetryOffByOne_cid_lease_g = [ clash |-> FALSE,
   rebooted |-> FALSE,
@@ -134,7 +142,7 @@ State 4: <lease_bugRetryOffByOne_cid_lease_VmmCrash line 1623, col 3 to line 163
 /\ lease_bugRetryOffByOne_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ lease_bugRetryOffByOne_cid_lease_up = TRUE
 
-State 5: <lease_bugRetryOffByOne_cid_lease_Assign line 1380, col 3 to line 1462, col 54 of module lease_bugRetryOffByOne>
+State 5: <lease_bugRetryOffByOne_cid_lease_Assign line 1556, col 3 to line 1643, col 54 of module lease_bugRetryOffByOne>
 /\ lease_bugRetryOffByOne_cid_lease_lease = (0 :> 1 @@ 1 :> 1 @@ 2 :> 0)
 /\ lease_bugRetryOffByOne_cid_lease_att = <<1, 0>>
 /\ lease_bugRetryOffByOne_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
@@ -153,6 +161,8 @@ State 5: <lease_bugRetryOffByOne_cid_lease_Assign line 1380, col 3 to line 1462,
      pred |-> -1,
      pst |-> "none" ] >>
 /\ lease_bugRetryOffByOne_cid_lease_reclaimed = TRUE
+/\ lease_bugRetryOffByOne_cid_lease_scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
+/\ lease_bugRetryOffByOne_cid_lease_recorded = (0 :> 1 @@ 1 :> 1 @@ 2 :> 0)
 /\ lease_bugRetryOffByOne_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugRetryOffByOne_cid_lease_g = [ clash |-> FALSE,
   rebooted |-> FALSE,
@@ -168,7 +178,7 @@ State 5: <lease_bugRetryOffByOne_cid_lease_Assign line 1380, col 3 to line 1462,
 /\ lease_bugRetryOffByOne_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ lease_bugRetryOffByOne_cid_lease_up = TRUE
 
-State 6: <lease_bugRetryOffByOne_cid_lease_Launch line 1526, col 3 to line 1617, col 54 of module lease_bugRetryOffByOne>
+State 6: <lease_bugRetryOffByOne_cid_lease_Launch line 1711, col 3 to line 1815, col 54 of module lease_bugRetryOffByOne>
 /\ lease_bugRetryOffByOne_cid_lease_lease = (0 :> 1 @@ 1 :> 1 @@ 2 :> 0)
 /\ lease_bugRetryOffByOne_cid_lease_att = <<1, 0>>
 /\ lease_bugRetryOffByOne_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
@@ -187,6 +197,8 @@ State 6: <lease_bugRetryOffByOne_cid_lease_Launch line 1526, col 3 to line 1617,
      pred |-> -1,
      pst |-> "none" ] >>
 /\ lease_bugRetryOffByOne_cid_lease_reclaimed = TRUE
+/\ lease_bugRetryOffByOne_cid_lease_scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
+/\ lease_bugRetryOffByOne_cid_lease_recorded = (0 :> 1 @@ 1 :> 1 @@ 2 :> 0)
 /\ lease_bugRetryOffByOne_cid_lease_dev = (0 :> 0 @@ 1 :> 1 @@ 2 :> 0)
 /\ lease_bugRetryOffByOne_cid_lease_g = [ clash |-> FALSE,
   rebooted |-> FALSE,
@@ -202,7 +214,7 @@ State 6: <lease_bugRetryOffByOne_cid_lease_Launch line 1526, col 3 to line 1617,
 /\ lease_bugRetryOffByOne_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ lease_bugRetryOffByOne_cid_lease_up = TRUE
 
-State 7: <lease_bugRetryOffByOne_cid_lease_VmmCrash line 1623, col 3 to line 1634, col 54 of module lease_bugRetryOffByOne>
+State 7: <lease_bugRetryOffByOne_cid_lease_VmmCrash line 1821, col 3 to line 1832, col 54 of module lease_bugRetryOffByOne>
 /\ lease_bugRetryOffByOne_cid_lease_lease = (0 :> 1 @@ 1 :> 1 @@ 2 :> 0)
 /\ lease_bugRetryOffByOne_cid_lease_att = <<1, 0>>
 /\ lease_bugRetryOffByOne_cid_lease_late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
@@ -221,6 +233,8 @@ State 7: <lease_bugRetryOffByOne_cid_lease_VmmCrash line 1623, col 3 to line 163
      pred |-> -1,
      pst |-> "none" ] >>
 /\ lease_bugRetryOffByOne_cid_lease_reclaimed = TRUE
+/\ lease_bugRetryOffByOne_cid_lease_scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
+/\ lease_bugRetryOffByOne_cid_lease_recorded = (0 :> 1 @@ 1 :> 1 @@ 2 :> 0)
 /\ lease_bugRetryOffByOne_cid_lease_dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
 /\ lease_bugRetryOffByOne_cid_lease_g = [ clash |-> FALSE,
   rebooted |-> FALSE,

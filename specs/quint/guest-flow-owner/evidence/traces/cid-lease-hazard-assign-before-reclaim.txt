@@ -8,7 +8,9 @@ State 1
   late = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
   dev = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
   conf_step = [init |-> [tag |-> "UNIT"]]
+  scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
   al = << [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
+  recorded = (0 :> 0 @@ 1 :> 0 @@ 2 :> 0)
   cursor = 0
   g = [ clash |-> FALSE, rebooted |-> FALSE, reclaimed |-> FALSE, stopped |-> {}, lastEnd |-> <<"none", "none">>, preEnd |-> <<"none", "none">>, pendingGen |-> <<"", "">>, fin |-> {}, unreapedOrphans |-> {} ]
   bootLeft = -1
@@ -16,6 +18,7 @@ State 1
 State 2 [Assign]
   lease = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
   al = << [ st |-> "leased", off |-> 0, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ], [ st |-> "wait", off |-> -1, retry |-> FALSE, ex |-> FALSE, chg |-> FALSE, pred |-> -1, pst |-> "none" ] >>
+  recorded = (0 :> 1 @@ 1 :> 0 @@ 2 :> 0)
   cursor = 1
 
 State 3 [Launch]
