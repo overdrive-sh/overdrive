@@ -57,10 +57,9 @@
 //!
 //! # Fixture construction — why not a plain fault-injection seam
 //!
-//! `VmDriver::stop`'s host-footprint teardown (`cgroup_kill`,
-//! `remove_workload_scope`, `remove_dir_all`, `remove_file`,
-//! `crates/overdrive-worker/src/vm_driver.rs:696-701`) is ALREADY
-//! best-effort — every call is `let _ = ...`, so a substrate failure
+//! `VmDriver::stop`'s host-footprint teardown (`VmHostState::kill_scope`,
+//! `remove_dir_all`, `remove_file`, in `crates/overdrive-worker/src/vm_driver.rs`)
+//! is ALREADY best-effort — every call is `let _ = ...`, so a substrate failure
 //! there is silently absorbed and `stop()` still returns `Ok(())`. To
 //! reproduce "cgroup scope removal is made to fail" deterministically
 //! (rather than racing a real kernel reap-lag window), these tests

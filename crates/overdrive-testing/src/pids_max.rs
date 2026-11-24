@@ -5,11 +5,11 @@
 //!
 //! GH #295 E23 (user decision 2 of 2026-09-30): "OUR CODE MUST NEVER PANIC. IT
 //! MUST ALWAYS BE RECOVERABLE AND/OR SELF HEALING." Under the release profile's
-//! `panic = "abort"` a panic in the retained VM-lifecycle allocation-scoped
-//! `cgroup.kill` path would end the process instead of returning its typed
-//! failure. The no-panic contract is exercised by refusing the OS thread that
-//! write would need and asserting `CgroupManager::cgroup_kill` returns its
-//! `io::Error` rather than aborting.
+//! `panic = "abort"` a panic in the VM scope kill path would end the process
+//! instead of returning its typed failure. The no-panic contract is exercised by
+//! refusing the blocking-pool thread `RealVmHostState::kill_scope`'s
+//! `tokio::fs` calls would need and asserting it returns instead of panicking
+//! (`overdrive-host/tests/integration/vm_host_state_refused_thread.rs`).
 //!
 //! Real kernel only; requires root + cgroup v2 (the Lima dev VM). The kernel's
 //! `pids` controller returns `EAGAIN` from `cgroup_can_fork`

@@ -18,7 +18,13 @@
 //!   whole hold and the task is alive;
 //! * after the drain it returns `Ok` and the scope is absent;
 //! * a scope that empties during the wait returns `Ok` without waiting out the
-//!   bound.
+//!   bound;
+//! * a scope that another remover deletes during the wait is absent, so
+//!   `kill_scope` returns `Ok`. The removal does not wake a waiter on
+//!   `cgroup.events` (`kernfs_drain_open_files`, `fs/kernfs/file.c:811 @ v7.0`,
+//!   notifies no poller), and a later read of the removed file fails with
+//!   `ENODEV` (`fs/kernfs/file.c:174,260 @ v7.0`); either is the scope's
+//!   absence, not a failure.
 //!
 //! # Owner path, fault stimulus, oracle
 //!
@@ -33,8 +39,7 @@
 //!
 //! Tier 3, a `cgroup-default` / `volume-pool` guest (it has `dmsetup`,
 //! `losetup`, device-mapper and cgroup v2; no udev, so the device node is made
-//! here). Example-only at this layer (Mandate 9). PENDING (RED): today
-//! `kill_scope` returns `Ok` for the held scope.
+//! here). Example-only at this layer (Mandate 9).
 
 #![allow(
     clippy::doc_markdown,
@@ -233,12 +238,10 @@ fn eventually(max: Duration, condition: impl Fn() -> bool) -> bool {
     condition()
 }
 
-/// PENDING (RB-3, ADR-0349). `kill_scope` never removes a populated scope: with
+/// RB-3, ADR-0349. `kill_scope` never removes a populated scope: with
 /// the scope's last task held in exit by a suspended device, it returns
 /// `ResourceBusy` at its bound with the directory present and the task alive;
-/// after the drain it returns `Ok` and the scope is gone. Today the running
-/// kernel's `rmdir` removes the scope under the held task and `kill_scope`
-/// returns `Ok`.
+/// after the drain it returns `Ok` and the scope is gone.
 ///
 /// CONTRACT_SHAPE: bounded-change. Universe: the scope directory, the task,
 /// the return value.
@@ -317,5 +320,59 @@ fn guard_a_scope_that_empties_during_the_wait_returns_ok_before_the_bound() {
     assert!(
         !populated(&scope) && eventually(Duration::from_secs(5), || state_of(pid) != 'D'),
         "the task is gone from the scope"
+    );
+}
+
+/// RB-3, ADR-0349 (absent scope is `Ok`). Another remover deletes the scope
+/// while `kill_scope` waits on its `cgroup.events`: the wait ends and
+/// `kill_scope` returns `Ok`, because the scope it was asked to remove is gone.
+/// The second remover is the test's own `rmdir`, which the running kernel
+/// accepts for a scope whose last task is held in exit (the spike's finding), so
+/// the removal lands under the wait.
+///
+/// PENDING (RED): the removal wakes no waiter, so `kill_scope` waits out its
+/// bound and returns `ResourceBusy` for a scope that is already gone (observed
+/// on metal: `Err(Kind(ResourceBusy))`); an `ENODEV` read, if a wake did arrive,
+/// would return as a non-busy error. Neither is mapped to the absent scope.
+///
+/// CONTRACT_SHAPE: bounded-change. Universe: the return value, the scope
+/// directory.
+#[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
+#[test]
+#[serial(cgroup)]
+#[should_panic(expected = "kill_scope returns Ok when another remover deletes the scope mid-wait")]
+fn kill_scope_returns_ok_when_another_remover_deletes_the_scope_mid_wait() {
+    let device = Device::new("raced");
+    let id = alloc("ksk-raced-0");
+    let scope = make_scope(&id);
+    device.suspend();
+    let (pid, ready) = spawn_writer(&scope, &device);
+    wait_ready(ready);
+    // SAFETY: SIGKILL to the child this test forked.
+    unsafe { libc::kill(pid, libc::SIGKILL) };
+    assert!(
+        eventually(Duration::from_secs(5), || state_of(pid) == 'D' && populated(&scope)),
+        "precondition: the killed task is held in exit (state D) and its scope reads populated 1"
+    );
+    let other_remover = {
+        let scope = scope.clone();
+        std::thread::spawn(move || {
+            // Well inside the 3 s bound, after `kill_scope` is waiting on `cgroup.events`.
+            std::thread::sleep(Duration::from_millis(500));
+            std::fs::remove_dir(&scope)
+        })
+    };
+    let rt = runtime();
+
+    let result = rt.block_on(host().kill_scope(&CgroupPath::for_alloc(&id)));
+
+    other_remover
+        .join()
+        .expect("the other remover ran")
+        .expect("precondition: the other remover's rmdir of the held scope succeeds");
+    assert!(!scope.exists(), "the scope is absent");
+    assert!(
+        result.is_ok(),
+        "kill_scope returns Ok when another remover deletes the scope mid-wait, got {result:?}"
     );
 }

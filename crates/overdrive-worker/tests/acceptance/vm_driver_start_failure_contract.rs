@@ -785,6 +785,10 @@ async fn duplicate_start_request_is_rejected_without_replacement_cross_ownership
     clippy::doc_markdown,
     reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
 )]
+#[allow(
+    clippy::too_many_lines,
+    reason = "one scenario: the sibling baseline, two failed starts, and every preserved fact"
+)]
 #[tokio::test]
 async fn failed_start_cleanup_twice_converges_to_the_same_residue_free_state() {
     let tmp = TempDir::new().expect("tempdir");
@@ -814,6 +818,27 @@ async fn failed_start_cleanup_twice_converges_to_the_same_residue_free_state() {
             .collect::<Vec<_>>()
     };
     let sibling_cgroups = sibling_subtree();
+    // Every cgroup entry outside the sibling's and the target's own subtrees: the shared parents.
+    // A failed start and its cleanup touch nothing else.
+    let target_scope = CgroupPath::for_alloc(&target).resolve(&layout_cgroup_root);
+    let outside_both = || {
+        cgroup_fs
+            .snapshot()
+            .into_iter()
+            .filter(|(path, _)| {
+                !path.starts_with(&sibling_scope) && !path.starts_with(&target_scope)
+            })
+            .collect::<Vec<_>>()
+    };
+    let target_subtree = || {
+        cgroup_fs
+            .snapshot()
+            .into_iter()
+            .filter(|(path, _)| path.starts_with(&target_scope))
+            .collect::<Vec<_>>()
+    };
+    let outside_both_before = outside_both();
+    let mut target_subtrees = Vec::new();
 
     std::fs::remove_file(fixture_rootfs_path(&tmp)).expect("remove target rootfs master");
     let target_plan =
@@ -858,6 +883,13 @@ async fn failed_start_cleanup_twice_converges_to_the_same_residue_free_state() {
             sibling_cgroups,
             "attempt {attempt} preserves the independent cgroup exactly"
         );
+        assert_eq!(
+            outside_both(),
+            outside_both_before,
+            "attempt {attempt} touches no cgroup entry outside the sibling's subtree beyond the \
+             target's own"
+        );
+        target_subtrees.push(target_subtree());
         assert!(host_state.has_scope(&sibling), "attempt {attempt} preserves the sibling's scope");
         assert!(sim.is_live(sibling_pid), "attempt {attempt} preserves the sibling VMM");
         residue_snapshots.push(residue);
@@ -865,6 +897,10 @@ async fn failed_start_cleanup_twice_converges_to_the_same_residue_free_state() {
     assert_eq!(
         residue_snapshots[0], residue_snapshots[1],
         "replaying failed-start cleanup is convergent"
+    );
+    assert_eq!(
+        target_subtrees[0], target_subtrees[1],
+        "replaying failed-start cleanup leaves the target's own cgroup entries unchanged"
     );
 
     stop_ready(&driver, &sibling_handle, &clock).await;

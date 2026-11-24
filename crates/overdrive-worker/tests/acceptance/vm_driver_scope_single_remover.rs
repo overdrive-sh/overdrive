@@ -1,7 +1,7 @@
 //! Node-local persistent volume (GH #348, ADR-0351, ADR-0349, ADR-0352): the VM driver removes
 //! a VM scope through `VmHostState::kill_scope` and through nothing else, a busy scope changes
 //! neither the stop outcome nor the reported start failure nor the other cleanup steps, and the
-//! driver no longer places the VMM pid in the scope.
+//! driver does not place the VMM pid in the scope (ADR-0352).
 //!
 //! Owner path: the production `VmDriver` over the fixtures of `vm_driver_stop_unreaped`.
 //! A `kill_scope` call is observed through the scripted-failure queue of `SimVmHostState`: a

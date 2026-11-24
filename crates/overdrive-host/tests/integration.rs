@@ -63,6 +63,8 @@ mod integration {
     mod volume_pool_backing;
     // node-local-persistent-volume (GH #348, ADR-0349) — `kill_scope` never removes a populated scope.
     mod vm_host_state_scope_kill;
+    // node-local-persistent-volume (GH #348, E23) — a refused blocking-pool thread is an `io::Error`, never a panic.
+    mod vm_host_state_refused_thread;
     mod volume_pool_probe;
     mod volume_pool_probe_pool;
     mod volume_pool_support;

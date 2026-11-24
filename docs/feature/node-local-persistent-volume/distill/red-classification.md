@@ -334,3 +334,16 @@ backend-candidate guards, the three `workload_describe_abandoned_launch` goldens
 
 **Existing tests the crafter must rewrite when 09-02 lands** (they assert the opposite of ADR-0351): the start-failure tests in `vm_driver_stop_totality.rs` and
 `vm_driver_start_failure_contract.rs` that read the scope's removal from `SimCgroupFs`.
+
+## Pass 4: 09-02 review follow-up (the refused-thread coverage and the removed-mid-wait race)
+
+Verified on metal (ordinary grammar, `integration-tests,kvm-tests`); each text was read from a real failing run (`--no-capture`).
+
+| Test | Fails today on | Activation |
+|---|---|---|
+| `vm_host_state_refused_thread::a_kill_scope_under_thread_refusal_returns_instead_of_panicking` (`cgroup-default` guest) | "kill_scope returns instead of panicking when its blocking thread is refused": tokio panics inside `kill_scope` with "OS can't spawn worker thread: Resource temporarily unavailable (os error 11)" (`tokio-1.52.1/src/fs/mod.rs:317`), because the `cgroup.kill` write and the `rmdir` go through `tokio::fs` | the crafter's fix of `kill_scope`'s blocking-pool dependence (E23: under `panic = "abort"` this ends the node) |
+| `vm_host_state_scope_kill::kill_scope_returns_ok_when_another_remover_deletes_the_scope_mid_wait` (`cgroup-default`, `volume-pool` guest) | "kill_scope returns Ok when another remover deletes the scope mid-wait, got Err(Kind(ResourceBusy))": the removal wakes no waiter on `cgroup.events` (`kernfs_drain_open_files`, `fs/kernfs/file.c:811 @ v7.0`, notifies no poller), so `kill_scope` waits out its 3 s bound and reports busy for a scope that is gone. The `ENODEV` read (`file.c:174,260`) is reached only if a wake arrives | the crafter's fix: an absent scope is `Ok`, however the wait ends |
+
+`refuse_thread_creation` / `ThreadCreationRefused` (`overdrive-testing/src/pids_max.rs`) are kept: the refused-thread test reaches `kill_scope` under the fixture.
+`failed_start_cleanup_twice_converges_to_the_same_residue_free_state` again asserts that a failed start and its cleanup touch no cgroup entry outside the sibling's
+subtree beyond the target's own scope (whose leftover `cpu.weight` and `memory.max` entries are the same on both attempts).

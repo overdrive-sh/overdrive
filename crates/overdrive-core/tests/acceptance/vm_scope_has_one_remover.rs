@@ -6,9 +6,8 @@
 //! The lease gate of ADR-0156 treats "scope absent" as "every descriptor of the
 //! VMM is closed". That holds only if no code removes a scope while its tasks
 //! are still exiting. `VmHostState::kill_scope` waits for `populated 0` before
-//! it removes the directory. A second remover, such as the VM driver's bare
-//! `CgroupManager::remove_workload_scope`, defeats the gate. This test is the
-//! gate's structural defence: it scans the production `src/` of every workspace
+//! it removes the directory. A second remover, such as a bare `rmdir` in the VM
+//! driver, defeats the gate. This test is the gate's structural defence: it scans the production `src/` of every workspace
 //! crate and names every call that removes a cgroup directory.
 //!
 //! # What counts as a remover
@@ -33,8 +32,6 @@
 //!
 //! Tier 1 layer 1, default lane, `host_pure` (a read of source files). An AST
 //! scan with `syn`, the precedent of `workflow_body_has_no_step_machine.rs`.
-//! PENDING (RED): today `CgroupManager::remove_workload_scope` removes a scope
-//! with a bare `rmdir`.
 
 #![allow(clippy::expect_used, clippy::panic, clippy::doc_markdown)]
 
@@ -205,9 +202,8 @@ fn workspace_removers() -> BTreeSet<Remover> {
     found
 }
 
-/// PENDING (RB-5, ADR-0351). No production caller outside the allow-list
-/// removes a cgroup directory. Today `CgroupManager::remove_workload_scope`
-/// does, with a bare `rmdir` that removes a scope under a live exiting task.
+/// RB-5, ADR-0351. No production caller outside the allow-list removes a
+/// cgroup directory: a bare `rmdir` removes a scope under a live exiting task.
 ///
 /// CONTRACT_SHAPE: pure-function. Universe: the set of removers in the
 /// workspace's production source.
