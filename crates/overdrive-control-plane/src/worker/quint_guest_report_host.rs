@@ -307,9 +307,9 @@ fn build_world() -> std::result::Result<World, DriverError> {
         .enable_all()
         .build()
         .expect("current-thread runtime");
-    let vmm = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
-    let host = SimVmmHost::new(vmm.clone(), true);
     let clock = Arc::new(SimClock::new());
+    let vmm = SimVmm::new(clock.clone());
+    let host = SimVmmHost::new(vmm.clone(), true);
     let obs = Arc::new(SimObservationStore::single_peer(
         NodeId::new("guest-report-host").expect("valid node ID"),
         0,

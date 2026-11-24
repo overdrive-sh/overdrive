@@ -259,21 +259,3 @@ fn alloc_status_row_launch_lost_with_control_plane_decodes_through_current_envel
         &payload_launch_abandoned(TransitionReason::LaunchLostWithControlPlane),
     );
 }
-
-#[test]
-#[ignore = "fixture regeneration tool — run on demand when the archived launch-ended layout changes"]
-#[allow(clippy::print_stdout, reason = "fixture regeneration output")]
-fn print_launch_abandoned_fixtures() {
-    for (name, reason) in [
-        ("CURRENT_LAYOUT_ALLOC_STATUS_V1_LAUNCH_SUPERSEDED", TransitionReason::LaunchSuperseded),
-        (
-            "CURRENT_LAYOUT_ALLOC_STATUS_V1_LAUNCH_LOST_WITH_CONTROL_PLANE",
-            TransitionReason::LaunchLostWithControlPlane,
-        ),
-    ] {
-        let envelope = AllocStatusRowEnvelope::latest(payload_launch_abandoned(reason));
-        let bytes =
-            rkyv::to_bytes::<rkyv::rancor::Error>(&envelope).expect("archive allocation status");
-        println!("{name} = \"{}\"", hex::encode(bytes.as_ref()));
-    }
-}

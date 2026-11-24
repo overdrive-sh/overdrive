@@ -236,7 +236,7 @@ impl CloudHypervisorVmm {
 
     /// Override the cgroup2 mount a `CgroupPath` resolves under (default
     /// `/sys/fs/cgroup`). The composition root passes the value it gives
-    /// `CgroupManager`.
+    /// `CgroupManager`. No caller until step 09-05.
     #[must_use]
     pub fn with_cgroup_root(mut self, root: PathBuf) -> Self {
         self.cgroup_root = root;

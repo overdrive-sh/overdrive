@@ -137,7 +137,8 @@ impl Harness {
         let mut header = vec![0_u8; KERNEL_MAGIC_WINDOW];
         header[..4].copy_from_slice(b"\x7fELF");
         std::fs::write(root.join("vmlinuz"), &header).expect("stage the synthetic kernel image");
-        let vmm = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
+        let clock = SimClock::new();
+        let vmm = SimVmm::new(Arc::new(clock.clone()));
         let io = Arc::new(SimBeaconIo::stepped(vmm.clone()));
         let intake = BeaconIntake::bind(
             Arc::clone(&io) as Arc<dyn BeaconIo>,
@@ -145,7 +146,6 @@ impl Harness {
         )
         .await
         .expect("the sim beacon listener binds");
-        let clock = SimClock::new();
         let wiring =
             overdrive_core::guest_network::GuestNetworkExecWiring::new(Arc::new(clock.clone()));
         assert!(wiring.supervisor().open_after_boot(), "fixture EXEC gate opens");

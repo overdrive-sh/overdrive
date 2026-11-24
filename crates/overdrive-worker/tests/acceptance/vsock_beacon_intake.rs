@@ -11,7 +11,7 @@
 //! `overdrive-worker/src/vm_driver/quint_flows_beacon.rs`); these bodies are
 //! its example cells.
 //!
-//! Driving ports: `BeaconIntake::bind`, `VmDriver::new(.., beacon, std::sync::Arc::new(overdrive_sim::SimVmHostState::new()))`,
+//! Driving ports: `BeaconIntake::bind`, `VmDriver::new(.., beacon, ..)`,
 //! `VmDriver::start` / `stop`, `VmDriver::beacon_observation`. Driven port:
 //! `BeaconIo`, supplied by `SimBeaconIo` (the QPROJ-7 arbiter of the beacon
 //! accept queue and of the connections the driver closed), coupled to a
@@ -92,7 +92,7 @@ fn layout(root: &Path) -> VmHostLayout {
 }
 
 /// A `VmDriver` over sim ports whose beacon intake is bound over `io`
-/// (DG-2 row 15: `VmDriver::new(.., beacon, std::sync::Arc::new(overdrive_sim::SimVmHostState::new()))`).
+/// (DG-2 row 15: `VmDriver::new(.., beacon, ..)`).
 async fn driver_over(vmm: &SimVmm, io: &Arc<SimBeaconIo>, root: &Path) -> VmDriver {
     driver_over_vmm(Arc::new(vmm.clone()), io, root).await.0
 }

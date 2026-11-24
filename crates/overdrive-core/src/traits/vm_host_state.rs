@@ -172,6 +172,10 @@ pub trait VmHostState: Send + Sync + 'static {
     /// `Err` with `kind() == std::io::ErrorKind::ResourceBusy` is the only
     /// kind a caller retries. Any other kind is a substrate refusal
     /// (`PermissionDenied`, `EIO`), never retried.
+    ///
+    /// The populated-first wait and `ResourceBusy` contract above are
+    /// implemented by `SimVmHostState`; the host adapter implements them
+    /// from roadmap step 09-02.
     async fn kill_scope(&self, scope: &CgroupPath) -> std::io::Result<()>;
 
     /// Remove this allocation's run directory and per-launch rootfs

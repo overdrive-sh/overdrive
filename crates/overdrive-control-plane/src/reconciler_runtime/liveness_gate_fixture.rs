@@ -311,7 +311,7 @@ impl LivenessWorld {
             Arc::clone(&clock) as Arc<dyn Clock>
         );
         assert!(wiring.supervisor().open_after_boot());
-        let vmm = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
+        let vmm = SimVmm::new(Arc::clone(&clock) as Arc<dyn Clock>);
         let beacon = Arc::new(SimBeaconIo::new(vmm.clone()));
         let beacon_intake = BeaconIntake::bind(
             Arc::clone(&beacon) as Arc<dyn overdrive_core::vm::beacon::BeaconIo>,

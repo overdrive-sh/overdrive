@@ -486,11 +486,12 @@ impl Node {
     fn new() -> Self {
         let tmp = TempDir::new().expect("tmpdir");
         stage_artifacts(tmp.path());
-        let vmm = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
+        let clock = Arc::new(SimClock::new());
+        let vmm = SimVmm::new(clock.clone());
         Self {
             host: SimVmmHost::new(vmm.clone(), true),
             vmm,
-            clock: Arc::new(SimClock::new()),
+            clock,
             obs: Arc::new(SimObservationStore::single_peer(
                 NodeId::new("cid-lease").expect("valid node ID"),
                 0,

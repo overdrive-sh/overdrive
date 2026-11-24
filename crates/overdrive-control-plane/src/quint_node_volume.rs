@@ -10,7 +10,7 @@
 //! tick, the action shim, and the production `VmDriver` over a `SimVmm`,
 //! whose volume pool is composed through the pinned seam
 //! `SimVolumePoolProbe::composed(SimVolumeBacking)` → `probe()` →
-//! `VmDriver::new(.., volumes, std::sync::Arc::new(overdrive_sim::SimVmHostState::new()))`. The production exit observer writes the
+//! `VmDriver::new(.., volumes, ..)`. The production exit observer writes the
 //! terminal rows. The driver writes no row, intent or sim state the
 //! production path writes itself. Spec identifiers keep their earlier
 //! "store" spelling (`storeUp`, `StoreAbsentBoot`); the contract's word is
@@ -393,11 +393,12 @@ impl Node {
     pub(crate) fn new() -> Self {
         let tmp = TempDir::new().expect("tmpdir");
         stage_artifacts(tmp.path());
-        let vmm = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
+        let clock = Arc::new(SimClock::new());
+        let vmm = SimVmm::new(clock.clone());
         Self {
             host: SimVmmHost::new(vmm.clone(), true),
             vmm,
-            clock: Arc::new(SimClock::new()),
+            clock,
             obs: Arc::new(SimObservationStore::single_peer(
                 NodeId::new("node-volume").expect("valid node ID"),
                 0,

@@ -734,6 +734,9 @@ pub trait Driver: Send + Sync + 'static {
     ///   reaped and the allocation's host artifacts are removed by
     ///   `VmReclamation` after that; the stop is complete and the
     ///   allocation is stopped.
+    ///
+    /// The `KilledNotReaped` late-reap cleanup is implemented by the VM
+    /// driver from roadmap step 09-03.
     async fn stop(&self, handle: &AllocationHandle) -> Result<(), DriverError>;
 
     /// Pre-existing observation surface — retained for tests and

@@ -227,7 +227,8 @@ impl Node {
         let mut header = vec![0_u8; KERNEL_MAGIC_WINDOW];
         header[..4].copy_from_slice(b"\x7fELF");
         std::fs::write(root.join("vmlinuz"), &header).expect("stage the synthetic kernel image");
-        let vmm = SimVmm::new(std::sync::Arc::new(overdrive_sim::adapters::clock::SimClock::new()));
+        let clock = SimClock::new();
+        let vmm = SimVmm::new(Arc::new(clock.clone()));
         let recorder = Arc::new(RecordingVmm {
             inner: vmm.clone(),
             pool: pool.clone(),
@@ -239,7 +240,6 @@ impl Node {
             inner: Arc::clone(&io),
             failed: tokio::sync::watch::channel(false).0,
         });
-        let clock = SimClock::new();
         let cgroup_fs = SimCgroupFs::new();
         let driver = Self::build_driver(
             &root,

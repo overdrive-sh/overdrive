@@ -337,15 +337,14 @@ impl Harness {
         let node_id = NodeId::new(&format!("host-{index}"))
             .map_err(|source| HarnessError::NodeId { index, source })?;
 
+        let clock = Arc::new(SimClock::new());
         let adapters = HostAdapters {
-            clock: Arc::new(SimClock::new()),
+            clock: clock.clone(),
             transport: Arc::new(SimTransport::new()),
             entropy: Arc::new(SimEntropy::new(host_seed)),
             dataplane: Arc::new(SimDataplane::new()),
             driver: Arc::new(SimDriver::new(DriverType::Vm)),
-            vmm: Arc::new(SimVmm::new(
-                std::sync::Arc::new(crate::adapters::clock::SimClock::new()),
-            )),
+            vmm: Arc::new(SimVmm::new(clock)),
             llm: Arc::new(SimLlm::new(Vec::new())),
             observation: Arc::new(SimObservationStore::single_peer(node_id, host_seed)),
         };
