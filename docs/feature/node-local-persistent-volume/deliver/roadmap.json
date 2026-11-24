@@ -2,7 +2,7 @@
   "roadmap": {
     "project_id": "node-local-persistent-volume",
     "created_at": "2026-11-20T00:00:00Z",
-    "total_steps": 20
+    "total_steps": 28
   },
   "test_paradigm": "Rust, per .claude/rules/testing.md. Test files listed in files_to_modify are edited only by the acceptance designer, via the orchestrator; the crafter never edits acceptance bodies or markers.Every acceptance body is PRE-AUTHORED by DISTILL (distill/test-scenarios.md, distill/red-classification.md); crafters only remove the pending marker (#[should_panic] / #[ignore]), confirm the semantic RED, implement to the pinned contract (feature-delta.md Interface contracts), and confirm GREEN. Crafters never write, replace, weaken or complete an acceptance body, and never invent public API: a missing shape is a blocker surfaced to the orchestrator (CLAUDE.md 'Implement to the design'). Pure functions get proptest; DST invariants are seeded (seed printed); quint-connect conformance replays the in-place specs. Every command runs on metal (cargo xtask metal run -- ...), never Lima, never --exclusive for tests. Tests that need the volume-pool guest or a VMM carry kvm-tests on top of integration-tests. Marker retargets listed under 'Markers that move' in red-classification.md are test-file edits owned by the acceptance designer, performed by the orchestrator via nw-acceptance-designer at activation, not by the crafter. No roadmap step id or issue number in any new identifier, filename or log message (.claude/rules/domain-naming.md). Validator length warnings are cosmetic.",
   "phases": [
@@ -367,16 +367,16 @@
         {
           "id": "06-01",
           "name": "A restart generation is handled when its successor is observed",
-          "description": "Adopt generation_replacement_pending at the four reconciler sites and in restart_status_for_alloc and delete the private compat rule restart_pending_until_successor_observed and its inline restatement: pending iff the current row exists, is not a finished Job row (kind Job with a terminal), and its issued_generation entry is below the committed generation. A relaunch of an abandoned replacement charges nothing; a restart never gives a finished, failed or operator-stopped Job a new allocation.",
+          "description": "Adopt generation_replacement_pending at the four reconciler sites and in restart_status_for_alloc and delete the private compat rule restart_pending_until_successor_observed and its inline restatement: pending iff the newest row that ran exists (last_ran_alloc, 09-01: an abandoned row, ADR-0355, ran nothing and handles no generation, so a generation whose successor was abandoned is still pending and its relaunch is a generation replacement carrying the count basis's count), is not a finished Job row (kind Job with a terminal), and its issued_generation entry is below the committed generation. A relaunch of an abandoned replacement charges nothing; a restart never gives a finished, failed or operator-stopped Job a new allocation.",
           "criteria": [
-            "generation_replacement_pending.rs: the 14 examples and two properties pass (iff against an independent restatement; agreement with allocation_attempt_transition NoChange)",
+            "generation_replacement_pending.rs: the 14 examples and two properties pass (iff against an independent restatement; agreement with allocation_attempt_transition NoChange), now taking the newest row that ran (last_ran_alloc) as the current row; ACCEPTANCE-DESIGNER PREREQUISITE: extend the examples with abandoned-row chains (an abandoned successor handles nothing; consecutive abandoned rows of both reasons; none ran) and author the generation_replacement_pending agreement clause of the RB-13 deletion-equivalence property, which this step activates",
             "restart_generation_reconcile.rs: a_lost_launch_is_relaunched_once_for_the_pending_generation, an_abandoned_replacement_relaunch_charges_nothing and a_restart_never_gives_an_operator_stopped_job_a_new_allocation pass; the seven guards keep passing",
             "a_restart_the_evaluation_already_hydrated_sees_its_own_start_superseded_once and both shutdown cells and both control-plane-crash cells (restart and resume) pass; a_restart_of_a_running_job_ends_it_and_issues_nothing_after passes",
             "quint_rg_control_plane_crash_during_restart_launch_relaunches_once and quint_rg_resume_of_stopped_job_does_nothing_and_issues_no_id pass; the compat rule no longer exists"
           ],
           "test_file": "crates/overdrive-reconcilers/tests/acceptance/generation_replacement_pending.rs",
           "scenario_name": "S-RG-01, S-RG-02; S-SUP-33; S-INV-01 shutdown and crash cells and the running-Job restart; S-Q-14, S-Q-23",
-          "implementation_notes": "ADR-0335 (amends ADR-0073); H1 is a no-op restart of a finished Job (L9, #301 changes it, not this step). Gates: cargo xtask metal run -- cargo nextest run -p overdrive-reconcilers -p overdrive-core -p overdrive-control-plane -p overdrive-sim --features integration-tests; dst-lint; conformance-lint; check/clippy workspace. MODEL CONFORMANCE (row 11, driving row 9): these quint_restart_generation.rs runs become GREEN in this step: control_plane_crash_during_restart_launch_relaunches_once and resume_of_stopped_job_does_nothing_and_issues_no_id. The orchestrator has the acceptance designer lift their markers before the gate. resume_while_running_stops_and_replaces and restart_of_completed_job_does_nothing_and_issues_no_id are guards (no #[should_panic]; they pass against production today) and must keep passing. The crafter never edits acceptance bodies or markers.",
+          "implementation_notes": "ADR-0335 (amends ADR-0073); H1 is a no-op restart of a finished Job (L9, #301 changes it, not this step). Gates: cargo xtask metal run -- cargo nextest run -p overdrive-reconcilers -p overdrive-core -p overdrive-control-plane -p overdrive-sim --features integration-tests; dst-lint; conformance-lint; check/clippy workspace. MODEL CONFORMANCE (row 11, driving row 9): these quint_restart_generation.rs runs become GREEN in this step: control_plane_crash_during_restart_launch_relaunches_once and resume_of_stopped_job_does_nothing_and_issues_no_id. The orchestrator has the acceptance designer lift their markers before the gate. resume_while_running_stops_and_replaces and restart_of_completed_job_does_nothing_and_issues_no_id are guards (no #[should_panic]; they pass against production today) and must keep passing. The crafter never edits acceptance bodies or markers. CHANGED BY THE STUCK-VM DESIGN (RB-13, ADR-0355): the shutdown and control-plane-crash cells now run against the Terminated / LaunchSuperseded or LaunchLostWithControlPlane rows 09-06 writes, with the count rule of 09-08 already in place, so a relaunch after them is a crash restart (basis count + 1, once) or a generation replacement (basis count), never a no-row case; 'a_restart_the_evaluation_already_hydrated_sees_its_own_start_superseded_once' ends in an abandoned row; the new function takes last_ran_alloc, not current_alloc; every quint_rg pin first reaches the Pending row written since 09-06.",
           "files_to_modify": [
             "crates/overdrive-reconcilers/src/workload_lifecycle.rs",
             "crates/overdrive-control-plane/src/reconciler_runtime.rs",
@@ -385,7 +385,8 @@
             "crates/overdrive-control-plane/src/quint_restart_generation.rs"
           ],
           "depends_on": [
-            "05-02"
+            "05-02",
+            "09-08"
           ],
           "effort_hours": 10
         },
@@ -401,7 +402,7 @@
           ],
           "test_file": "crates/overdrive-control-plane/src/action_shim/prelaunch_outcome_acceptance.rs",
           "scenario_name": "S-SHIM-02, S-SHIM-03, S-SHIM-08; S-INV-01 persistent, transient and Job pre-launch cells; S-Q-17, 18, 19, 20",
-          "implementation_notes": "ADR-0337 (J-1, DE-1: a non-start DriverError stays an internal typed error with no row; no S8/R10 test). The held-clock windows in the persistent bounded-launches test were only compile-checked until now: confirm they run RED then GREEN. Gates: cargo xtask metal run -- cargo nextest run -p overdrive-control-plane --features integration-tests; conformance-lint; dst-lint. MODEL CONFORMANCE (row 11): the quint_restart_generation.rs runs restart_of_exhausted_workload_relaunches_uncharged, generation_replacement_forgives_predecessor_failure, persistent_prelaunch_failure_ends_in_backoff_exhausted and transient_prelaunch_failure_recovers become GREEN in this step. The orchestrator has the acceptance designer lift or retarget those markers before the gate; the crafter never edits acceptance bodies or markers.",
+          "implementation_notes": "ADR-0337 as amended by ADR-0355 W3: a non-start DriverError ends the launch's Pending row as a Failed DriverInternalError row (written and tested in 09-06, which this step follows); the pre-driver failure rows of this step are likewise written over the Pending row 09-06 introduces and carry its workload_addr (the identity-issue failure comes after the Pending write; the empty-registry restart row carries the address when the successor's Pending row was written), and the Failed row the identity failure writes is the row the abandoned/failed ending of that Pending row already guarantees. The held-clock windows in the persistent bounded-launches test were only compile-checked until now: confirm they run RED then GREEN. Gates: cargo xtask metal run -- cargo nextest run -p overdrive-control-plane --features integration-tests; conformance-lint; dst-lint. MODEL CONFORMANCE (row 11): the quint_restart_generation.rs runs restart_of_exhausted_workload_relaunches_uncharged, generation_replacement_forgives_predecessor_failure, persistent_prelaunch_failure_ends_in_backoff_exhausted and transient_prelaunch_failure_recovers become GREEN in this step. The orchestrator has the acceptance designer lift or retarget those markers before the gate; the crafter never edits acceptance bodies or markers.",
           "files_to_modify": [
             "crates/overdrive-control-plane/src/action_shim/mod.rs",
             "crates/overdrive-control-plane/src/action_shim/prelaunch_outcome_acceptance.rs",
@@ -514,7 +515,9 @@
           "depends_on": [
             "06-02",
             "07-02",
-            "08-01"
+            "08-01",
+            "09-05",
+            "09-07"
           ],
           "effort_hours": 6
         },
@@ -540,12 +543,261 @@
           "effort_hours": 4
         }
       ]
+    },
+    {
+      "id": "09",
+      "name": "The stuck-VM design: bounded reap and scope kill, the VMM born in its scope, the launch on record from hand-out to its end, boot past a stuck VM, a launch that never ran does not count (RB-1 to RB-13, N-1 to N-4, P-6, P-7; ADR-0348 to ADR-0355). Runs before 06-01 despite its number: 06-01 depends on 09-08",
+      "steps": [
+        {
+          "id": "09-01",
+          "name": "The stuck-VM API surface compiles: KilledNotReaped, the two bounds, the pool reservation, the two launch-ended reasons and their predicates, with_cgroup_root, the sim hooks and VmDriver::new(Arc<dyn VmHostState>)",
+          "description": "Land exactly the API the design pins so the tests DISTILL could not author (test-scenarios.md N3) can be written. overdrive-core: VmTermination::KilledNotReaped (unit variant); pub const VMM_REAP_BOUND = 5 s beside the Vmm trait; pub const KILL_SCOPE_SETTLE_BOUND = 3 s beside the VmHostState trait; TransitionReason::LaunchSuperseded and LaunchLostWithControlPlane (fieldless, appended after VmVolumeUnavailable, is_failure false, human_readable wordings 'launch abandoned: superseded by a stop, a restart or node shutdown' and 'launch abandoned: lost with the control plane'); pub fn is_launch_abandoned(row) -> bool (#[must_use], beside is_platform_reclaimed; true iff Terminated with either reason) and the one shared last_ran_alloc(rows) (current_alloc over the rows for which is_launch_abandoned is false); the Vmm::terminate, VmHostState::kill_scope and Driver::stop rustdoc clauses of ADR-0348 and ADR-0349. overdrive-control-plane: GuestAddressPool::reserve_leftover(&AllocationId, Ipv4Addr) -> Result<(), CorruptLeftoverRow> (a Retiring lease with no plan; counts toward the cap; assign returns LeaseRetiring; snapshot omits it; observe reports it), the pub CorruptLeftoverRow enum (AddressOutsidePrefix, OffsetAlreadyHeld with their constructors and Display) and ReclamationError::CorruptLeftoverRow(#[from]). overdrive-host: CloudHypervisorVmm::with_cgroup_root(PathBuf) (default /sys/fs/cgroup). overdrive-worker: VmDriver::new takes a required Arc<dyn VmHostState>, the composition root passes the one it already builds. overdrive-sim: SimVmm::new takes a required Arc<dyn Clock> and gains scripting for an unreapable process (terminate marks it killed, waits VMM_REAP_BOUND on the injected clock, returns KilledNotReaped; device and scope membership released only at the scripted reap); SimVmHostState gains the hold of a scope until a reap (kill_scope on a held scope returns Err(ResourceBusy) at once, changes nothing, consumes no scripted failure) and the scripted observe failure the lease-gate test needs. @sizing-review-needed (a surface step: many crates, almost no behaviour; kept whole because the tests of every later step compile only against all of it).",
+          "criteria": [
+            "cargo check and clippy -D warnings over the workspace with integration-tests,kvm-tests are green; every exhaustive match on VmTermination, TransitionReason, ReclamationError and every VmDriver::new call site carries the new arm or parameter, and a VmTermination::KilledNotReaped arm in VmDriver::stop and the start-failure cleanup routes to the existing completed-stop path with no new behaviour (the scope-step omission and its tests are 09-03)",
+            "Pure units pass: is_launch_abandoned is true for the two reasons on a Terminated row and false for every other reason and for a Failed row; last_ran_alloc skips abandoned rows and is None when none ran; the two reasons are not failures and carry their human_readable wording",
+            "schema_evolution/alloc_status_row.rs carries one golden fixture per new reason; FIXTURE_V1 is untouched; the archived size and known_discriminants [0] are unchanged (if the size check finds a change, apply the version-bump procedure of 02-02 in this commit); api/openapi.yaml is regenerated; render::alloc_status and human_readable goldens for both reasons pass",
+            "Sim equivalence units pass: SimVmm with an unreapable process returns KilledNotReaped after exactly VMM_REAP_BOUND on the injected clock and keeps its device and scope membership until the scripted reap; SimVmHostState reports the held scope in observe() and answers kill_scope with ResourceBusy until the reap",
+            "reserve_leftover units pass (cap count, LeaseRetiring on assign, survives a next-fit wrap, snapshot omits, observe reports) and the two corrupt-row cases return their typed variant with the allocation named and never panic",
+            "No public item beyond the ones named here is added; no behaviour of a delivered step changes"
+          ],
+          "test_file": "crates/overdrive-core/tests/acceptance/launch_abandoned_predicates.rs",
+          "scenario_name": "ADR-0355 section 1 units (is_launch_abandoned, last_ran_alloc, human_readable, golden fixtures); ADR-0350 Pool units (reserve_leftover, CorruptLeftoverRow); sim contract units for the unreapable process and the held scope",
+          "implementation_notes": "ACCEPTANCE-DESIGNER PREREQUISITE AND ORCHESTRATOR HAND-OFF (two points): (1) before the crafter starts, the orchestrator has nw-acceptance-designer pin the TEST-SUPPORT signatures the design leaves to DISTILL (the SimVmm unreapable-process scripting method and its scripted reap, the SimVmHostState hold method and its release, the SimVmHostState scripted observe failure); the crafter implements those exact names and never picks them (a missing name is a blocker). (2) When this step lands, the orchestrator dispatches nw-acceptance-designer to AUTHOR every test of test-scenarios.md N3 (rows ADR-0348 Tier 1 (a) to (e) and Vmm equivalence and stop-totality; ADR-0349 equivalence and the VmReclamation tick over a held scope; ADR-0351 Tier 1; ADR-0350 pool and the boot cases; ADR-0352 host units and Vmm equivalence for membership; ADR-0355 count tests, the deletion-equivalence proptest, the units, goldens and Tier 1 relaunch tests; RB-2 Tier 1 (a) to (d); ADR-0354 tests), each as a complete executable body under #[should_panic(expected = ...)] naming the assertion that fails today, with its placement declaration, and records them in red-classification.md; those tests are then activated by the later steps named in their rows. Three N3 rows stay surfaced and are NOT unblocked by this API: the crash facility on the CLI ServeHandle for the Tier-3 boot variant of S-VOL-T3-12 and the Tier-3 serve-crash test of 09-05, the compiled stand-in hypervisor and the wrapper-chooser seam (N6 question 3) and the injectable cgroup filesystem. The acceptance designer returns each as a test-support proposal to the orchestrator (production API is never invented for a test; CLAUDE.md 'agents propose, the user adds'). with_cgroup_root and the VmDriver host-state field have no reader until 09-05 and 09-02; keep -D warnings green with the repository's production-scaffold convention for an exactly authorised shape, not with new API. A missing shape elsewhere is a blocker. Gates: cargo xtask metal run -- cargo check --workspace --all-targets --features integration-tests,kvm-tests; ... cargo clippy --workspace --all-targets --features integration-tests,kvm-tests -- -D warnings; cargo xtask metal run -- cargo nextest run -p overdrive-core -p overdrive-sim -p overdrive-control-plane -p overdrive-host -p overdrive-worker --features integration-tests; cargo xtask metal run -- cargo run -p overdrive-control-plane --bin openapi -- check; cargo xtask metal run -- cargo xtask dst-lint; doctests. MODEL CONFORMANCE: no quint run goes GREEN in this step.",
+          "files_to_modify": [
+            "crates/overdrive-core/src/traits/vmm.rs",
+            "crates/overdrive-core/src/traits/vm_host_state.rs",
+            "crates/overdrive-core/src/traits/driver.rs",
+            "crates/overdrive-core/src/transition_reason.rs",
+            "crates/overdrive-core/tests/schema_evolution/alloc_status_row.rs",
+            "api/openapi.yaml",
+            "crates/overdrive-control-plane/src/guest_network.rs",
+            "crates/overdrive-control-plane/src/action_shim/reclamation.rs",
+            "crates/overdrive-host/src/vmm.rs",
+            "crates/overdrive-worker/src/vm_driver.rs",
+            "crates/overdrive-sim/src/adapters/vmm.rs",
+            "crates/overdrive-sim/src/adapters/vm_host_state.rs",
+            "crates/overdrive-cli/src/render.rs"
+          ],
+          "depends_on": [
+            "05-02"
+          ],
+          "effort_hours": 10
+        },
+        {
+          "id": "09-02",
+          "name": "A VM scope has one remover: the populated-first scope kill, ResourceBusy at the bound, and the deletion of the second remover",
+          "description": "RealVmHostState::kill_scope writes cgroup.kill, waits for the scope's cgroup.events to report populated 0 within KILL_SCOPE_SETTLE_BOUND (cancellable by the bound, no thread blocked in the kernel, a scope absent or with no cgroup.events skips the wait), removes the directory only after the empty reading, returns Err(ResourceBusy) at the bound with the scope in place, and returns any other error at once with no retry. VmDriver's two cleanup sites (cleanup_driver_artifacts, attempt_start_cleanup) replace their cgroup_kill write and remove_workload_scope call with one VmHostState::kill_scope call in the same position; ResourceBusy is the cleanup's best effort (the stop completes, the start-failure cleanup returns the failure it was reporting, run directory and clone still removed, the scope left to VmReclamation). CgroupManager::remove_workload_scope and cgroup_kill lose their callers and are deleted with their tests. A default-lane AST scan enforces the single remover.",
+          "criteria": [
+            "vm_host_state_scope_kill.rs: kill_scope_never_removes_a_scope_whose_last_task_is_held_in_exit passes on the real kernel (ResourceBusy after the bound, directory present and task alive for the whole hold, Ok and absent after the drain); guard_a_scope_that_empties_during_the_wait_returns_ok_before_the_bound keeps passing",
+            "vm_scope_has_one_remover.rs: a_vm_scope_is_removed_only_by_the_populated_first_scope_kill passes with its marker removed; both scan guards keep passing; the stale comments at overdrive-sim cgroup_fs.rs and overdrive-core cgroup_fs.rs are rewritten to name VmHostState::kill_scope",
+            "The N3 tests of ADR-0349 and ADR-0351 pass: VmHostState equivalence (Ok implies absent, ResourceBusy leaves the scope observed, idempotence, a non-busy error returns at once without retry), the host-adapter units over a tempdir cgroup root (no cgroup.events is Ok and absent; an absent scope is Ok; a failing cgroup.kill write returns its kind at once), the VmReclamation tick over a held scope (no discard, no row, other actions still run, the next tick removes it after the hold clears), the boot-reclamation double's busy case, and the Tier 1 production VmDriver tests (a reaped stop and a start-failure cleanup remove the scope only through kill_scope; a held scope leaves the stop, the reported start failure, the removed run directory and clone unchanged)",
+            "CgroupManager::remove_workload_scope and cgroup_kill are gone with every test listed under 'Retired tests'; StartCleanupStage collapses its two scope stages to one; the two cgroup_isolation test-cleanup callers remove their scope through kill_scope or tokio::fs::remove_dir",
+            "A real serve + deploy of the volume workload stops and restarts through the populated-first path with the existing 04-03 and 05-02 journeys still GREEN"
+          ],
+          "test_file": "crates/overdrive-host/tests/integration/vm_host_state_scope_kill.rs",
+          "scenario_name": "S-RB-17, S-RB-18 and the guard; ADR-0349 and ADR-0351 N3 tests as authored after 09-01",
+          "implementation_notes": "ADR-0349 and ADR-0351; Linux claims are cited against vendors/linux v7.0 in the docstrings. Retired tests (the crafter deletes them with the production code in this same commit, per red-classification.md 'Tests the crafter deletes'): overdrive-worker tests/acceptance/cgroup_manager/{remove_workload_scope_idempotent,cgroup_kill_idempotent,cgroup_kill_writes_one_newline}.rs and their mod lines; tests/integration/cgroup_manager/{remove_workload_scope_propagates_real_io_error,cgroup_kill_propagates_real_io_error}.rs; tests/integration/real_cgroup_fs/{cgroup_kill_terminates_pids,refused_thread_kill}.rs and the mod lines at tests/integration.rs:37, :68, :69; reword (keep the tests) the rustdoc of rmdir_auto_reap.rs and procs_pid_movement.rs; sim_cgroup_fs/write.rs::b_write_cgroup_kill_stores_one_newline stays. If a cgroup_kill caller exists outside overdrive-worker src and tests, report it rather than keeping the method. place_pid_in_scope and its test are NOT deleted here (09-05). No stub, shim or deprecation. Gates: cargo xtask metal run -- cargo nextest run -p overdrive-host -p overdrive-worker -p overdrive-control-plane -p overdrive-sim -p overdrive-core --features integration-tests,kvm-tests; cargo xtask metal run -- cargo xtask dst-lint; ... cargo xtask conformance-lint; check/clippy workspace; doctests. MODEL CONFORMANCE: no quint run goes GREEN here (the cid_lease pins need 09-03 and 09-04).",
+          "files_to_modify": [
+            "crates/overdrive-host/src/vm_host_state.rs",
+            "crates/overdrive-sim/src/adapters/vm_host_state.rs",
+            "crates/overdrive-worker/src/vm_driver.rs",
+            "crates/overdrive-worker/src/cgroup_manager.rs",
+            "crates/overdrive-control-plane/src/action_shim/reclamation.rs",
+            "crates/overdrive-control-plane/src/vm_reclamation_boot.rs",
+            "crates/overdrive-sim/src/adapters/cgroup_fs.rs",
+            "crates/overdrive-core/src/traits/cgroup_fs.rs",
+            "crates/overdrive-host/tests/integration/vm_host_state_scope_kill.rs",
+            "crates/overdrive-core/tests/acceptance/vm_scope_has_one_remover.rs",
+            "crates/overdrive-worker/tests/acceptance/cgroup_manager/",
+            "crates/overdrive-worker/tests/integration/cgroup_manager/",
+            "crates/overdrive-worker/tests/integration/real_cgroup_fs/",
+            "crates/overdrive-worker/tests/integration.rs",
+            "crates/overdrive-control-plane/tests/integration/cgroup_isolation/alloc_scope_has_writable_cpu_weight_and_memory_max.rs"
+          ],
+          "depends_on": [
+            "09-01"
+          ],
+          "effort_hours": 12
+        },
+        {
+          "id": "09-03",
+          "name": "A VMM kill waits a bounded time for the reap: KilledNotReaped completes the stop and leaves the scope to reclamation",
+          "description": "CloudHypervisorVmm::terminate waits VMM_REAP_BOUND from the kill request on both the grace-expired and zero-grace paths (real time) and returns Ok(KilledNotReaped) when the process is still not reaped; the adapter keeps waiting and a late reap runs its ordinary reap path with no ExitEvent and no row write. VmDriver::stop on KilledNotReaped completes (beacon writer vmm_has_exited, run directory and clone removed, the scope step omitted in the stop, the start-failure cleanup and the boot-race cleanup alike, no guest-lease touch); the shim comment 'Driver::stop awaits process quiescence' is corrected to the Driver::stop contract. The stop's terminal row is Terminated Stopped { by: Reconciler } with no Failed row and no restart-budget input.",
+          "criteria": [
+            "The Tier 1 tests of ADR-0348 (a) to (e) pass over the production VmDriver::stop and a SimVmm with an unreapable process: stop returns Ok after exactly VMM_REAP_BOUND beyond the grace on the injected clock and the shim writes Terminated/Stopped with no Failed row and no charge; the SimVolumeBacking claim and the SimVmm vsock holder stay held until the scripted reap; the late reap emits no ExitEvent and changes no row; a replacement launch waits on the claim, is not charged before its bound and attaches after the reap; no kill_scope call follows KilledNotReaped in the stop or the start-failure cleanup while the run directory and clone are still removed",
+            "Vmm equivalence (CloudHypervisorVmm and SimVmm agree on an already-gone pid and on the reapable outcomes), the stop-totality KilledNotReaped case, and the VmReclamation pass over a terminal allocation whose scope cannot be removed (emits again next pass; removes it after the reap) pass",
+            "The marker of S-VOL-T3-12 (a_workload_stop_during_a_held_claim_returns_promptly_with_no_failed_row) is retargeted by the acceptance designer from its unbounded-reap point to its next RED (the scope-kept and lease-held assertions that 09-04 completes); it fails there today and the first reached failure is recorded",
+            "A reapable VMM never sees the new outcome; Driver::stop's signature, VM_STOP_GRACE and the lane and supersession path are unchanged"
+          ],
+          "test_file": "crates/overdrive-worker/tests/acceptance/vm_driver_stop_unreaped.rs",
+          "scenario_name": "ADR-0348 Tier 1 (a) to (e), Vmm equivalence, stop-totality, VmReclamation unremovable-scope pass (authored after 09-01); S-VOL-T3-12 retarget",
+          "implementation_notes": "ADR-0348 (RB-1). The shim write is unchanged: StopAllocation proceeds as for a reaped VMM. The stuck window's lane time is VM_STOP_GRACE + VMM_REAP_BOUND = 15 s. No path pays both bounds. Gates: cargo xtask metal run -- cargo nextest run -p overdrive-worker -p overdrive-host -p overdrive-sim -p overdrive-control-plane --features integration-tests,kvm-tests; ... cargo xtask dst-lint; conformance-lint; check/clippy workspace; doctests. The marker retarget is an acceptance-designer edit by the orchestrator; the crafter never edits acceptance bodies or markers. MODEL CONFORMANCE: none goes GREEN here; StopUnreaped needs the lease gate of 09-04.",
+          "files_to_modify": [
+            "crates/overdrive-host/src/vmm.rs",
+            "crates/overdrive-worker/src/vm_driver.rs",
+            "crates/overdrive-control-plane/src/action_shim/mod.rs",
+            "crates/overdrive-sim/src/adapters/vmm.rs",
+            "crates/overdrive-worker/tests/acceptance/vm_driver_stop_unreaped.rs",
+            "crates/overdrive-cli/tests/integration/volume_survives.rs"
+          ],
+          "depends_on": [
+            "09-01",
+            "09-02"
+          ],
+          "effort_hours": 10
+        },
+        {
+          "id": "09-04",
+          "name": "A guest-address lease is released only once the VM's scope is absent; the held-flush journey passes end to end",
+          "description": "teardown_guest_network (the one release site) reads the allocation's lease and plan, observes VmHostState once (a failure returns the existing ShimError::Reclamation before any effect), tears the network down when a plan exists (a boot reservation has none and skips it) and releases the lease only when the scope is absent; with the scope present the lease stays Retiring (retired if Admitted) and the call returns Ok so the stop still writes its terminal row. reclaim_guest_network and the helpers gain the crate-internal &dyn VmHostState. The ReclaimAllocationNetwork retry WorkloadLifecycle already emits releases the lease after VmReclamation removes the scope.",
+          "criteria": [
+            "a_stop_keeps_the_lease_held_while_the_vms_scope_is_present_and_a_reclaim_releases_it_after passes with its marker removed; guard_a_stop_releases_the_lease_at_once_when_no_scope_remains keeps passing",
+            "The RB-2 Tier 1 tests pass over the production shim, WorkloadLifecycle, SimVmm and SimVmHostState: (a) the lease is Retiring and counted toward the cap, an assign wrapping to the offset takes another; (b) after the scripted reap, a VmReclamation pass and a reclaim attempt the lease is released and no launch clashed; (c) a failing scope observation at the stop gives a typed error, no teardown and no row, and the replay succeeds; (d) the lease is held while the scope is held across several reclaim attempts",
+            "S-VOL-T3-12 (a_workload_stop_during_a_held_claim_returns_promptly_with_no_failed_row) loses its should_panic marker and passes on the real pool: the stuck VMM's scope is kept while its flush is held, no lease is released while it is unreaped and it is released after the drain, the scope is removed by the reclamation pass after the drain",
+            "quint_cid_lease_scope_is_removed_only_after_it_is_empty and quint_cid_lease_next_fit_skips_an_unreaped_lease go GREEN (should_panic removed), replaying ScopeIsRemovedOnlyAfterItIsEmpty on lease_conf_ok and NextFitSkipsAnUnreapedLease on lease_conf_three through the production pool, shim and SimVmm"
+          ],
+          "test_file": "crates/overdrive-control-plane/src/action_shim/prelaunch_outcome_acceptance.rs",
+          "scenario_name": "S-RB-10; RB-2 Tier 1 (a) to (d); S-VOL-T3-12; quint_cid_lease pins ScopeIsRemovedOnlyAfterItIsEmpty and NextFitSkipsAnUnreapedLease",
+          "implementation_notes": "ADR-0156 amended; K1 to K5 are cited at v7.0 in the feature-delta. A reservation case is exercised by 09-07, not here. Gates: cargo xtask metal run -- cargo nextest run -p overdrive-control-plane -p overdrive-reconcilers -p overdrive-sim --features integration-tests; cargo xtask metal run -- cargo nextest run -p overdrive-cli --features integration-tests,kvm-tests (T3-12); dst-lint; conformance-lint. MODEL CONFORMANCE (row 11): the two named quint_cid_lease runs above become GREEN in this step; the orchestrator has the acceptance designer lift their markers before the gate; the crafter never edits acceptance bodies or markers.",
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/action_shim/mod.rs",
+            "crates/overdrive-control-plane/src/action_shim/reclamation.rs",
+            "crates/overdrive-control-plane/src/action_shim/prelaunch_outcome_acceptance.rs",
+            "crates/overdrive-control-plane/src/guest_network/quint_cid_lease.rs",
+            "crates/overdrive-cli/tests/integration/volume_survives.rs"
+          ],
+          "depends_on": [
+            "09-02",
+            "09-03"
+          ],
+          "effort_hours": 8
+        },
+        {
+          "id": "09-05",
+          "name": "A VMM is born inside its scope: clone3 with CLONE_INTO_CGROUP and a pidfd, step-named launch errors, and the deletion of the pid write and the seccomp boot probe",
+          "description": "crates/overdrive-host/src/vmm/launch_clone.rs owns the VMM spawn: the program resolved to an absolute path before the clone, descriptors moved to at least 3, an error pipe read in spawn_blocking, a raw clone3 with CLONE_INTO_CGROUP | CLONE_PIDFD into the scope directory descriptor (resolved through with_cgroup_root), a child that runs the audited sequence (signal reset, stdio, close_range, no_new_privs, seccomp, execve) and reports a failing LaunchStep and errno in five bytes, a LaunchedChild guard that kills and reaps on drop, and the reaper holding the pidfd (AsyncFd readiness, waitid(P_PIDFD), pidfd_send_signal). register_launch_child_hook is deleted. A refused placement fails create with 'joining the cgroup failed: ...' and a failing child step names its step. place_pid_in_scope and the driver's call and failure branch are deleted. The launch seccomp boot probe is dropped (P-6) with its causes and tests. SimVmm records membership in config.cgroup_scope from creation to the scripted reap and fails create for an absent scope. @sizing-review-needed (one unsafe module, its failure naming, the reaper rework and three deletions; kept whole because the pid write cannot be deleted before the VMM is born in its scope).",
+          "criteria": [
+            "vmm_launch_in_scope.rs: a_created_vmm_is_a_member_of_its_scope_when_create_returns, create_against_a_removed_scope_fails_naming_the_step_and_leaves_nothing and create_against_a_scope_with_subtree_control_set_fails_naming_the_step_and_leaves_nothing pass with their markers removed on a nested-launch guest (kvm-tests)",
+            "The N3 tests of ADR-0352 that need no new seam pass: host units (an unresolvable wrapper is ConfinementUnavailable with no child; scope, pidfd, error and stdio descriptors are not inherited; with descriptors 0 to 2 closed the stand-in still gets /dev/null stdin and stdout and the stderr capture), the LaunchStep codec round trip, the siginfo-to-VmmExit mapping over synthetic CLD_DUMPED values, Vmm equivalence for membership, and the Tier 1 test that the driver makes no place_pid call and a failed create leaves no scope member",
+            "The existing Tier-3 launch journeys of 04-03 and 05-02 stay GREEN with a real Cloud Hypervisor launched through clone3, and the launch latency shows no measurable regression against fork+exec in the first Tier-3 launch test",
+            "place_pid_in_scope, its driver call and failure branch, register_launch_child_hook, VmmProbeSubstrate::check_launch_seccomp and its implementation, the launch-seccomp probe stage and the three VmmProbeError causes only it returned are gone with the retired tests below",
+            "A Tier-3 test that crashes serve while the VMM is held after exec (09-01 hand-off item) and the stand-in tests that need a compiled hypervisor or a wrapper chooser are authored only if the orchestrator rules on the test-support proposal; they are not a gate of this step"
+          ],
+          "test_file": "crates/overdrive-host/tests/integration/vmm_launch_in_scope.rs",
+          "scenario_name": "S-RB-19, S-RB-20; ADR-0352 host units, equivalence and Tier 1 (authored after 09-01)",
+          "implementation_notes": "ADR-0352; P-6 and P-7 (user rulings 2026-11-23). The unsafe surface and the child's allowed calls are exactly feature-delta 'A VMM is born inside its scope' items 2 to 6; every kernel claim is cited against vendors/linux v7.0. The resource limits are written before the spawn so memory.max applies from the first instruction. Retired tests (crafter deletes with the code): overdrive-worker tests/acceptance/cgroup_manager/place_pid_in_scope.rs and its mod line; in overdrive-host src/vmm.rs tests each_launch_filter_probe_cause_maps_to_its_typed_error and the_startup_probe_installs_the_exact_launch_program (delete), launch_on_a_target_without_a_program_is_refused_before_any_effect (delete its probe half, keep the create half), vmm_probe_preserves_stage_order_and_rejects_each_injected_ip_execution_failure (drop launch-seccomp from its stage list) and the test double's check_launch_seccomp. Whether serve's other startup checks are needed is #376, not this step. Gates: cargo xtask metal run -- cargo nextest run -p overdrive-host -p overdrive-worker -p overdrive-sim --features integration-tests,kvm-tests; check/clippy workspace with kvm-tests; dst-lint; placement-lint; doctests. MODEL CONFORMANCE: none (K-C8 needs no model change).",
+          "files_to_modify": [
+            "crates/overdrive-host/src/vmm/launch_clone.rs",
+            "crates/overdrive-host/src/vmm.rs",
+            "crates/overdrive-core/src/traits/vmm.rs",
+            "crates/overdrive-core/src/vm/config.rs",
+            "crates/overdrive-worker/src/vm_driver.rs",
+            "crates/overdrive-worker/src/cgroup_manager.rs",
+            "crates/overdrive-sim/src/adapters/vmm.rs",
+            "crates/overdrive-control-plane/src/lib.rs",
+            "crates/overdrive-host/tests/integration/vmm_launch_in_scope.rs",
+            "crates/overdrive-worker/tests/acceptance/cgroup_manager/"
+          ],
+          "depends_on": [
+            "09-01"
+          ],
+          "effort_hours": 16
+        },
+        {
+          "id": "09-06",
+          "name": "A launch is on record from hand-out to its end: the Pending row with the lease's address, the terminal-row carry, and an abandoned or failed row for every launch that ends before running, including at boot",
+          "description": "The shim writes the allocation's Pending row (state Pending, workload_addr the lease's address, kind as the action's, everything else None) in one write_alloc_lifecycle call after provision_and_inject_netns returns Ok and before ensure_intercept_identity and driver.start, in the StartAllocation arm and in the RestartAllocation successor arm; a prior non-terminal row means no Pending write, and a duplicate restart dispatch (the driver's AllocationAlreadyOwned) writes no row of its own and keeps the owner's lease; a failing Pending write creates no VMM, retires and tears down the lease and returns the typed ShimError. Every later row carries the address: the Failed row of a failed start, FinalizeFailed's terminal, the stop's terminal, the reclamation executor's row and the post-Running fail-closed Failed rows (equal to the Running row's address; a provision failure has none). A launch that ends before running ends its Pending row: W1 and W2 (StartSuperseded) write Terminated / LaunchSuperseded after the releases, with a teardown failure returned after the row and a row-write failure the typed error, in both arms and with the restart arm's exact-old predecessor cleanup and finish_restart intact (this reworks the no-row StartSuperseded arms of 05-01 and emit_launch_superseded's 'no allocation row written' message); W3 (any other DriverError from start) ends it as Failed DriverInternalError; W4, the first step of vm_reclamation_boot::converge, ends every Pending row of this node Terminated / LaunchLostWithControlPlane with the address carried before the observation and the executors, idempotent, reserving and killing nothing. @sizing-review-needed (the Pending write, the carry table and every ending of it are one invariant, a Pending row never outlives its launch: splitting leaves a launch that ends with a stuck Pending row in a deploy, so they are not split).",
+          "criteria": [
+            "prelaunch_outcome_acceptance.rs: start_arm_records_the_pending_row_with_the_leases_address_before_the_driver_starts, restart_arm_records_the_successors_pending_row_with_the_leases_address_before_the_driver_starts, start_arm_failing_pending_write_never_reaches_the_driver_and_releases_the_lease, start_arm_failed_start_row_carries_the_pending_rows_address and a_stops_terminal_row_carries_the_prior_rows_workload_addr pass; guard_a_duplicate_start_dispatch_never_regresses_a_running_row_to_pending and guard_a_duplicate_restart_dispatch_never_regresses_the_successors_running_row keep passing; the Pending and Running rows of one launch carry the same restart_count and last_terminated and the Running write is accepted",
+            "finalize_failed_genuine_terminal_forward_carries_workload_addr and a_platform_reclaimed_row_carries_the_prior_rows_address pass; assert_superseding_failed_row asserts equality with the Running row's address, not its absence (feature-delta carry table)",
+            "start_arm_superseded_launch_ends_its_row_as_abandoned_and_releases_lease_svid_and_claim, restart_arm_superseded_successor_ends_its_row_as_abandoned_and_runs_exact_old_predecessor_cleanup, start_arm_teardown_failure_does_not_suppress_the_abandoned_row, start_arm_failing_abandoned_row_write_is_returned_as_the_typed_observation_error and start_arm_a_non_start_driver_error_ends_in_a_failed_driver_internal_error_row pass",
+            "The five rewritten launch_lane_supersession.rs tests, a_stop_interrupts_the_start_and_its_result_is_never_used and node_shutdown_ends_a_waiting_launch_with_an_abandoned_row_and_the_loop_exits pass: every superseded launch ends exactly one abandoned row and never a Running or Failed row",
+            "launches_lost_with_the_control_plane::{a_pending_row_with_no_host_artifact_ends_as_lost_with_the_control_plane, a_pending_row_whose_vm_left_a_settled_scope_ends_as_lost_with_the_control_plane, a_second_boot_over_the_closed_rows_writes_nothing} and both mid_boot_volume_reclamation cells pass; guard_another_nodes_pending_row_is_left_alone keeps passing; the executors never rewrite a closed row's reason",
+            "The restart_arm_duplicate_vm_owner test (R9) is rearranged by the acceptance designer so the owner has its Pending row and asserts the row, the lease and the predecessor cleanup (an owner claim with no row is not a state serve + deploy produces); the release-before-return premise is confirmed on every launch-ending path, and a violating path is fixed here, never given a new reason",
+            "A real serve + deploy of a VM workload that is restarted, stopped or shut down mid-launch leaves one Terminated row naming why and no Pending row; a grep-level check finds no reader of workload_addr outside the Running gates that assumes a non-Running row has none"
+          ],
+          "test_file": "crates/overdrive-control-plane/src/action_shim/prelaunch_outcome_acceptance.rs",
+          "scenario_name": "S-RB-01 to S-RB-09, S-RB-11, S-RB-12 (first three), S-RB-14, S-RB-15, S-RB-16; guard S-RB-11",
+          "implementation_notes": "ACCEPTANCE-DESIGNER PREREQUISITES (orchestrator dispatches nw-acceptance-designer before the crafter): (1) rearrange restart_arm_duplicate_vm_owner_is_a_no_row_success_that_still_cleans_the_predecessor so the owner has its Pending row present (test-scenarios.md N6 question 1, settled by the design: a duplicate dispatch of one restart writes no row, returns Ok(()) to finish_restart and keeps the owner's lease); (2) change assert_superseding_failed_row in action_shim/mod.rs (the A-4 assertion, N6 question 2) from 'does not inherit the Running row's address' to equality with the Running row's address; (3) the two-boot mid_boot_volume_reclamation cells assert the row, not 'no row' (already changed by DISTILL, N2). ADR-0353, ADR-0355 W1 to W4 and ADR-0337 (amended: a non-start DriverError is no longer a no-row internal error; W3 writes its Failed DriverInternalError row, so the S8 and R10 tests of 06-02's note are now authored and pass here). Retired tests: none; the two no-row 05-01 tests were renamed and re-pended by DISTILL (N2). Delivered 05-01 and 05-02 behaviour changes only as ADR-0355 says: the driver's observation points, the lane table and the producers are unchanged; the 05-02 tests re-pended by DISTILL (the five lane tests, the shutdown and stop tests) return to GREEN here. quint_rg pins reach a Pending row that now exists; none of them is lifted here because each also needs RB-13 or a later step. Gates: cargo xtask metal run -- cargo nextest run -p overdrive-control-plane -p overdrive-core -p overdrive-sim --features integration-tests; cargo xtask metal run -- cargo nextest run -p overdrive-cli --features integration-tests,kvm-tests; dst-lint; conformance-lint; openapi check; check/clippy workspace. MODEL CONFORMANCE: quint_node_volume.rs runs already GREEN stay GREEN (an abandoned or lost launch now projects a Terminated row with the reason); the orchestrator has the acceptance designer verify at activation which first RED each re-pended pin hits.",
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/action_shim/mod.rs",
+            "crates/overdrive-control-plane/src/action_shim/reclamation.rs",
+            "crates/overdrive-control-plane/src/vm_reclamation_boot.rs",
+            "crates/overdrive-control-plane/src/action_shim/prelaunch_outcome_acceptance.rs",
+            "crates/overdrive-control-plane/tests/acceptance/launch_lane_supersession.rs",
+            "crates/overdrive-control-plane/tests/acceptance/finalize_failed_forward_carries_workload_addr.rs",
+            "crates/overdrive-control-plane/src/node_volume_boundaries.rs"
+          ],
+          "depends_on": [
+            "05-02",
+            "09-01"
+          ],
+          "effort_hours": 16
+        },
+        {
+          "id": "09-07",
+          "name": "Boot proceeds past a stuck VM: every executor result is collected, a busy scope writes its row and reserves its address, and boot never refuses for a dead VM",
+          "description": "vm_reclamation_boot::converge (signature unchanged), after W4, observes the leftover scopes and the allocation rows, runs every reclamation executor to completion in parallel (a join_all keeping results in the planner's action order, each bounded by KILL_SCOPE_SETTLE_BOUND, so boot waits one bound in the worst case), treats Err(Host(ResourceBusy)) as busy and not as a failure, reserves for every busy scope the offset of its row's workload_addr through reserve_leftover before the first assign, and returns Ok. A busy Running scope's executor writes the platform-reclaimed row carrying the address and does not discard artifacts (the steady-state VmReclamation tick that meets a busy scope writes no row); VmReclamation removes the scope later and the network-reclaim retry releases the reservation through teardown_guest_network (no plan, no provisioner call). Any other executor error still refuses the boot with ConvergeError::Reclamation; an address outside the prefix or an offset already held refuses it with ReclamationError::CorruptLeftoverRow naming the allocation and never panics; all reservations are made before the first non-busy error or corrupt row is returned.",
+          "criteria": [
+            "launches_lost_with_the_control_plane::{a_busy_scope_boots_ends_the_running_row_and_reserves_its_address, a_busy_scope_of_a_pending_row_ends_as_lost_and_reserves_the_carried_address} pass with their markers removed; guard_a_non_busy_executor_error_still_refuses_the_boot keeps passing",
+            "The ADR-0350 Tier 1 tests pass: converge returns Ok with a held scope, the pool reports the offset Retiring and counted in occupancy, a launch sweep across the whole offset range including a next-fit wrap never receives the stuck VMM's CID (the SimVmm vsock holder is the arbiter); several stuck VMs cost one bound of boot delay and are all reserved; one scope's failure never drops another's reservation; the two corrupt-row cases (address outside the prefix, two rows with one offset) refuse the boot naming the allocation with no panic",
+            "The one release site over a reservation: repeated ReclaimAllocationNetwork attempts return Ok promptly and keep the reservation while the scope is held; after the scripted reap, a VmReclamation pass and one more attempt the offset is assignable; the sim provisioner records no teardown for a reservation; the reclaim path over a restarted process (no driver entry) returns Ok",
+            "The ADR-0354 tests pass: a busy boot executor step writes the terminal row and does not discard artifacts, the next VmReclamation pass discards them after the hold clears, the steady-state tick that meets the same busy scope leaves the row unchanged",
+            "quint_cid_lease_serve_crash_during_guest_boot_reserves_from_the_recorded_address and the randomized quint_cid_lease_lease_conf_ok lose their should_panic markers and pass (seed printed on failure); cargo xtask conformance-lint exits 0",
+            "The Tier-3 boot variant of S-VOL-T3-12 (the node boots with a held-flush VM left over and does not reuse its CID) is authored once the orchestrator has ruled on the crash-facility proposal of 09-01; until then it is a recorded gap, not a gate"
+          ],
+          "test_file": "crates/overdrive-control-plane/src/vm_reclamation_boot.rs",
+          "scenario_name": "S-RB-13; S-RB-15 busy cells; ADR-0350 and ADR-0354 N3 tests; quint_cid_lease pins ServeCrashDuringGuestBootReservesFromTheRecordedAddress and lease_conf_ok",
+          "implementation_notes": "ADR-0350 and ADR-0354; ADR-0156 amended ('boot reclamation, and the reservation of every VM it could not remove, complete before the first assign'). Overdrive does not defend against foreign software mutating this state, only against its own crash and a stuck VM. converge's busy test reads the io::ErrorKind; no field or return type of the executors changes. Gates: cargo xtask metal run -- cargo nextest run -p overdrive-control-plane -p overdrive-sim -p overdrive-core --features integration-tests; cargo xtask metal run -- cargo nextest run -p overdrive-cli --features integration-tests,kvm-tests; dst-lint; conformance-lint; check/clippy workspace. MODEL CONFORMANCE (row 11): the two quint_cid_lease pins above become GREEN in this step, with the other four named runs and the randomized trace replaying through the production composition; the orchestrator has the acceptance designer lift the markers before the gate; the crafter never edits acceptance bodies or markers.",
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/vm_reclamation_boot.rs",
+            "crates/overdrive-control-plane/src/action_shim/reclamation.rs",
+            "crates/overdrive-control-plane/src/guest_network.rs",
+            "crates/overdrive-control-plane/src/guest_network/quint_cid_lease.rs",
+            "crates/overdrive-control-plane/src/lib.rs"
+          ],
+          "depends_on": [
+            "09-02",
+            "09-04",
+            "09-06"
+          ],
+          "effort_hours": 12
+        },
+        {
+          "id": "09-08",
+          "name": "A launch that never ran does not count: the count basis is the newest row that ran",
+          "description": "WorkloadLifecycle derives a new launch's restart count, last_failure_seen_at carry, backoff gate, ceiling decision and FinalizeFailed basis from last_ran_alloc(rows) (the newest row for which is_launch_abandoned is false), never from an abandoned row: a crash restart takes the basis row's restart_counts entry plus one, an operator restart (generation replacement) the basis row's entry unchanged (a Failed basis is forgiven), a fresh placement 0; a platform-reclaimed basis keeps its no-ceiling, no-plus-one treatment. is_natural_exit excludes an abandoned row so a Job whose launch never ran is not finalised Failed { exit_code: Some(0) }. current_alloc is unchanged and returns the newest row, abandoned or not; the existing restart path relaunches it. restart_status_for_alloc reads its attempts through the count basis. Deleting the abandoned rows from any chain changes no later launch's count, charged or exhausted.",
+          "criteria": [
+            "The three RB-13 count tests pass: (1) a crash restart abandoned by an operator restart forgives the crash (relaunch carries the basis count 0, same for LaunchLostWithControlPlane); (2) a lost launch with no operator action charges the crash once, also across two consecutive abandoned rows (count 1, not 2); (3) a launch abandoned before anything ran carries 0, and a shutdown-abandoned successor of an operator restart still relaunches as a generation replacement with the stopped row's count",
+            "The deletion-equivalence proptest passes for the restart and FinalizeFailed clauses over generated chains with arbitrary View entries for abandoned ids (seed printed); its generation_replacement_pending agreement clause is authored by the acceptance designer as a separate property that 06-01 activates",
+            "After a restart commit, a shutdown and a boot the workload is relaunched once (Service and Job; the Job is not finalised) and after a stop nothing is relaunched, over the seeded restart_generation_invariant.rs cells; the budget is never advanced by an abandoned launch",
+            "quint_rg_second_restart_loses_launch_then_one_placement goes GREEN through the new restart-budget rule (the count basis); the node-local-volume run superseded_launch_result_discarded regains its expectation that the relaunch charges 0 (charged is 0 after the relaunch) and its driver stays GREEN; no other quint pin is lifted here",
+            "No site other than is_launch_abandoned names the two reasons as a set; the reconciler adopts last_ran_alloc exactly where feature-delta 'Launches that end before running' item 2 lists the reads"
+          ],
+          "test_file": "crates/overdrive-reconcilers/tests/acceptance/workload_lifecycle_restart.rs",
+          "scenario_name": "RB-13 count tests 1 to 3, deletion-equivalence (authored after 09-01); S-INV-01 relaunch cells; S-Q-15 second restart (quint_rg_second_restart_loses_launch_then_one_placement); superseded_launch_result_discarded",
+          "implementation_notes": "ADR-0355 section 2 and RB-13 (user ruling 2026-11-24); amends ADR-0335's handled-generation wording (an abandoned row handles nothing), which 06-01 implements. This step changes the derivation reads at the call sites feature-delta names (attempts, last_failure_seen_at, the ceiling decision, FinalizeFailed, is_natural_exit); the generation-pending read stays with 06-01, which consumes last_ran_alloc from the start. The restart-generation model carries the hazards abandonedRowCounts and abandonWritesNoRow and the invariant I_ABANDONED_ROWS_DO_NOT_COUNT (specs/quint/restart-generation, evidence recorded); no spec is edited here. Gates: cargo xtask metal run -- cargo nextest run -p overdrive-reconcilers -p overdrive-core -p overdrive-control-plane -p overdrive-sim --features integration-tests; dst-lint; conformance-lint; check/clippy workspace. MODEL CONFORMANCE: quint_rg_second_restart_loses_launch_then_one_placement and the node-local-volume superseded_launch_result_discarded expectation become GREEN here; the orchestrator has the acceptance designer lift the marker and restore the charged-0 expectation before the gate; the crafter never edits acceptance bodies or markers.",
+          "files_to_modify": [
+            "crates/overdrive-reconcilers/src/workload_lifecycle.rs",
+            "crates/overdrive-control-plane/src/handlers.rs",
+            "crates/overdrive-reconcilers/tests/acceptance/workload_lifecycle_restart.rs",
+            "crates/overdrive-control-plane/tests/integration/restart_generation_invariant.rs",
+            "crates/overdrive-control-plane/src/quint_restart_generation.rs",
+            "crates/overdrive-control-plane/src/quint_node_volume.rs"
+          ],
+          "depends_on": [
+            "09-01",
+            "09-06"
+          ],
+          "effort_hours": 10
+        }
+      ]
     }
   ],
   "validation": {
     "status": "approved",
     "reviewer": "nw-acceptance-designer-reviewer",
     "approved_at": "2026-11-20T01:46:03+00:00",
-    "notes": "Approved after two review rounds; final round's three wording findings applied. 01-01 amended 2026-11-20 by user ruling: second-disk launch support moved in from 03-01/04-02. 2026-11-20: example under examples/ added by user ruling; 04-03 proves it parses and its README is accurate; E16 captures it in 08-03."
+    "notes": "Approved after two review rounds; final round's three wording findings applied. 01-01 amended 2026-11-20 by user ruling: second-disk launch support moved in from 03-01/04-02. 2026-11-20: example under examples/ added by user ruling; 04-03 proves it parses and its README is accurate; E16 captures it in 08-03. 2026-11-24: phase 09 added for the stuck-VM design (ADR-0348 to ADR-0355); 06-01 now depends on 09-08; 08-02 also depends on 09-05 and 09-07; phase 09 has not been reviewed."
   }
 }
