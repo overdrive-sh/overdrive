@@ -1320,8 +1320,7 @@ impl VmDriver {
         }
         if let Some(scope) = scope {
             // `ResourceBusy` is the cleanup's best effort: the scope is left
-            // to `VmReclamation` and the failure being reported stays
-            // unchanged (ADR-0349, ADR-0351).
+            // to `VmReclamation` (ADR-0349, ADR-0351).
             if let Err(err) = self.host_state.kill_scope(scope).await
                 && err.kind() != io::ErrorKind::ResourceBusy
             {
@@ -1736,8 +1735,8 @@ impl VmDriver {
 }
 
 /// Await the existing driver-owned artifact cleanup sequence in its required
-/// order. Best-effort result handling is unchanged; completion means every
-/// cleanup call has returned, not that each artifact's absence was verified.
+/// order. Results are handled best-effort; completion means every cleanup
+/// call has returned, not that each artifact's absence was verified.
 async fn cleanup_driver_artifacts(
     host_state: &Arc<dyn overdrive_core::traits::vm_host_state::VmHostState>,
     live_vm: &LiveVm,

@@ -60,9 +60,6 @@ impl Drop for ScopeCleanup {
 #[overdrive_test(guest = "cgroup-default")]
 #[test]
 #[serial(cgroup)]
-#[should_panic(
-    expected = "kill_scope returns instead of panicking when its blocking thread is refused"
-)]
 fn a_kill_scope_under_thread_refusal_returns_instead_of_panicking() {
     let alloc = AllocationId::new("alloc-e23kill-0").expect("valid allocation id");
     let scope = CgroupPath::for_alloc(&alloc).resolve(Path::new(ROOT));

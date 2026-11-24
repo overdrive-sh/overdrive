@@ -12,18 +12,18 @@
 //! adapter implements that contract; it does not restate it.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::os::unix::fs::FileExt as _;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::os::unix::fs::FileExt as _;
 
 use async_trait::async_trait;
-use tokio::io::Interest;
-use tokio::io::unix::AsyncFd;
 use overdrive_core::AllocationId;
 use overdrive_core::cgroup::CgroupPath;
 use overdrive_core::traits::vm_host_state::{
     KILL_SCOPE_SETTLE_BOUND, ScopeFacts, VmHostObservation, VmHostState, VmHostStateProbeError,
 };
+use tokio::io::Interest;
+use tokio::io::unix::AsyncFd;
 
 /// The fixed relative path segment every workload cgroup scope lives
 /// under, resolved against this adapter's `cgroup_root`. Mirrors the
@@ -223,7 +223,7 @@ impl VmHostState for RealVmHostState {
     async fn kill_scope(&self, scope: &CgroupPath) -> std::io::Result<()> {
         let path = scope.resolve(&self.cgroup_root);
 
-        match tokio::fs::write(path.join("cgroup.kill"), b"1").await {
+        match write_cgroup_kill(&path) {
             Ok(()) => {}
             // Already gone -- idempotent.
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
@@ -239,7 +239,7 @@ impl VmHostState for RealVmHostState {
 
         // The scope is empty: `rmdir` is expected to succeed at once. Any
         // failure is a real error returned at once, never retried.
-        match tokio::fs::remove_dir(&path).await {
+        match remove_scope_dir(&path) {
             Ok(()) => Ok(()),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
             Err(e) => Err(e),
@@ -292,8 +292,50 @@ impl VmHostState for RealVmHostState {
     }
 }
 
+// The three cgroupfs calls below are plain synchronous syscalls, not
+// `tokio::fs`, because `tokio::fs` dispatches each call onto the blocking pool
+// and `spawn_blocking` PANICS when the OS refuses a thread (`EAGAIN`), which
+// under `panic = "abort"` ends the node. None of them waits on a task: the
+// `cgroup.kill` write only signals the scope's tasks
+// (`cgroup_kill_write`, `kernel/cgroup/cgroup.c @ v7.0`), the `cgroup.events`
+// open and the `rmdir` are kernfs operations that do not sleep on the scope's
+// tasks, and the removal of an already-empty scope is immediate.
+
+/// Writes `1` to the scope's `cgroup.kill`, signalling every task in it.
+fn write_cgroup_kill(scope_dir: &Path) -> std::io::Result<()> {
+    std::fs::write(scope_dir.join("cgroup.kill"), b"1")
+}
+
+/// Opens the scope's `cgroup.events`.
+fn open_cgroup_events(scope_dir: &Path) -> std::io::Result<std::fs::File> {
+    std::fs::File::open(scope_dir.join("cgroup.events"))
+}
+
+/// Removes the (empty) scope directory.
+fn remove_scope_dir(scope_dir: &Path) -> std::io::Result<()> {
+    std::fs::remove_dir(scope_dir)
+}
+
+/// Whether the scope directory no longer exists.
+fn scope_is_gone(scope_dir: &Path) -> bool {
+    matches!(std::fs::metadata(scope_dir), Err(e) if e.kind() == std::io::ErrorKind::NotFound)
+}
+
+/// Whether `error` says the cgroup behind an already-open `cgroup.events` was
+/// removed: kernfs fails a read of a removed node with `ENODEV`
+/// (`kernfs_seq_start`, `fs/kernfs/file.c @ v7.0`).
+fn is_scope_removed_error(error: &std::io::Error) -> bool {
+    error.kind() == std::io::ErrorKind::NotFound || error.raw_os_error() == Some(libc::ENODEV)
+}
+
 /// Waits for the scope's `cgroup.events` to report `populated 0`, bounded by
-/// [`KILL_SCOPE_SETTLE_BOUND`]; at the bound returns `ResourceBusy`.
+/// [`KILL_SCOPE_SETTLE_BOUND`]; at the bound returns `ResourceBusy` unless the
+/// scope directory is gone, in which case another remover took it and it is `Ok`.
+///
+/// Removing a cgroup wakes no `POLLPRI` waiter (`kernfs_drain_open_files`
+/// notifies no poller, `fs/kernfs/file.c @ v7.0`), so a scope removed
+/// mid-wait is noticed at the bound, or by the next read after any other wake,
+/// which fails with `ENODEV`; both read as gone.
 ///
 /// A scope with no `cgroup.events` (absent, or a directory that is not a
 /// cgroup) has nothing to wait for and returns `Ok`. The wait is a readiness
@@ -305,16 +347,19 @@ impl VmHostState for RealVmHostState {
 /// read after arming, tested, then awaited, so a change between the read and
 /// the wait is not lost.
 async fn wait_until_unpopulated(scope_dir: &Path) -> std::io::Result<()> {
-    let file = match tokio::fs::File::open(scope_dir.join("cgroup.events")).await {
-        Ok(file) => file.into_std().await,
+    let file = match open_cgroup_events(scope_dir) {
+        Ok(file) => file,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
         Err(e) => return Err(e),
     };
     let events = AsyncFd::with_interest(file, Interest::PRIORITY)?;
     let settled = async {
         loop {
-            if !is_populated(events.get_ref())? {
-                return Ok(());
+            match is_populated(events.get_ref()) {
+                Ok(false) => return Ok(()),
+                Ok(true) => {}
+                Err(e) if is_scope_removed_error(&e) => return Ok(()),
+                Err(e) => return Err(e),
             }
             let mut ready = events.ready(Interest::PRIORITY).await?;
             ready.clear_ready();
@@ -322,6 +367,7 @@ async fn wait_until_unpopulated(scope_dir: &Path) -> std::io::Result<()> {
     };
     match tokio::time::timeout(KILL_SCOPE_SETTLE_BOUND, settled).await {
         Ok(outcome) => outcome,
+        Err(_bound_elapsed) if scope_is_gone(scope_dir) => Ok(()),
         Err(_bound_elapsed) => Err(std::io::Error::from(std::io::ErrorKind::ResourceBusy)),
     }
 }

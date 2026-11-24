@@ -340,7 +340,6 @@ fn guard_a_scope_that_empties_during_the_wait_returns_ok_before_the_bound() {
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[test]
 #[serial(cgroup)]
-#[should_panic(expected = "kill_scope returns Ok when another remover deletes the scope mid-wait")]
 fn kill_scope_returns_ok_when_another_remover_deletes_the_scope_mid_wait() {
     let device = Device::new("raced");
     let id = alloc("ksk-raced-0");
