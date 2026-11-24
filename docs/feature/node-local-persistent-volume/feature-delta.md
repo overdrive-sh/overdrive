@@ -657,12 +657,17 @@ in the same tick are delayed by up to that bound for each stuck scope. A stuck s
 
 - **`kill_scope` never removes a populated scope.** Host adapter, real cgroupfs (Tier 3; the spike's `volume-pool` hold is the fixture): with the
   scope's last task held in exit, `kill_scope` returns `ResourceBusy` at the bound, the directory is present for the whole hold (the early `rmdir`
-  of the running kernel would have broken this), the task is alive; after the drain it returns `Ok` with the scope absent. Host adapter, unit, over a
-  fake `cgroup.events` that reads `populated 1` then `0`: the removal is issued only after the `0` read.
+  of the running kernel would have broken this), the task is alive; after the drain it returns `Ok` with the scope absent. That test also shows the ordering (the
+  directory is present for the whole hold, so the removal follows the `0` read) and the mid-wait case (a scope that empties during the wait
+  returns `Ok` without waiting out the bound). No host-adapter unit over a fake `cgroup.events` is written: `RealVmHostState::new` takes the
+  cgroup root, so a tempdir can be injected (no seam is added), but a regular file cannot stand in for cgroupfs's notification (a regular file
+  is not pollable for `cgroup.events` changes), so the wait cannot be exercised there.
 - `VmHostState` equivalence (`vm_host_state_equivalence.rs`): both adapters agree on `Ok` implying absent and no task left, on `ResourceBusy`
   leaving the scope present and observed, on idempotence, and on a non-busy error returning at once without retry.
-- Host adapter, unit: a `PermissionDenied` removal is returned on the first attempt; a scope that empties mid-wait returns `Ok` early; a scope with
-  no `cgroup.events` is `Ok`.
+- Host adapter, unit, over a tempdir passed as `RealVmHostState::new`'s `cgroup_root` (the existing parameter; no seam): a scope directory with no
+  `cgroup.events` is `Ok` and absent afterwards; an absent scope is `Ok`; a non-`ResourceBusy` error is returned at once with no retry (arranged
+  with `cgroup.kill` a directory, which fails the write with a non-`NotFound` kind). A `PermissionDenied` removal cannot be arranged as root and
+  `serve` always runs as root on the appliance, so it has no obligation of its own: the any-other-kind case above is the same branch.
 - Tier 1, seeded, production `VmReclamation` tick over `SimVmHostState` with a held scope: the tick returns busy without discarding, writing a row
   or advancing the lease; other allocations' actions in the same tick still run; after the hold clears the next tick removes the scope.
 - The boot-reclamation test double (`vm_reclamation_boot.rs:821`) gains the busy case.
@@ -753,8 +758,10 @@ one process, so enrolling only the first pid also left every thread and child cr
    the adapter's stderr capture (the bounded `VmmDiagnostics` capture of today), the environment is `serve`'s environment at the spawn with nothing
    added or removed, the working directory is inherited, and the argv is the one `build_confined_command` builds today (wrapper prefix, hypervisor
    binary, `--seccomp`, `--landlock` and the rules). Whether `build_confined_command` keeps returning a `Command` the primitive reads, or returns
-   the argv directly, is the crafter's. The program is resolved to an absolute path **before** the clone, by the search `execvp` performs, so the
-   child calls `execve` and never searches; an unresolvable wrapper is reported as `io::ErrorKind::NotFound`, which `classify_launch_spawn_error`
+   the argv directly, is the crafter's. The program is resolved to an absolute path **before** the clone, by the search `execvp` performs over `serve`'s `PATH`
+   (the first executable candidate; when no candidate is executable but one exists, the first existing candidate is returned and its `execve`
+   reports `EACCES`, as `execvp` ends with `EACCES`), so the child calls `execve` and never searches; a wrapper with no candidate on `PATH`
+   is reported as `io::ErrorKind::NotFound`, which `classify_launch_spawn_error`
    already maps to `ConfinementUnavailable`. Every parent-side descriptor the child `dup2`s from (the `/dev/null`
    descriptor, the stderr pipe's write end) is moved with `fcntl(F_DUPFD_CLOEXEC, 3)` before the clone and the original closed, so its number is at
    least 3 whatever `serve`'s own stdio is: with stdio closed, `open` and `pipe2` return 0 to 2, and a source in 0 to 2 would be clobbered by an
@@ -901,6 +908,17 @@ the wrapper is not found: the error pipe reports it, the child is reaped, no pro
 
 **Tests.**
 
+- **Test seams: none is added.** The launch tests need three things, and each is existing surface. (1) *The stand-in hypervisor* is a small Rust
+  program the test compiles with the guest's own `rustc` and passes to `with_binary`; the `cgroup-default` / `nested-launch-rustc` profile
+  provides `rustc` and `cc` in the guest (`overdrive-testing/src/guest_suite.rs`, the profile the nested-launch tests already use). It is test
+  support, DISTILL's, and sits in the test's own tempdir. (2) *The launch wrapper* is the confinement's `prlimit` (or `ip` for a mesh VM),
+  resolved on `serve`'s `PATH` (item 4); a test in its own guest sets `PATH` to a tempdir first, holding a `prlimit` file with mode `0644`, so the
+  wrapper resolves and `execve` returns `EACCES` (the step `executing the launch program`). No builder chooses the wrapper: it is derived from the
+  confinement, and a seam beside it would let a test run a launch the product never builds. (3) *The cgroup root* of `CloudHypervisorVmm` is
+  `with_cgroup_root` (item 9), a builder the test-only `with_binary` already sits beside; the composition root passes the value it gives
+  `CgroupManager`. A stand-in cannot hold a thread in uninterruptible I/O, so the `KilledNotReaped` Tier-3 case below runs only as S-VOL-T3-12's
+  real held flush; the stand-in test covers a normal exit, a signal and a held-after-`exec` stand-in. The `VmmExit` core-dump case is covered by
+  a unit test of the siginfo-to-`VmmExit` mapping over synthetic `CLD_DUMPED` values, not by a real core dump.
 - Tier 3 (real cgroupfs, a `cgroup-default` guest): the hypervisor stand-in supplied through the existing `with_binary` seam records its own
   `/proc/self/cgroup` as its first act; the record names the scope, for a plain and a mesh launch. The same test reads the `cgroup.procs` of the
   scope after `create` returns and finds every process of the tree, and reads the stand-in's `/proc/self/status` `Seccomp` and `NoNewPrivs`
@@ -911,10 +929,10 @@ the wrapper is not found: the error pipe reports it, the child is reaped, no pro
   sweep after the boot never receives the CID the crashed VMM held and produces no `EADDRINUSE`.
 - Tier 3, refusal: `create` against a scope removed before the call, and against a scope with `subtree_control` set, each fails typed with no
   process created and the rootfs clone removed.
-- Tier 3, step naming (a `cgroup-default` guest, through `with_binary` and the existing `create` seams): `create` fails with a `detail`
+- Tier 3, step naming (a `cgroup-default` guest, through `with_cgroup_root`, the guest's `PATH` and the existing `create` seams): `create` fails with a `detail`
   naming the step for each of the steps a test can make fail with no new production seam: `joining the cgroup` (the scope removed or
   `subtree_control` set, the same fixtures as the refusal test), and `executing the launch program` (a wrapper that resolves to an
-  absolute path and is not executable, so `execve` returns `EACCES`). Each asserts the `detail` contains the step's `as_str` and the
+  absolute path and is not executable, so `execve` returns `EACCES`; the wrapper is a mode-`0644` `prlimit` first on the guest's `PATH`). Each asserts the `detail` contains the step's `as_str` and the
   `errno` text, and that no process remains. `loading the seccomp filter`, `wiring standard I/O`, `closing inherited descriptors`,
   `setting no_new_privs` and `resetting signal state` cannot be made to fail from a test without a production seam (a fault-injecting
   filter, a descriptor limit the child cannot lift, a syscall interposer): none is invented. They are covered by a unit test on the
@@ -922,8 +940,7 @@ the wrapper is not found: the error pipe reports it, the child is reaped, no pro
   decode as `Execve` / `EIO`, and `as_str` is distinct for every step. That the real child writes the right step byte for each failing
   step is read in the module's audited child sequence at review, not tested.
 - Tier 3, reap: the stand-in's exit is observed through the pidfd with the right `VmmExit` (a normal exit, a signal, a core dump); `terminate`
-  kills through the pidfd; a stand-in with a thread held in uninterruptible I/O returns `KilledNotReaped` at the bound (S-VOL-T3-12 covers the
-  real held flush).
+  kills through the pidfd; the `KilledNotReaped` case is S-VOL-T3-12's real held flush (a stand-in cannot hold a thread in uninterruptible I/O).
 - Tier 3, cancellation: a `create` future dropped while its launch is inside `spawn_blocking` leaves no stand-in process and no zombie child
   of `serve` once the launch returns.
 - Host adapter, unit: an unresolvable wrapper fails `create` with no spawned child and maps to `ConfinementUnavailable`; the scope, pidfd, error
@@ -1102,7 +1119,17 @@ call to `write_alloc_lifecycle`** (the writer the Running row uses), made in the
 `provision_and_inject_netns` is unchanged. A provision failure writes no `Pending` row (no VMM can exist) and keeps its `Failed` row. The row:
 `state: Pending`, `started_at`, `reason`, `detail`, `terminal`, `stderr_tail` all `None`, `workload_addr: Some(addr)`, `kind` as the action's. A
 Start whose prior row is already non-terminal (a stale duplicate dispatch: `Pending`, `Running`, `Draining`, `Suspended`) writes no `Pending` row:
-that row is the record, and it carries the same address because `assign` replays the same lease for an id it holds. **If the `Pending` write
+that row is the record, and it carries the same address because `assign` replays the same lease for an id it holds. **The Restart arm applies the
+same rule to its successor:** it reads the successor allocation's own row (the key `write_alloc_lifecycle` writes) before the `Pending` write, and
+writes none when that row is non-terminal; the successor's `Pending` write is `dominating(.., None)` only when the successor has no non-terminal
+row. So a duplicate dispatch of one restart (R9, the driver's `AllocationAlreadyOwned`) never writes over the owner dispatch's `Pending` or
+`Running` row, and it writes no row of its own: it returns the successor outcome `Ok(())` to `finish_restart` and keeps the lease, which is the
+owner's (the same id replays the same lease). No new terminal reason is needed. A duplicate-owner answer after a `Pending` write made by *this*
+dispatch cannot occur: a supervision claim is taken only by a `start` whose dispatch wrote the `Pending` row first, rows are never deleted, and the
+claim of a launch that ended before running is released before the dispatch returns, so a second dispatch of the id finds a non-terminal row
+(the owner is still launching or running) or a claim-free id. DELIVER confirms the release-before-return premise on each launch-ending path; a
+path that violates it is a defect to fix there, never a new reason. The R9 test arranges the owner with its `Pending` row present and asserts the
+row, the lease and the predecessor cleanup; an owner claim with no row is not a state `serve` plus `deploy` produces. **If the `Pending` write
 fails, no VMM is created:** the arm retires and tears down the lease (`retire_guest_network_lease`, `teardown_for_dispatch`) and returns the typed
 `ShimError` (N-REC). Cost: one observation write per launch, on the launch path that already makes the Running write.
 
@@ -1115,6 +1142,8 @@ from the prior row:
 | terminal row of `FinalizeFailed` (`:1693`) | drops it (`if is_stable { prior } else { None }`) | forward-carries `prior_row.workload_addr` always |
 | the stop's terminal row, and the reclamation executor's row (`action_shim/reclamation.rs:265`) | `None` | carry the prior row's address |
 | exit-observer terminal row (`exit_observer.rs:562`) | carries it | unchanged |
+| the `Failed` row that supersedes a `Running` row on the post-`Running` fail-closed paths (`fail_closed_on_mtls_install_with_guest`, `fail_closed_on_guest_network_activation`; S10) | `None`; `assert_superseding_failed_row` asserts it does not inherit the `Running` row's address | carries the `Running` row's address. The VMM reached `Running` and may hold its CID until the stop settles (a stop can end `KilledNotReaped`, ADR-0348), so boot must find the address on the allocation's newest row; a row that drops it would hide a stuck VM from reservation (ADR-0350). The assertion changes to equality with the `Running` row's address |
+| the `Failed` row of a provision failure (`fail_closed_on_netns_provision`) | `None` | unchanged: no `Pending` row and no VMM exist, and the lease is retired; there is no address to carry |
 
 *Persisted format.* None changes: `AllocStatusRow.workload_addr` and `AllocState::Pending` exist in the persisted `AllocStatusRowV2` payload, so no
 rkyv envelope bump and no new fixture. The wire shape (`AllocStateWire::Pending`) already has the state.
@@ -1134,8 +1163,8 @@ below; `LogicalTimestamp::dominating` over the prior row (Start) and `dominating
   `Pending` write is made to fail, `Vmm::create` is never entered, the lease is released and the typed error is returned. A stale duplicate dispatch
   against a non-terminal row writes no second `Pending` row. The `Pending` and `Running` rows of one launch carry the same `restart_count` and
   `last_terminated`, and the `Running` write is accepted by the store.
-- **The terminal-row carry.** The stop's terminal row, the `FinalizeFailed` row, the `Failed` row of a failed start (Start and Restart arms) and
-  the reclamation executor's row each carry the prior row's `workload_addr`; a Service allocation whose row is `Pending` or terminal and carries an
+- **The terminal-row carry.** The stop's terminal row, the `FinalizeFailed` row, the `Failed` row of a failed start (Start and Restart arms), the
+  `Failed` row of the post-`Running` fail-closed paths and the reclamation executor's row each carry the prior row's `workload_addr`; a Service allocation whose row is `Pending` or terminal and carries an
   address has no backend.
 - **Readers.** A grep-level check in DELIVER of every reader of `workload_addr` outside the `Running` gates (the handlers at `handlers.rs:129-144`,
   the CLI render at `render.rs:606`) for a reading that assumes a non-`Running` row has none.
@@ -1514,7 +1543,7 @@ supersession arm of § Superseding a launch is added).
 | R6 | Restart `:2263-2291` | any other `GuestNetwork` error: `Failed` successor row `WorkloadNetnsProvisionFailed` | unchanged |
 | R7 | Restart `:2293-2330` | `ensure_intercept_identity` fails: successor unwound, `finish_restart(Err)`, no successor row | **`Failed` successor row** (ADR-0337), reason as S5, then `finish_restart`; a Job's row is final (S5-J) |
 | R8 | Restart `:2332-2344` | no driver of the kind composed: synthesised `StartRejected`, `Failed` row | unchanged |
-| R9 | Restart `:2349-2364` | duplicate owner: `finish_restart(Ok)` | **N-IDEM**, as S7 |
+| R9 | Restart `:2349-2364` | duplicate owner: `finish_restart(Ok)` | **N-IDEM**, as S7. The successor's `Pending` write is skipped when its own row is non-terminal (§ "The guest address is on record"), so the duplicate writes no row and leaves the owner's row as it is |
 | R10 | Restart `:2419-2439` | `Err(other)` from `driver.start`: `finish_restart(Err)`, no row | **`Failed` successor row**, as S8 (N-4, W3), then `finish_restart(Err)` |
 | R11 | Restart `:2465-2526` | the successor row write fails | **N-REC** |
 | R12 | Restart (SD-3) | `StartSuperseded` through `finish_restart` | **abandoned row** (N-4), then `finish_restart` |

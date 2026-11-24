@@ -100,6 +100,26 @@ single-remover scan's allow-list includes the `CgroupFs` adapters' own probe rem
 Placement pinning, growth and the relation to #97 bind no code in this slice: answers 6 to 8 of the feature delta, with the directions carried by
 L2 and L3.
 
+**Resolution of the DISTILL gaps in the stuck-VM design (2026-11-24, N3 and N6 of `distill/test-scenarios.md`). Choices within approved
+decisions; nothing operator-visible changes and no ruling is reopened.**
+
+1. **Duplicate-owner restart (ADR-0353, no new reason).** The Restart arm applies the Start arm's rule to its successor: no `Pending` row when
+   the successor's own row is non-terminal. A duplicate dispatch (`AllocationAlreadyOwned`) then writes no row, ends none, keeps the owner's
+   lease and returns `Ok(())` to `finish_restart`. "Duplicate owner after this dispatch wrote `Pending`" is unreachable (a claim is taken only
+   after its dispatch wrote `Pending`; rows are never deleted; a launch-ending path releases the claim before returning), so ADR-0355 gains no
+   reason and the N-4 ruling holds. DELIVER confirms the release-before-return premise. The R9 test is rearranged by DISTILL to an owner with
+   its `Pending` row present; "owner claim, no row" is not produced by `serve` plus `deploy`. Rejected: a terminal reason for a duplicate
+   (reaches no real state, adds a persisted variant and fixtures); a driver ownership query before the write (new port surface).
+2. **The post-`Running` fail-closed `Failed` row carries the `Running` row's address (ADR-0353 carry table).** The VMM may hold its CID until
+   the stop settles (`KilledNotReaped`), and boot reads the address from the newest row. The provision-failure `Failed` row has none to carry.
+   `assert_superseding_failed_row` changes to equality.
+3. **Test seams: none added.** (a) `RealVmHostState::new` already takes `cgroup_root`; the tempdir tests that need no cgroupfs notification use
+   it, and the ordering and mid-wait cases of ADR-0349 are shown on real cgroupfs (the held-scope Tier-3 test). (b) The wrapper is chosen by
+   the guest's `PATH` through the execvp-faithful resolution now pinned in item 4 of ADR-0352's contract; a builder would let a test run a
+   launch the product never builds. (c) The stand-in hypervisor is a test-compiled Rust program built with the `nested-launch-rustc` guest's
+   `rustc`, passed to `with_binary`. Dropped: the uninterruptible-I/O stand-in (S-VOL-T3-12's real held flush covers it), the real core dump
+   (a mapping unit test covers it) and a `PermissionDenied` removal (unreachable as root).
+
 ## Scope limitations and their tracking issues
 
 | # | Limitation | Issue |

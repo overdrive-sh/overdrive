@@ -37,5 +37,8 @@ the state exist).
 - A launch whose `Pending` write fails retires and tears down its lease and returns the typed error; no VMM that can hold a CID exists without a row
   that names its address.
 - A `Pending` row must never outlive its launch: [ADR-0355](adr-0355-a-launch-that-ends-before-running-ends-its-pending-row-with-a-terminal-row-that-names-why.md).
-- The stop, `FinalizeFailed`, failed-start and reclamation rows carry the prior row's address.
+- The stop, `FinalizeFailed`, failed-start, post-`Running` fail-closed `Failed` and reclamation rows carry the prior row's address; a provision
+  failure writes no `Pending` row and has none to carry.
+- Both launch arms write no `Pending` row when the allocation's own row is non-terminal, so a duplicate dispatch (a driver answer of
+  `AllocationAlreadyOwned`) writes no row and ends none; no reason is added to ADR-0355.
 - ADR-0156's "boot reclamation precedes every `assign`" has its input: the address of every VMM that can hold a CID is on a row.
