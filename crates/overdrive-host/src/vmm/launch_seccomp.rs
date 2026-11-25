@@ -2,16 +2,16 @@
 //!
 //! The pure builder is the functional core: [`VmmLaunchSeccompFilter::for_target`]
 //! builds the compile target's classic-BPF deny-list program in the parent,
-//! with no syscall and no I/O. The imperative shell is the audited launch hook
-//! `register_launch_child_hook` in the parent module, which installs the
-//! program in the forked child before its first exec.
+//! with no syscall and no I/O. The imperative shell is the launch primitive
+//! `launch_clone`, which installs the program in the clone child before its
+//! `execve`.
 //!
 //! The program exists for `x86_64` only (user ruling 10); every other target is
 //! refused at run time with [`LaunchSeccompUnsupportedArch`] (GH #302).
 
 /// The VMM launch seccomp program (D-295-R22, ADR-0143): built in the parent
 /// for the compile target's syscall ABI, installed in the child by
-/// `register_launch_child_hook`.
+/// `launch_clone`.
 pub(super) struct VmmLaunchSeccompFilter {
     program: Vec<libc::sock_filter>,
 }

@@ -99,13 +99,7 @@ pub trait Vmm: Send + Sync + 'static {
     /// executable returns [`VmmProbeError::LaunchToolUnavailable`] with
     /// the executable name and the original `std::io::Error`; `NotFound`
     /// is reported as PATH absence and all other I/O kinds as an execution
-    /// failure. A launch seccomp filter that has no program for the target
-    /// architecture, that the kernel refuses, or under which the launch
-    /// executable does not exit successfully returns
-    /// [`VmmProbeError::LaunchSeccompUnsupportedArch`],
-    /// [`VmmProbeError::LaunchSeccompInstall`], or
-    /// [`VmmProbeError::LaunchSeccompProbeExit`] respectively. The composition
-    /// root emits `health.startup.refused` with the structured cause and the
+    /// failure. The composition root emits `health.startup.refused` with the structured cause and the
     /// process refuses to start.
     async fn probe(&self) -> std::result::Result<(), VmmProbeError>;
 
@@ -134,10 +128,19 @@ pub trait Vmm: Send + Sync + 'static {
     /// - Exactly one hypervisor process is running, confined per
     ///   `config.confinement`, with its rootfs clone staged at
     ///   `config.rootfs.clone_dest()`.
+    /// - The process was created inside `config.cgroup_scope`: its first
+    ///   instruction ran as a member, so every process and thread of the VMM
+    ///   tree is a member from the start. The caller does not place it.
     /// - The returned [`VmProcess`] carries a live [`VmControl`] (the
     ///   process pid and its `--api-socket` path) and a
     ///   [`VmExitWatch`] that resolves exactly once, when the
     ///   hypervisor process itself exits.
+    ///
+    /// # Preconditions
+    /// - The scope directory `config.cgroup_scope` names exists and is a valid
+    ///   placement target for the caller. A refused placement fails `create`
+    ///   with no process left, and the error names the step
+    ///   (`joining the cgroup failed: ...`).
     ///
     /// # Edge cases
     /// - `config.rootfs.clone_dest()` already exists (a crashed prior
@@ -507,35 +510,6 @@ pub enum VmmProbeError {
         launch_tool_failure_description(.source)
     )]
     LaunchToolUnavailable { tool: String, source: std::io::Error },
-
-    /// No VMM launch seccomp program exists for this target architecture
-    /// (D-295-R22, ADR-0143).
-    #[error("no VMM launch seccomp program for target architecture {target_arch}")]
-    LaunchSeccompUnsupportedArch {
-        /// `std::env::consts::ARCH` of the running build.
-        target_arch: &'static str,
-    },
-
-    /// Spawning a launch tool under the VMM launch seccomp filter failed: the
-    /// kernel refused the filter, or a launch-hook step failed (D-295-R22).
-    #[error("VMM launch seccomp filter could not be installed: {source}")]
-    LaunchSeccompInstall {
-        /// The spawn error carrying the child's errno.
-        source: std::io::Error,
-    },
-
-    /// A launch tool spawned under the VMM launch seccomp filter did not exit
-    /// successfully; a foreign-ABI kill ends it with `SIGSYS` (D-295-R22).
-    #[error(
-        "launch tool under the VMM launch seccomp filter ended with exit code \
-         {exit_code:?}, signal {signal:?}"
-    )]
-    LaunchSeccompProbeExit {
-        /// The tool's exit code, when it exited.
-        exit_code: Option<i32>,
-        /// The signal that ended the tool, when it was killed.
-        signal: Option<u8>,
-    },
 }
 
 fn launch_tool_failure_description(source: &std::io::Error) -> &'static str {
@@ -579,23 +553,5 @@ impl VmmProbeError {
     #[must_use]
     pub fn launch_tool_unavailable(tool: impl Into<String>, source: std::io::Error) -> Self {
         Self::LaunchToolUnavailable { tool: tool.into(), source }
-    }
-
-    /// [`VmmProbeError::LaunchSeccompUnsupportedArch`] for `target_arch`.
-    #[must_use]
-    pub const fn launch_seccomp_unsupported_arch(target_arch: &'static str) -> Self {
-        Self::LaunchSeccompUnsupportedArch { target_arch }
-    }
-
-    /// [`VmmProbeError::LaunchSeccompInstall`] carrying the spawn error.
-    #[must_use]
-    pub const fn launch_seccomp_install(source: std::io::Error) -> Self {
-        Self::LaunchSeccompInstall { source }
-    }
-
-    /// [`VmmProbeError::LaunchSeccompProbeExit`] for the tool's exit status.
-    #[must_use]
-    pub const fn launch_seccomp_probe_exit(exit_code: Option<i32>, signal: Option<u8>) -> Self {
-        Self::LaunchSeccompProbeExit { exit_code, signal }
     }
 }

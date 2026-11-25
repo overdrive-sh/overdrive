@@ -8,7 +8,6 @@
 //! IS the contract.
 
 mod create_workload_scope;
-mod place_pid_in_scope;
 mod workloads_slice_bootstrap;
 mod write_resource_limits;
 mod write_resource_limits_warn_on_error;

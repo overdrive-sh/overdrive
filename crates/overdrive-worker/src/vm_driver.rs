@@ -1888,21 +1888,6 @@ impl Driver for VmDriver {
             beacon_state.live.insert(spec.alloc.clone(), (transport.cid(), transport.launch()));
         }
 
-        if let Err(err) = self.cgroup_manager.place_pid_in_scope(&scope, control.pid).await {
-            clear_beacon_launch(&mut self.beacon_state.lock(), &spec.alloc);
-            let primary = start_rejected_unclassified(format!("place VMM pid in scope: {err}"));
-            return Err(self
-                .cleanup_after_start_failure(
-                    &spec.alloc,
-                    &run_dir,
-                    Some(&scope),
-                    Some(&control),
-                    Some(&rootfs),
-                    primary,
-                )
-                .await);
-        }
-
         // The three-way race (ADR-0082 §D3). `biased;` is load-bearing:
         // if the beacon and the VMM exit are both ready, the beacon
         // wins — a guest that beaconed and then died is a STARTED VM

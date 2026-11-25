@@ -895,6 +895,9 @@ pub struct VmConfig {
     pub vcpus: NonZeroU8,
     pub run_dir: VmRunDir,
     pub confinement: VmConfinement,
+    /// The allocation's cgroup scope. `Vmm::create` creates the VMM process
+    /// inside it (`clone3` with `CLONE_INTO_CGROUP`), so its first instruction
+    /// runs as a member. The scope directory must exist when `create` is called.
     pub cgroup_scope: CgroupPath,
     /// The workload's volume disk, attached as the second `--disk` after the
     /// rootfs (GH #348, ADR-0315). `None` states no volume.

@@ -208,22 +208,6 @@ impl CgroupManager {
         self.fs.create_dir(&dir).await
     }
 
-    /// Place a process PID into the workload scope's `cgroup.procs`
-    /// file. Writes `"{pid}\n"`.
-    ///
-    /// # Errors
-    /// Returns the underlying `std::io::Error` from
-    /// [`CgroupFs::write`].
-    pub async fn place_pid_in_scope(
-        &self,
-        scope: &CgroupPath,
-        pid: u32,
-    ) -> Result<(), std::io::Error> {
-        let path = scope.resolve(&self.cgroup_root).join("cgroup.procs");
-        let payload = format!("{pid}\n");
-        self.fs.write(&path, payload.as_bytes()).await
-    }
-
     /// Write `cpu.weight` and `memory.max` for the given scope,
     /// derived from `Resources` per ADR-0026 D9.
     ///

@@ -19,7 +19,7 @@
 //! `ObservationStore`, and `Llm`.
 
 // `deny`, not `forbid`: the audited VMM launch hook
-// (`vmm::register_launch_child_hook`, ADR-0129 / ADR-0143) carries the crate's
+// (`vmm::launch_clone`, ADR-0129 / ADR-0143 / ADR-0352) carries the crate's
 // only production `#[allow(unsafe_code)]`.
 #![deny(unsafe_code)]
 #![allow(clippy::missing_errors_doc, clippy::missing_panics_doc)]

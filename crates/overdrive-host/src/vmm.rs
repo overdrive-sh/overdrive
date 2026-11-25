@@ -10,14 +10,14 @@
 //! # `terminate` cooperates with `create`'s reaper
 //!
 //! [`Vmm::terminate`] takes only a bare [`VmControl`] — no handle to the
-//! spawned [`tokio::process::Child`], which is exclusively owned by the
-//! background task `create` spawns (only one thing may ever call
-//! `Child::wait`, or the two callers race the kernel's zombie-reap). So
+//! spawned process, whose pidfd is exclusively owned by the background task
+//! `create` spawns (only one thing may ever reap the child, or the two callers
+//! race the kernel's zombie-reap). So
 //! `create` also installs a per-pid [`VmProcessState`] into `self.live`:
 //! a `Notify` `terminate` uses to ask the reaper to kill the child now,
 //! and a `watch::Sender<Option<VmmExit>>` that lets ANY later `terminate`
 //! call — before or after the process actually exits — observe the
-//! outcome without racing the reaper's own `child.wait()`.
+//! outcome without racing the reaper's own wait.
 //!
 //! # `FICLONE` is real, self-applied, and never `cp`
 //!
@@ -34,9 +34,7 @@ use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
 use std::io;
 use std::os::unix::fs::MetadataExt;
-use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -50,9 +48,11 @@ use overdrive_core::traits::vmm::{
 use overdrive_core::vm::config::{DiskAttachment, VmConfig};
 use parking_lot::Mutex;
 use tokio::io::{AsyncReadExt, BufReader};
-use tokio::process::{ChildStderr, Command};
+use tokio::net::unix::pipe::Receiver;
+use tokio::process::Command;
 use tokio::sync::{Notify, oneshot, watch};
 
+mod launch_clone;
 mod launch_seccomp;
 
 /// Default probe target for §D5 scenario 1 (VM image directory reflink
@@ -88,9 +88,6 @@ trait VmmProbeSubstrate: Send + Sync {
         binary: PathBuf,
     ) -> std::result::Result<(), VmmProbeError>;
     async fn execute_launch_tool(&self, tool: &'static str) -> io::Result<()>;
-    /// Prove at boot that the kernel accepts the exact VMM launch seccomp
-    /// program and that an exec proceeds under it (D-295-R22, ADR-0143).
-    async fn check_launch_seccomp(&self) -> std::result::Result<(), VmmProbeError>;
     async fn check_kvm(&self) -> std::result::Result<(), VmmProbeError>;
     async fn check_run_dir(&self, run_dir_root: PathBuf) -> std::result::Result<(), VmmProbeError>;
 }
@@ -112,24 +109,6 @@ impl VmmProbeSubstrate for RealVmmProbeSubstrate {
 
     async fn execute_launch_tool(&self, tool: &'static str) -> io::Result<()> {
         Command::new(tool).arg("--version").output().await.map(|_| ())
-    }
-
-    async fn check_launch_seccomp(&self) -> std::result::Result<(), VmmProbeError> {
-        let filter = launch_seccomp::VmmLaunchSeccompFilter::for_target()
-            .map_err(|error| VmmProbeError::launch_seccomp_unsupported_arch(error.target_arch))?;
-        let mut command = Command::new("prlimit");
-        command.arg("--version").stdout(Stdio::null()).stderr(Stdio::null());
-        register_launch_child_hook(&mut command, 3, filter);
-
-        let status = command.status().await.map_err(VmmProbeError::launch_seccomp_install)?;
-        if status.success() {
-            return Ok(());
-        }
-
-        Err(VmmProbeError::launch_seccomp_probe_exit(
-            status.code(),
-            status.signal().and_then(|signal| u8::try_from(signal).ok()),
-        ))
     }
 
     async fn check_kvm(&self) -> std::result::Result<(), VmmProbeError> {
@@ -236,7 +215,7 @@ impl CloudHypervisorVmm {
 
     /// Override the cgroup2 mount a `CgroupPath` resolves under (default
     /// `/sys/fs/cgroup`). The composition root passes the value it gives
-    /// `CgroupManager`. No caller until step 09-05.
+    /// `CgroupManager`.
     #[must_use]
     pub fn with_cgroup_root(mut self, root: PathBuf) -> Self {
         self.cgroup_root = root;
@@ -274,7 +253,9 @@ impl CloudHypervisorVmm {
         self.searched_binary_paths().iter().any(|p| Path::new(p).exists())
     }
 
-    /// Build the confined `cloud-hypervisor` spawn command (§(c)): the
+    /// Build the confined `cloud-hypervisor` launch command (§(c)), read by
+    /// [`launch_clone::launch`] for its program and arguments only (the spawn
+    /// primitive owns standard I/O): the
     /// `prlimit`/`setpriv` wrapper prefix, the hypervisor binary, its args
     /// (including `--seccomp`), then `--landlock` and the complete ordered
     /// explicit rules from `VmConfig::landlock_rules`. The FLAG literal
@@ -332,62 +313,7 @@ impl CloudHypervisorVmm {
         for rule in config.landlock_rules() {
             cmd.arg("--landlock-rules").arg(rule.to_rule_arg());
         }
-        cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped()).kill_on_drop(false);
         cmd
-    }
-}
-
-/// The single audited launch hook (ADR-0129, ADR-0143): registers one
-/// `pre_exec` closure that, in the forked child, (1) marks every descriptor
-/// at or above `first_closed` close-on-exec, (2) sets `no_new_privs`, and
-/// (3) loads `filter`, returning the first step's `io::Error` on failure.
-/// The crate's only production `#[allow(unsafe_code)]`.
-#[allow(unsafe_code)]
-fn register_launch_child_hook(
-    cmd: &mut tokio::process::Command,
-    first_closed: std::os::fd::RawFd,
-    filter: launch_seccomp::VmmLaunchSeccompFilter,
-) {
-    #[allow(
-        clippy::cast_possible_truncation,
-        reason = "the filter builder guarantees its program fits sock_fprog.len"
-    )]
-    let program_len = filter.program().len() as u16;
-
-    unsafe {
-        cmd.as_std_mut().pre_exec(move || {
-            let close_result = libc::syscall(
-                libc::SYS_close_range,
-                first_closed.cast_unsigned(),
-                libc::c_uint::MAX,
-                libc::CLOSE_RANGE_CLOEXEC,
-            );
-            if close_result == -1 {
-                return Err(io::Error::last_os_error());
-            }
-
-            if libc::prctl(
-                libc::PR_SET_NO_NEW_PRIVS,
-                1 as libc::c_ulong,
-                0 as libc::c_ulong,
-                0 as libc::c_ulong,
-                0 as libc::c_ulong,
-            ) == -1
-            {
-                return Err(io::Error::last_os_error());
-            }
-
-            let program = filter.program();
-            let filter_program =
-                libc::sock_fprog { len: program_len, filter: program.as_ptr().cast_mut() };
-            if libc::syscall(libc::SYS_seccomp, libc::SECCOMP_SET_MODE_FILTER, 0, &filter_program)
-                == -1
-            {
-                return Err(io::Error::last_os_error());
-            }
-
-            Ok(())
-        });
     }
 }
 
@@ -405,17 +331,32 @@ fn classify_launch_spawn_error(
     wrapper: &[String],
     source: &io::Error,
 ) -> VmmError {
-    if source.kind() == io::ErrorKind::NotFound && launched_executable == OsStr::new(&wrapper[0]) {
-        VmmError::ConfinementUnavailable {
+    let step_failure =
+        source.get_ref().and_then(|inner| inner.downcast_ref::<launch_clone::StepFailure>());
+    // A refused placement is a property of the scope, never of the wrapper.
+    let refused_placement =
+        step_failure.is_some_and(|failure| failure.step == launch_clone::JOINING_THE_CGROUP);
+    if source.kind() == io::ErrorKind::NotFound
+        && launched_executable == OsStr::new(&wrapper[0])
+        && !refused_placement
+    {
+        return VmmError::ConfinementUnavailable {
             control: ConfinementControl::UidDrop,
             detail: format!("confinement wrapper {} not found: {source}", wrapper[0]),
-        }
-    } else {
-        VmmError::create(format!(
-            "spawning VMM launch executable {} failed: {source}",
-            launched_executable.to_string_lossy()
-        ))
+        };
     }
+    let executable = launched_executable.to_string_lossy();
+    // A failing launch step names itself: `<step> failed: <executable>: <errno>`.
+    step_failure.map_or_else(
+        || {
+            VmmError::create(format!(
+                "spawning VMM launch executable {executable} failed: {source}"
+            ))
+        },
+        |failure| {
+            VmmError::create(format!("{} failed: {executable}: {}", failure.step, failure.source))
+        },
+    )
 }
 
 async fn cleanup_rootfs_clone_after_create_failure(clone_dest: &Path, failure_stage: &'static str) {
@@ -444,8 +385,6 @@ impl Vmm for CloudHypervisorVmm {
         self.probe_substrate.check_cloud_hypervisor(self.binary.clone()).await?;
 
         probe_launch_toolchain(self.probe_substrate.as_ref()).await?;
-
-        self.probe_substrate.check_launch_seccomp().await?;
 
         self.probe_substrate.check_kvm().await?;
 
@@ -563,21 +502,39 @@ impl Vmm for CloudHypervisorVmm {
         // and every inherited descriptor above stderr is closed on exec.
         let wrapper = config.confinement.launch_wrapper(config.rlimit_fsize());
         let vsock_arg = vhost_kernel_vsock_arg(cid);
-        let mut cmd = self.build_confined_command(config, &wrapper, &vsock_arg);
-        register_launch_child_hook(&mut cmd, libc::STDERR_FILENO + 1, launch_filter);
-        let launched_executable: OsString = cmd.as_std().get_program().to_owned();
-
-        // `let-else` is deliberately NOT used here (unlike the `child.id()`
-        // check below): the `Err` arm needs the `io::Error` detail, and
-        // extracting it from a `let-else`-failed scrutinee would need an
-        // `unwrap_err`-shaped call this workspace's lint profile forbids
-        // outside tests.
-        let spawn_result = cmd.spawn();
+        let cmd = self.build_confined_command(config, &wrapper, &vsock_arg);
+        let program = cmd.as_std().get_program().to_owned();
+        let args: Vec<OsString> = cmd.as_std().get_args().map(OsStr::to_owned).collect();
         drop(cmd);
+        let scope_dir = config.cgroup_scope.resolve(&self.cgroup_root);
 
-        #[allow(clippy::manual_let_else, clippy::single_match_else)]
-        let mut child = match spawn_result {
-            Ok(child) => child,
+        // ADR-0352: the VMM is created INSIDE its scope (`clone3` with
+        // `CLONE_INTO_CGROUP`), so its first instruction runs as a member. The
+        // whole launch is one blocking call that runs to completion once
+        // started: a dropped `create` future leaves a `Launched` that is dropped
+        // un-adopted, whose guard kills and reaps the VMM.
+        let launched = tokio::task::spawn_blocking(move || {
+            launch_clone::launch(&launch_clone::LaunchRequest {
+                program: &program,
+                args: &args,
+                scope_dir: &scope_dir,
+                filter: &launch_filter,
+            })
+        })
+        .await;
+        let launch_result = match launched {
+            Ok(result) => result,
+            Err(join_err) => {
+                cleanup_rootfs_clone_after_create_failure(
+                    config.rootfs.clone_dest(),
+                    "launch-spawn",
+                )
+                .await;
+                return Err(VmmError::create(format!("VMM launch task panicked: {join_err}")));
+            }
+        };
+        let launched = match launch_result {
+            Ok(launched) => launched,
             Err(source) => {
                 // §D6: the spawn failed after the clone succeeded — remove
                 // it. No partial artifact escapes a failed `create`.
@@ -586,24 +543,31 @@ impl Vmm for CloudHypervisorVmm {
                     "launch-spawn",
                 )
                 .await;
-                // Attribute a spawn failure to the process actually passed
-                // to `execve`; CH's own absence is still owned by the
-                // pre-check above.
-                return Err(classify_launch_spawn_error(&launched_executable, &wrapper, &source));
+                // A refused placement or a failing step names itself; CH's own
+                // absence is still owned by the pre-check above.
+                return Err(classify_launch_spawn_error(
+                    OsStr::new(&wrapper[0]),
+                    &wrapper,
+                    &source,
+                ));
             }
         };
-
-        let Some(pid) = child.id() else {
-            cleanup_rootfs_clone_after_create_failure(
-                config.rootfs.clone_dest(),
-                "missing-child-pid",
-            )
-            .await;
-            return Err(VmmError::create(
-                "spawned cloud-hypervisor child reported no pid".to_string(),
-            ));
+        let launch_clone::Launched { child, stderr: stderr_fd } = launched;
+        let pid = child.pid();
+        let watch = match child.into_watch() {
+            Ok(watch) => watch,
+            Err(source) => {
+                // The guard was dropped on the failure: the VMM is killed.
+                cleanup_rootfs_clone_after_create_failure(
+                    config.rootfs.clone_dest(),
+                    "launch-spawn",
+                )
+                .await;
+                return Err(VmmError::create(format!(
+                    "registering the VMM's pidfd with the reactor failed: {source}"
+                )));
+            }
         };
-        let stderr_pipe = child.stderr.take();
 
         let (exit_tx, exit_rx) = oneshot::channel::<VmmExit>();
         let (outcome_tx, _outcome_rx) = watch::channel::<Option<VmmExit>>(None);
@@ -619,14 +583,16 @@ impl Vmm for CloudHypervisorVmm {
 
         let live = Arc::clone(&self.live);
         tokio::spawn(async move {
-            let reader_handle = stderr_pipe.map(|pipe| spawn_stderr_capture(pipe, writer));
+            let reader_handle = Receiver::from_owned_fd(stderr_fd)
+                .ok()
+                .map(|pipe| spawn_stderr_capture(pipe, writer));
 
             let status = tokio::select! {
                 biased;
-                status = child.wait() => status,
+                status = watch.wait() => status,
                 () = state.kill_now.notified() => {
-                    let _ = child.start_kill();
-                    child.wait().await
+                    watch.kill();
+                    watch.wait().await
                 }
             };
 
@@ -838,15 +804,14 @@ fn volume_node_error(device: &Path, node: Option<&Path>, source: &io::Error) -> 
 /// Classify a resolved (or failed-to-observe) child exit into the
 /// adapter-agnostic [`VmmExit`] shape.
 fn classify_exit(
-    status: io::Result<std::process::ExitStatus>,
+    status: io::Result<rustix::process::WaitIdStatus>,
     stderr_tail: Option<String>,
 ) -> VmmExit {
     match status {
-        Ok(status) => VmmExit {
-            exit_code: status.code(),
-            signal: status.signal().and_then(|s| u8::try_from(s).ok()),
-            stderr_tail,
-        },
+        Ok(status) => {
+            let (exit_code, signal) = launch_clone::exit_of(&status);
+            VmmExit { exit_code, signal, stderr_tail }
+        }
         Err(_io_err) => VmmExit { exit_code: None, signal: None, stderr_tail },
     }
 }
@@ -861,7 +826,7 @@ fn classify_exit(
 /// Same non-blocking rationale as before: a daemonised grandchild holding
 /// the pipe open must never make `terminate` / the reaper hang on EOF.
 fn spawn_stderr_capture(
-    pipe: ChildStderr,
+    pipe: Receiver,
     writer: VmmDiagnosticsWriter,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
@@ -1077,30 +1042,23 @@ mod tests {
 
     placement!(host_pure);
 
-    /// The probe stages in their accepted order (FD § "[REF] Driven port — VMM launch seccomp filter (D-295-R22) — ACCEPTED 2026-09-24" (the startup probe order)): R2 removes
-    /// `ip`, and D-295-R22 inserts `launch-seccomp` after `setpriv`.
-    const ACCEPTED_PROBE_ORDER: [&str; 7] =
-        ["reflink", "cloud-hypervisor", "prlimit", "setpriv", "launch-seccomp", "kvm", "run-dir"];
+    /// The probe stages in their accepted order: R2 removes `ip`, and the
+    /// launch-seccomp stage is dropped (P-6): the real launch is the check.
+    const ACCEPTED_PROBE_ORDER: [&str; 6] =
+        ["reflink", "cloud-hypervisor", "prlimit", "setpriv", "kvm", "run-dir"];
 
     struct RecordingProbeSubstrate {
         visited: Arc<Mutex<Vec<&'static str>>>,
         /// A launch tool whose execution fails, and the failure's kind.
         launch_tool_failure: Option<(&'static str, io::ErrorKind)>,
-        /// The launch-seccomp stage's scripted failure; `None` passes.
-        launch_seccomp_failure: Mutex<Option<VmmProbeError>>,
     }
 
     impl RecordingProbeSubstrate {
         fn new(
             visited: &Arc<Mutex<Vec<&'static str>>>,
             launch_tool_failure: Option<(&'static str, io::ErrorKind)>,
-            launch_seccomp_failure: Option<VmmProbeError>,
         ) -> Self {
-            Self {
-                visited: Arc::clone(visited),
-                launch_tool_failure,
-                launch_seccomp_failure: Mutex::new(launch_seccomp_failure),
-            }
+            Self { visited: Arc::clone(visited), launch_tool_failure }
         }
     }
 
@@ -1130,12 +1088,6 @@ mod tests {
                 return Err(io::Error::new(kind, format!("injected {kind:?}")));
             }
             Ok(())
-        }
-
-        async fn check_launch_seccomp(&self) -> std::result::Result<(), VmmProbeError> {
-            self.visited.lock().push("launch-seccomp");
-            let scripted = self.launch_seccomp_failure.lock().take();
-            scripted.map_or(Ok(()), Err)
         }
 
         async fn check_kvm(&self) -> std::result::Result<(), VmmProbeError> {
@@ -1207,7 +1159,7 @@ mod tests {
         // the launcher needs no `ip`, so the probe never executes it.
         for kind in [io::ErrorKind::NotFound, io::ErrorKind::PermissionDenied] {
             let visited = Arc::new(Mutex::new(Vec::new()));
-            let vmm = vmm_over(RecordingProbeSubstrate::new(&visited, Some(("ip", kind)), None));
+            let vmm = vmm_over(RecordingProbeSubstrate::new(&visited, Some(("ip", kind))));
 
             let outcome = Vmm::probe(&vmm).await;
 
@@ -1231,8 +1183,7 @@ mod tests {
                 (io::ErrorKind::PermissionDenied, "could not execute: injected PermissionDenied"),
             ] {
                 let visited = Arc::new(Mutex::new(Vec::new()));
-                let vmm =
-                    vmm_over(RecordingProbeSubstrate::new(&visited, Some((tool, kind)), None));
+                let vmm = vmm_over(RecordingProbeSubstrate::new(&visited, Some((tool, kind))));
 
                 let error = Vmm::probe(&vmm)
                     .await
@@ -1256,102 +1207,6 @@ mod tests {
                     "{tool} {kind:?} must retain an honest diagnostic",
                 );
             }
-        }
-    }
-
-    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
-    /// S-ND295-44 — A target with no launch filter starts no microVM (each
-    /// launch-filter probe cause maps to its own typed probe error).
-    /// CONTRACT_SHAPE: pure-function.
-    #[allow(
-        clippy::doc_markdown,
-        reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
-    )]
-    #[tokio::test]
-    async fn each_launch_filter_probe_cause_maps_to_its_typed_error() {
-        let arch = std::env::consts::ARCH;
-
-        // On every target but x86_64 the real stage has no program to install
-        // and names the architecture before any spawn (user ruling 10).
-        #[cfg(not(target_arch = "x86_64"))]
-        {
-            let refusal = RealVmmProbeSubstrate.check_launch_seccomp().await;
-            match refusal {
-                Err(VmmProbeError::LaunchSeccompUnsupportedArch { target_arch }) => {
-                    assert_eq!(target_arch, arch, "the refusal must name the running architecture");
-                }
-                other => {
-                    panic!("the {arch} launch-seccomp stage must refuse as unsupported: {other:?}")
-                }
-            }
-        }
-
-        let sigsys = u8::try_from(libc::SIGSYS).expect("SIGSYS fits the VmmExit signal shape");
-        let causes = [
-            (
-                VmmProbeError::launch_seccomp_unsupported_arch(arch),
-                format!("no VMM launch seccomp program for target architecture {arch}"),
-            ),
-            (
-                VmmProbeError::launch_seccomp_install(io::Error::from_raw_os_error(libc::EINVAL)),
-                format!(
-                    "VMM launch seccomp filter could not be installed: {}",
-                    io::Error::from_raw_os_error(libc::EINVAL)
-                ),
-            ),
-            (
-                VmmProbeError::launch_seccomp_install(io::Error::from(io::ErrorKind::NotFound)),
-                format!(
-                    "VMM launch seccomp filter could not be installed: {}",
-                    io::Error::from(io::ErrorKind::NotFound)
-                ),
-            ),
-            (
-                VmmProbeError::launch_seccomp_probe_exit(Some(1), None),
-                "launch tool under the VMM launch seccomp filter ended with exit code Some(1), \
-                 signal None"
-                    .to_owned(),
-            ),
-            (
-                VmmProbeError::launch_seccomp_probe_exit(None, Some(sigsys)),
-                format!(
-                    "launch tool under the VMM launch seccomp filter ended with exit code None, \
-                     signal Some({sigsys})"
-                ),
-            ),
-        ];
-
-        for (cause, display) in causes {
-            let expected = format!("{cause:?}");
-            let visited = Arc::new(Mutex::new(Vec::new()));
-            let vmm = vmm_over(RecordingProbeSubstrate::new(&visited, None, Some(cause)));
-
-            let error = Vmm::probe(&vmm)
-                .await
-                .expect_err("a failing launch-seccomp stage must reject the probe");
-
-            let stages = visited.lock().clone();
-            assert_eq!(
-                stages.last(),
-                Some(&"launch-seccomp"),
-                "the probe must stop at the launch-seccomp stage for {expected}: {stages:?}",
-            );
-            let setpriv = stages.iter().position(|stage| *stage == "setpriv");
-            let seccomp = stages.iter().position(|stage| *stage == "launch-seccomp");
-            assert!(
-                setpriv.is_some() && setpriv < seccomp,
-                "the launch-seccomp stage must follow setpriv: {stages:?}",
-            );
-            assert!(
-                !stages.contains(&"kvm") && !stages.contains(&"run-dir"),
-                "no stage after launch-seccomp may run once it fails: {stages:?}",
-            );
-            assert_eq!(
-                format!("{error:?}"),
-                expected,
-                "the probe must return the stage's typed launch-seccomp error unchanged",
-            );
-            assert_eq!(error.to_string(), display, "the pinned diagnostic must render");
         }
     }
 
@@ -1535,7 +1390,6 @@ mod launch_seccomp_kernel {
     use std::os::fd::{AsRawFd, OwnedFd};
     #[cfg(not(target_arch = "x86_64"))]
     use std::os::unix::fs::MetadataExt;
-    use std::path::Path;
     #[cfg(not(target_arch = "x86_64"))]
     use std::path::PathBuf;
     #[cfg(target_arch = "x86_64")]
@@ -1754,20 +1608,6 @@ mod launch_seccomp_kernel {
     /// The libtest path of [`launch_seccomp_child_role`].
     #[cfg(target_arch = "x86_64")]
     const CHILD_ROLE_TEST: &str = "vmm::launch_seccomp_kernel::launch_seccomp_child_role";
-    /// The libtest arguments that run exactly [`launch_seccomp_child_role`].
-    #[cfg(target_arch = "x86_64")]
-    const CHILD_ROLE_ARGS: [&str; 5] =
-        [CHILD_ROLE_TEST, "--exact", "--include-ignored", "--nocapture", "--test-threads=1"];
-    /// The file a hook-step case's launch target creates when it runs.
-    #[cfg(target_arch = "x86_64")]
-    const CHILD_MARKER_ENV: &str = "OVERDRIVE_LAUNCH_SECCOMP_MARKER";
-    /// The launch target of the hook-step cases: it creates the marker file.
-    #[cfg(target_arch = "x86_64")]
-    const MARKER_ROLE: &str = "marker";
-    /// The hook-step control: the intermediate refuses no hook step.
-    #[cfg(target_arch = "x86_64")]
-    const NO_STIMULUS_ROLE: &str = "hook-step-none";
-
     /// The thirteen TAP-mutating requests (FD § "[REF] Driven port — VMM launch seccomp filter (D-295-R22) — ACCEPTED 2026-09-24" (the thirteen-row deny-list table)), in table order.
     #[cfg(target_arch = "x86_64")]
     const DENIED_REQUESTS: [&str; 13] = [
@@ -1802,10 +1642,9 @@ mod launch_seccomp_kernel {
     #[cfg(target_arch = "x86_64")]
     #[derive(Clone, Copy)]
     enum Launch {
-        /// Through the production `register_launch_child_hook` with the
-        /// production program.
+        /// With the production launch filter installed by the test harness.
         Hooked { first_closed: std::os::fd::RawFd },
-        /// The contrast: the same child with no hook.
+        /// The contrast: the same child with no filter.
         Unhooked,
     }
 
@@ -1842,19 +1681,6 @@ mod launch_seccomp_kernel {
                 .collect()
         }
 
-        /// The free text after the tag of every report record of `kind`, for
-        /// records whose payload is prose rather than `k=v` fields. Matched
-        /// wherever the tag appears on a line, as in [`Self::records`].
-        fn texts(&self, kind: &str) -> Vec<String> {
-            String::from_utf8_lossy(&self.output.stdout)
-                .lines()
-                .filter_map(|line| line.find(REPORT).map(|at| &line[at + REPORT.len()..]))
-                .filter_map(|record| {
-                    record.trim_start().strip_prefix(kind)?.strip_prefix(' ').map(str::to_owned)
-                })
-                .collect()
-        }
-
         fn signal(&self) -> Option<i32> {
             std::os::unix::process::ExitStatusExt::signal(&self.output.status)
         }
@@ -1878,6 +1704,55 @@ mod launch_seccomp_kernel {
                 String::from_utf8_lossy(&self.output.stdout),
                 String::from_utf8_lossy(&self.output.stderr),
             )
+        }
+    }
+
+    /// Test harness: make the re-exec'd child run under the production launch
+    /// filter, with every descriptor from `first_closed` marked close-on-exec
+    /// and `no_new_privs` set, as the launch sequence does. The filter cases
+    /// need descriptor 3 (the scratch TAP queue) to survive `exec`, which the
+    /// production sequence (`close_range(3, ..)`) never allows, so they install
+    /// the program themselves; the program under test is the production one.
+    #[cfg(target_arch = "x86_64")]
+    fn install_filter_for_reexec(
+        cmd: &mut tokio::process::Command,
+        first_closed: std::os::fd::RawFd,
+        filter: super::launch_seccomp::VmmLaunchSeccompFilter,
+    ) {
+        let program_len = u16::try_from(filter.program().len()).expect("the program fits");
+        // SAFETY: the closure runs in the forked child before exec and issues
+        // only `close_range`, `prctl` and `seccomp` raw system calls over values
+        // it captured: no allocation, lock or formatting.
+        unsafe {
+            cmd.pre_exec(move || {
+                let closed = libc::syscall(
+                    libc::SYS_close_range,
+                    first_closed.cast_unsigned(),
+                    libc::c_uint::MAX,
+                    libc::CLOSE_RANGE_CLOEXEC,
+                );
+                if closed == -1 {
+                    return Err(io::Error::last_os_error());
+                }
+                let (on, unused) = (libc::c_ulong::from(1_u32), libc::c_ulong::from(0_u32));
+                if libc::prctl(libc::PR_SET_NO_NEW_PRIVS, on, unused, unused, unused) == -1 {
+                    return Err(io::Error::last_os_error());
+                }
+                let program = libc::sock_fprog {
+                    len: program_len,
+                    filter: filter.program().as_ptr().cast_mut(),
+                };
+                if libc::syscall(
+                    libc::SYS_seccomp,
+                    libc::SECCOMP_SET_MODE_FILTER,
+                    0,
+                    &raw const program,
+                ) == -1
+                {
+                    return Err(io::Error::last_os_error());
+                }
+                Ok(())
+            });
         }
     }
 
@@ -1935,64 +1810,11 @@ mod launch_seccomp_kernel {
             if let Launch::Hooked { first_closed } = launch {
                 let filter = super::launch_seccomp::VmmLaunchSeccompFilter::for_target()
                     .expect("the 64-bit x86_64 target has a launch seccomp program");
-                super::register_launch_child_hook(&mut cmd, first_closed, filter);
+                install_filter_for_reexec(&mut cmd, first_closed, filter);
             }
             cmd.output().await.expect("spawn the re-exec'd child")
         });
         ChildRun { role, output }
-    }
-
-    /// Inheritable descriptors held across the spawn: a socket and a pipe
-    /// opened without their close-on-exec flags, each also duplicated at or
-    /// above 64 (`F_DUPFD`, still inheritable) so they sit clear of the
-    /// descriptor-3 boundary under test.
-    #[cfg(target_arch = "x86_64")]
-    struct InheritableDescriptors {
-        held: Vec<OwnedFd>,
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    impl InheritableDescriptors {
-        fn open() -> Self {
-            use std::os::fd::FromRawFd;
-
-            // SAFETY: socket(2) and pipe(2) without their close-on-exec flags
-            // are the deliberate fault stimulus; each descriptor they return
-            // is owned below exactly once.
-            let socket = unsafe { libc::socket(libc::AF_INET, libc::SOCK_DGRAM, 0) };
-            assert!(socket >= 0, "open an inheritable socket: {}", io::Error::last_os_error());
-            let mut pipe = [0; 2];
-            // SAFETY: `pipe` is a live two-element buffer for the call.
-            let rc = unsafe { libc::pipe(pipe.as_mut_ptr()) };
-            assert_eq!(rc, 0, "open an inheritable pipe: {}", io::Error::last_os_error());
-            let mut held = Vec::with_capacity(6);
-            for raw in [socket, pipe[0], pipe[1]] {
-                // SAFETY: `raw` is open; F_DUPFD returns a new descriptor
-                // without FD_CLOEXEC.
-                let high = unsafe { libc::fcntl(raw, libc::F_DUPFD, 64) };
-                assert!(high >= 64, "duplicate {raw} above 64: {}", io::Error::last_os_error());
-                // SAFETY: `raw` and `high` are open descriptors this fixture
-                // exclusively owns from here on.
-                held.push(unsafe { OwnedFd::from_raw_fd(raw) });
-                // SAFETY: as above.
-                held.push(unsafe { OwnedFd::from_raw_fd(high) });
-            }
-            let fixture = Self { held };
-            fixture.assert_inheritable();
-            fixture
-        }
-
-        fn assert_inheritable(&self) {
-            for fd in &self.held {
-                // SAFETY: F_GETFD only reads the flags of an open descriptor.
-                let flags = unsafe { libc::fcntl(fd.as_raw_fd(), libc::F_GETFD) };
-                assert!(
-                    flags >= 0 && flags & libc::FD_CLOEXEC == 0,
-                    "fixture descriptor {} must stay inheritable (flags {flags})",
-                    fd.as_raw_fd(),
-                );
-            }
-        }
     }
 
     #[cfg(target_arch = "x86_64")]
@@ -2266,275 +2088,6 @@ mod launch_seccomp_kernel {
         report(format_args!("i386_control getpid={returned} pid={}", std::process::id()));
     }
 
-    // ------------------------------------------------------------------
-    // x86_64: a failed launch-hook step is a launch error (S-ND295-41)
-    // ------------------------------------------------------------------
-
-    /// One of the launch hook's three child steps (FD § "[REF] Driven port —
-    /// VMM launch seccomp filter (D-295-R22) — ACCEPTED 2026-09-24" (the three
-    /// child steps of `register_launch_child_hook`)).
-    #[cfg(target_arch = "x86_64")]
-    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-    enum HookStep {
-        /// Step 1: `close_range(first_closed, ~0U, CLOSE_RANGE_CLOEXEC)`.
-        CloseRange,
-        /// Step 2: `prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0)`.
-        NoNewPrivs,
-        /// Step 3: `seccomp(SECCOMP_SET_MODE_FILTER, 0, &fprog)`.
-        LoadFilter,
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    impl HookStep {
-        const ALL: [Self; 3] = [Self::CloseRange, Self::NoNewPrivs, Self::LoadFilter];
-
-        /// The intermediate child role that refuses this step.
-        const fn role(self) -> &'static str {
-            match self {
-                Self::CloseRange => "hook-step-close-range",
-                Self::NoNewPrivs => "hook-step-no-new-privs",
-                Self::LoadFilter => "hook-step-load-filter",
-            }
-        }
-
-        fn from_role(role: &str) -> Option<Self> {
-            Self::ALL.into_iter().find(|step| step.role() == role)
-        }
-
-        /// The field naming this step in a `stimulus` report record.
-        const fn key(self) -> &'static str {
-            match self {
-                Self::CloseRange => "close_range",
-                Self::NoNewPrivs => "no_new_privs",
-                Self::LoadFilter => "seccomp",
-            }
-        }
-
-        /// The system call number the stimulus refuses for this step, and the
-        /// low word of the first argument it must also carry (`prctl` is
-        /// refused only for `PR_SET_NO_NEW_PRIVS`).
-        fn refused_call(self) -> (u32, Option<u32>) {
-            let number =
-                |nr: libc::c_long| u32::try_from(nr).expect("x86_64 syscall numbers fit u32");
-            match self {
-                Self::CloseRange => (number(libc::SYS_close_range), None),
-                Self::NoNewPrivs => (
-                    number(libc::SYS_prctl),
-                    Some(u32::try_from(libc::PR_SET_NO_NEW_PRIVS).expect("the prctl option fits")),
-                ),
-                Self::LoadFilter => (number(libc::SYS_seccomp), None),
-            }
-        }
-    }
-
-    /// `AUDIT_ARCH_X86_64` (`linux/audit.h`); the locked `libc` does not
-    /// export it.
-    #[cfg(target_arch = "x86_64")]
-    const STIMULUS_AUDIT_ARCH_X86_64: u32 = 0xC000_003E;
-
-    #[cfg(target_arch = "x86_64")]
-    const fn bpf_insn(code: u16, jt: u8, jf: u8, k: u32) -> libc::sock_filter {
-        libc::sock_filter { code, jt, jf, k }
-    }
-
-    /// The fault stimulus of the hook-step cases (test support): a
-    /// classic-BPF program that returns `ERRNO(EPERM)` for exactly `step`'s
-    /// system call (for `prctl`, only with `PR_SET_NO_NEW_PRIVS` as its first
-    /// argument) and allows every other call. The intermediate installs it
-    /// before it registers the production hook, so the forked launch child
-    /// inherits it and that one hook step fails with `EPERM`.
-    #[cfg(target_arch = "x86_64")]
-    fn step_refusal_program(step: HookStep) -> Vec<libc::sock_filter> {
-        let code = |bits: u32| u16::try_from(bits).expect("classic-BPF opcodes fit u16");
-        let offset = |at: usize| u32::try_from(at).expect("seccomp_data offsets fit u32");
-        let load = code(libc::BPF_LD | libc::BPF_W | libc::BPF_ABS);
-        let jeq = code(libc::BPF_JMP | libc::BPF_JEQ | libc::BPF_K);
-        let ret = code(libc::BPF_RET | libc::BPF_K);
-        let allow = libc::SECCOMP_RET_ALLOW;
-        let refuse =
-            libc::SECCOMP_RET_ERRNO | u32::try_from(libc::EPERM).expect("EPERM is positive");
-        let (nr, first_argument) = step.refused_call();
-        let mut program = vec![
-            bpf_insn(load, 0, 0, offset(std::mem::offset_of!(libc::seccomp_data, arch))),
-            // A foreign ABI is outside the stimulus: allow it.
-            bpf_insn(jeq, 1, 0, STIMULUS_AUDIT_ARCH_X86_64),
-            bpf_insn(ret, 0, 0, allow),
-            bpf_insn(load, 0, 0, offset(std::mem::offset_of!(libc::seccomp_data, nr))),
-        ];
-        match first_argument {
-            None => program.extend([
-                bpf_insn(jeq, 0, 1, nr),
-                bpf_insn(ret, 0, 0, refuse),
-                bpf_insn(ret, 0, 0, allow),
-            ]),
-            // `args[0]`'s low word: the target is little-endian.
-            Some(argument) => program.extend([
-                bpf_insn(jeq, 0, 3, nr),
-                bpf_insn(load, 0, 0, offset(std::mem::offset_of!(libc::seccomp_data, args))),
-                bpf_insn(jeq, 0, 1, argument),
-                bpf_insn(ret, 0, 0, refuse),
-                bpf_insn(ret, 0, 0, allow),
-            ]),
-        }
-        program
-    }
-
-    /// Set `no_new_privs` on this process, as seccomp(2) requires before an
-    /// unprivileged filter load.
-    #[cfg(target_arch = "x86_64")]
-    fn set_no_new_privs() {
-        let (on, unused) = (libc::c_ulong::from(1_u32), libc::c_ulong::from(0_u32));
-        // SAFETY: `prctl` with integer arguments only.
-        let rc = unsafe { libc::prctl(libc::PR_SET_NO_NEW_PRIVS, on, unused, unused, unused) };
-        assert_eq!(rc, 0, "set no_new_privs: {}", io::Error::last_os_error());
-    }
-
-    #[cfg(target_arch = "x86_64")]
-    fn install_step_refusal(step: HookStep) {
-        let program = step_refusal_program(step);
-        let fprog = libc::sock_fprog {
-            len: u16::try_from(program.len()).expect("the stimulus program fits sock_fprog"),
-            filter: program.as_ptr().cast_mut(),
-        };
-        // SAFETY: `fprog` points at `program`, live and unmodified for the
-        // whole call; the kernel copies the instructions before returning.
-        let rc = unsafe {
-            libc::syscall(
-                libc::SYS_seccomp,
-                libc::c_ulong::from(libc::SECCOMP_SET_MODE_FILTER),
-                libc::c_ulong::from(0_u32),
-                &raw const fprog,
-            )
-        };
-        assert_eq!(rc, 0, "install the {step:?} refusal: {}", io::Error::last_os_error());
-    }
-
-    /// Issue `step`'s system call in this process in a form that changes
-    /// nothing, and return its errno (0 on success): an empty close-on-exec
-    /// range, a `no_new_privs` that is already set, and a read-only seccomp
-    /// action query. Run after the stimulus is installed, it witnesses that
-    /// exactly the targeted step is refused.
-    #[cfg(target_arch = "x86_64")]
-    fn probe_hook_step(step: HookStep) -> i32 {
-        let (none, on) = (libc::c_ulong::from(0_u32), libc::c_ulong::from(1_u32));
-        let last = libc::c_ulong::from(u32::MAX);
-        let allow_action: u32 = libc::SECCOMP_RET_ALLOW;
-        // SAFETY: each call passes integer arguments or a pointer to the live
-        // stack value `allow_action`, which the kernel only reads.
-        let rc = unsafe {
-            match step {
-                HookStep::CloseRange => libc::syscall(
-                    libc::SYS_close_range,
-                    last,
-                    last,
-                    libc::c_ulong::from(libc::CLOSE_RANGE_CLOEXEC),
-                ),
-                HookStep::NoNewPrivs => {
-                    libc::c_long::from(libc::prctl(libc::PR_SET_NO_NEW_PRIVS, on, none, none, none))
-                }
-                HookStep::LoadFilter => libc::syscall(
-                    libc::SYS_seccomp,
-                    libc::c_ulong::from(libc::SECCOMP_GET_ACTION_AVAIL),
-                    none,
-                    &raw const allow_action,
-                ),
-            }
-        };
-        if rc == -1 { io::Error::last_os_error().raw_os_error().expect("an OS error") } else { 0 }
-    }
-
-    /// The hook-step intermediate: sets `no_new_privs`, installs `step`'s
-    /// refusal (none for the control), reports which steps its own probes
-    /// see refused, then launches this binary as [`MARKER_ROLE`] through the
-    /// production hook with the production program (`first_closed = 3`, a
-    /// launch without a queue). A spawn error is classified by the adapter's
-    /// own `classify_launch_spawn_error` and reported; a spawned target is
-    /// awaited and its exit status reported.
-    #[cfg(target_arch = "x86_64")]
-    fn child_hook_step(step: Option<HookStep>) {
-        use std::process::Stdio;
-
-        let marker =
-            std::env::var_os(CHILD_MARKER_ENV).expect("the parent names the target's marker file");
-        set_no_new_privs();
-        if let Some(step) = step {
-            install_step_refusal(step);
-        }
-        let probes: Vec<String> = HookStep::ALL
-            .iter()
-            .map(|probe| format!("{}={}", probe.key(), probe_hook_step(*probe)))
-            .collect();
-        report(format_args!("stimulus {}", probes.join(" ")));
-
-        let target = std::env::current_exe().expect("locate this test binary");
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("launcher runtime");
-        runtime.block_on(async {
-            let mut cmd = tokio::process::Command::new(&target);
-            cmd.args(CHILD_ROLE_ARGS)
-                .env(CHILD_ROLE_ENV, MARKER_ROLE)
-                .env(CHILD_MARKER_ENV, marker.as_os_str())
-                .stdin(Stdio::null())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped());
-            let filter = super::launch_seccomp::VmmLaunchSeccompFilter::for_target()
-                .expect("the 64-bit x86_64 target has a launch seccomp program");
-            super::register_launch_child_hook(&mut cmd, 3, filter);
-            match cmd.output().await {
-                Ok(output) => {
-                    let status = output
-                        .status
-                        .code()
-                        .map_or_else(|| "signal".to_owned(), |code| code.to_string());
-                    report(format_args!("launch spawned=true status={status}"));
-                    eprintln!(
-                        "launch target stdout:\n{}\nlaunch target stderr:\n{}",
-                        String::from_utf8_lossy(&output.stdout),
-                        String::from_utf8_lossy(&output.stderr),
-                    );
-                }
-                Err(spawn_error) => {
-                    let wrapper = [target.to_string_lossy().into_owned()];
-                    let classified = super::classify_launch_spawn_error(
-                        target.as_os_str(),
-                        &wrapper,
-                        &spawn_error,
-                    );
-                    let errno = spawn_error
-                        .raw_os_error()
-                        .map_or_else(|| "none".to_owned(), |errno| errno.to_string());
-                    match &classified {
-                        super::VmmError::Create { detail } => {
-                            report(format_args!(
-                                "launch spawned=false errno={errno} variant=create"
-                            ));
-                            report(format_args!("launch_detail {detail}"));
-                        }
-                        other => {
-                            report(format_args!(
-                                "launch spawned=false errno={errno} variant=other"
-                            ));
-                            report(format_args!("launch_detail {other:?}"));
-                        }
-                    }
-                }
-            }
-        });
-    }
-
-    /// The hook-step cases' launch target: it creates the marker file, so the
-    /// file exists exactly when the target ran.
-    #[cfg(target_arch = "x86_64")]
-    fn child_marker() {
-        let marker =
-            std::env::var_os(CHILD_MARKER_ENV).expect("the launcher names the marker file");
-        std::fs::File::create_new(&marker).unwrap_or_else(|error| {
-            panic!("create the target marker {}: {error}", Path::new(&marker).display())
-        });
-    }
-
     /// The re-exec child role of the x86_64 cases. It does nothing unless a
     /// parent case re-executes this binary with `OVERDRIVE_LAUNCH_SECCOMP_CHILD`
     /// set; it then observes itself and prints `OVERDRIVE_LAUNCH_SECCOMP_REPORT`
@@ -2557,191 +2110,8 @@ mod launch_seccomp_kernel {
             Some("x32") => child_x32(),
             Some("i386") => child_i386_ioctl(),
             Some("i386-control") => child_i386_control(),
-            Some(MARKER_ROLE) => child_marker(),
-            Some(NO_STIMULUS_ROLE) => child_hook_step(None),
-            other => match other.and_then(HookStep::from_role) {
-                Some(step) => child_hook_step(Some(step)),
-                None => panic!("unknown launch_seccomp child role {other:?}"),
-            },
+            other => panic!("unknown launch_seccomp child role {other:?}"),
         }
-    }
-
-    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
-    /// S-ND295-41 — The launched child inherits exactly descriptors 0 to 3.
-    /// CONTRACT_SHAPE: bounded-change.
-    #[cfg(target_arch = "x86_64")]
-    #[overdrive_test(guest = "cgroup-default")]
-    #[test]
-    fn the_launched_child_inherits_exactly_descriptors_zero_to_three() {
-        let tap = ScratchTap::create();
-        let queue = attach_scratch_queue(&tap.name);
-        let inheritable = InheritableDescriptors::open();
-
-        for (first_closed, expected_fds, expected_fd3) in
-            [(CHILD_QUEUE_FD + 1, "0,1,2,3", tap.name.as_str()), (3, "0,1,2", "-")]
-        {
-            let child = run_child("descriptors", &tap, &queue, Launch::Hooked { first_closed });
-            child.assert_completed();
-            let records = child.records("descriptors");
-            assert_eq!(records.len(), 1, "one descriptor report per child: {child}");
-            assert_eq!(
-                records[0]["fds"], expected_fds,
-                "with first_closed = {first_closed} the exec'd child must hold exactly {expected_fds}: {child}",
-            );
-            assert_eq!(
-                records[0]["fd3_iff"], expected_fd3,
-                "descriptor 3 must be the scratch TAP queue exactly when first_closed = 4: {child}",
-            );
-        }
-        inheritable.assert_inheritable();
-    }
-
-    /// Re-exec this test binary as the hook-step intermediate: `step`'s
-    /// refusal installed (none for the control), then one launch through the
-    /// production hook of a target that creates `marker`.
-    #[cfg(target_arch = "x86_64")]
-    fn run_hook_step_intermediate(step: Option<HookStep>, marker: &Path) -> ChildRun {
-        let role = step.map_or(NO_STIMULUS_ROLE, HookStep::role);
-        let binary = std::env::current_exe().expect("locate this test binary");
-        let output = std::process::Command::new(binary)
-            .args(CHILD_ROLE_ARGS)
-            .env(CHILD_ROLE_ENV, role)
-            .env(CHILD_MARKER_ENV, marker)
-            .stdin(std::process::Stdio::null())
-            .output()
-            .expect("spawn the hook-step intermediate");
-        ChildRun { role, output }
-    }
-
-    /// Whether the launch target ran: its marker file exists. A failed read
-    /// other than absence is a harness failure, never "did not run".
-    #[cfg(target_arch = "x86_64")]
-    fn target_ran(marker: &Path) -> bool {
-        match std::fs::symlink_metadata(marker) {
-            Ok(_) => true,
-            Err(error) if error.kind() == io::ErrorKind::NotFound => false,
-            Err(error) => panic!("stat the target marker {}: {error}", marker.display()),
-        }
-    }
-
-    /// The intermediate's own probes must see exactly `refused` refused with
-    /// `EPERM` and every other hook step succeed, so the stimulus targets one
-    /// step and no other.
-    #[cfg(target_arch = "x86_64")]
-    fn assert_stimulus(run: &ChildRun, refused: Option<HookStep>) {
-        let records = run.records("stimulus");
-        assert_eq!(records.len(), 1, "one stimulus report: {run}");
-        for step in HookStep::ALL {
-            let expected = if Some(step) == refused { libc::EPERM } else { 0 };
-            assert_eq!(
-                records[0].get(step.key()),
-                Some(&expected.to_string()),
-                "with {refused:?} refused, the {step:?} probe must return errno {expected}: {run}",
-            );
-        }
-    }
-
-    /// The S-ND295-41 hook-step oracle: with no step refused the hooked
-    /// launch runs its target (the control); with `step` refused the spawn
-    /// fails, `classify_launch_spawn_error` maps it to `VmmError::Create`
-    /// carrying `EPERM`, and the target never runs.
-    #[cfg(target_arch = "x86_64")]
-    fn assert_a_failed_hook_step_is_a_launch_error(step: HookStep) {
-        let workspace = tempfile::tempdir().expect("per-case directory for the target markers");
-        let target = std::env::current_exe().expect("locate this test binary");
-
-        // Control: nothing refused, so the same hooked launch runs its target.
-        let control_marker = workspace.path().join("control-target-ran");
-        let control = run_hook_step_intermediate(None, &control_marker);
-        control.assert_completed();
-        assert_stimulus(&control, None);
-        let launches = control.records("launch");
-        assert_eq!(launches.len(), 1, "one launch report: {control}");
-        assert_eq!(
-            (launches[0]["spawned"].as_str(), launches[0].get("status").map(String::as_str)),
-            ("true", Some("0")),
-            "with no hook step refused, the hooked launch spawns and its target succeeds: {control}",
-        );
-        assert!(target_ran(&control_marker), "the control's target must run: {control}");
-
-        // The step refused: the launch is an error and the target never runs.
-        let marker = workspace.path().join("target-ran");
-        let refused = run_hook_step_intermediate(Some(step), &marker);
-        refused.assert_completed();
-        assert_stimulus(&refused, Some(step));
-        let launches = refused.records("launch");
-        assert_eq!(launches.len(), 1, "one launch report: {refused}");
-        assert_eq!(
-            launches[0]["spawned"], "false",
-            "a failed {step:?} hook step must fail the spawn, never launch silently: {refused}",
-        );
-        assert_eq!(
-            launches[0]["errno"],
-            libc::EPERM.to_string(),
-            "the spawn error must carry the child's errno from the failed {step:?} step: {refused}",
-        );
-        assert_eq!(
-            launches[0]["variant"], "create",
-            "classify_launch_spawn_error must map a hook failure to VmmError::Create: {refused}",
-        );
-        let details = refused.texts("launch_detail");
-        assert_eq!(details.len(), 1, "one classified detail: {refused}");
-        let eperm = io::Error::from_raw_os_error(libc::EPERM).to_string();
-        let executable = target.to_string_lossy();
-        assert!(
-            details[0].contains(&eperm) && details[0].contains(&*executable),
-            "the Create detail must name the launched executable and carry {eperm:?}: {refused}",
-        );
-        assert!(
-            !target_ran(&marker),
-            "the {step:?} failure must stop the target running: {refused}"
-        );
-    }
-
-    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
-    /// S-ND295-41 — The launched child inherits exactly descriptors 0 to 3 (a
-    /// failed close-on-exec step turns into a launch error, never a silent
-    /// launch).
-    /// CONTRACT_SHAPE: bounded-change.
-    ///
-    /// Lane: native x86_64 metal. The stimulus is the intermediate's own
-    /// seccomp filter refusing `close_range` with `EPERM`; no root and no TAP
-    /// are needed.
-    #[cfg(target_arch = "x86_64")]
-    #[overdrive_test(guest = "cgroup-default")]
-    #[test]
-    fn a_failed_close_on_exec_step_is_a_launch_error_and_the_target_never_runs() {
-        assert_a_failed_hook_step_is_a_launch_error(HookStep::CloseRange);
-    }
-
-    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
-    /// S-ND295-41 — The launched child inherits exactly descriptors 0 to 3 (a
-    /// failed no-new-privileges step turns into a launch error, never a silent
-    /// launch).
-    /// CONTRACT_SHAPE: bounded-change.
-    ///
-    /// Lane: native x86_64 metal. The stimulus is the intermediate's own
-    /// seccomp filter refusing `prctl(PR_SET_NO_NEW_PRIVS)` with `EPERM`.
-    #[cfg(target_arch = "x86_64")]
-    #[overdrive_test(guest = "cgroup-default")]
-    #[test]
-    fn a_failed_no_new_privs_step_is_a_launch_error_and_the_target_never_runs() {
-        assert_a_failed_hook_step_is_a_launch_error(HookStep::NoNewPrivs);
-    }
-
-    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
-    /// S-ND295-41 — The launched child inherits exactly descriptors 0 to 3 (a
-    /// failed filter-load step turns into a launch error, never a silent
-    /// launch).
-    /// CONTRACT_SHAPE: bounded-change.
-    ///
-    /// Lane: native x86_64 metal. The stimulus is the intermediate's own
-    /// seccomp filter refusing `seccomp(2)` with `EPERM`.
-    #[cfg(target_arch = "x86_64")]
-    #[overdrive_test(guest = "cgroup-default")]
-    #[test]
-    fn a_failed_filter_load_step_is_a_launch_error_and_the_target_never_runs() {
-        assert_a_failed_hook_step_is_a_launch_error(HookStep::LoadFilter);
     }
 
     /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
@@ -2845,24 +2215,6 @@ mod launch_seccomp_kernel {
 
     /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
     /// S-ND295-43 — The production launch hook denies TAP-mutating requests on
-    /// every thread (the startup probe installs the launch program).
-    /// CONTRACT_SHAPE: bounded-change.
-    #[cfg(target_arch = "x86_64")]
-    #[overdrive_test(guest = "cgroup-default")]
-    #[tokio::test]
-    async fn the_startup_probe_installs_the_exact_launch_program() {
-        use super::VmmProbeSubstrate;
-
-        let outcome = super::RealVmmProbeSubstrate.check_launch_seccomp().await;
-        assert!(
-            outcome.is_ok(),
-            "the kernel must accept the exact launch program and prlimit must exec under it: \
-             {outcome:?}",
-        );
-    }
-
-    /// Outcome anchor: OUT-ND295-BORN-CAPTURED.
-    /// S-ND295-43 — The production launch hook denies TAP-mutating requests on
     /// every thread (foreign syscall ABIs end the process).
     /// CONTRACT_SHAPE: bounded-change.
     #[cfg(target_arch = "x86_64")]
@@ -2924,20 +2276,7 @@ mod launch_seccomp_kernel {
     async fn launch_on_a_target_without_a_program_is_refused_before_any_effect() {
         use overdrive_core::guest_transport::{GUEST_CID_BASE, GuestCid};
 
-        use super::{
-            ConfinementControl, RealVmmProbeSubstrate, Vmm, VmmError, VmmProbeError,
-            VmmProbeSubstrate,
-        };
-
-        let arch = std::env::consts::ARCH;
-        match RealVmmProbeSubstrate.check_launch_seccomp().await {
-            Err(VmmProbeError::LaunchSeccompUnsupportedArch { target_arch }) => {
-                assert_eq!(target_arch, arch, "the probe stage must name the running architecture");
-            }
-            other => {
-                panic!("the {arch} launch-seccomp stage must refuse as unsupported: {other:?}")
-            }
-        }
+        use super::{ConfinementControl, Vmm, VmmError};
 
         let fixture = LaunchFixture::new(tempfile::tempdir().expect("per-case directory"));
         let clone_dest = fixture.config.rootfs.clone_dest().to_path_buf();

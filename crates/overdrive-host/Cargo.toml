@@ -83,9 +83,9 @@ linux-keyutils.workspace = true
 # `libc` — the D-295-R22 VMM launch seccomp program (ADR-0143): the
 # `sock_filter` / `sock_fprog` / `seccomp_data` types, the `BPF_*` and
 # `SECCOMP_RET_*` codes, and the thirteen denied ioctl request numbers; and
-# the three raw syscalls of the audited launch hook
-# `register_launch_child_hook`, the crate's only production
-# `#[allow(unsafe_code)]` (ADR-0129). The FICLONE call still goes through the
+# the raw `clone3` and the child's audited launch sequence
+# in `vmm/launch_clone.rs`, the crate's only production
+# `#[allow(unsafe_code)]` (ADR-0129, ADR-0352). The FICLONE call still goes through the
 # safe `rustix` wrapper above.
 libc.workspace           = true
 nix.workspace             = true

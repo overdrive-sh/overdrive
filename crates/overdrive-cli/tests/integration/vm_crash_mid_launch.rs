@@ -168,9 +168,6 @@ async fn serve_on(server: &TempDir, standin: &Path) -> ServeHandle {
 #[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test]
 #[serial(cgroup)]
-#[should_panic(
-    expected = "the hypervisor's first act must run inside its allocation's cgroup scope"
-)]
 async fn a_serve_crash_just_after_the_vmm_is_spawned_leaves_nothing_outside_a_scope_boot_reclaims()
 {
     let fixture = VmFixture::provision(&staging_root()).expect("provision the shared VM fixture");

@@ -392,7 +392,12 @@ impl NodeAdapters {
             http: Arc::new(overdrive_worker::probe_runner::HyperHttpProber::new()),
         };
         let vm = VmAdapters {
-            vmm: Arc::new(overdrive_host::CloudHypervisorVmm::new()),
+            // The VMM is created inside its scope (ADR-0352), so the adapter
+            // resolves a `CgroupPath` under the same cgroup root `CgroupManager` uses.
+            vmm: Arc::new(
+                overdrive_host::CloudHypervisorVmm::new()
+                    .with_cgroup_root(PathBuf::from(cgroup_preflight::DEFAULT_CGROUP_ROOT)),
+            ),
             beacon: Arc::new(overdrive_host::VsockBeaconIo::new()),
             cgroup_accounting: Arc::new(overdrive_host::RealCgroupAccounting::new()),
             capability: VmCapability::Optional,

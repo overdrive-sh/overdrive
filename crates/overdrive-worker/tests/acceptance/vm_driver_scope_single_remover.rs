@@ -209,7 +209,6 @@ async fn guard_a_held_scope_leaves_the_stop_outcome_and_artifacts_unchanged() {
 /// `cgroup.procs` entry under the scope in `SimCgroupFs`.
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[should_panic(expected = "the driver must not write the VMM pid to the scope's cgroup.procs")]
 async fn the_driver_does_not_place_the_vmm_pid_in_its_scope() {
     let node = Node::new().await;
     let spec = node.spec("alloc-no-place-pid", 2, false);

@@ -5,7 +5,7 @@
 //! Tier 3, real-io. Requires Lima sudo.
 //!
 //! Exercises ADR-0054 § D3 row 6. The
-//! `cgroup_manager::place_pid_in_scope` method depends on this
+//! workload placement into a scope depends on this
 //! kernel-side semantic. `SimCgroupFs` only stores the byte payload at
 //! the in-memory `cgroup.procs` path; no PID movement occurs because
 //! no real PIDs exist.
