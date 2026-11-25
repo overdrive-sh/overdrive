@@ -762,11 +762,6 @@ fn assert_nothing_failed_or_charged(
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[tokio::test]
 #[serial(cgroup)]
-// Pending on an unbounded reap wait after SIGKILL of a VMM blocked in uninterruptible I/O on the
-// suspended device (the predecessor row stays `Running`); lifts in the bounded-reap fix.
-#[should_panic(
-    expected = "a superseded launch must neither fail nor start once the claim bound has elapsed"
-)]
 async fn a_workload_stop_during_a_held_claim_returns_promptly_with_no_failed_row() {
     let journey = Journey::new();
     let handle = serve_at(&journey.data_dir(), &journey.config_dir()).await;
