@@ -12,7 +12,7 @@ between workloads. It says nothing about a browser on the internet that wants to
 reach one of them.
 
 The public ingress gateway closes that gap. It runs inside `overdrive serve`,
-terminates TLS 1.3 on TCP/443 for a hostname you name in a Route (the document
+terminates TLS 1.3 on TCP/443 for a hostname you name in a Route (the resource
 that maps a public hostname to a Service), and relays each
 HTTP/1.1 request to a VM Service over the same mesh. The guest sees plaintext
 HTTP. This post explains how the data path ended up in the kernel and where the

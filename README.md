@@ -11,9 +11,8 @@ instead of a stack you assemble and babysit.
 > **Status: early.** Overdrive runs on a single node and is
 > pre-production. This README marks what runs now and what is intended.
 > Nothing here is presented as shipped that isn't, and there are no benchmark
-> numbers because there is nothing at fleet scale to measure yet. The full
-> design — most of which is still ahead of the implementation — is tracked in
-> the roadmap below.
+> numbers because there is nothing at fleet scale to measure yet. The work in
+> progress is described under [What we are building now](#what-we-are-building-now).
 
 ## What runs
 
@@ -62,17 +61,16 @@ actually run right now:
   each call to a running, healthy copy without an application discovery client.
 - **Public HTTPS ingress.** Start `serve` with the four gateway flags (listen
   address, certified-key id, certificate chain, private key) and deploy a Route
-  document with `overdrive deploy`. The
+  resource with `overdrive deploy`. The
   [gateway](https://overdrive.sh/docs/concepts/public-ingress-gateway)
   terminates TLS 1.3, routes by hostname and path to a VM Service, and relays
   the request over the mesh. It speaks HTTP/1.1 only, serves one Route per node,
   and reads certificates from files you provide. See
   [expose a service publicly](https://overdrive.sh/docs/how-to/expose-a-service-publicly).
 
-WebAssembly functions, persistent volumes, multi-node HA, and the immutable OS
-are all on the roadmap below — designed, not yet shipped. Issue
-[#348: node-local persistent volume for VM workloads](https://github.com/overdrive-sh/overdrive/issues/348)
-tracks persistent volumes.
+Overdrive does not run WebAssembly functions, persistent volumes, more than one
+node, or the immutable appliance OS. Persistent volumes are in progress (see
+below).
 
 ## Deploy a workload
 
@@ -153,67 +151,39 @@ rootfs. The guest is hardware-isolated and its real exit code is reported back. 
 - [Benchmark methodology](https://overdrive.sh/docs/concepts/benchmark-methodology)
   — turn replicates into comparable numbers with a noise floor.
 
-## Roadmap
+## What we are building now
 
-The platform is built in phases, each tracked as a GitHub milestone. Phase 1 is
-essentially complete (22 of 24 issues closed). Phase 2 is in progress (29 of 39).
-Phases 3–7 are planned and mostly unstarted, though the Cloud Hypervisor microVM
-driver (#42) and the public ingress gateway (#54) landed ahead of the rest of
-their phases and run. Some Phase 2 work, including transparent mTLS and
-the SVID lifecycle, already runs. The other items remain tracked work.
-Issue numbers link the specifics.
+We are making Overdrive good enough to develop Overdrive on. The target is a
+development box that runs as an ordinary VM Service on an Overdrive node and
+hosts [herdr](https://herdr.dev), a terminal workspace that runs coding agents
+such as Claude Code and Codex side by side. herdr keeps its terminals in a
+background server and attaches over plain OpenSSH, so the box needs a disk that
+outlives restarts, a way to reach its SSH port, outbound network for the agents,
+and KVM for the tests that boot microVMs.
 
-### [Phase 2 — eBPF dataplane & identity](https://github.com/overdrive-sh/overdrive/milestone/2) · in progress
+In progress:
 
-The shipped mesh path runs TLS 1.3 in the node agent and hands record processing
-to kTLS (#26), and the workload SVID lifecycle issues, rotates, and drops
-identities (#35). Moving TLS termination into the guest kernel is tracked in #303.
-Other tracked work includes agentless flow and resource telemetry (#31, #32),
-node enrollment (#36), and the real-kernel test harness (#29, #30).
+- [#348: node-local persistent volume for VM workloads](https://github.com/overdrive-sh/overdrive/issues/348).
+  A second virtio-blk disk with one writer, owned by the workload rather than
+  the allocation, so the repository, the Rust build cache and herdr's sessions
+  survive a crash, a `workload restart` and a redeploy on the same node.
+- [#382: VM guests cannot resolve public DNS names](https://github.com/overdrive-sh/overdrive/issues/382).
+  Guests already connect to public addresses, but the node's DNS responder
+  drops every query that is not a mesh name, so `github.com` and
+  `api.anthropic.com` do not resolve.
 
-### [Phase 3 — workload drivers & policy](https://github.com/overdrive-sh/overdrive/milestone/3)
+Next:
 
-Run more than microVMs: WebAssembly serverless functions with scale-to-zero
-(#44) and shared volumes (#43). A dual policy engine compiles Regorus and WASM
-policy down to in-kernel verdicts (#38, #45, #47), and node drain migrates
-workloads off unhealthy nodes — the reactive tier of self-healing (#50).
+- [#381: an `overdrive tunnel` to a VM Service listener](https://github.com/overdrive-sh/overdrive/issues/381).
+  An authenticated byte stream over the operator's existing mTLS connection, so
+  `ssh` and `herdr --remote` reach the box through a `ProxyCommand` without a
+  public port.
+- [#347: nested virtualization for VM workloads](https://github.com/overdrive-sh/overdrive/issues/347).
+  Expose VMX or SVM to the guest so `/dev/kvm` works inside the box and the
+  tests that boot microVMs run there.
 
-### [Phase 4 — gateway, sidecars & deployments](https://github.com/overdrive-sh/overdrive/milestone/4)
-
-The built-in gateway (#54) runs for HTTP/1.1. The remaining gateway work
-adds HTTP/2, gRPC, and WebSocket (#55, #341), a middleware pipeline with rate
-limiting, auth, and circuit breaking (#56), and certificates it issues itself
-over ACME (#57). WASM sidecars add the credential proxy and content inspector (#51, #52)
-behind an SDK (#53). And deployment strategies grow up: rolling deploys (#64),
-canary promotion with SLO-based rollback (#65), multi-stage rollout workflows
-(#62, #66), and scheduled cron jobs (#63, #166).
-
-### [Phase 5 — HA, multi-node & the immutable OS](https://github.com/overdrive-sh/overdrive/milestone/5)
-
-High availability through a Raft intent store and a gossiped observation store
-(#67, #68), with zero-downtime single→HA migration (#70). Operator identity and
-CLI auth (#80, #81). And the sealed appliance itself: the `meta-overdrive`
-immutable node OS and Image Factory (#75, #76), with an optional WireGuard or
-Tailscale mesh underlay (#77, #78).
-
-### [Phase 6 — observability & self-healing](https://github.com/overdrive-sh/overdrive/milestone/6)
-
-The tiered self-healing story lands here. An LLM SRE agent (#85) runs
-first-class investigations (#86), proposes typed actions through a risk-based
-approval gate (#88), correlates signals by workload identity (#89), and reasons
-over the reflexive and reactive tiers (#91) — learning from incident memory
-(#94). Plus right-sizing (#92), scale-to-zero (#93), and persistent stateful
-microVMs (#96–#100).
-
-### [Phase 7 — multi-region, SDKs & supply chain](https://github.com/overdrive-sh/overdrive/milestone/7)
-
-Multi-region federation (#104–#107), language SDKs for functions and workflows
-(#109, #110), unikernel drivers (#112), OpenTelemetry export (#111), in-place OS
-upgrades with dm-verity + TPM attestation and Secure Boot (#117, #118), and
-operator SSO via OIDC (#119).
-
-The full tracker — 99 open issues across these milestones — lives at
-[github.com/overdrive-sh/overdrive/issues](https://github.com/overdrive-sh/overdrive/issues).
+The rest of the design, from multi-node HA to WebAssembly functions, is tracked
+in the [issue tracker](https://github.com/overdrive-sh/overdrive/issues).
 
 ## Documentation
 

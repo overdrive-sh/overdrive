@@ -105,9 +105,9 @@ on a Service failure or progress timeout. A local TOML parse error also exits
 `1`. Pre-acceptance transport and server errors exit `2`. `--detach` reports
 only the intent commit, so its success does not assert Service health.
 
-### Route documents
+### Route resources
 
-`deploy` also accepts a public Route document. A Route file holds exactly one
+`deploy` also accepts a public Route resource. A Route file holds exactly one
 top-level `[route]` table, and unknown fields are rejected.
 
 ```toml

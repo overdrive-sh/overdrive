@@ -216,6 +216,11 @@ are not.
 | The user approved D-3 on 2026-11-02, dropping the window design. | We dropped the windowed design because it let a stale record outlive its owner. |
 | The capture found a gap. | Running the example found a bug our tests had missed. |
 | A missed entry showed up only on the Metal box. | A missed entry only showed up on the test machine. |
+| Deploy a Route document with `overdrive deploy`. | Deploy a Route resource with `overdrive deploy`. |
+
+Call an object the operator declares and applies with `overdrive deploy` (a
+Route, a Service, a Job) a resource. It is not a "document". The TOML file that
+holds it is a file or a spec.
 
 Also delete words that tell the reader how to feel or that go stale: *simply,
 just, easy, easily, currently, new, soon, under the hood, please*.
