@@ -59,6 +59,57 @@ mod integration {
         VmmIdentity { uid: OVERDRIVE_VMM_UID, gid: Gid::new(OVERDRIVE_VMM_UID), supplementary }
     }
 
+    /// The cgroup scope a `Vmm::create` launches into (ADR-0352). `create` only
+    /// joins a scope that exists, so a case that drives the `Vmm` port directly
+    /// plays the driver's part: it makes the scope the way production does
+    /// (`mkdir -p` on the resolved path) and removes it afterwards through
+    /// `VmHostState::kill_scope`, the one remover of a VM scope (ADR-0351).
+    #[cfg(feature = "kvm-tests")]
+    struct VmScope(overdrive_core::cgroup::CgroupPath);
+
+    #[cfg(feature = "kvm-tests")]
+    impl VmScope {
+        const CGROUP_ROOT: &'static str = "/sys/fs/cgroup";
+
+        /// Make the scope `config.cgroup_scope` names.
+        fn create(config: &overdrive_core::vm::config::VmConfig) -> Self {
+            let dir = config.cgroup_scope.resolve(std::path::Path::new(Self::CGROUP_ROOT));
+            std::fs::create_dir_all(&dir)
+                .unwrap_or_else(|error| panic!("create the scope {}: {error}", dir.display()));
+            Self(config.cgroup_scope.clone())
+        }
+    }
+
+    #[cfg(feature = "kvm-tests")]
+    impl Drop for VmScope {
+        fn drop(&mut self) {
+            use overdrive_core::traits::vm_host_state::VmHostState as _;
+
+            // `kill_scope` reads only the cgroup root; the run and index roots are unused.
+            let host = overdrive_host::RealVmHostState::new(
+                std::path::PathBuf::from(Self::CGROUP_ROOT),
+                std::path::PathBuf::new(),
+                std::path::PathBuf::new(),
+            );
+            let scope = self.0.clone();
+            // A scope left behind makes the next case fail on a stale directory, so a
+            // failed removal is a failure of this case, unless the case already panicked.
+            // A thread of its own: a case runs inside a runtime, which cannot be nested.
+            let removed = std::thread::spawn(move || {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .expect("a runtime for the scope removal")
+                    .block_on(async move { host.kill_scope(&scope).await })
+            })
+            .join()
+            .expect("the scope removal thread does not panic");
+            if !std::thread::panicking() {
+                removed.expect("kill_scope removes the VMM's scope");
+            }
+        }
+    }
+
     // node-local-persistent-volume (GH #348, ADR-0314) — the volume pool boot probe.
     mod volume_pool_backing;
     // node-local-persistent-volume (GH #348, ADR-0349) — `kill_scope` never removes a populated scope.

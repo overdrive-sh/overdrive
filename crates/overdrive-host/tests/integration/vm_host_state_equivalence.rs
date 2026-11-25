@@ -195,10 +195,15 @@ async fn vm_host_state_equivalence_real() {
     let config = sample_vm_config(&fixture, &run_root, &index_dir);
     std::fs::create_dir_all(config.run_dir.path()).expect("create run dir");
 
-    // Boot a real Cloud Hypervisor VMM -- the process whose PID this test
-    // enrolls into a real cgroup v2 scope, so `kill_scope`'s settle
-    // postcondition is proven against a genuinely live process, not a
-    // synthetic stand-in.
+    // Boot a real Cloud Hypervisor VMM inside a real cgroup v2 scope, so
+    // `kill_scope`'s settle postcondition is proven against a genuinely live
+    // process, not a synthetic stand-in. `create` joins a scope that exists;
+    // making it is the DRIVER's job (`brief.md` §108's effect-isolation
+    // table), so this test plays that role first. `create_dir_all` on a
+    // mounted cgroup2 filesystem is exactly `mkdir -p`. The scope is removed
+    // by `kill_scope`, below, which is the assertion under test.
+    let scope_path = config.cgroup_scope.resolve(Path::new(CGROUP_ROOT));
+    tokio::fs::create_dir_all(&scope_path).await.expect("create real cgroup v2 scope");
     let vmm = CloudHypervisorVmm::default();
     vmm.probe().await.expect("Vmm::probe succeeds on this host");
     let proc = vmm.create(&config, cid(0x0320)).await.expect("Vmm::create boots a real VMM");
@@ -212,19 +217,6 @@ async fn vm_host_state_equivalence_real() {
     std::fs::create_dir_all(&index_dir).expect("create the clone-index dir");
     std::os::unix::fs::symlink(config.rootfs.clone_dest(), config.rootfs.index_link())
         .expect("record the per-launch clone in the platform-owned index");
-
-    // Cgroup enrolment is the DRIVER's job, not `create`'s (per
-    // `brief.md` §108's effect-isolation table) -- this test plays that
-    // role directly. `create_dir_all` on a mounted cgroup2 filesystem is
-    // exactly `mkdir -p`; the kernel synthesises `cgroup.procs` /
-    // `cgroup.kill` for the new leaf regardless of controller
-    // delegation (delegation governs resource accounting, not base
-    // membership/kill).
-    let scope_path = config.cgroup_scope.resolve(Path::new(CGROUP_ROOT));
-    tokio::fs::create_dir_all(&scope_path).await.expect("create real cgroup v2 scope");
-    tokio::fs::write(scope_path.join("cgroup.procs"), proc.control.pid.to_string())
-        .await
-        .expect("enrol the VMM pid into the scope");
 
     let host =
         RealVmHostState::new(PathBuf::from(CGROUP_ROOT), run_root.clone(), index_dir.clone());

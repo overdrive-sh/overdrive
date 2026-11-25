@@ -123,6 +123,7 @@ async fn drive_shared_sequence(vmm: &dyn Vmm, fixture: &VmFixture, run_root: &Pa
 
     let config_a = sample_vm_config(fixture, run_root, "vmmeq-a");
     std::fs::create_dir_all(config_a.run_dir.path()).expect("create run dir");
+    let _scope_a = super::VmScope::create(&config_a);
     let clone_dest = config_a.rootfs.clone_dest().to_path_buf();
 
     let proc1 =
@@ -160,6 +161,8 @@ async fn drive_shared_sequence(vmm: &dyn Vmm, fixture: &VmFixture, run_root: &Pa
         "same alloc id must derive the same clone destination -- precondition for this edge case"
     );
     std::fs::create_dir_all(config_b.run_dir.path()).expect("create run dir (idempotent)");
+    // The same allocation, so the same scope: it already exists and `create` joins it again.
+    let _scope_b = super::VmScope::create(&config_b);
     let proc2 = vmm
         .create(&config_b, cid(0x0311))
         .await
@@ -381,6 +384,7 @@ async fn vmm_live_console_tail_is_coherent_with_final_exit_stderr_tail_for_both_
     let ch_run_root = staging_root.join("run-ch-tail");
     let ch_config = sample_vm_config(&fixture, &ch_run_root, "vmmeq-tail-ch");
     std::fs::create_dir_all(ch_config.run_dir.path()).expect("create run dir");
+    let _ch_scope = super::VmScope::create(&ch_config);
     let ch = CloudHypervisorVmm::new();
     let mut ch_process = ch.create(&ch_config, cid(0x0315)).await.expect("real CH spawns");
 
@@ -429,6 +433,7 @@ async fn vmm_early_exit_preserves_code_signal_and_stderr_tail_for_both_adapters(
     let ch_run_root = staging_root.join("run-ch-early");
     let ch_config = sample_vm_config(&fixture, &ch_run_root, "vmmeq-early-ch");
     std::fs::create_dir_all(ch_config.run_dir.path()).expect("create run dir");
+    let _ch_scope = super::VmScope::create(&ch_config);
     let ch = CloudHypervisorVmm::new();
     let mut ch_process = ch.create(&ch_config, cid(0x0317)).await.expect("real CH spawns");
 
@@ -517,6 +522,7 @@ async fn a_killed_vmm_is_reaped_before_terminate_returns_on_both_adapters() {
     let ch = CloudHypervisorVmm::new();
     let ch_config = sample_vm_config(&fixture, &staging_root.join("run-ch-reaped"), "vmmeq-rp-c");
     std::fs::create_dir_all(ch_config.run_dir.path()).expect("create run dir");
+    let _ch_scope = super::VmScope::create(&ch_config);
     let mut ch_process = ch.create(&ch_config, cid(0x0331)).await.expect("real CH spawns");
     let ch_pid = ch_process.control.pid;
 
@@ -538,11 +544,9 @@ async fn a_killed_vmm_is_reaped_before_terminate_returns_on_both_adapters() {
 /// cgroup root (`with_cgroup_root`). The driver makes the scope before `create`; the test plays
 /// that part. Oracle: the VMM's pid is listed in the scope's `cgroup.procs` right after `create`.
 /// The `SimVmm` half of the equivalence waits for a scope-membership observable on `SimVmm`.
-/// PENDING until `create` places the VMM into the scope itself.
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default", profile = "nested-launch")]
 #[tokio::test]
-#[should_panic(expected = "the VMM must be a member of config.cgroup_scope")]
 async fn a_created_vmm_is_a_member_of_its_scope_on_the_real_adapter() {
     let staging_root = default_staging_root();
     let fixture = VmFixture::provision(&staging_root).expect("fixture provisions on this host");
@@ -569,11 +573,10 @@ async fn a_created_vmm_is_a_member_of_its_scope_on_the_real_adapter() {
 /// ADR-0352 ("a refused placement (a scope that is gone ...) fails `create` and creates no
 /// process"). Owner path: `CloudHypervisorVmm::create` over the real cgroup root. Fault: the scope
 /// directory does not exist. Oracle: `create` is `Err`; any process it did create is reaped before
-/// the assertion so a failing run leaks nothing. PENDING until `create` owns the placement.
+/// the assertion so a failing run leaks nothing.
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default", profile = "nested-launch")]
 #[tokio::test]
-#[should_panic(expected = "create into a scope that does not exist must fail")]
 async fn create_into_a_missing_scope_fails_on_the_real_adapter() {
     let staging_root = default_staging_root();
     let fixture = VmFixture::provision(&staging_root).expect("fixture provisions on this host");

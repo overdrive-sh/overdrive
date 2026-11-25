@@ -70,12 +70,13 @@ use std::time::{Duration, Instant};
 use overdrive_core::AllocationId;
 use overdrive_core::cgroup::CgroupPath;
 use overdrive_core::guest_transport::{GUEST_FORWARDER_MODULE_PATH, GuestCid};
+use overdrive_core::traits::vm_host_state::VmHostState;
 use overdrive_core::traits::vmm::{VmControl, Vmm, VmmExit};
 use overdrive_core::vm::config::{
     Gid, HostArch, KernelCmdline, KernelImage, MemoryPlan, OVERDRIVE_VMM_UID, RootfsPlan, VmConfig,
     VmConfinement, VmRunDir, VmmIdentity, VolumeAttachment,
 };
-use overdrive_host::CloudHypervisorVmm;
+use overdrive_host::{CloudHypervisorVmm, RealVmHostState};
 
 use crate::guest_app::GUEST_PEER_GUEST_PATH;
 use crate::guest_peer::{CONTROL_PORT_PARAM, GuestPeer, GuestPeerControl, GuestPeerError};
@@ -671,8 +672,15 @@ impl GuestKit {
         fs::set_permissions(boot.run_dir, fs::Permissions::from_mode(0o710))
             .map_err(staging(format!("making {} traversable", boot.run_dir.display())))?;
         let launch = |detail: String| GuestKitError::Launch { source: io::Error::other(detail) };
-        let alloc = AllocationId::new(&format!("kit-{}", boot.cid))
-            .map_err(|e| launch(format!("allocation id: {e}")))?;
+        // The allocation names the VMM's cgroup scope, and the cgroup tree is shared by
+        // every concurrent test process while a CID is not (each guest placement runs in
+        // its own vsock-local network namespace). Two tests may therefore boot the same
+        // CID at once: the process id and a launch counter keep their scopes apart, so
+        // one test's `kill_scope` never ends another test's VMM.
+        let launch_number = NEXT_LAUNCH.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let alloc =
+            AllocationId::new(&format!("kit-{}-{}-{launch_number}", boot.cid, std::process::id()))
+                .map_err(|e| launch(format!("allocation id: {e}")))?;
         let cid = GuestCid::new(boot.cid).map_err(|e| launch(format!("guest CID: {e}")))?;
         // Cloud Hypervisor's pathname Unix socket is limited by `sun_path`.
         // Keep per-launch runtime artifacts below the invocation-owned Metal
@@ -748,8 +756,19 @@ impl GuestKit {
             write_nested_virt_shim(boot.run_dir, runtime.path(), &self.cloud_hypervisor_bin)?;
         let vmm = CloudHypervisorVmm::new().with_binary(nested_ch);
         let launcher = vmm.clone();
-        let process = run_on_kit_runtime(async move { launcher.create(&config, cid).await })
-            .map_err(|e| launch(e.to_string()))?;
+        // `Vmm::create` creates the VMM inside its scope, which the caller makes
+        // first (the production driver does the same).
+        let scope = config.cgroup_scope.clone();
+        let scope_dir = scope.resolve(Path::new(CGROUP_ROOT));
+        fs::create_dir_all(&scope_dir)
+            .map_err(staging(format!("creating the VMM scope {}", scope_dir.display())))?;
+        let process = match run_on_kit_runtime(async move { launcher.create(&config, cid).await }) {
+            Ok(process) => process,
+            Err(error) => {
+                remove_scope(&scope);
+                return Err(launch(error.to_string()));
+            }
+        };
         let exit = Arc::new(Mutex::new(None));
         let recorded = Arc::clone(&exit);
         let mut watch = process.exit;
@@ -769,6 +788,7 @@ impl GuestKit {
             cid: boot.cid,
             console,
             console_key,
+            scope,
             _runtime: runtime,
         })
     }
@@ -883,6 +903,8 @@ pub struct GuestKitVm {
     console: PathBuf,
     /// The key of this guest's entry in the process's live-console registry.
     console_key: u64,
+    /// The VMM's cgroup scope, removed once the VMM has been reaped.
+    scope: CgroupPath,
     /// Owns the short runtime path until the VMM has been terminated.
     _runtime: WorkDir,
 }
@@ -1001,6 +1023,7 @@ impl GuestKitVm {
         let vmm = self.vmm.clone();
         run_on_kit_runtime(async move { vmm.terminate(&control, Duration::ZERO).await })
             .map_err(|e| GuestKitError::Wait { cid, source: io::Error::other(e.to_string()) })?;
+        remove_scope(&self.scope);
         // `terminate` returns once the reaper has the ending; the watcher
         // task records it a moment later.
         let deadline = Instant::now() + VMM_REAP_BOUND;
@@ -1042,8 +1065,25 @@ impl Drop for GuestKitVm {
             let vmm = self.vmm.clone();
             let _ =
                 run_on_kit_runtime(async move { vmm.terminate(&control, Duration::ZERO).await });
+            remove_scope(&self.scope);
         }
     }
+}
+
+/// Counts this process's guest launches, to keep their cgroup scopes apart.
+static NEXT_LAUNCH: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// The cgroup2 mount a VMM scope resolves under.
+const CGROUP_ROOT: &str = "/sys/fs/cgroup";
+
+/// Remove a reaped VMM's scope through the one remover of a VM scope,
+/// `VmHostState::kill_scope`. A scope that is already gone is a success; one
+/// the kernel still reports busy is left for the guest's teardown.
+fn remove_scope(scope: &CgroupPath) {
+    // `kill_scope` reads only the cgroup root; the two other roots are unused.
+    let host = RealVmHostState::new(PathBuf::from(CGROUP_ROOT), PathBuf::new(), PathBuf::new());
+    let scope = scope.clone();
+    let _ = run_on_kit_runtime(async move { host.kill_scope(&scope).await });
 }
 
 /// How long the watcher task has to record a reaped VMM's ending.

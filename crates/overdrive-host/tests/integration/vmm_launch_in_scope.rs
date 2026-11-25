@@ -26,7 +26,6 @@
 //! # Tier and placement
 //!
 //! Tier 3, `nested-launch` guest, `kvm-tests`. Example-only (Mandate 9).
-//! PENDING (RED): today `create` ignores `config.cgroup_scope`.
 
 #![allow(clippy::doc_markdown, reason = "contract-shape tags in the scenario docs")]
 
@@ -120,7 +119,7 @@ fn stage(name: &str) -> (VmFixture, PathBuf, VmConfig) {
     (fixture, run_root, config)
 }
 
-/// PENDING (RB-9, ADR-0352). When `create` returns, the VMM process is a member
+/// (RB-9, ADR-0352). When `create` returns, the VMM process is a member
 /// of `config.cgroup_scope` and the scope's `cgroup.procs` lists it. Today the
 /// VMM is in `serve`'s cgroup until the driver writes its pid.
 ///
@@ -130,7 +129,6 @@ fn stage(name: &str) -> (VmFixture, PathBuf, VmConfig) {
 #[overdrive_test(guest = "cgroup-default", profile = "nested-launch")]
 #[tokio::test]
 #[serial(vmm_in_scope)]
-#[should_panic(expected = "the VMM is a member of its scope when create returns")]
 async fn a_created_vmm_is_a_member_of_its_scope_when_create_returns() {
     let (_fixture, _run_root, config) = stage("in-scope-a");
     let scope = scope_dir(&config);
@@ -152,7 +150,7 @@ async fn a_created_vmm_is_a_member_of_its_scope_when_create_returns() {
     );
 }
 
-/// PENDING (RB-9, P-7, ADR-0352 item 8). A scope that does not exist is a
+/// (RB-9, P-7, ADR-0352 item 8). A scope that does not exist is a
 /// refused placement: `create` fails with a `detail` that names the step, no
 /// hypervisor process exists, and the rootfs clone is removed. Today `create`
 /// ignores the scope and boots the VMM.
@@ -162,7 +160,6 @@ async fn a_created_vmm_is_a_member_of_its_scope_when_create_returns() {
 #[overdrive_test(guest = "cgroup-default", profile = "nested-launch")]
 #[tokio::test]
 #[serial(vmm_in_scope)]
-#[should_panic(expected = "create against a scope that does not exist fails")]
 async fn create_against_a_removed_scope_fails_naming_the_step_and_leaves_nothing() {
     let (_fixture, _run_root, config) = stage("in-scope-removed");
     assert!(!scope_dir(&config).exists(), "precondition: the scope was never created");
@@ -184,21 +181,23 @@ async fn create_against_a_removed_scope_fails_naming_the_step_and_leaves_nothing
     );
 }
 
-/// PENDING (RB-9, ADR-0352 item 8, C3). A scope that cannot be a placement
-/// target (a controller enabled in its `subtree_control`, so the scope is a
+/// (RB-9, ADR-0352 item 8, C3). A scope that cannot be a placement
+/// target (a domain controller (`memory`) enabled in its `subtree_control`, so the scope is a
 /// domain with children) refuses the launch the same way: typed, naming the
 /// step, no process, no clone.
 #[overdrive_test(guest = "cgroup-default", profile = "nested-launch")]
 #[tokio::test]
 #[serial(vmm_in_scope)]
-#[should_panic(expected = "create against a scope that is not a valid placement target fails")]
 async fn create_against_a_scope_with_subtree_control_set_fails_naming_the_step_and_leaves_nothing()
 {
     let (_fixture, _run_root, config) = stage("in-scope-subtree");
     let scope = scope_dir(&config);
     std::fs::create_dir_all(&scope).expect("create the scope");
-    std::fs::write(scope.join("cgroup.subtree_control"), "+pids")
-        .expect("precondition: enable a controller in the scope's subtree_control");
+    std::fs::write(scope.join("cgroup.subtree_control"), "+memory").expect(
+        "precondition: enable a domain controller in the scope's subtree_control (`pids` is \
+         threaded, and the kernel still permits placement into a scope that enables only \
+         threaded controllers: cgroup.c:413-431 @ v7.0)",
+    );
     let vmm = CloudHypervisorVmm::default();
     vmm.probe().await.expect("Vmm::probe succeeds on this host");
 

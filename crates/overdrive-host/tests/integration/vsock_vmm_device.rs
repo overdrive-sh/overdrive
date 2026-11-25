@@ -330,6 +330,7 @@ fn main() {
 async fn the_vmm_opens_its_own_vsock_device_and_overdrive_holds_no_copy() {
     let (fixture, run_root) = fixture_and_run_root("own-device");
     let config = launch_config(&fixture, &run_root, "vsock-dev-own", &[]);
+    let _scope_config = super::VmScope::create(&config);
     let vmm = CloudHypervisorVmm::new();
     assert_eq!(own_vhost_vsock_fds(), 0, "precondition: no Overdrive vhost-vsock descriptor");
 
@@ -357,6 +358,7 @@ async fn the_cid_is_free_at_once_after_its_vmm_exits() {
     let vmm = CloudHypervisorVmm::new();
 
     let first_config = launch_config(&fixture, &run_root, "vsock-dev-first", &[]);
+    let _scope_first_config = super::VmScope::create(&first_config);
     let first = vmm.create(&first_config, cid(0x0401)).await.expect("the first launch");
     let _kill_first = KillOnDrop(first.control.pid);
     wait_until_vmm_holds_its_device(first.control.pid).await;
@@ -364,6 +366,7 @@ async fn the_cid_is_free_at_once_after_its_vmm_exits() {
     assert_eq!(vhost_vsock_fds(first.control.pid), None, "the first VMM is gone");
 
     let second_config = launch_config(&fixture, &run_root, "vsock-dev-second", &[]);
+    let _scope_second_config = super::VmScope::create(&second_config);
     let mut second = vmm.create(&second_config, cid(0x0401)).await.expect("the second launch");
     let _kill_second = KillOnDrop(second.control.pid);
     let held = wait_until_vmm_holds_its_device(second.control.pid).await;
@@ -387,11 +390,13 @@ async fn a_launch_on_a_held_cid_exits_before_ready_and_leaves_the_holder_running
     let vmm = CloudHypervisorVmm::new();
 
     let holder_config = launch_config(&fixture, &run_root, "vsock-dev-holder", &[]);
+    let _scope_holder_config = super::VmScope::create(&holder_config);
     let holder = vmm.create(&holder_config, cid(0x0402)).await.expect("the holder launches");
     let _kill_holder = KillOnDrop(holder.control.pid);
     wait_until_vmm_holds_its_device(holder.control.pid).await;
 
     let clash_config = launch_config(&fixture, &run_root, "vsock-dev-clash", &[]);
+    let _scope_clash_config = super::VmScope::create(&clash_config);
     let mut clash =
         vmm.create(&clash_config, cid(0x0402)).await.expect("the spawn itself succeeds");
     let _kill_clash = KillOnDrop(clash.control.pid);
@@ -440,6 +445,7 @@ async fn the_fork_boots_and_passes_data_under_the_production_launch_identity() {
         "v1c-production-identity",
         &[&control_arg],
     );
+    let _scope_config = super::VmScope::create(&config);
     let vmm = CloudHypervisorVmm::new().with_binary(fixture.cloud_hypervisor_bin);
     let mut process = vmm
         .create(&config, cid(0x0406))
@@ -577,6 +583,7 @@ async fn post_boot_resets_end_the_vmm_and_reset_live_host_flows() {
             &format!("reset-exit-{name}"),
             &[&control_arg],
         );
+        let _scope_config = super::VmScope::create(&config);
         let vmm = CloudHypervisorVmm::new().with_binary(fixture.cloud_hypervisor_bin.clone());
         let mut process = vmm.create(&config, cid(offset)).await.expect("the reset case launches");
         let pid = process.control.pid;
@@ -617,6 +624,7 @@ async fn post_boot_resets_end_the_vmm_and_reset_live_host_flows() {
         assert_eq!(kernel_boots(&config), 1, "{name}: no second guest boot");
 
         let next_config = launch_config(&fixture, work.path(), &format!("{name}-next"), &[]);
+        let _scope_next_config = super::VmScope::create(&next_config);
         let next = vmm.create(&next_config, cid(offset)).await.expect("the CID is reusable");
         let _kill_next = KillOnDrop(next.control.pid);
         assert_eq!(wait_until_vmm_holds_its_device(next.control.pid).await, 1);
@@ -637,6 +645,7 @@ async fn a_guest_pid1_crash_under_panic_1_ends_the_vmm() {
     let vmm = CloudHypervisorVmm::new();
     // No init can run: the kernel panics, `panic=1` resets after one second.
     let config = launch_config(&fixture, &run_root, "vsock-dev-pid1", &["init=/nonexistent"]);
+    let _scope_config = super::VmScope::create(&config);
 
     let mut process = vmm.create(&config, cid(0x0403)).await.expect("the fork launches");
     let pid = process.control.pid;
@@ -651,6 +660,7 @@ async fn a_guest_pid1_crash_under_panic_1_ends_the_vmm() {
     assert_eq!(kernel_boots(&config), 1, "no second guest boot ran under the same VMM");
 
     let next_config = launch_config(&fixture, &run_root, "vsock-dev-pid1-next", &[]);
+    let _scope_next_config = super::VmScope::create(&next_config);
     let next = vmm.create(&next_config, cid(0x0403)).await.expect("the next launch");
     let _kill_next = KillOnDrop(next.control.pid);
     assert_eq!(wait_until_vmm_holds_its_device(next.control.pid).await, 1, "the CID is free");
@@ -668,6 +678,7 @@ async fn a_guest_triple_fault_ends_the_vmm() {
     let vmm = CloudHypervisorVmm::new();
     let config =
         launch_config(&fixture, &run_root, "vsock-dev-triple", &["init=/nonexistent", "reboot=t"]);
+    let _scope_config = super::VmScope::create(&config);
 
     let mut process = vmm.create(&config, cid(0x0404)).await.expect("the fork launches");
     let pid = process.control.pid;
@@ -700,6 +711,7 @@ async fn a_forced_guest_reboot_ends_the_vmm() {
         "vsock-dev-reboot",
         &["init=/sbin/reboot-now"],
     );
+    let _scope_config = super::VmScope::create(&config);
 
     let mut process = vmm.create(&config, cid(0x0405)).await.expect("the fork launches");
     let pid = process.control.pid;
