@@ -173,8 +173,26 @@ steps:
       entry: "Cautious — 'do I have to learn a second lifecycle vocabulary?'"
       exit: "Trusting — 'same verbs, same terminal states, and a restart gives me a clean disk.'"
 
+  - id: 7
+    name: "A program in the guest reaches a public service by name"
+    command: "overdrive deploy herdr-box.toml; then, in the guest, getaddrinfo(\"github.com\") and connect"
+    summary: >
+      The guest keeps its one nameserver, the node's guest gateway. The node
+      responder answers mesh names itself and forwards other names to the host's
+      upstream resolvers, so a public lookup returns promptly and the connect by
+      address (already working) completes. A non-existent public name returns
+      NXDOMAIN promptly; a forwarded answer inside an Overdrive-owned address
+      range is not handed to the guest; with no reachable upstream the guest
+      gets a definite reply before its own 5 s timeout. Feature:
+      guest-public-dns-resolution (GH #382, J-OPS-005). Details in
+      docs/feature/guest-public-dns-resolution/feature-delta.md.
+    emotional_state:
+      entry: "Frustrated — 'the VM is Running and outbound TCP works, but git and cargo fail with Try again.'"
+      exit: "Relieved — 'it resolves like any host, and when it does not, the error is definite and fast.'"
+
 integration_validation:
   shared_artifacts_summary:
+    - "guest nameserver — single source is overdrive-init's resolv.conf (one line, the guest gateway). Unchanged by guest-public-dns-resolution; the node responder at that address is the only resolver the guest uses, for mesh and non-mesh names."
     - "guest exit status — produced by the in-guest agent (overdrive-init) over vsock; the ONLY source of ExitKind::CleanExit. The host cloud-hypervisor process's exit status is never the source. Consumed by exit_observer::classify, the restart/backoff reconciler, and `workload describe`."
     - "ready beacon — produced by the in-guest agent over vsock; gates VmDriver::start's return, which is what the action shim maps to AllocState::Running. Moving honesty into start's return keeps the existing shim seam correct rather than adding a parallel readiness path."
     - "declared resources — single source is the `[resources]` block (`cpu`, `memory` human-readable strings per GH #372; canonical form rendered identically by `workload describe`); drives vCPU count and memory size for the guest AND is what the right-sizing reconciler (#92) converges against. `[vm]` deliberately carries neither."
@@ -193,7 +211,16 @@ related_features:
   - id: service-kind-vm-workloads
     role: "Extends this journey to Service-kind VMs using guest-targeted HTTP/TCP probes (GH #257); guest command probes remain GH #280."
 
+  - id: guest-public-dns-resolution
+    role: "Adds step 7: a guest resolves public names through its default gateway nameserver (GH #382, J-OPS-005)."
+
 changelog:
+  - date: 2026-11-25
+    feature: guest-public-dns-resolution
+    change: >
+      EXTENDED with step 7 (a guest program reaches a public service by name) and
+      the guest-nameserver shared artifact, by the DISCUSS wave for GH #382.
+      Maps to the newly minted J-OPS-005. Steps 1-6 unmodified.
   - date: 2026-08-01
     feature: microvm-driver-cloud-hypervisor
     change: >
