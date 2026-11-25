@@ -759,7 +759,46 @@ jobs:
       anxiety: A benchmark could be mistaken for a correctness gate, or taken on a host whose state differs from production
       habit: Spikes live in spike-scratch and are read by hand; the metal run grammar must keep meaning the same for tests
 
+  - id: J-OPS-005
+    title: "Let a program in my VM reach a public service by name with the guest's default resolver, no resolver plumbing"
+    relates_to: [J-MESH-001, J-OPS-003]
+    situation: >
+      When a program inside a VM I deployed with `overdrive deploy` calls a
+      public service by its name (api.anthropic.com, github.com, crates.io),
+      and the guest's only nameserver is the node's guest gateway, and
+      outbound connections by address already work,
+    motivation: >
+      I want the lookup to resolve through the guest's default resolver
+      configuration and return promptly, with a definite answer when the name
+      does not exist or cannot be resolved, without installing a resolver, a
+      route or a rule in the guest,
+    outcome: >
+      so the workload behaves as it would on an ordinary host, a dev box can run
+      agents, git and cargo, and a failed lookup tells me whether the name is
+      wrong or the node's upstream is down instead of costing a silent
+      five-second timeout.
+    source: GH #382; metal run b20bcb2fb8028a614e91755c (Linux 7.0.0-38, fe0c3adcf); docs/research/platform/herdr-dev-environment-in-microvm-research.md gap 7; guest-public-dns-resolution DISCUSS (2026-11-25)
+    served_by_phase: guest-public-dns-resolution
+    status: active
+    dimensions:
+      functional: A guest resolves public names through the gateway nameserver and connects; mesh names are unchanged
+      emotional: Confidence that a deployed VM is an ordinary host as far as names go
+      social: A dev box that runs agents, git and cargo without a resolver workaround
+    four_forces:
+      push: Every public lookup from a guest fails after about 5 s while outbound TCP by address works
+      pull: The guest's default configuration resolves public names and mesh names through the one gateway nameserver
+      anxiety: Forwarding makes upstream answers untrusted input to mesh addressing, and adds a dependency on the host's resolvers
+      habit: Guests keep one nameserver (ADR-0154); mesh naming stays on the node responder
+
 changelog:
+  - date: 2026-11-25
+    change: >
+      Added J-OPS-005 for guest-public-dns-resolution (GH #382), authored by the
+      DISCUSS wave from the issue, the metal probe and the herdr dev-box
+      research, not external customer research. Minted rather than elevated:
+      the progress (a guest reaches a public service by name) and failure mode
+      (egress works, lookup times out) differ from J-MESH-001 (mesh peer by
+      name) and J-OPS-003 (lifecycle honesty). No existing job contract changed.
   - date: 2026-11-19
     change: >
       EXTENDED J-PLAT-008 for guest-benchmark-substrate (GH #362), authored by

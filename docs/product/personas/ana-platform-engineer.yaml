@@ -67,6 +67,7 @@ persona:
       - "Ana sees `workload describe: Running` but `dig @<vip>` hangs, and needs to know WHY without reading kernel source"
       - "Lifecycle (GH #249): Ana stops a declared workload to roll it (new build, wedged instance, fresh `workload_addr`), re-runs `overdrive deploy <spec>`, and NOTHING comes back up — the operator-stop sentinel is sticky/overriding and the same-spec resubmit is a no-op — so she needs an explicit way to bring up a fresh instance without deleting/redeclaring the workload"
       - "VM Service (GH #257): Ana needs HTTP/TCP health to reach the guest workload and refuses to substitute host VMM status"
+      - "Guest outbound names (GH #382): Ana deploys a VM dev box (herdr-box.toml) whose programs call api.anthropic.com, github.com and crates.io, and every lookup fails after 5 s although outbound TCP by address works"
 
   motivations:
     functional: >
@@ -129,4 +130,4 @@ persona:
     - "Lifecycle (GH #249): after the replace action, `overdrive workload describe <id>` shows a NEW AllocationId reaching Running while `jobs/<id>` stays declared, and the workload's mesh name keeps resolving the SAME frontend `F` (no stale address)"
     - "VM Service (GH #257): a guest HTTP/TCP result drives Stable, readiness eligibility, and liveness behavior through the supported VM deploy/describe contract"
 
-  related_jobs: [J-OPS-004, J-PLAT-004, J-OPS-003]
+  related_jobs: [J-OPS-004, J-PLAT-004, J-OPS-003, J-OPS-005]
