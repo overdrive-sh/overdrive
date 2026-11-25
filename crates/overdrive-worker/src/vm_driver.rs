@@ -39,8 +39,8 @@ use overdrive_core::traits::driver::{
     OomFacts, Resources, STDERR_TAIL_LINES, VmStartFailure, VolumePayload,
 };
 use overdrive_core::traits::vmm::{
-    VMM_CONSOLE_TAIL_MAX_BYTES, VmControl, VmExitWatch, VmTermination, Vmm, VmmDiagnostics,
-    VmmError, VmmExit,
+    Result as VmmResult, VMM_CONSOLE_TAIL_MAX_BYTES, VmControl, VmExitWatch, VmTermination, Vmm,
+    VmmDiagnostics, VmmError, VmmExit,
 };
 use overdrive_core::traits::volume_backing::{ClaimState, VolumeBackingError};
 use overdrive_core::vm::beacon::{BeaconConnKey, BeaconIo, BeaconMessage, BeaconSocket};
@@ -1752,8 +1752,9 @@ enum VmmReap {
 
 impl VmmReap {
     /// The reap state a terminate outcome leaves. Exhaustive: a new [`VmTermination`] variant
-    /// must be classified here.
-    const fn after(outcome: &overdrive_core::traits::vmm::Result<VmTermination>) -> Self {
+    /// must be classified here. A terminate `Err` maps to `Reaped`: `kill_scope` is the
+    /// cgroup-level backstop and tolerates a busy scope, so the cleanup still attempts it.
+    const fn after(outcome: &VmmResult<VmTermination>) -> Self {
         match outcome {
             Ok(VmTermination::KilledNotReaped) => Self::NotReaped,
             Ok(VmTermination::ExitedWithinGrace(_) | VmTermination::Killed) | Err(_) => {
@@ -1775,11 +1776,8 @@ async fn cleanup_driver_artifacts(
     // `VmReclamation`; no other failure changes the cleanup either. A VMM that is killed but
     // not reaped still populates its scope, so the kill is omitted and the scope is left to
     // `VmReclamation` (ADR-0348).
-    match reap {
-        VmmReap::Reaped => {
-            let _ = host_state.kill_scope(&live_vm.scope).await;
-        }
-        VmmReap::NotReaped => {}
+    if reap == VmmReap::Reaped {
+        let _ = host_state.kill_scope(&live_vm.scope).await;
     }
     let _ = tokio::fs::remove_dir_all(live_vm.run_dir.path()).await;
     remove_clone_then_index_link(&live_vm.rootfs).await;
@@ -2170,7 +2168,8 @@ impl Driver for VmDriver {
         // VMM completion ends the writer's read-until-EXIT wait immediately,
         // and the deadline only force-closes an in-flight SHUTDOWN write
         // while the same VMM wait continues.
-        let termination = self.vmm.terminate(&control, VM_STOP_GRACE);
+        let termination =
+            async { VmmReap::after(&self.vmm.terminate(&control, VM_STOP_GRACE).await) };
         tokio::pin!(termination);
         let reap;
         match beacon.as_ref().and_then(|writer| writer.request_stop()) {
@@ -2181,7 +2180,7 @@ impl Driver for VmDriver {
                     disposition = "absent",
                     "VM beacon writer consumed"
                 );
-                reap = VmmReap::after(&termination.await);
+                reap = termination.await;
             }
             Some(mut writer_task) => {
                 let writer_deadline = self.clock.sleep(VM_SHUTDOWN_REQUEST_DEADLINE);
@@ -2193,7 +2192,7 @@ impl Driver for VmDriver {
                 tokio::select! {
                     biased;
                     outcome = &mut termination => {
-                        reap = VmmReap::after(&outcome);
+                        reap = outcome;
                         if let Some(writer) = writer {
                             writer.vmm_has_exited();
                         }
@@ -2209,7 +2208,7 @@ impl Driver for VmDriver {
                         }
                     }
                     _ = &mut writer_task => {
-                        reap = VmmReap::after(&termination.await);
+                        reap = termination.await;
                     }
                     () = &mut writer_deadline => {
                         if let Some(writer) = writer {
@@ -2218,10 +2217,10 @@ impl Driver for VmDriver {
                         tokio::select! {
                             biased;
                             _ = &mut writer_task => {
-                                reap = VmmReap::after(&termination.await);
+                                reap = termination.await;
                             }
                             outcome = &mut termination => {
-                        reap = VmmReap::after(&outcome);
+                                reap = outcome;
                                 if let Some(writer) = writer {
                                     writer.vmm_has_exited();
                                 }

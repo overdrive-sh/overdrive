@@ -2773,10 +2773,11 @@ async fn dispatch_single(
             let terminal_driver =
                 alloc_drivers.lock().get(&alloc_id).copied().and_then(|kind| drivers.get(kind));
 
-            // `Driver::stop` returns once the VMM is reaped or killed and past the reap
-            // bound (ADR-0348). Its exit observer can
-            // therefore contend with an intentional-stop observation while
-            // this arm is inside the cleanup protocol. Re-read the LWW winner
+            // `Driver::stop` returns when the VMM is reaped, or killed and still
+            // unreaped at the bound (ADR-0348); the exit observer may fire before or
+            // after this arm's cleanup, so it can contend with an
+            // intentional-stop observation while this arm is inside the cleanup
+            // protocol. Re-read the LWW winner
             // after cleanup and once more after a rejected compound write. A
             // second rejection leaves the competing terminal row authoritative:
             // cleanup has completed, so release the local ownership without
