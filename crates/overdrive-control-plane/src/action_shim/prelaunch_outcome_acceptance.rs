@@ -1315,7 +1315,6 @@ async fn running_vm_over_a_host(id: &str) -> (Rig, SimVmHostState) {
 /// CONTRACT_SHAPE: bounded-change. Universe: the allocation's row, the pool's
 /// lease and occupancy, the host's scopes.
 #[tokio::test]
-#[should_panic(expected = "the lease is held while the VM's scope is present")]
 async fn a_stop_keeps_the_lease_held_while_the_vms_scope_is_present_and_a_reclaim_releases_it_after()
  {
     let id = "alloc-prelaunch-service-0";
@@ -1569,7 +1568,6 @@ fn operator_stop(id: &str) -> Action {
 /// Fault: the unreaped VMM. Oracle: the row, the pool's `observe`, the CIDs the
 /// pool hands out across one full next-fit walk, `SimVmm::vsock_device_holders`.
 #[tokio::test]
-#[should_panic(expected = "the unreaped VM's lease stays held Retiring while its scope is present")]
 async fn a_stop_of_an_unreapable_vm_keeps_its_lease_counted_and_no_wrapping_assign_takes_its_cid() {
     let id = "alloc-prelaunch-service-0";
     let (rig, host) = running_vm_over_a_host(id).await;
@@ -1622,7 +1620,6 @@ async fn a_stop_of_an_unreapable_vm_keeps_its_lease_counted_and_no_wrapping_assi
 /// `VmReclamation`'s pass over `SimVmm` and `SimVmHostState`. Oracle: the pool,
 /// the host's scopes, the device holders and the fresh VMM's liveness.
 #[tokio::test]
-#[should_panic(expected = "the lease is held until the VMM is reaped")]
 async fn after_the_reap_a_reclamation_pass_and_a_reclaim_attempt_release_the_lease_and_no_launch_clashes()
  {
     let id = "alloc-prelaunch-service-0";
@@ -1667,7 +1664,6 @@ async fn after_the_reap_a_reclamation_pass_and_a_reclaim_attempt_release_the_lea
 /// lease. Today the stop reads no scope, so the scripted failure is never met
 /// and the stop completes.
 #[tokio::test]
-#[should_panic(expected = "a failing scope observation at the stop is the typed reclamation error")]
 async fn a_failing_scope_observation_at_the_stop_gives_a_typed_error_with_no_teardown_and_no_row_and_the_replay_succeeds()
  {
     let id = "alloc-prelaunch-service-0";
@@ -1709,7 +1705,6 @@ async fn a_failing_scope_observation_at_the_stop_gives_a_typed_error_with_no_tea
 /// Oracle: the pool's lease state and occupancy and the host's scope after each
 /// attempt; the view's attempt count proves the attempts were made.
 #[tokio::test]
-#[should_panic(expected = "the lease stays held while the scope is held, attempt 1")]
 async fn the_lease_stays_held_across_several_reclaim_attempts_while_the_scope_is_held() {
     let id = "alloc-prelaunch-service-0";
     let (rig, host) = running_vm_over_a_host(id).await;
