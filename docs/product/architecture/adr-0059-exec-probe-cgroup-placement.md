@@ -11,6 +11,14 @@ Tags: phase-1, service-kind, worker-subsystem, cgroup, exec-probe.
 trait), ADR-0026 (cgroup v2 direct writes), ADR-0028 (cgroup
 preflight refusal), ADR-0030 (exec driver pattern).
 
+**Note 2026-11-25**: `cgroup_manager::place_pid_in_scope` no longer
+exists. The VMM is now created directly inside its allocation's scope
+with `clone3` `CLONE_INTO_CGROUP` (ADR-0352), and the cgroup manager's
+method and its test were deleted with that change. The `ExecDriver`
+reuse this ADR relies on for the exec-probe placement (mechanism b)
+therefore no longer has a function to call; no `CgroupExecProber` is
+in the code yet.
+
 ## Context
 
 Exec probes (US-03) MUST run inside the workload's cgroup per

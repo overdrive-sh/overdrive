@@ -19,6 +19,13 @@ cgroup. The original spec was empirically falsified by DELIVER step
 01-02 — cgroupfs only permits kernel-managed pseudo-files inside
 cgroup directories. See § Alternatives considered → Alternative F.
 
+**Note 2026-11-25**: `CgroupManager::place_pid_in_scope` no longer
+exists. The VMM is now created directly inside its allocation's scope
+with `clone3` `CLONE_INTO_CGROUP` in `overdrive-host`
+(`vmm/launch_clone.rs`), not spawned and then moved by a
+`cgroup.procs` write; see ADR-0352. Mentions of `place_pid_in_scope`
+below describe the shape at acceptance.
+
 ## Context
 
 ADR-0026 chose direct `std::fs` writes against `/sys/fs/cgroup` for the

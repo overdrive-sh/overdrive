@@ -764,8 +764,8 @@ C4Component
     Component(probe_task, "Per-probe-instance task", "tokio::task", "Loops: select(cancel, sleep(interval)) → probe.probe() → write ProbeResultRow → repeat")
     Component(tcp_prober, "TokioTcpProber", "production binding of TcpProber", "tokio::net::TcpStream::connect + tokio::time::timeout")
     Component(http_prober, "HyperHttpProber", "production binding of HttpProber", "hyper::client + connection pool + per-request timeout")
-    Component(exec_prober, "CgroupExecProber", "production binding of ExecProber", "Command::spawn + place_pid_in_scope (ADR-0026 reuse) + cgroup.kill on timeout (ADR-0059)")
-    Component(cgmgr, "cgroup_manager (existing per ADR-0026)", "module", "place_pid_in_scope, cgroup_kill; reused by ExecProber")
+    Component(exec_prober, "CgroupExecProber", "production binding of ExecProber", "Command::spawn + cgroup placement (see note below the diagram) + cgroup.kill on timeout (ADR-0059)")
+    Component(cgmgr, "cgroup_manager (existing per ADR-0026)", "module", "cgroup_kill; reused by ExecProber")
   }
 
   Container_Boundary(ctrl, "overdrive-control-plane (adapter-host)") {
@@ -791,7 +791,7 @@ C4Component
   Rel(probe_task, tcp_prober, "TcpProber::probe (TCP mechanic)")
   Rel(probe_task, http_prober, "HttpProber::probe (HTTP mechanic)")
   Rel(probe_task, exec_prober, "ExecProber::probe (Exec mechanic)")
-  Rel(exec_prober, cgmgr, "place_pid_in_scope + cgroup_kill")
+  Rel(exec_prober, cgmgr, "cgroup_kill")
   Rel(probe_task, obs_store, "ObservationStore::write_probe_result(ProbeResultRow) — LWW per (alloc_id, role, probe_idx)")
   Rel(reconciler_runtime, obs_store, "list_probe_results_for_alloc on hydrate_actual")
   Rel(reconciler_runtime, service_reconciler, "reconcile(desired, actual, view, tick) → (Vec<Action>, View)")
@@ -800,6 +800,12 @@ C4Component
   Rel(core_traits, runner, "Trait surface (Arc<dyn TcpProber/HttpProber/ExecProber>)")
   Rel(core_obs, obs_store, "Row shape; rkyv envelope V1")
 ```
+
+**Note 2026-11-25**: `place_pid_in_scope` no longer exists. The VMM is now
+created directly inside its allocation's scope with `clone3`
+`CLONE_INTO_CGROUP` (ADR-0352), so the cgroup manager's placement method
+was deleted. The exec prober's placement step is therefore not drawn here;
+ADR-0059's placement mechanism is not yet implemented in the code.
 
 The diagram makes six architectural properties visually explicit:
 
@@ -831,9 +837,9 @@ The diagram makes six architectural properties visually explicit:
    `.claude/rules/development.md` § "Trait definitions specify
    behavior, not just signature".
 4. **Cgroup-aware exec via reused cgroup-manager primitives**
-   (per ADR-0059). `CgroupExecProber` reuses
-   `place_pid_in_scope` + `cgroup_kill` from `ExecDriver`'s
-   existing module; bounded new code in the exec-probe path.
+   (per ADR-0059). `CgroupExecProber` reuses `cgroup_kill` from
+   `ExecDriver`'s existing module; bounded new code in the
+   exec-probe path. Its placement step is covered by the note above.
 5. **LWW observation, not append-mode** (per ADR-0054 §5 as
    amended by ADR-0080 § D2 +
    `.claude/rules/development.md` § "Persist inputs, not derived

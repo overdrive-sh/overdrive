@@ -849,7 +849,7 @@ one process, so enrolling only the first pid also left every thread and child cr
 
    | Refusal | Surfaces as |
    |---|---|
-   | opening the scope directory fails (absent, no search permission) | `VmmError::Io` (open), before any clone |
+   | opening the scope directory fails (absent, no search permission) | the primitive's `io::Error` (step `joining the cgroup`), before any clone; `VmmError::Create` through `classify_launch_spawn_error`, with the same `detail` as the `clone3` row below |
    | `clone3` returns `EBADF`, `ENODEV`, `EACCES`, `EPERM`, `EBUSY`, `EOPNOTSUPP`, `ENOENT`, `ENOMEM` | the primitive's `io::Error` (step `joining the cgroup`), `VmmError::Create` through `classify_launch_spawn_error`; the `detail` reads `joining the cgroup failed: <launch executable>: <errno text>` |
    | a child step fails (`LaunchStep`, item 4) | the step and `errno` from the error pipe, `VmmError::Create`; the `detail` reads `<step.as_str()> failed: <launch executable>: <errno text>`, for example `loading the seccomp filter failed: /usr/bin/prlimit: Invalid argument (os error 22)`; an unresolvable wrapper is `NotFound` at the pre-clone resolution and maps to `ConfinementUnavailable` (unchanged) |
 
