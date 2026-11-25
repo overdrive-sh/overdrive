@@ -245,14 +245,13 @@ fn assert_one_abandoned_superseded_row(rows: &[AllocStatusRow]) {
 
 /// Boundary 4 (late success, ADR-0334): a stop recorded while a launch waits on a held claim
 /// interrupts it. The launch ends at once with `StartSuperseded` (no simulated time passes, so
-/// it does not wait for its 30 s claim bound): no row, no VMM, nothing charged to the restart
-/// budget, the predecessor's claim untouched, and the volume kept. The stop's own evaluation,
-/// which runs after it, finds nothing to stop and never reattaches the stale launch: its result
-/// is never used.
+/// it does not wait for its 30 s claim bound): its `Pending` row ends as an abandoned
+/// `Terminated` row (ADR-0355), no VMM, nothing charged to the restart budget, the predecessor's
+/// claim untouched, and the volume kept. The stop's own evaluation, which runs after it, finds
+/// nothing to stop and never reattaches the stale launch: its result is never used.
 ///
-/// Pending: the production spec parser refuses `[vm.volume]` until DELIVER's spec-surface step,
-/// so the body stops at `declare`; the assertions after it are the contract the launch path must
-/// meet once the parser and the lane table land.
+/// Pending (ADR-0353, ADR-0355 W1): today the superseded launch writes no row, so the body
+/// fails at the abandoned-row assertion.
 #[test]
 #[should_panic(expected = "a superseded launch ends its Pending row as an abandoned row")]
 fn a_stop_interrupts_the_start_and_its_result_is_never_used() {

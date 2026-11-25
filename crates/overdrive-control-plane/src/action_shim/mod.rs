@@ -3668,8 +3668,8 @@ mod fail_closed_mtls_tests {
     /// onto the `Failed` row (assertion A-9, the #248 drop shape).
     const STARTED_AT_SECS: u64 = 1_700_000_000;
     /// The per-instance address the seeded `Running` row owns. The `Failed`
-    /// row must NOT inherit it (assertion A-4) — a failed alloc is not a live
-    /// backend.
+    /// row carries it unchanged (assertion A-4) — the address is the
+    /// allocation's record, not a claim that it is a live backend.
     const RUNNING_WORKLOAD_ADDR: Ipv4Addr = Ipv4Addr::new(10, 42, 0, 2);
 
     /// The alloc identity triple every case shares.
@@ -3683,7 +3683,7 @@ mod fail_closed_mtls_tests {
 
     /// The `Running` `AllocStatusRow` the helper supersedes. Carries a
     /// `Some(..)` `started_at` and a `Some(..)` `workload_addr` so the
-    /// forward-carry (A-9) and the deliberate non-carry (A-4) are both
+    /// forward-carries (A-9 and A-4) are both
     /// falsifiable.
     fn seeded_running_row(
         alloc: &AllocationId,
