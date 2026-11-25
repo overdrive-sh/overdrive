@@ -568,3 +568,554 @@ unsafe fn child_after_clone(plan: &ChildPlan) -> ! {
         child_fail(plan.error_pipe, LaunchStep::Execve)
     }
 }
+
+/// Host-only tests: the error-pipe codec and the wait-status mapping. Neither
+/// needs a guest; the status cases wait on ordinary children of the test.
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used)]
+
+    use proptest::prelude::*;
+    use rustix::process::Pid;
+
+    use super::*;
+    use overdrive_testing::placement;
+
+    placement!(host_pure);
+
+    const EVERY_STEP: [LaunchStep; 6] = [
+        LaunchStep::SignalReset,
+        LaunchStep::Stdio,
+        LaunchStep::CloseRange,
+        LaunchStep::NoNewPrivs,
+        LaunchStep::SeccompLoad,
+        LaunchStep::Execve,
+    ];
+
+    fn any_step() -> impl Strategy<Value = LaunchStep> {
+        proptest::sample::select(EVERY_STEP.to_vec())
+    }
+
+    #[test]
+    fn every_step_byte_round_trips_and_the_bytes_are_one_to_six_in_launch_order() {
+        let codes: Vec<u8> = EVERY_STEP.iter().map(|step| step.code()).collect();
+        assert_eq!(codes, [1, 2, 3, 4, 5, 6], "the step bytes are the launch order");
+        for step in EVERY_STEP {
+            assert_eq!(LaunchStep::from_code(step.code()), step, "{step:?} round-trips");
+        }
+    }
+
+    #[test]
+    fn a_byte_that_names_no_step_is_execve() {
+        for code in std::iter::once(0_u8).chain(7..=u8::MAX) {
+            assert_eq!(LaunchStep::from_code(code), LaunchStep::Execve, "byte {code}");
+        }
+    }
+
+    #[test]
+    fn a_report_is_the_step_byte_then_the_native_endian_errno() {
+        let report = ChildReport { step: LaunchStep::SeccompLoad, errno: libc::EACCES };
+        let mut expected = vec![5_u8];
+        expected.extend_from_slice(&libc::EACCES.to_ne_bytes());
+        assert_eq!(report.encode().to_vec(), expected);
+    }
+
+    proptest! {
+        #[test]
+        fn a_report_decodes_to_what_was_encoded(step in any_step(), errno in any::<i32>()) {
+            let report = ChildReport { step, errno };
+            prop_assert_eq!(ChildReport::decode(&report.encode()), Some(report));
+        }
+
+        #[test]
+        fn a_payload_of_the_wrong_length_decodes_as_execve_with_eio(
+            bytes in proptest::collection::vec(any::<u8>(), 1..32)
+                .prop_filter("not exactly a report", |bytes| bytes.len() != REPORT_LEN),
+        ) {
+            prop_assert_eq!(
+                ChildReport::decode(&bytes),
+                Some(ChildReport { step: LaunchStep::Execve, errno: libc::EIO }),
+            );
+        }
+
+        #[test]
+        fn a_five_byte_report_with_an_unknown_step_keeps_its_errno_and_names_execve(
+            code in prop_oneof![Just(0_u8), 7..=u8::MAX],
+            errno in any::<i32>(),
+        ) {
+            let mut bytes = vec![code];
+            bytes.extend_from_slice(&errno.to_ne_bytes());
+            prop_assert_eq!(
+                ChildReport::decode(&bytes),
+                Some(ChildReport { step: LaunchStep::Execve, errno }),
+            );
+        }
+    }
+
+    #[test]
+    fn no_bytes_means_the_child_reached_exec() {
+        assert_eq!(ChildReport::decode(&[]), None);
+    }
+
+    /// Wait for an ordinary child of this test the way the reaper does, with
+    /// `waitid`, and return the status the mapping reads.
+    #[allow(
+        clippy::zombie_processes,
+        reason = "the child is reaped by `waitid`, which clippy does not recognise as a wait"
+    )]
+    fn status_of(script: &str) -> WaitIdStatus {
+        let child = std::process::Command::new("/bin/sh")
+            .args(["-c", script])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("spawn /bin/sh");
+        let pid = Pid::from_raw(i32::try_from(child.id()).expect("a pid fits i32"))
+            .expect("a child pid is nonzero");
+        rustix::process::waitid(WaitId::Pid(pid), WaitIdOptions::EXITED)
+            .expect("waitid on the child")
+            .expect("a blocking waitid returns the status")
+    }
+
+    #[test]
+    fn a_normal_exit_maps_to_its_code_and_no_signal() {
+        for code in [0, 1, 7, 127, 255] {
+            assert_eq!(exit_of(&status_of(&format!("exit {code}"))), (Some(code), None));
+        }
+    }
+
+    #[test]
+    fn a_signal_death_maps_to_the_signal_and_no_code() {
+        for (name, number) in [("KILL", 9_u8), ("TERM", 15), ("HUP", 1)] {
+            assert_eq!(
+                exit_of(&status_of(&format!("kill -{name} $$"))),
+                (None, Some(number)),
+                "SIG{name}",
+            );
+        }
+    }
+}
+
+/// Guest tests (Tier 3): the spawn primitive against a real cgroup v2
+/// filesystem and real processes. Each case launches ordinary programs
+/// (`sleep`, `sh`) through [`launch`], the same call `create` makes, with the
+/// production seccomp program.
+#[cfg(test)]
+#[allow(
+    clippy::expect_used,
+    clippy::unwrap_used,
+    reason = "test fixture: a failed precondition is a failed case"
+)]
+#[allow(
+    clippy::doc_markdown,
+    reason = "the repository-mandated CONTRACT_SHAPE declaration is an exact machine-read line"
+)]
+mod guest_tests {
+    use std::collections::BTreeMap;
+    use std::fs::File;
+    use std::path::{Path, PathBuf};
+    use std::time::Duration;
+
+    use super::*;
+    use overdrive_testing::overdrive_test;
+
+    const CGROUP_ROOT: &str = "/sys/fs/cgroup";
+    /// How long a case waits for a killed child to be reaped.
+    const REAP_BOUND: Duration = Duration::from_secs(10);
+    /// What `exit_of` reports: the exit code, the terminating signal.
+    type Observed = (Option<i32>, Option<u8>);
+
+    /// A cgroup the case launches into: a direct child of the cgroup2 mount.
+    struct Scope(PathBuf);
+
+    impl Scope {
+        fn create(name: &str) -> Self {
+            let dir =
+                Path::new(CGROUP_ROOT).join(format!("launch-clone-{name}-{}", std::process::id()));
+            std::fs::create_dir(&dir).expect("create the scope");
+            Self(dir)
+        }
+
+        fn procs(&self) -> String {
+            std::fs::read_to_string(self.0.join("cgroup.procs")).expect("read cgroup.procs")
+        }
+    }
+
+    impl Drop for Scope {
+        fn drop(&mut self) {
+            // Best effort: the guest is discarded after the case.
+            let _ = std::fs::remove_dir(&self.0);
+        }
+    }
+
+    fn launch_program(scope: &Scope, program: &str, args: &[&str]) -> io::Result<Launched> {
+        let filter = VmmLaunchSeccompFilter::for_target().expect("a launch filter for the target");
+        let args: Vec<OsString> = args.iter().map(OsString::from).collect();
+        launch(&LaunchRequest {
+            program: OsStr::new(program),
+            args: &args,
+            scope_dir: &scope.0,
+            filter: &filter,
+        })
+    }
+
+    /// A process's descriptor table as `/proc/<pid>/fd` shows it: number to target.
+    fn fd_table(pid: u32) -> Result<BTreeMap<i32, String>, String> {
+        let mut table = BTreeMap::new();
+        let entries = std::fs::read_dir(format!("/proc/{pid}/fd")).map_err(|e| e.to_string())?;
+        for entry in entries {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let number: i32 = entry.file_name().to_string_lossy().parse().map_err(|_| "fd")?;
+            let target = std::fs::read_link(entry.path()).map_err(|e| e.to_string())?;
+            table.insert(number, target.to_string_lossy().into_owned());
+        }
+        Ok(table)
+    }
+
+    /// Wait until `pid` is blocked in a sleep system call (`nanosleep` or
+    /// `clock_nanosleep`): its dynamic loader has finished, so its descriptor
+    /// table holds only what it inherited. `launch` returns once the child has
+    /// reached `execve`, not once the new program has started.
+    fn wait_until_sleeping(pid: u32) {
+        let deadline = std::time::Instant::now() + REAP_BOUND;
+        loop {
+            let syscall =
+                std::fs::read_to_string(format!("/proc/{pid}/syscall")).unwrap_or_default();
+            if matches!(syscall.split_whitespace().next(), Some("35" | "230")) {
+                return;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "process {pid} never blocked in a sleep call: `{}`",
+                syscall.trim()
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    fn runtime() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread().enable_all().build().expect("a runtime")
+    }
+
+    async fn is_gone(pid: u32) -> bool {
+        let deadline = tokio::time::Instant::now() + REAP_BOUND;
+        while Path::new(&format!("/proc/{pid}")).exists() {
+            if tokio::time::Instant::now() >= deadline {
+                return false;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        true
+    }
+
+    /// Run `body` with the process's descriptors 0 to 2 closed, then restore
+    /// them. The body returns data only: a failed assertion inside it would
+    /// have nowhere to print.
+    fn with_standard_descriptors_closed<R>(body: impl FnOnce() -> R) -> R {
+        let mut saved = [-1; 3];
+        for (slot, fd) in saved.iter_mut().zip(0..) {
+            // SAFETY: `F_DUPFD_CLOEXEC` on a live descriptor returns a new one.
+            let copy = unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, FIRST_NON_STDIO_FD) };
+            assert!(copy >= FIRST_NON_STDIO_FD, "save standard descriptor {fd}");
+            *slot = copy;
+        }
+        for fd in 0..3 {
+            // SAFETY: closing a descriptor this test owns; it is restored below.
+            unsafe { libc::close(fd) };
+        }
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(body));
+        for (fd, copy) in (0..).zip(saved) {
+            // SAFETY: `copy` is the live saved descriptor; `dup2` re-installs it on `fd`.
+            unsafe {
+                libc::dup2(copy, fd);
+                libc::close(copy);
+            }
+        }
+        match outcome {
+            Ok(value) => value,
+            Err(panic) => std::panic::resume_unwind(panic),
+        }
+    }
+
+    /// The test binary itself, launched as the VMM stand-in: the guest has no
+    /// shell, so a child with a chosen behaviour is one of the `child_role_*`
+    /// cases below, run by name.
+    fn launch_role(scope: &Scope, role: &str) -> io::Result<Launched> {
+        let executable = std::env::current_exe().expect("the test binary's path");
+        let name = format!(
+            "{}::{role}",
+            module_path!().split_once("::").expect("a crate-qualified module path").1
+        );
+        launch_program(
+            scope,
+            executable.to_str().expect("a UTF-8 path"),
+            &["--exact", &name, "--ignored", "--nocapture", "--test-threads=1"],
+        )
+    }
+
+    /// Child role: end with exit status 7.
+    #[overdrive_test(guest = "cgroup-default")]
+    #[test]
+    #[ignore = "child role: launched by the cases that observe a child's exit"]
+    fn child_role_exit_seven() {
+        std::process::exit(7);
+    }
+
+    /// Child role: end on SIGKILL, raised against itself.
+    #[overdrive_test(guest = "cgroup-default")]
+    #[test]
+    #[ignore = "child role: launched by the cases that observe a child's exit"]
+    fn child_role_kill_self() {
+        // SAFETY: raising a signal against this process.
+        unsafe { libc::raise(libc::SIGKILL) };
+        std::thread::sleep(Duration::from_secs(600));
+    }
+
+    /// Child role: end on SIGABRT with core dumping allowed.
+    #[overdrive_test(guest = "cgroup-default")]
+    #[test]
+    #[ignore = "child role: launched by the cases that observe a child's exit"]
+    fn child_role_abort_with_core() {
+        let unlimited =
+            libc::rlimit { rlim_cur: libc::RLIM_INFINITY, rlim_max: libc::RLIM_INFINITY };
+        // SAFETY: `unlimited` is a live `rlimit`; `abort` ends the process.
+        unsafe {
+            libc::setrlimit(libc::RLIMIT_CORE, &raw const unlimited);
+            libc::abort()
+        }
+    }
+
+    /// Child role: write one line on standard error, then wait to be killed.
+    #[overdrive_test(guest = "cgroup-default")]
+    #[test]
+    #[ignore = "child role: launched by the case that observes standard I/O"]
+    #[allow(clippy::print_stderr, reason = "the line on standard error is the case's oracle")]
+    fn child_role_write_stderr_then_wait() {
+        eprintln!("on-stderr");
+        std::thread::sleep(Duration::from_secs(600));
+    }
+
+    /// (ADR-0352, ADR-0129) The launched process holds descriptors 0 to 2 and
+    /// nothing else: a descriptor the parent left inheritable does not reach it.
+    ///
+    /// CONTRACT_SHAPE: bounded-change. Universe: the descriptor table of the
+    /// launched process.
+    #[overdrive_test(guest = "cgroup-default")]
+    #[test]
+    fn a_launched_process_holds_no_inherited_descriptor_beyond_standard_io() {
+        let scratch = tempfile::tempdir().expect("scratch directory");
+        let stray_path = scratch.path().join("stray-parent-descriptor");
+        let stray = File::create(&stray_path).expect("create the stray file");
+        rustix::io::fcntl_setfd(&stray, rustix::io::FdFlags::empty())
+            .expect("make the descriptor inheritable");
+        let stray_target = stray_path.to_string_lossy().into_owned();
+
+        // Contrast: an ordinary spawn inherits it, so its absence below is the
+        // launch sequence's doing, not the descriptor's.
+        let mut control = std::process::Command::new("sleep")
+            .arg("600")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("spawn the contrast child");
+        wait_until_sleeping(control.id());
+        let control_table = fd_table(control.id()).expect("the contrast table");
+        control.kill().expect("kill the contrast child");
+        control.wait().expect("reap the contrast child");
+        assert!(
+            control_table.values().any(|target| *target == stray_target),
+            "contrast: an ordinary spawn inherits the stray descriptor: {control_table:?}"
+        );
+
+        let scope = Scope::create("hygiene");
+        let launched = launch_program(&scope, "sleep", &["600"]).expect("launch sleep");
+        wait_until_sleeping(launched.child.pid());
+        let table = fd_table(launched.child.pid()).expect("the launched table");
+        drop(launched);
+
+        let numbers: Vec<i32> = table.keys().copied().collect();
+        assert_eq!(numbers, [0, 1, 2], "only standard I/O is held: {table:?}");
+        assert!(
+            table.values().all(|target| *target != stray_target),
+            "the stray descriptor did not reach the launched process: {table:?}"
+        );
+        assert_eq!(table[&0], "/dev/null", "standard input");
+        assert_eq!(table[&1], "/dev/null", "standard output");
+        assert!(table[&2].starts_with("pipe:"), "standard error is the capture pipe: {table:?}");
+    }
+
+    /// (ADR-0352, module safety argument) Standard I/O is correct when the
+    /// parent's own descriptors 0 to 2 are closed: every source the child
+    /// duplicates from sits at 3 or above, so no `dup2` clobbers one.
+    ///
+    /// CONTRACT_SHAPE: bounded-change. Universe: the descriptor table of the
+    /// launched process, what arrives on its stderr pipe.
+    #[overdrive_test(guest = "cgroup-default")]
+    #[test]
+    fn standard_io_is_correct_when_the_parents_standard_descriptors_are_closed() {
+        let scope = Scope::create("closed-stdio");
+
+        let (probe_fd, table, stderr_text) = with_standard_descriptors_closed(|| {
+            // With 0 to 2 closed, the next open takes the lowest number.
+            let probe = File::open("/dev/null").expect("open a probe");
+            let probe_fd = probe.as_raw_fd();
+            drop(probe);
+
+            let launched = launch_role(&scope, "child_role_write_stderr_then_wait")
+                .map_err(|error| error.to_string());
+            let (table, text) = match launched {
+                Ok(launched) => {
+                    // Read what the child writes on its capture pipe until the marker.
+                    let mut pipe = File::from(launched.stderr.try_clone().expect("clone stderr"));
+                    let mut seen = Vec::new();
+                    let mut chunk = [0_u8; 256];
+                    let outcome = loop {
+                        match std::io::Read::read(&mut pipe, &mut chunk) {
+                            Ok(0) => break Err("stderr closed before the marker".to_owned()),
+                            Ok(count) => {
+                                seen.extend_from_slice(&chunk[..count]);
+                                if String::from_utf8_lossy(&seen).contains("on-stderr\n") {
+                                    break Ok(String::from_utf8_lossy(&seen).into_owned());
+                                }
+                            }
+                            Err(error) => break Err(error.to_string()),
+                        }
+                    };
+                    (fd_table(launched.child.pid()), outcome)
+                }
+                Err(error) => (Err(error.clone()), Err(error)),
+            };
+            (probe_fd, table, text)
+        });
+
+        assert!(
+            probe_fd < FIRST_NON_STDIO_FD,
+            "the parent's low descriptors were free: {probe_fd}"
+        );
+        let table = table.expect("the launch succeeded with 0 to 2 closed");
+        assert_eq!(
+            table.get(&0).map(String::as_str),
+            Some("/dev/null"),
+            "standard input: {table:?}"
+        );
+        assert_eq!(
+            table.get(&1).map(String::as_str),
+            Some("/dev/null"),
+            "standard output: {table:?}"
+        );
+        assert!(
+            table.get(&2).is_some_and(|target| target.starts_with("pipe:")),
+            "standard error is the capture pipe: {table:?}"
+        );
+        assert_eq!(
+            table.keys().copied().collect::<Vec<_>>(),
+            [0, 1, 2],
+            "nothing else is held: {table:?}"
+        );
+        assert!(
+            stderr_text.expect("the child wrote to stderr").contains("on-stderr\n"),
+            "what the child writes on standard error arrives on the capture pipe"
+        );
+    }
+
+    /// (ADR-0352) The exit is observed through the pidfd: code, signal and core
+    /// dump map as `exit_of` says, the child is reaped by the observation (no
+    /// zombie remains in its scope), and `kill` ends a running child.
+    ///
+    /// CONTRACT_SHAPE: bounded-change. Universe: the observed status, the
+    /// process table entry, the scope's `cgroup.procs`.
+    #[overdrive_test(guest = "cgroup-default")]
+    #[test]
+    fn the_exit_is_observed_through_the_pidfd_and_the_child_is_reaped() {
+        std::fs::write("/proc/sys/kernel/core_pattern", "core")
+            .expect("set a core pattern the dump can honour");
+        let work = tempfile::tempdir().expect("working directory for core files");
+        std::env::set_current_dir(work.path()).expect("enter the working directory");
+        let scope = Scope::create("reap");
+
+        let cases: [(&str, Observed, bool); 3] = [
+            ("child_role_exit_seven", (Some(7), None), false),
+            ("child_role_kill_self", (None, Some(9)), false),
+            ("child_role_abort_with_core", (None, Some(6)), true),
+        ];
+        runtime().block_on(async {
+            for (script, expected, dumped) in cases {
+                let launched = launch_role(&scope, script).expect("launch");
+                let Launched { child, stderr: _stderr } = launched;
+                let pid = child.pid();
+                let watch = child.into_watch().expect("register the pidfd");
+                let status = watch.wait().await.expect("the exit is observed");
+                assert_eq!(exit_of(&status), expected, "mapping for `{script}`");
+                assert_eq!(status.dumped(), dumped, "core dump for `{script}`");
+                assert!(
+                    !Path::new(&format!("/proc/{pid}")).exists(),
+                    "`{script}`: observing the exit reaped the child (no zombie)"
+                );
+            }
+
+            let Launched { child, stderr: _stderr } =
+                launch_program(&scope, "sleep", &["600"]).expect("launch sleep");
+            let pid = child.pid();
+            let watch = child.into_watch().expect("register the pidfd");
+            watch.kill();
+            let status = watch.wait().await.expect("the kill is observed");
+            assert_eq!(exit_of(&status), (None, Some(9)), "a killed child reports SIGKILL");
+            assert!(is_gone(pid).await, "the killed child was reaped");
+        });
+        assert_eq!(scope.procs().trim(), "", "no member, zombie included, remains in the scope");
+    }
+
+    /// (ADR-0352) A launch that is abandoned leaves no VMM: a `create` future
+    /// dropped after its `clone3` drops the blocking task's `Launched` unadopted,
+    /// and the guard kills and reaps the child. Covered in both shapes the guard
+    /// has: with a runtime (a detached reap) and without (a synchronous reap).
+    ///
+    /// CONTRACT_SHAPE: bounded-change. Universe: the process table entry, the
+    /// scope's `cgroup.procs`.
+    #[overdrive_test(guest = "cgroup-default")]
+    #[test]
+    fn an_abandoned_launch_is_killed_and_reaped_by_its_guard() {
+        let scope = Scope::create("abandoned");
+        let scope_dir = scope.0.clone();
+
+        // With a runtime: `create` awaits `spawn_blocking(launch)`; dropping the
+        // future drops the join handle and the closure's result is discarded.
+        let rt = runtime();
+        rt.block_on(async {
+            let (sender, receiver) = std::sync::mpsc::channel();
+            let task = tokio::task::spawn_blocking(move || {
+                let filter = VmmLaunchSeccompFilter::for_target().expect("a launch filter");
+                let args = [OsString::from("600")];
+                let launched = launch(&LaunchRequest {
+                    program: OsStr::new("sleep"),
+                    args: &args,
+                    scope_dir: &scope_dir,
+                    filter: &filter,
+                })?;
+                sender.send(launched.child.pid()).expect("report the pid");
+                Ok::<_, io::Error>(launched)
+            });
+            drop(task);
+            let pid = tokio::task::spawn_blocking(move || receiver.recv_timeout(REAP_BOUND))
+                .await
+                .expect("the receive task")
+                .expect("the abandoned launch reached clone3");
+            assert!(is_gone(pid).await, "the abandoned VMM is killed and reaped");
+        });
+        drop(rt);
+        assert_eq!(scope.procs().trim(), "", "nothing remains in the scope after the reap");
+
+        // Without a runtime: the guard waits for the kill itself.
+        let launched = launch_program(&scope, "sleep", &["600"]).expect("launch sleep");
+        let pid = launched.child.pid();
+        assert!(Path::new(&format!("/proc/{pid}")).exists(), "the child is alive before the drop");
+        drop(launched);
+        assert!(
+            !Path::new(&format!("/proc/{pid}")).exists(),
+            "with no runtime the drop returns only once the child is reaped"
+        );
+        assert_eq!(scope.procs().trim(), "", "nothing remains in the scope");
+    }
+}
