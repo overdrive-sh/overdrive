@@ -135,6 +135,22 @@ ADR-0350)", "How the pool reports a reservation". Rejected: `launch: Option<Laun
 `Reserved` variant of the core `GuestAttachmentLease` (changes core API and every exhaustive match for a distinction no reconciler decision uses);
 omitting reservations from `lease_observation` (splits `CidUnique` and the stuck-VM CID checks across two maps).
 
+**A rejected `Running` write that leaves a kept lease is the N-REC exposure, with no new rule (2026-11-25, review finding M1 of step 09-04).
+A choice within ADR-0353 and ADR-0355; nothing an operator observes changes and no ruling is reopened.**
+
+When the initial `Running` row write is rejected (S9, R11), the shim retires the lease, stops the VMM and tears down; if the VMM is killed and
+not reaped with its scope present, the release gate (ADR-0348) keeps the lease and the shim returns the typed error. After step 09-06 the row on
+this path is the launch's `Pending` row (ADR-0353), which carries the address. Nothing before the next boot ends it: `reclaimable_allocations`
+emits `ReclaimAllocationNetwork` only for `Failed` or `Terminated` rows, and a `Pending` row is a live launch, so widening the reclaim to a
+non-terminal row would release the lease of a launch that is still running. Boot closes the row first (W4, `LaunchLostWithControlPlane`), the
+pool is rebuilt empty, and step 4 of § "Boot proceeds past a stuck VM" reserves the address from the closed row if the scope remains. So the
+lease stays Retiring and counted toward the cap, with its allocation row, until the next boot. This is the existing N-REC exposure: the
+fault is a failure of the observation write of the launch's own row, which `observation.redb` confines to a node-fatal store fault, and the
+workload is not relaunched in between either. Rejected: a second terminal-row write on this path (the same fault makes it fail too, so it is a
+retry heuristic; the reasons that exist misdescribe it, `LaunchSuperseded` being a stop, restart or shutdown and `Failed` charging the restart
+budget for a store fault; a new reason is a persisted variant); the reclaim retry treating a non-terminal row as reclaimable (releases a live
+launch's lease). The lease is named in the N-REC exposure of the feature delta; no code or roadmap step changes.
+
 ## Scope limitations and their tracking issues
 
 | # | Limitation | Issue |
