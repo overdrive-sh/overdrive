@@ -1223,4 +1223,441 @@ mod guest_tests {
         );
         assert_eq!(scope.procs().trim(), "", "nothing remains in the scope");
     }
+
+    // ------------------------------------------------------------------
+    // x86_64: a failed launch step is a launch error, never a silent launch
+    // ------------------------------------------------------------------
+
+    /// How one launch step is forced to fail: the system call a stimulus
+    /// filter refuses, the low word of its first argument the call must also
+    /// carry (`None`: any), and the `errno` the refusal returns.
+    #[cfg(target_arch = "x86_64")]
+    struct Refusal {
+        number: libc::c_long,
+        first_argument: Option<u32>,
+        errno: i32,
+    }
+
+    /// The refusal that fails exactly `step`: the one system call that step
+    /// makes in `child_after_clone`, and an `errno` chosen per step so the
+    /// reported `errno` is traceable to its step.
+    #[cfg(target_arch = "x86_64")]
+    fn refusal_of(step: LaunchStep) -> Refusal {
+        let word = |value: libc::c_int| u32::try_from(value).expect("the option fits a word");
+        match step {
+            // `sigaction(SIGPIPE, ..)` is the step's one call the parent's runtime does not
+            // also make after the filter is installed.
+            LaunchStep::SignalReset => Refusal {
+                number: libc::SYS_rt_sigaction,
+                first_argument: Some(word(libc::SIGPIPE)),
+                errno: libc::EPERM,
+            },
+            LaunchStep::Stdio => {
+                Refusal { number: libc::SYS_dup2, first_argument: None, errno: libc::EMFILE }
+            }
+            LaunchStep::CloseRange => {
+                Refusal { number: libc::SYS_close_range, first_argument: None, errno: libc::EPERM }
+            }
+            LaunchStep::NoNewPrivs => Refusal {
+                number: libc::SYS_prctl,
+                first_argument: Some(word(libc::PR_SET_NO_NEW_PRIVS)),
+                errno: libc::EACCES,
+            },
+            LaunchStep::SeccompLoad => {
+                Refusal { number: libc::SYS_seccomp, first_argument: None, errno: libc::EBUSY }
+            }
+            LaunchStep::Execve => {
+                Refusal { number: libc::SYS_execve, first_argument: None, errno: libc::EACCES }
+            }
+        }
+    }
+
+    /// The classic-BPF program that returns `refusal.errno` for the refused
+    /// call and allows every other.
+    #[cfg(target_arch = "x86_64")]
+    fn refusing_program(refusal: &Refusal) -> Vec<libc::sock_filter> {
+        const LOAD_WORD_ABSOLUTE: u16 = 0x20;
+        const JUMP_EQUAL_CONSTANT: u16 = 0x15;
+        const RETURN_CONSTANT: u16 = 0x06;
+        const SECCOMP_RET_ALLOW: u32 = 0x7fff_0000;
+        const SECCOMP_RET_ERRNO: u32 = 0x0005_0000;
+
+        let offset = |value: usize| u32::try_from(value).expect("a seccomp_data offset fits u32");
+        let number = u32::try_from(refusal.number).expect("an x86_64 system call number fits u32");
+        let deny = SECCOMP_RET_ERRNO | u32::try_from(refusal.errno).expect("an errno fits u32");
+        let instruction = |code, jt, jf, k| libc::sock_filter { code, jt, jf, k };
+
+        let mut program = vec![instruction(
+            LOAD_WORD_ABSOLUTE,
+            0,
+            0,
+            offset(std::mem::offset_of!(libc::seccomp_data, nr)),
+        )];
+        match refusal.first_argument {
+            None => program.extend([
+                instruction(JUMP_EQUAL_CONSTANT, 0, 1, number),
+                instruction(RETURN_CONSTANT, 0, 0, deny),
+                instruction(RETURN_CONSTANT, 0, 0, SECCOMP_RET_ALLOW),
+            ]),
+            // The argument's low word is its first four bytes on little-endian x86_64.
+            Some(argument) => program.extend([
+                instruction(JUMP_EQUAL_CONSTANT, 0, 3, number),
+                instruction(
+                    LOAD_WORD_ABSOLUTE,
+                    0,
+                    0,
+                    offset(std::mem::offset_of!(libc::seccomp_data, args)),
+                ),
+                instruction(JUMP_EQUAL_CONSTANT, 0, 1, argument),
+                instruction(RETURN_CONSTANT, 0, 0, deny),
+                instruction(RETURN_CONSTANT, 0, 0, SECCOMP_RET_ALLOW),
+            ]),
+        }
+        program
+    }
+
+    /// Install the refusal on the calling process (and so on every child it
+    /// clones). Irrevocable: call it only in a process spawned for the case.
+    #[cfg(target_arch = "x86_64")]
+    fn install_refusal(refusal: &Refusal) {
+        let program = refusing_program(refusal);
+        let filter = libc::sock_fprog {
+            len: u16::try_from(program.len()).expect("a short program"),
+            filter: program.as_ptr().cast_mut(),
+        };
+        // SAFETY: `prctl(PR_SET_NO_NEW_PRIVS)` takes five integer arguments and
+        // touches no memory; the installing process needs it to load a filter.
+        let privileges = unsafe {
+            libc::prctl(
+                libc::PR_SET_NO_NEW_PRIVS,
+                1 as libc::c_ulong,
+                0 as libc::c_ulong,
+                0 as libc::c_ulong,
+                0 as libc::c_ulong,
+            )
+        };
+        assert_eq!(privileges, 0, "set no_new_privs on the stimulus process");
+        // SAFETY: `filter` is a live `sock_fprog` whose `filter` pointer is the
+        // live `program`, which outlives the call; the kernel copies it.
+        let loaded = unsafe {
+            libc::syscall(libc::SYS_seccomp, libc::SECCOMP_SET_MODE_FILTER, 0, &raw const filter)
+        };
+        assert_eq!(loaded, 0, "load the stimulus filter: {}", io::Error::last_os_error());
+    }
+
+    /// The `cargo test` arguments that run one `#[ignore]` role of this module.
+    #[cfg(target_arch = "x86_64")]
+    fn role_arguments(role: &str) -> Vec<OsString> {
+        let name = format!(
+            "{}::{role}",
+            module_path!().split_once("::").expect("a crate-qualified module path").1
+        );
+        ["--exact", &name, "--ignored", "--nocapture", "--test-threads=1"]
+            .map(OsString::from)
+            .to_vec()
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    const REFUSED_STEP_ENV: &str = "LAUNCH_STEP_CASE_REFUSED_STEP";
+    #[cfg(target_arch = "x86_64")]
+    const SCOPE_ENV: &str = "LAUNCH_STEP_CASE_SCOPE";
+    #[cfg(target_arch = "x86_64")]
+    const MARKER_ENV: &str = "LAUNCH_STEP_CASE_MARKER";
+    #[cfg(target_arch = "x86_64")]
+    const REPORT_ENV: &str = "LAUNCH_STEP_CASE_REPORT";
+
+    /// Child role: the launch target. Its only effect is creating the marker
+    /// file, so the marker exists exactly when the target ran.
+    #[cfg(target_arch = "x86_64")]
+    #[overdrive_test(guest = "cgroup-default")]
+    #[test]
+    #[ignore = "child role: launched by the cases that force a launch step to fail"]
+    fn child_role_create_marker() {
+        let marker = std::env::var_os(MARKER_ENV).expect("the marker path");
+        std::fs::write(marker, b"ran").expect("create the marker");
+    }
+
+    /// Child role: the launcher. Installs the refusal named by the environment
+    /// (none for the control), launches `child_role_create_marker` into the
+    /// scope, and writes what it observed to the report file.
+    #[cfg(target_arch = "x86_64")]
+    #[overdrive_test(guest = "cgroup-default")]
+    #[test]
+    #[ignore = "child role: launched by the cases that force a launch step to fail"]
+    fn child_role_launch_with_a_refused_step() {
+        use overdrive_core::traits::vmm::VmmError;
+
+        let scope_dir = PathBuf::from(std::env::var_os(SCOPE_ENV).expect("the scope path"));
+        let report_path = std::env::var_os(REPORT_ENV).expect("the report path");
+        if let Ok(code) = std::env::var(REFUSED_STEP_ENV) {
+            let code: u8 = code.parse().expect("a step byte");
+            install_refusal(&refusal_of(LaunchStep::from_code(code)));
+        }
+
+        let executable = std::env::current_exe().expect("the test binary's path");
+        let args = role_arguments("child_role_create_marker");
+        let filter = VmmLaunchSeccompFilter::for_target().expect("a launch filter");
+        let launched = launch(&LaunchRequest {
+            program: executable.as_os_str(),
+            args: &args,
+            scope_dir: &scope_dir,
+            filter: &filter,
+        });
+
+        let mut report: Vec<String> = Vec::new();
+        match launched {
+            Ok(Launched { child, stderr: _stderr }) => {
+                let status = runtime()
+                    .block_on(async {
+                        child.into_watch().expect("register the pidfd").wait().await
+                    })
+                    .expect("the target's exit is observed");
+                report.push(format!("outcome=launched\nexit={:?}\n", exit_of(&status)));
+            }
+            Err(error) => {
+                let failure = error
+                    .get_ref()
+                    .and_then(|inner| inner.downcast_ref::<StepFailure>())
+                    .expect("a failing step is a StepFailure");
+                let wrapper = [executable.to_string_lossy().into_owned()];
+                let VmmError::Create { detail } =
+                    super::super::classify_launch_spawn_error(&wrapper, &error)
+                else {
+                    panic!("a failing step must classify as VmmError::Create");
+                };
+                // Any child of this process, live or unreaped, would show here.
+                // SAFETY: `waitpid` with a null status pointer writes nothing.
+                let waited = unsafe { libc::waitpid(-1, std::ptr::null_mut(), libc::WNOHANG) };
+                let children = if waited == -1
+                    && io::Error::last_os_error().raw_os_error() == Some(libc::ECHILD)
+                {
+                    "none".to_owned()
+                } else {
+                    format!("waitpid returned {waited}")
+                };
+                report.push(format!(
+                    "outcome=refused\nstep={}\nerrno={:?}\ndisplay={error}\ncreate={detail}\n\
+                     children={children}\n",
+                    failure.step,
+                    failure.source.raw_os_error(),
+                ));
+            }
+        }
+        let procs = std::fs::read_to_string(scope_dir.join("cgroup.procs"))
+            .expect("read the scope's cgroup.procs");
+        report.push(format!("procs={}\n", procs.split_whitespace().collect::<Vec<_>>().join(",")));
+        std::fs::write(report_path, report.join("")).expect("write the report");
+    }
+
+    /// What the launcher process reported, and what it printed.
+    #[cfg(target_arch = "x86_64")]
+    struct LauncherRun {
+        report: BTreeMap<String, String>,
+        marker: PathBuf,
+        output: std::process::Output,
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    impl LauncherRun {
+        fn field(&self, key: &str) -> &str {
+            self.report
+                .get(key)
+                .map_or_else(|| panic!("the report has no `{key}`: {self}"), String::as_str)
+        }
+
+        fn target_ran(&self) -> bool {
+            match std::fs::symlink_metadata(&self.marker) {
+                Ok(_) => true,
+                Err(error) if error.kind() == io::ErrorKind::NotFound => false,
+                Err(error) => panic!("stat the marker {}: {error}", self.marker.display()),
+            }
+        }
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    impl fmt::Display for LauncherRun {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(
+                f,
+                "report {:?}\nlauncher stdout:\n{}\nlauncher stderr:\n{}",
+                self.report,
+                String::from_utf8_lossy(&self.output.stdout),
+                String::from_utf8_lossy(&self.output.stderr),
+            )
+        }
+    }
+
+    /// Re-exec this test binary as the launcher: `refused` forced to fail (none
+    /// for the control), one launch into `scope` of a target that creates
+    /// `marker`. A fresh process per case, so the refusal never reaches another
+    /// test.
+    #[cfg(target_arch = "x86_64")]
+    fn run_launcher(refused: Option<LaunchStep>, scope: &Scope, workspace: &Path) -> LauncherRun {
+        let marker = workspace.join("target-ran");
+        let report_path = workspace.join("report");
+        let mut command =
+            std::process::Command::new(std::env::current_exe().expect("the test binary's path"));
+        command
+            .args(role_arguments("child_role_launch_with_a_refused_step"))
+            .env(SCOPE_ENV, &scope.0)
+            .env(MARKER_ENV, &marker)
+            .env(REPORT_ENV, &report_path)
+            .env_remove(REFUSED_STEP_ENV)
+            .stdin(std::process::Stdio::null());
+        if let Some(step) = refused {
+            command.env(REFUSED_STEP_ENV, step.code().to_string());
+        }
+        let output = command.output().expect("spawn the launcher");
+        let text = std::fs::read_to_string(&report_path).unwrap_or_default();
+        let report = text
+            .lines()
+            .filter_map(|line| line.split_once('='))
+            .map(|(key, value)| (key.to_owned(), value.to_owned()))
+            .collect();
+        let run = LauncherRun { report, marker, output };
+        assert!(run.output.status.success(), "the launcher process must complete: {run}");
+        run
+    }
+
+    /// The oracle shared by every step case. With nothing refused the same
+    /// launch runs its target (the control); with `step` refused the launch is
+    /// an error that names `step` and carries its `errno`, the target never
+    /// runs, no child of the launcher survives or awaits reaping, and the scope
+    /// holds no process.
+    ///
+    /// The refusal is the only difference between the two runs, and the steps
+    /// run in order: a launch that fails at `step` has passed every step before
+    /// it, so the reported step is the one the case forced.
+    #[cfg(target_arch = "x86_64")]
+    fn assert_a_failed_step_is_a_launch_error(step: LaunchStep) {
+        let workspace = tempfile::tempdir().expect("per-case directory");
+        let control_workspace = workspace.path().join("control");
+        let refused_workspace = workspace.path().join("refused");
+        std::fs::create_dir(&control_workspace).expect("control directory");
+        std::fs::create_dir(&refused_workspace).expect("refused directory");
+
+        // Control: nothing refused, so the target runs and exits 0.
+        let control_scope = Scope::create("step-control");
+        let control = run_launcher(None, &control_scope, &control_workspace);
+        assert_eq!(control.field("outcome"), "launched", "the control launches: {control}");
+        assert_eq!(
+            control.field("exit"),
+            "(Some(0), None)",
+            "the control's target exits 0: {control}"
+        );
+        assert!(control.target_ran(), "the control's target must run: {control}");
+
+        // The step refused: the launch is an error and the target never runs.
+        let scope = Scope::create("step-refused");
+        let refused = run_launcher(Some(step), &scope, &refused_workspace);
+        assert_eq!(
+            refused.field("outcome"),
+            "refused",
+            "a failed {step:?} step must fail the launch, never launch silently: {refused}",
+        );
+        assert_eq!(
+            refused.field("step"),
+            step.as_str(),
+            "the launch error must name the failed step: {refused}",
+        );
+        assert_eq!(
+            refused.field("errno"),
+            format!("Some({})", refusal_of(step).errno),
+            "the launch error must carry the errno of the failed {step:?} step: {refused}",
+        );
+        assert!(
+            refused.field("display").contains(step.as_str()),
+            "the error shown to the operator must name the step: {refused}",
+        );
+        assert!(
+            refused.field("create").starts_with(&format!("{} failed: ", step.as_str())),
+            "the adapter must report the step as the VMM create failure: {refused}",
+        );
+        assert!(
+            !refused.target_ran(),
+            "the {step:?} failure must stop the target running: {refused}"
+        );
+        assert_eq!(
+            refused.field("children"),
+            "none",
+            "no child lives or awaits reaping: {refused}"
+        );
+        assert_eq!(refused.field("procs"), "", "the scope holds no process: {refused}");
+        assert_eq!(scope.procs().trim(), "", "the scope still holds no process afterwards");
+    }
+
+    /// (ADR-0352, ADR-0129) A failed signal-reset step turns into a launch
+    /// error, never a silent launch.
+    ///
+    /// CONTRACT_SHAPE: bounded-change. Universe: the launch result, the
+    /// target's marker file, the launcher's children, the scope's `cgroup.procs`.
+    /// Stimulus: the launcher's own seccomp filter refusing
+    /// `rt_sigaction(SIGPIPE)`.
+    #[cfg(target_arch = "x86_64")]
+    #[overdrive_test(guest = "cgroup-default")]
+    #[test]
+    fn a_failed_signal_reset_step_is_a_launch_error_and_the_target_never_runs() {
+        assert_a_failed_step_is_a_launch_error(LaunchStep::SignalReset);
+    }
+
+    /// (ADR-0352, ADR-0129) A failed standard-I/O step turns into a launch
+    /// error, never a silent launch.
+    ///
+    /// CONTRACT_SHAPE: bounded-change. Universe: as the signal-reset case.
+    /// Stimulus: the launcher's own seccomp filter refusing `dup2`.
+    #[cfg(target_arch = "x86_64")]
+    #[overdrive_test(guest = "cgroup-default")]
+    #[test]
+    fn a_failed_standard_io_step_is_a_launch_error_and_the_target_never_runs() {
+        assert_a_failed_step_is_a_launch_error(LaunchStep::Stdio);
+    }
+
+    /// (ADR-0352, ADR-0129) A failed descriptor-close step turns into a launch
+    /// error, never a silent launch.
+    ///
+    /// CONTRACT_SHAPE: bounded-change. Universe: as the signal-reset case.
+    /// Stimulus: the launcher's own seccomp filter refusing `close_range`.
+    #[cfg(target_arch = "x86_64")]
+    #[overdrive_test(guest = "cgroup-default")]
+    #[test]
+    fn a_failed_close_on_exec_step_is_a_launch_error_and_the_target_never_runs() {
+        assert_a_failed_step_is_a_launch_error(LaunchStep::CloseRange);
+    }
+
+    /// (ADR-0352, ADR-0129) A failed no-new-privileges step turns into a launch
+    /// error, never a silent launch.
+    ///
+    /// CONTRACT_SHAPE: bounded-change. Universe: as the signal-reset case.
+    /// Stimulus: the launcher's own seccomp filter refusing
+    /// `prctl(PR_SET_NO_NEW_PRIVS)`.
+    #[cfg(target_arch = "x86_64")]
+    #[overdrive_test(guest = "cgroup-default")]
+    #[test]
+    fn a_failed_no_new_privs_step_is_a_launch_error_and_the_target_never_runs() {
+        assert_a_failed_step_is_a_launch_error(LaunchStep::NoNewPrivs);
+    }
+
+    /// (ADR-0352, ADR-0143) A failed filter-load step turns into a launch
+    /// error, never a silent launch.
+    ///
+    /// CONTRACT_SHAPE: bounded-change. Universe: as the signal-reset case.
+    /// Stimulus: the launcher's own seccomp filter refusing `seccomp(2)`.
+    #[cfg(target_arch = "x86_64")]
+    #[overdrive_test(guest = "cgroup-default")]
+    #[test]
+    fn a_failed_filter_load_step_is_a_launch_error_and_the_target_never_runs() {
+        assert_a_failed_step_is_a_launch_error(LaunchStep::SeccompLoad);
+    }
+
+    /// (ADR-0352) A failed `execve` turns into a launch error, never a silent
+    /// launch.
+    ///
+    /// CONTRACT_SHAPE: bounded-change. Universe: as the signal-reset case.
+    /// Stimulus: the launcher's own seccomp filter refusing `execve`.
+    #[cfg(target_arch = "x86_64")]
+    #[overdrive_test(guest = "cgroup-default")]
+    #[test]
+    fn a_failed_execve_step_is_a_launch_error_and_the_target_never_runs() {
+        assert_a_failed_step_is_a_launch_error(LaunchStep::Execve);
+    }
 }
