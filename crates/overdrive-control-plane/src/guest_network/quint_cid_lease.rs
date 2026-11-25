@@ -109,7 +109,7 @@
 //! composition built for the read over the reopened files and dropped
 //! before the next `Restart`. `dev` and the
 //! `running` part of `al(a).st` ← S `SimVmm::vsock_device_holders` (QPROJ-7
-//! arbiter, Tier-3 pair V-30 Q2a / Q2c / Q2d and V-RECLAIM); `leased` ⇔ the
+//! arbiter, Tier-3 pair overdrive-host vsock_vmm_device); `leased` ⇔ the
 //! placement lease is Admitted, no VMM holds its CID's device and its
 //! allocation has no row (the owner-read form, architect 2026-10-19: the
 //! held provisioner is the step's pacing device only and is never read);
@@ -826,6 +826,12 @@ impl CidLeaseDriver {
     /// The dispatches parked at a teardown whose reclaim attempt over a
     /// still-present scope changes nothing: the stopped allocation's lease is
     /// Retiring, it is not its workload's placement, and its scope is present.
+    /// A restart's cleanup of a predecessor parks at the same boundary, and
+    /// can match only for an allocation whose stuck scope outlives it (a boot
+    /// reservation redeployed): the shim's attempt there is the same no-op
+    /// over a present scope, and the model files that lease as `late`, so the
+    /// pass-through is equally right. The action's origin is not observable
+    /// through the provisioner port, so the filter cannot be narrower.
     /// They are not a model boundary (the model's `Launch` / `Stop` park only
     /// at the dispatch's own teardown), so `held_for` ignores them and the
     /// pass-through releases them.
@@ -949,17 +955,22 @@ impl CidLeaseDriver {
     fn is_late(&self, alloc: &AllocationId, state: GuestAttachmentLease, a: i64) -> bool {
         state == GuestAttachmentLease::Retiring
             && self.placement.get(&a) != Some(alloc)
-            && !self
-                .serve
-                .as_ref()
-                .is_some_and(|serve| serve.provisioner.is_held(Held::Teardown, alloc))
+            && !self.in_flight_teardown(alloc)
+    }
+
+    /// `alloc`'s dispatch is parked at its teardown as a model boundary. A
+    /// passable reclaim attempt parks at the same place but is not one: its
+    /// lease is `late`.
+    fn in_flight_teardown(&self, alloc: &AllocationId) -> bool {
+        self.serve.as_ref().is_some_and(|serve| serve.provisioner.is_held(Held::Teardown, alloc))
+            && !self.passable_reclaims().iter().any(|(_, passable)| passable == alloc)
     }
 
     /// The VMM of `alloc`'s launch holding `cid`'s device (S arbiter).
     fn launch_vmm(&self, alloc: &AllocationId, cid: GuestCid) -> Option<u32> {
-        // conformance-lint: sim-arbiter-ok QPROJ-7 the simulated host's VM scopes (the VMM processes an allocation's launch created; the VmHostState port's fact), Tier-3 pair V-30 Q2c / Q2d and V-RECLAIM
+        // conformance-lint: sim-arbiter-ok QPROJ-7 the simulated host's VM scopes (the VMM processes an allocation's launch created; the VmHostState port's fact), Tier-3 pair overdrive-host vm_host_state_equivalence
         let pids = self.node.host.pids_of(alloc);
-        // conformance-lint: sim-arbiter-ok QPROJ-7 SimVmm vsock_device_holders (the kernel's vhost-vsock holder per CID), Tier-3 pair V-30 Q2a / Q2c / Q2d
+        // conformance-lint: sim-arbiter-ok QPROJ-7 SimVmm vsock_device_holders (the kernel's vhost-vsock holder per CID), Tier-3 pair overdrive-host vsock_vmm_device
         self.node.vmm.vsock_device_holders().get(&cid).copied().filter(|pid| pids.contains(pid))
     }
 
@@ -1575,8 +1586,12 @@ impl CidLeaseDriver {
             .map_err(|error| DriverError::Production(format!("stop_workload: {error}")))?;
         self.node.clock.tick(PAST_BACKOFF);
         self.spawn_tick("StopUnreaped", a)?;
+        // The stop kills the VMM, then waits the reap bound on a `SimClock`
+        // sleep it registers in the same poll as the kill. Once the kill is
+        // observed the sleep is registered; the bound elapses once.
+        self.settle("the stop kills the VMM", |driver| !driver.node.vmm.is_live(pid))?;
+        self.node.clock.tick(VMM_REAP_BOUND);
         self.settle("the stop kills the VMM and holds at teardown, or returns", |driver| {
-            driver.node.clock.tick(VMM_REAP_BOUND);
             driver.tick_finished(a)
                 || driver.held_for(a).is_some_and(|(kind, _)| kind == Held::Teardown)
         })?;
@@ -1720,19 +1735,29 @@ impl CidLeaseDriver {
         Ok(())
     }
 
-    /// The allocations whose scope the host reports present with no live
-    /// process: a scope kept after a kill that did not reap.
-    fn scopes(&self) -> std::result::Result<BTreeSet<AllocationId>, DriverError> {
+    /// Every scope the host reports present, with the member pids it lists.
+    fn observed_scopes(
+        &self,
+    ) -> std::result::Result<BTreeMap<AllocationId, BTreeSet<u32>>, DriverError> {
         let serve = self.serve("project")?;
-        // conformance-lint: sim-arbiter-ok QPROJ-7 the simulated host's VM scopes (VmHostState::observe, the port's own fact), Tier-3 pair V-30 Q2c / Q2d and V-RECLAIM
+        // conformance-lint: sim-arbiter-ok QPROJ-7 the simulated host's VM scopes (VmHostState::observe, the port's own fact), Tier-3 pair overdrive-host vm_host_state_equivalence
         let observation = serve
             .rt
             .block_on(serve.state.vm_host_state.observe())
             .map_err(|error| DriverError::Production(format!("VmHostState::observe: {error}")))?;
-        Ok(observation
-            .scopes
+        Ok(observation.scopes.into_iter().map(|(alloc, facts)| (alloc, facts.pids)).collect())
+    }
+
+    /// The model's `scope`: the allocations whose scope the host reports
+    /// present with no running VMM, a scope kept by a killed VMM (listed in
+    /// `cgroup.procs` while stuck) or left after its reap. A running VMM's
+    /// scope is not modelled.
+    fn scopes(&self) -> std::result::Result<BTreeSet<AllocationId>, DriverError> {
+        Ok(self
+            .observed_scopes()?
             .into_iter()
-            .filter(|(_, facts)| facts.pids.is_empty())
+            // conformance-lint: sim-arbiter-ok QPROJ-7 SimVmm liveness of a scope's member task (running versus killed), Tier-3 pair overdrive-host vm_host_state_equivalence
+            .filter(|(_, pids)| pids.iter().all(|pid| !self.node.vmm.is_live(*pid)))
             .map(|(alloc, _)| alloc)
             .collect())
     }
@@ -1781,7 +1806,7 @@ impl CidLeaseDriver {
                     .offset_of(*cid)
                     .ok_or_else(|| DriverError::NoPreImage(format!("CID {}", cid.get())))?;
                 let row = reading.row(alloc);
-                // conformance-lint: sim-arbiter-ok QPROJ-7 SimVmm vsock_device_holders (no VMM holds the lease's CID device), Tier-3 pair V-30 Q2a / Q2c / Q2d
+                // conformance-lint: sim-arbiter-ok QPROJ-7 SimVmm vsock_device_holders (no VMM holds the lease's CID device), Tier-3 pair overdrive-host vsock_vmm_device
                 let unheld = !self.node.vmm.vsock_device_holders().contains_key(cid);
                 let st = match state {
                     GuestAttachmentLease::Retiring => "retiring",
@@ -1879,7 +1904,7 @@ impl CidLeaseDriver {
         if self.serve.is_some() {
             self.check_background("project")?;
         }
-        // conformance-lint: sim-arbiter-ok QPROJ-7 SimVmm vsock_device_holders (the kernel's vhost-vsock holder per CID), Tier-3 pair V-30 Q2a/Q2c/Q2d (overdrive-host vsock_vmm_device) and V-RECLAIM
+        // conformance-lint: sim-arbiter-ok QPROJ-7 SimVmm vsock_device_holders (the kernel's vhost-vsock holder per CID), Tier-3 pair overdrive-host vsock_vmm_device
         let holders = self.node.vmm.vsock_device_holders();
         let up = self.serve.is_some();
         let leases = self.leases();
@@ -1893,7 +1918,7 @@ impl CidLeaseDriver {
                 .offset_of(*cid)
                 .ok_or_else(|| DriverError::NoPreImage(format!("held CID {}", cid.get())))?;
             let holder = match leases.iter().find(|(_, view)| view.cid() == *cid) {
-                // conformance-lint: sim-arbiter-ok QPROJ-7 the simulated host's VM scopes (which launch a holder VMM belongs to), Tier-3 pair V-30 Q2c / Q2d and V-RECLAIM
+                // conformance-lint: sim-arbiter-ok QPROJ-7 the simulated host's VM scopes (which launch a holder VMM belongs to), Tier-3 pair overdrive-host vm_host_state_equivalence
                 Some((alloc, _)) if self.node.host.pids_of(alloc).contains(pid) => *self
                     .alloc_of
                     .get(alloc)
@@ -1913,6 +1938,7 @@ impl CidLeaseDriver {
             let mut late = lease.clone();
             let mut scope = (0..offsets).map(|o| (o, false)).collect::<BTreeMap<_, _>>();
             let scopes = self.scopes()?;
+            let observed = self.observed_scopes()?;
             // O QPROJ-2: the live pool, read in one snapshot.
             let observation = self.pool.lease_observation();
             for (alloc, view) in &observation.leases {
@@ -1943,8 +1969,8 @@ impl CidLeaseDriver {
                     continue;
                 }
                 let Some(o) = self.inst.offset_of(*cid) else { continue };
-                // conformance-lint: sim-arbiter-ok QPROJ-7 the simulated host's VM scopes (which scope a holder VMM belongs to), Tier-3 pair V-30 Q2c / Q2d and V-RECLAIM
-                if scopes.iter().any(|alloc| self.node.host.pids_of(alloc).contains(pid)) {
+                // the scope listing the holder VMM as a member task (`cgroup.procs`)
+                if scopes.iter().any(|alloc| observed.get(alloc).is_some_and(|m| m.contains(pid))) {
                     scope.insert(o, true);
                 }
             }

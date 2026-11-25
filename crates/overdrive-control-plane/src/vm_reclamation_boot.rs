@@ -731,6 +731,10 @@ pub(crate) mod sim_vm_host {
         /// Allocations whose VMM was killed and not reaped: the scope stays
         /// until a `kill_scope` finds every process reaped.
         lingering: BTreeSet<AllocationId>,
+        /// Allocations whose run directory was discarded. A run directory is a
+        /// separate surface from the scope: discarding it never removes the
+        /// scope, and an unreaped process keeps the scope.
+        run_dirs_discarded: BTreeSet<AllocationId>,
     }
 
     /// The simulated host's VM surfaces over one `SimVmm`.
@@ -763,7 +767,9 @@ pub(crate) mod sim_vm_host {
         }
 
         fn record(&self, alloc: AllocationId, pid: u32) {
-            self.facts.lock().vms.entry(alloc).or_default().insert(pid);
+            let mut facts = self.facts.lock();
+            facts.run_dirs_discarded.remove(&alloc);
+            facts.vms.entry(alloc).or_default().insert(pid);
         }
 
         /// The pids whose kill a `kill_scope` call is waiting for (gated).
@@ -826,12 +832,19 @@ pub(crate) mod sim_vm_host {
             let facts = self.facts.lock();
             let mut observation = VmHostObservation::default();
             for (alloc, pids) in &facts.vms {
-                let live: BTreeSet<u32> =
-                    pids.iter().copied().filter(|pid| self.vmm.is_live(*pid)).collect();
-                if !live.is_empty() || facts.lingering.contains(alloc) {
-                    observation.scopes.insert(alloc.clone(), ScopeFacts { pids: live });
+                // `cgroup.procs` lists every member task: a running VMM and a
+                // killed one that is not reaped (a stuck task stays a member).
+                let members: BTreeSet<u32> = pids
+                    .iter()
+                    .copied()
+                    .filter(|pid| self.vmm.is_live(*pid) || self.vmm.is_unreaped(*pid))
+                    .collect();
+                if !members.is_empty() || facts.lingering.contains(alloc) {
+                    observation.scopes.insert(alloc.clone(), ScopeFacts { pids: members });
                 }
-                observation.run_dirs.insert(alloc.clone());
+                if !facts.run_dirs_discarded.contains(alloc) {
+                    observation.run_dirs.insert(alloc.clone());
+                }
             }
             drop(facts);
             Ok(observation)
@@ -884,7 +897,9 @@ pub(crate) mod sim_vm_host {
         }
 
         async fn discard_artifacts(&self, alloc: &AllocationId) -> std::io::Result<()> {
-            self.facts.lock().vms.remove(alloc);
+            // Removes the run directory only; the scope of an unreaped process
+            // persists (the kernel removes a scope only once it is empty).
+            self.facts.lock().run_dirs_discarded.insert(alloc.clone());
             Ok(())
         }
     }
