@@ -38,9 +38,9 @@ re-listing after falling behind. Resolution has three outcomes:
 - **A mesh destination with no reachable backend:** refuse the connection.
   Traffic that requires mesh encryption never falls back to plaintext.
 
-[Dial by name](/docs/concepts/dial-by-name) supplies a stable service address.
-The encryption layer selects a running backend when the connection arrives;
-the application does not need a service-discovery client.
+[Service names](/docs/concepts/service-names) supply a stable service address.
+The encryption layer selects a running backend when the connection arrives.
+The application does not need a service-discovery client.
 
 ## Authenticate, then hand record processing to the kernel
 
@@ -54,7 +54,7 @@ identity is outside this implementation.
 The agent installs the negotiated keys into kTLS for steady-state TLS record
 processing. The `ovd_fwd` socket forwarder refuses sockets with an installed
 upper-layer protocol, including kTLS. TLS therefore remains on the agent's TLS
-endpoints. A temporary userspace relay connects that TLS path to the guest
+endpoints. A userspace relay connects that TLS path to the guest
 stream for VM delivery. In-kernel forwarding and kTLS do not mean this entire
 path avoids userspace payload copies.
 
@@ -92,11 +92,13 @@ refusal, original-destination recovery, and guest delivery through the
 production composition. Simulation checks control-plane ownership and recovery.
 It does not substitute for kTLS, nftables, or vsock behavior on the real kernel.
 
-The implemented boundary is TCP mesh encryption for Linux microVM workloads on a single node. UDP transport does not acquire TLS merely because TCP
-uses this path. Guest-to-Service-VIP UDP delivery to a VM backend is
-[deferred](https://github.com/overdrive-sh/overdrive/issues/310), while guest DNS
-and remote UDP are supported. Multi-node mesh, non-Linux guest adaptation, and
-an operator command to switch encryption off are not implemented.
+The boundary is TCP mesh encryption for Linux microVM workloads on a single node.
+UDP transport does not acquire TLS merely because TCP uses this path. Guest DNS
+and remote UDP are supported, and a guest's UDP datagram to a Service VIP is
+refused because
+[delivery to a VM backend](https://github.com/overdrive-sh/overdrive/issues/310)
+is not supported. The mesh does not span nodes, does not adapt non-Linux guests,
+and has no operator command to switch encryption off.
 
 See [guest networking](/docs/concepts/guest-networking) for guest-kit
 requirements, transport ownership, capacity bounds, and recovery limits.

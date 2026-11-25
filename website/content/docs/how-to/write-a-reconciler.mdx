@@ -8,7 +8,7 @@ reconciler: a pure function the runtime drives on a loop. It is written for
 engineers extending Overdrive itself — reconcilers are authored in Rust, and
 adding a control-plane behaviour means adding one. For the model behind the steps —
 purity, the View, the action boundary — read [Reconcilers](/docs/concepts/reconcilers)
-first; this guide assumes it.
+first. This guide assumes it.
 
 <Callout title="Reconcilers are internal">
 	You author a reconciler in Rust inside the control-plane crates and register it
@@ -79,7 +79,7 @@ impl Reconciler for NoopHeartbeat {
 }
 ```
 
-`const NAME` is the kebab-case anchor; the type's constructor builds a
+`const NAME` is the kebab-case anchor. The type's constructor builds a
 `ReconcilerName` from it once. `State` and `View` are your own typed projections —
 both `()` here, because a heartbeat observes nothing and remembers nothing.
 
@@ -184,12 +184,11 @@ actions, and reloads it on the next boot. You never touch a database.
 
 ## Emit actions for every effect
 
-`reconcile` returns `Vec<Action>`; the action shim runs them behind its single I/O
+`reconcile` returns `Vec<Action>`. The action shim runs them behind its single I/O
 boundary. To start a microVM allocation, return `Action::StartAllocation`. To
-program the
-dataplane, `Action::DataplaneUpdateService`; to wake another reconciler,
-`Action::EnqueueEvaluation`; to launch a durable sequence,
-`Action::StartWorkflow` (see
+program the dataplane, return `Action::DataplaneUpdateService`. To wake another
+reconciler, return `Action::EnqueueEvaluation`. To launch a durable sequence,
+return `Action::StartWorkflow` (see
 [reconcilers and workflows](/docs/concepts/reconcilers-and-workflows)). Never
 perform the effect inside `reconcile` — return the action and let the shim execute
 it.
@@ -280,7 +279,7 @@ the resource.
 ## Register it
 
 A reconciler runs once it is registered in the control-plane runtime at boot —
-the same place the eight first-party reconcilers are registered in `overdrive serve`:
+the same place the first-party reconcilers are registered in `overdrive serve`:
 
 ```rust
 runtime.register(my_reconciler()).await?;

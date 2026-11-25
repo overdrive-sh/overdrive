@@ -6,7 +6,7 @@ description: Author an internal Overdrive workflow in Rust — implement the Wor
 This guide shows how to author a workflow: a durable async function the control
 plane drives to a terminal result. It is written for engineers extending Overdrive
 itself. For the model behind the steps — the journal, replay, and the error
-types — read [Workflows](/docs/concepts/workflows) first; this guide assumes it.
+types — read [Workflows](/docs/concepts/workflows) first. This guide assumes it.
 
 <Callout title="Workflows are internal">
 	You author a workflow in Rust inside the control-plane crates. There is no
@@ -51,9 +51,9 @@ impl Workflow for RegisterDeployment {
 
 Write `run` as one ordinary async function. Do not build a step enum or a state
 machine — the journal *is* the state machine, and you get it for free. `Input` and
-`Output` must be `serde`-serialisable; the engine CBOR-encodes them at its
+`Output` must be `serde`-serialisable. The engine CBOR-encodes them at its
 boundary, so a malformed input becomes a terminal failure before `run` is ever
-called. An `Output` of `()` is the contentless terminal; return a real type when
+called. An `Output` of `()` is the contentless terminal. Return a real type when
 the workflow produces a value. This example mirrors the `ProvisionRecord`
 reference workflow in `overdrive-core::testing` — the smallest workflow that
 performs one external effect and stops.
@@ -63,8 +63,8 @@ performs one external effect and stops.
 The body must read nothing non-deterministic on its own. Four `ctx` methods cover
 the surface:
 
-- `ctx.run(name, future).await?` — run a durable step. The future does the work;
-  its result is journaled under `name` and replayed verbatim on resume. **Every
+- `ctx.run(name, future).await?` — run a durable step. The future does the work.
+  Its result is journaled under `name` and replayed verbatim on resume. **Every
   side effect goes here.**
 - `ctx.sleep(duration).await?` — wait durably. The deadline is journaled, so a
   resume after the sleep elapsed returns at once instead of waiting again.
@@ -115,7 +115,7 @@ ctx.run("validate-and-call", async move {
 
 The `?` on `ctx.run(...).await` propagates a terminal failure straight out of the
 body — whose return type is `Result<Output, TerminalError>`. A retryable failure
-never reaches that `?`; the engine handles it out of band.
+never reaches that `?`. The engine handles it out of band.
 
 To tune the backoff, attach a policy before awaiting:
 
@@ -139,7 +139,7 @@ reconciler asks for it.
 <Steps>
 	<Step>
 		**Register the type at composition**, under a `WorkflowName`. You hand a
-		factory (`Fn() -> W`); the engine wraps each instance to drive it.
+		factory (`Fn() -> W`). The engine wraps each instance to drive it.
 
 		```rust
 		use overdrive_core::workflow::WorkflowName;
@@ -152,12 +152,12 @@ reconciler asks for it.
 		);
 		```
 
-		The shipped `overdrive serve` builds an empty registry today — registering
-		a first-party workflow here is the step that makes one runnable.
+		`overdrive serve` builds an empty registry. Registering a workflow here is
+		the step that makes it runnable.
 	</Step>
 	<Step>
 		**Start an instance** by emitting the action from a reconciler. `start`
-		carries the workflow name plus its CBOR-encoded input; `correlation` is the
+		carries the workflow name plus its CBOR-encoded input. `correlation` is the
 		stable key that identifies the instance across restarts.
 
 		```rust
@@ -179,7 +179,7 @@ reconciler asks for it.
 		reconciler observes that row to mark the instance done — and re-emits
 		`StartWorkflow` if it finds an instance that should be running but has no
 		live task, which is how a workflow resumes after a crash. You write the
-		workflow and the trigger; the runtime owns retry, resume, and completion.
+		workflow and the trigger. The runtime owns retry, resume, and completion.
 	</Step>
 </Steps>
 
@@ -190,7 +190,7 @@ Two rules keep a workflow durable, and the engine enforces both:
 - **All non-determinism through `ctx`.** No direct clock, socket, RNG, or timer in
   the body. Work that needs one goes inside a `ctx.run` step, through an injected
   port.
-- **A bounded number of steps.** A workflow terminates; it does not loop forever.
+- **A bounded number of steps.** A workflow terminates. It does not loop forever.
   If you reach for an unbounded loop, you want a
   [reconciler](/docs/concepts/architecture#the-convergence-loop), not a workflow.
 

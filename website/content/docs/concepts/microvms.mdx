@@ -10,15 +10,11 @@ deploy it with the same `overdrive deploy`, describe it with the same
 `overdrive workload describe`, and stop it with the same `overdrive job stop` —
 the driver underneath differs, the verbs do not.
 
-<Callout title="The short version">
-	A `[vm]` block boots a Cloud Hypervisor microVM from a kernel and rootfs you
-	supply. The allocation reaches `Running` only after the
-	guest has booted, and its terminal state carries the guest's real exit code —
-	not the hypervisor's. The hypervisor process runs non-root, seccomp-filtered,
-	and Landlock-confined. A microVM runs as a `[job]` or `[service]` on a single
-	node. Shared volumes and snapshots are not built — see
-	[Where it stands](#where-it-stands).
-</Callout>
+A `[vm]` block boots the microVM from a kernel and rootfs you supply. The
+allocation reaches `Running` only after the guest has booted, and its terminal
+state carries the guest's real exit code, not the hypervisor's. A microVM runs as
+a `[job]` to completion or as a `[service]` with declared listeners and health
+checks, on a single node.
 
 ## The guest kernel is the workload boundary
 
@@ -53,14 +49,15 @@ report before finalizing the VMM exit. A zero VMM exit is not evidence of a
 zero workload exit.
 
 This is what makes a microVM a first-class workload rather than a black box the
-platform launches and hopes for. Restart and backoff decisions use that guest-reported exit signal.
+platform launches and hopes for. Restart and backoff decisions use that
+guest-reported exit signal.
 
 ## How it stays confined
 
 The `cloud-hypervisor` process is a host process, and Overdrive treats it as one.
 It runs inside the allocation's cgroup and shares the host network namespace.
 VM attachment creates no per-VM host namespace, veth, TAP, or bridge. The guest
-uses vsock flow transport to reach shared node networking; its own kernel remains
+uses vsock flow transport to reach shared node networking. Its own kernel remains
 behind the hardware virtualization boundary. The hypervisor is also:
 
 - **Non-root.** The hypervisor drops to an unprivileged user before it boots the
@@ -77,7 +74,7 @@ closed rather than launch an unconfined hypervisor.
 State the boundary precisely: this is KVM plus seccomp plus Landlock plus cgroup
 placement. It is not a jailer-style chroot jail, and the guest does
 not run in its own PID namespace on the host. The isolation is strong and it is
-specific; calling it "a full jail" would overclaim.
+specific. Calling it "a full jail" would overclaim.
 
 ## You supply the kernel and rootfs
 
@@ -85,39 +82,36 @@ A `[vm]` spec names two host paths: a bootable kernel image and an ext4 root
 filesystem. There is no image factory or registry pull. You supply artifacts
 from a matching guest kit: a supported Linux kernel, its `ovd_fwd` module, and
 `overdrive-init`. Init checks the module release against the running kernel
-before READY; arbitrary kernels are unsupported. See
+before READY. Arbitrary kernels are unsupported. See
 [guest networking](/docs/concepts/guest-networking#the-node-and-guest-must-supply-matching-kernel-support)
 for the host and guest prerequisites.
 
 Each launch clones the rootfs first, so the running guest writes to its own copy
 and the master image stays untouched. The clone uses a copy-on-write reflink
 and allocates private data blocks as the guest writes. The rootfs must
-sit on a filesystem that supports reflinks; there is no full-copy fallback, and a
+sit on a filesystem that supports reflinks. There is no full-copy fallback, and a
 node that cannot reflink does not run VMs at all. The clone and its VM are torn
 down when the allocation ends.
 
-## Where it stands
+## Size, storage, and networking
 
-A `[vm]` workload boots, runs, and reports honestly through `overdrive serve` and
-`overdrive deploy` on a single node. The current boundaries:
+`[resources]` sizes the guest's vCPUs and memory at boot, written as
+`cpu = "500m"` and `memory = "128MiB"`. See the
+[workload spec reference](/docs/reference/workload-spec). The size is fixed for
+the life of the guest. Overdrive rejects a resize of a running VM, because CPU and
+memory hotplug are not wired.
 
-- **Jobs and services.** A `[vm]` block can run a job to completion or supply a
-  service with declared listeners and health checks.
-- **No shared volumes.** A microVM writes to its own rootfs copy, discarded when
-  it ends. A persistent or host-shared volume is unbuilt.
-- **No snapshots or persistence.** The driver boots a VM and tears it down.
-  Snapshot, restore, and persistent stateful microVMs are outside this scope.
-- **Fixed size.** `[resources]` sizes the guest's vCPUs and memory at boot,
-  written as `cpu = "500m"` and `memory = "128MiB"`. See the
-  [workload spec reference](/docs/reference/workload-spec).
-  Resizing a running VM is rejected — CPU and memory hotplug are not wired.
-- **Shared node networking.** Guest capture and vsock transport connect Linux
-  guests to DNS, remote TCP/UDP, and the host mesh mTLS path. Guest-to-Service-VIP
-  UDP delivery to a VM backend remains
-  [unbuilt](https://github.com/overdrive-sh/overdrive/issues/310). See
-  [guest networking](/docs/concepts/guest-networking).
-- **You supply the artifacts.** The kernel and rootfs are host paths you provide.
-  Building them from an image or a Dockerfile is unbuilt.
+A microVM writes to its own rootfs copy, which is discarded when the allocation
+ends. There are no shared or host-mounted volumes, and the driver does not
+snapshot or restore a VM. It boots a VM and tears it down. The kernel and rootfs
+are host paths you provide, and Overdrive does not build them from an image or a
+Dockerfile.
+
+Guest capture and vsock transport connect Linux guests to DNS, remote TCP/UDP, and
+the host mesh mTLS path. UDP from a guest to a Service VIP is refused, and
+delivery to a VM backend is tracked in
+[#310](https://github.com/overdrive-sh/overdrive/issues/310). See
+[guest networking](/docs/concepts/guest-networking).
 
 ## Where to go next
 

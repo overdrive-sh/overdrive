@@ -1,18 +1,18 @@
 ---
 title: Workflows
-description: The control plane's second primitive — a durable async function that runs a terminating sequence once and survives crashes by replaying a journal. Internal today, authored in Rust and driven by reconcilers.
+description: The control plane's second primitive — a durable async function that runs a terminating sequence once and survives crashes by replaying a journal. Internal, authored in Rust and driven by reconcilers.
 ---
 
 Overdrive has two control-plane primitives. A
 [reconciler](/docs/concepts/architecture#the-convergence-loop) converges declared
-intent toward observed reality and runs forever; a **workflow** runs a sequence
+intent toward observed reality and runs forever. A **workflow** runs a sequence
 of steps once, returns a typed result, and stops. The hard problem a workflow
 solves is durability across a crash: a workflow can die halfway through a
 four-step certificate rotation, restart on a fresh process, and continue from
 where it stopped — without repeating the steps that already ran. It does this by
 journaling every non-deterministic decision and replaying the journal on resume.
 
-Workflows are internal today. No `overdrive` command starts one and no spec field
+Workflows are internal. No `overdrive` command starts one and no spec field
 declares one — the primitive is authored in Rust by platform engineers and driven
 by the control plane itself.
 
@@ -40,7 +40,7 @@ flowchart TB
   obs -- "observe terminal · crash gap" --> rec
 `} />
 
-## Reconcilers converge; workflows terminate
+## Reconcilers converge and workflows terminate
 
 The two primitives answer different questions, and picking the wrong one shows up
 later as a fight against the runtime. A reconciler answers "what should always be
@@ -56,7 +56,7 @@ true?" A workflow answers "what sequence should run, once?"
 
 The dividing line is the ending. If the operation has a natural `Ok(result)`, it
 is a workflow. If it is "the cluster should always look like X," it is a
-reconciler. "Keep three replicas running" never ends, so it is a reconciler; "move
+reconciler. "Keep three replicas running" never ends, so it is a reconciler. "Move
 this allocation to another node" finishes, so it is a workflow.
 
 The two are not isolated, though. A reconciler *starts* a workflow, and a workflow
@@ -85,7 +85,7 @@ proceeds.
 On resume the engine **replays**. It runs the same `async fn` from the top, but
 each `ctx` call returns its journaled result instead of doing the work again: a
 `ctx.run` step that already sent its request returns the recorded outcome without
-re-sending; a `ctx.sleep` whose deadline already passed returns immediately. The
+re-sending. A `ctx.sleep` whose deadline already passed returns immediately. The
 body cannot tell the difference between a first run and a replay — and that is the
 point. Replay reaches the next unfinished step having repeated none of the
 finished ones.
@@ -109,7 +109,7 @@ error model turns on that distinction.
 - **Transient** — the step hit something that might succeed next time: a refused
   connection, a timeout. The engine re-drives the workflow from its journal after
   a backoff, up to a budget. A transient failure never reaches the workflow's
-  return type; the body never even observes it.
+  return type. The body never even observes it.
 - **Terminal** — the step failed permanently: malformed input, a violated
   invariant. Retrying cannot help. The failure propagates out of `ctx.run` as the
   workflow's terminal failure.
@@ -127,15 +127,14 @@ convention.
 When a workflow ends, the engine projects the outcome to a `WorkflowStatus` —
 `Completed { output }` or `Failed { terminal }` — and writes it to the
 observation store. Two further variants, `Cancelled` and `TimedOut`, are reserved
-for engine-driven cancellation and deadlines a later slice will add; the body can
-never produce them. The status is observation, not intent: a lifecycle reconciler
+for engine-driven cancellation and deadlines. The body can never produce them. The status is observation, not intent: a lifecycle reconciler
 reads it to decide the instance is done, the same
 [intent / observation discipline](/docs/concepts/intent-observation) the rest of
 the platform follows.
 
 One separation is worth stating plainly, because collapsing it is the tempting
 mistake: the value a workflow *returns* and the status the control plane *records*
-are two different types. The body returns `Result<Output, TerminalError>`; the
+are two different types. The body returns `Result<Output, TerminalError>`. The
 cluster observes a `WorkflowStatus`. Tying the author's success type to the
 engine's bookkeeping would couple every workflow's output to the runtime's
 lifecycle vocabulary.
@@ -163,33 +162,25 @@ control plane takes over:
 
 That last step is why a workflow survives a control-plane crash: recovery is the
 convergence loop noticing a gap, the same mechanism that restarts a crashed
-allocation. The workflow author writes the body and the trigger; durability,
+allocation. The workflow author writes the body and the trigger. Durability,
 retry, and resume belong to the runtime.
 
-The relationship runs both ways, in one vocabulary. A reconciler starts a workflow
-by emitting `Action::StartWorkflow`; a workflow drives the cluster back by emitting
-actions of its own through `ctx.emit_action` — the *same* `Action` type a
-reconciler emits, committed through the same action shim and Raft path. A workflow
-never writes intent directly; it emits an action, exactly as a reconciler does. So
-the two primitives form a loop rather than living in separate worlds: a reconciler
-starts a workflow, the workflow emits actions that change cluster state mid-run,
-reconcilers converge on the result, and the workflow's terminal status is itself a
-row a reconciler observes to close the instance out.
+A workflow never writes intent directly. It emits actions through `ctx.emit_action`, the same `Action` type a reconciler emits, and the action shim commits them.
 
 ## What workflows are for
 
 The operations that want a workflow rather than a reconciler share a profile: a
 fixed, ordered sequence with a natural end, where each step has an external effect
-that must not be repeated on a retry. Two are on the roadmap:
+that must not be repeated on a retry. Two examples:
 
 - **Certificate rotation** — request a certificate, wait for the DNS challenge to
   propagate, validate it, then signal readiness. Four ordered steps, each with an
-  effect; a crash mid-rotation must resume, not restart from the first request.
+  effect. A crash mid-rotation must resume, not restart from the first request.
 - **Allocation migration** — start a replacement allocation on another node, wait
   for it to pass health checks, drain the original, stop it. A sequence that
   terminates once the move is complete.
 
-Neither is "keep N replicas running" — that never ends, so it is a reconciler.
+A sequence that never ends, such as keeping N replicas running, is a reconciler.
 
 ## Where to go next
 

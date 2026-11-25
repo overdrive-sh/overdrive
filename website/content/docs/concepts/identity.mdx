@@ -1,6 +1,6 @@
 ---
 title: Identity
-description: Overdrive's built-in SPIFFE certificate authority — it mints short-lived workload SVIDs from a persistent, envelope-encrypted root, wired into overdrive serve. The control plane issues, holds, and audits an identity for every running allocation, and a node-agent L4 proxy presents it on the wire to encrypt traffic between workloads.
+description: Overdrive's built-in SPIFFE certificate authority — it mints short-lived workload SVIDs from a persistent, envelope-encrypted root, wired into overdrive serve. The control plane issues, holds, and audits an identity for every running allocation, and the node agent's mTLS enforcement presents it on the wire to encrypt traffic between workloads.
 ---
 
 Overdrive is its own certificate authority. Every workload gets a cryptographic
@@ -8,18 +8,15 @@ identity — a SPIFFE SVID — minted by a built-in CA the platform runs itself,
 no external PKI to stand up: no SPIRE, no Vault, no cert-manager. This page
 describes the built-in CA and how it works.
 
-<Callout title="Wired into serve and on the wire">
-	The built-in CA runs in `overdrive serve` today. At boot the control plane
-	resolves the operator key-encryption key, decrypts and adopts the persistent
-	root, and refuses to start if the envelope will not open. Every running
-	allocation then gets a SPIFFE SVID issued, held, and audited, and
-	`overdrive workload describe` reports each one. A held SVID reaches the wire:
-	[transparent mTLS](/docs/concepts/transparent-mtls) presents it on inbound and
-	outbound mesh connections and encrypts the traffic with TLS 1.3. The
-	[public ingress gateway](/docs/concepts/public-ingress-gateway) holds its own
-	SVID in a dedicated slot and presents it toward backends. The telemetry sink is
-	unbuilt. See [Where it stands](#where-it-stands).
-</Callout>
+The CA runs in `overdrive serve`. At boot the control plane resolves the operator
+key-encryption key, decrypts and adopts the persistent root, and refuses to start
+if the envelope will not open. Every running allocation then gets a SPIFFE SVID
+issued, held, and audited, and `overdrive workload describe` reports each one. A
+held SVID reaches the wire: [transparent mTLS](/docs/concepts/transparent-mtls)
+presents it on inbound and outbound mesh connections and encrypts the traffic
+with TLS 1.3 over kTLS. The
+[public ingress gateway](/docs/concepts/public-ingress-gateway) holds its own SVID
+in a dedicated slot and presents it toward backends.
 
 ## Two TLS stories, two CAs
 
@@ -33,8 +30,8 @@ worth keeping them apart:
   [architecture overview](/docs/concepts/architecture#identity-is-mutual-tls-minted-at-boot).
 - **Workload ↔ workload (this page).** The built-in CA issues
   identities to the *workloads themselves* — SPIFFE SVIDs that let one workload
-  authenticate another. A separate subsystem with its own persistent trust root;
-  it does not replace the operator-mTLS path.
+  authenticate another. A separate subsystem with its own persistent trust root.
+  It does not replace the operator-mTLS path.
 
 Everything below is the second story.
 
@@ -58,8 +55,10 @@ not renewed**: as an identity nears expiry the platform mints a fresh certificat
 with a new serial and a new validity window rather than extending the old one.
 Short lifetimes shrink the blast radius of a leaked key and make revocation mostly
 a matter of waiting one out. Because Overdrive is sidecarless, the **node agent
-holds the leaf private key** and runs the TLS handshake on the workload's behalf —
-there is no in-pod agent to hold it.
+holds the leaf private key** — there is no in-pod agent to hold it. The agent's
+[transparent mTLS](/docs/concepts/transparent-mtls) enforcement runs the TLS handshake
+on the workload's behalf and presents the SVID on inbound and outbound mesh
+connections.
 
 ## The trust hierarchy
 
@@ -102,7 +101,7 @@ the Linux kernel keyring (via systemd-creds), not in a file beside the ciphertex
 On boot the control plane decrypts the persisted root under the KEK and adopts it
 *before* issuing anything. If the envelope fails to open — a wrong KEK, or a
 tampered ciphertext — the control plane **refuses to start** rather than silently
-mint a new root. A silent re-mint would orphan every identity already issued;
+mint a new root. A silent re-mint would orphan every identity already issued.
 "earned trust" means proving the root is recoverable at boot instead of
 discovering it is not at the first handshake.
 
@@ -119,7 +118,7 @@ It shows the facts of issuance, never the certificate bytes or the private key.
 Every issuance writes an **append-only audit row** recording the certificate's
 serial, the SPIFFE identity, the issuer, the validity window, and what it was
 issued for: an allocation, or the ingress gateway, which has no allocation. The audit write
-is not optional — if it fails, **issuance fails**; the platform never hands out a
+is not optional — if it fails, **issuance fails**. The platform never hands out a
 certificate it did not record. Because each issuance is a fresh certificate rather
 than a renewal, the audit trail is a complete history of every identity the
 platform has minted.
@@ -136,31 +135,12 @@ the ACME request-and-DNS-challenge dance — *is* workflow-shaped, but that is a
 ## Built on the same swappable seam
 
 Like every other source of nondeterminism, the CA sits behind a port trait. The
-production adapter owns the real crypto; a simulation adapter draws serials from
+production adapter owns the real crypto. A simulation adapter draws serials from
 the seeded `Entropy` port, so under
 [deterministic simulation testing](/docs/concepts/deterministic-simulation-testing)
 the same seed produces byte-identical certificates and issuance replays exactly.
 The core crate defines only the trait — no crypto backend sits on the core compile
 path.
-
-## Where it stands
-
-The built-in CA runs in `overdrive serve`:
-
-- **Wired and live:** at boot the control plane resolves the operator KEK,
-  decrypts the persistent root and the node intermediate, and adopts them before
-  issuing anything — refusing to start if an envelope will not open. Every running
-  allocation gets an audited SVID, and `overdrive workload describe` reports each one.
-  The `Ca` port trait, both adapters, the envelope-sealed root, the per-node
-  intermediate, the single-SAN leaf profile, and the DST equivalence tests that pin
-  host/sim parity all sit on the production path.
-- **On the wire:** a held SVID is presented on
-  the wire. [Transparent mTLS](/docs/concepts/transparent-mtls) reads it to run the
-  mesh handshake in both directions and encrypt the connection with TLS 1.3 over
-  kTLS — provable with a packet capture. The ingress gateway holds a separate SVID
-  of its own in a dedicated slot and presents it on its hop to the backend. The
-  telemetry sink is unbuilt, so a workload's identity is not read on that
-  path.
 
 ## Where to go next
 

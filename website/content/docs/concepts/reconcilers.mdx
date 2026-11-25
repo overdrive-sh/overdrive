@@ -1,13 +1,13 @@
 ---
 title: Reconcilers
-description: The control plane's first primitive — a pure function that converges declared intent toward observed reality, run on a loop. The reconciler hydrates its own inputs through injected read-ports; the runtime owns time, persistence, and running the actions.
+description: The control plane's first primitive — a pure function that converges declared intent toward observed reality, run on a loop. The reconciler hydrates its own inputs through injected read-ports. The runtime owns time, persistence, and running the actions.
 ---
 
 Overdrive's control plane is built from two primitives, and a **reconciler** is
 the first: a pure function that looks at what should be true and what is true, and
 returns the actions that close the gap. The runtime runs it on a loop, forever.
 Its peer, the [workflow](/docs/concepts/workflows), runs a terminating sequence
-once; [reconcilers and workflows](/docs/concepts/reconcilers-and-workflows)
+once. [Reconcilers and workflows](/docs/concepts/reconcilers-and-workflows)
 explains how the two combine.
 
 The [architecture overview](/docs/concepts/architecture#the-convergence-loop)
@@ -114,24 +114,24 @@ testable: each hydration input is a port, so
 [simulation](/docs/concepts/deterministic-simulation-testing) supplies a `Sim*`
 implementation for every one and drives the reconciler against fabricated intent,
 observation, and host state — no live cluster, no real clock. Reach around a port
-to a concrete field and you hydrate an input the harness cannot substitute; the
+to a concrete field and you hydrate an input the harness cannot substitute. The
 replay guarantee stops holding for it. The port is the seam.
 
 Contract and implementation live in separate crates on purpose. The `Reconciler`
 trait, the read-port traits, and `HydrationContext` are core — the shared source
 of truth every reconciler and adapter agrees on. The reconciler implementations,
 `hydrate_*` bodies included, consume those ports, so they are adapters and live in
-`overdrive-reconcilers`. Core holds the contract; the adapter crate holds the code
+`overdrive-reconcilers`. Core holds the contract. The adapter crate holds the code
 that reads the world.
 
 ## Observe, diff, converge
 
 The loop calls `reconcile` every tick with freshly hydrated desired and actual.
-The reconciler recomputes the gap each time; it never assumes a past action took
+The reconciler recomputes the gap each time. It never assumes a past action took
 effect. A half-finished operation is just a gap the next pass closes — a crashed
 allocation is started again, a drifted dataplane map is rewritten, a
 half-provisioned interface is completed rather than adopted as-is. The control
-plane converges toward the declared state or keeps trying; it does not strand
+plane converges toward the declared state or keeps trying. It does not strand
 half-applied state for someone to fix by hand.
 
 This is why the *computation* is level-triggered. `reconcile` reads the current
@@ -268,7 +268,7 @@ The snapshot is taken once per tick, so every `reconcile` sees a single consiste
 "now." That single consistency is part of what makes the function pure over its
 inputs.
 
-## Actions are data; the shim runs them
+## Actions are data and the shim runs them
 
 `reconcile` returns `Vec<Action>` — typed descriptions of what should happen, not
 the happening itself. A separate **action shim** executes them: `StartAllocation`
@@ -282,7 +282,7 @@ the producer-push path from
 
 ## The reconcilers that ship
 
-Eight reconcilers run in `overdrive serve`:
+Seven reconcilers run in `overdrive serve`, and an eighth, GatewaySvidLifecycle, runs when you configure the public ingress gateway:
 
 - **WorkloadLifecycle** — drives allocations toward the declared replica count
   and owns every restart. A pre-startup crash, a startup-probe stop, and a
@@ -294,9 +294,7 @@ Eight reconcilers run in `overdrive serve`:
   committed. Readiness then decides whether the backend receives traffic. On a
   startup deadline or terminal liveness failure it emits
   `StopAllocation` for the live allocation. WorkloadLifecycle makes the restart
-  decision.
-- **BackendDiscoveryBridge** — turns live allocations into `service_backends`
-  observation rows.
+  decision. It also publishes the `service_backends` observation rows.
 - **ServiceMapHydrator** — programs the eBPF service map when the backend set
   differs from the programmed map, emitting `DataplaneUpdateService`. It reads the
   map's stored fingerprint as its actual state and retains its own backoff
@@ -311,7 +309,9 @@ Eight reconcilers run in `overdrive serve`:
   artifacts. It reads its actual state from the host, not from a row, so it is the
   host-backed reconciler. It declares no interest, and its one managed target,
   `node/<id>`, is evaluated by the resync pass every 30 seconds.
-- **NoopHeartbeat** — a proof-of-life reconciler that emits a no-op every tick; it
+- **GatewaySvidLifecycle** — issues the SVID the public ingress gateway presents
+  toward backends. It runs only when you configure the gateway.
+- **NoopHeartbeat** — a proof-of-life reconciler that emits a no-op every tick. It
   anchors the "reconcilers are pure" invariant the test suite checks.
 
 Adding a behaviour to the control plane means adding a reconciler, not threading
@@ -319,12 +319,12 @@ logic through the loop. The loop does not know what the reconcilers do.
 
 ## Working with workflows
 
-A reconciler runs forever; some operations instead need a terminating, durable
+A reconciler runs forever. Some operations instead need a terminating, durable
 sequence — rolling a certificate through four steps, migrating an allocation
 between nodes. For those a reconciler starts a
 [workflow](/docs/concepts/workflows) by emitting `Action::StartWorkflow`, and
 later observes the workflow's terminal status to converge the instance.
-`WorkflowLifecycle` is the reconciler that ships for exactly this. The full loop —
+`WorkflowLifecycle` is the reconciler for exactly this. The full loop —
 including how a workflow emits actions back into the same pipeline — is in
 [reconcilers and workflows](/docs/concepts/reconcilers-and-workflows).
 

@@ -1,12 +1,12 @@
 ---
 title: CLI reference
-description: Every overdrive command, flag, and exit code that ships in Phase 1 — serve, deploy, and the job, node, workload, and cluster inspection verbs.
+description: Every overdrive command, flag, and exit code — serve, deploy, and the job, node, workload, and cluster inspection verbs.
 ---
 
 `overdrive` is the single binary for both running the control plane and
-operating it. This page documents the command surface that ships today. Phase 1
-is single-node: there is no node-join flow and no multi-region configuration, so
-the commands here assume one machine running one control plane.
+operating it. The control plane runs on a single node. There is no node-join
+flow and no multi-region configuration, so the commands here assume one machine
+running one control plane.
 
 ## How the CLI finds the server
 
@@ -30,7 +30,7 @@ pin, and certificate together — never just the address.
 ## `overdrive serve`
 
 Start the control plane on a TLS-bound listener. This is the one command that
-does not read an existing config; it writes one.
+does not read an existing config. It writes one.
 
 ```bash
 overdrive serve [--bind <ADDR>] [--data-dir <PATH>] \
@@ -64,7 +64,7 @@ Node startup also validates shared guest networking: the host must have its
 matching `ovd_fwd` module loaded, and required listeners, capacity, and
 address-prefix checks must pass. See
 [guest networking](/docs/concepts/guest-networking#the-node-and-guest-must-supply-matching-kernel-support).
-Node vsock listener ports are configured through `ServerConfig`;
+Node vsock listener ports are configured through `ServerConfig`.
 [TOML loading](https://github.com/overdrive-sh/overdrive/issues/327) is unbuilt.
 The `--bind` flag above controls the operator API, not guest flow listeners.
 
@@ -83,7 +83,7 @@ overdrive deploy <SPEC> [--detach]
 | Argument / flag | Meaning |
 | --- | --- |
 | `<SPEC>` | Path to a TOML spec file. |
-| `--detach` | Wait only for the IntentStore commit; do not stream lifecycle events. |
+| `--detach` | Wait only for the IntentStore commit and do not stream lifecycle events. |
 
 Deploy is idempotent on the spec's content hash. A new spec reports `Inserted`.
 Re-deploying identical content reports `Unchanged` and commits nothing.
@@ -156,10 +156,10 @@ Workload lifecycle.
 overdrive job stop <ID>      # stop the workload with this id
 ```
 
-`stop` declares that the named workload should no longer run; the control plane
+`stop` declares that the named workload should no longer run. The control plane
 records the intent and its allocations wind down. To read back what is running,
-use [`workload describe <ID>`](#overdrive-workload) — `job list` is parsed but not
-yet wired (see [Accepted but not yet functional](#accepted-but-not-yet-functional)).
+use [`workload describe <ID>`](#overdrive-workload) — `job list` parses but does
+nothing (see [Commands that parse but do nothing](#commands-that-parse-but-do-nothing)).
 
 ## `overdrive workload`
 
@@ -185,7 +185,7 @@ for example `1GiB` and `500m`.
 For each running allocation that has been issued an identity, the `describe`
 output also lists its current certificate — serial, SPIFFE identity, issuer
 serial, and expiry — drawn from the issuance audit trail. These are the facts of
-issuance only; the certificate bytes and the private key never appear. The
+issuance only. The certificate bytes and the private key never appear. The
 section is omitted for allocations with no issued certificate.
 
 ## `overdrive node`
@@ -207,23 +207,23 @@ overdrive cluster status
 `cluster status` reports the control plane's current mode — `single` on a fresh
 node.
 
-## Accepted but not yet functional
+## Commands that parse but do nothing
 
 Two subcommands are part of the `clap` argv surface — they parse, and
-`--help` lists them — but their handlers are not wired in Phase 1. Each
-currently logs `command not yet wired` and exits `0` without doing anything:
+`--help` lists them — but they have no handler. Each logs
+`command not yet wired` and exits `0` without doing anything:
 
 | Command | State |
 | --- | --- |
-| `overdrive job list` | Parsed, no handler. Use [`workload describe <ID>`](#overdrive-workload) to inspect a workload today. |
-| `overdrive cluster upgrade --mode <single\|ha> --peers <list>` | Parsed, no handler. High-availability mode is design-stage; Phase 1 is single-node. |
+| `overdrive job list` | Parsed, no handler. Use [`workload describe <ID>`](#overdrive-workload) to inspect a workload. |
+| `overdrive cluster upgrade --mode <single\|ha> --peers <list>` | Parsed, no handler. High-availability mode is not implemented, and Phase 1 is single-node. |
 
 They are documented here so the behavior is not mistaken for a bug: the command
 appears to succeed (exit `0`) but has no effect.
 
 ## Global behavior
 
-- `overdrive --version` prints the build version; `overdrive --help` and
+- `overdrive --version` prints the build version. `overdrive --help` and
   `overdrive <command> --help` print usage.
 - Unknown flags are rejected rather than ignored — there is no silent
   pass-through for options like `--insecure`.

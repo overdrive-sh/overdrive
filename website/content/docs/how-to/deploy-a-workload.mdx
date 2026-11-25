@@ -3,13 +3,12 @@ title: Deploy a workload
 description: Start a single-node Overdrive control plane, declare service listeners and health checks, and deploy a Linux microVM with the CLI.
 ---
 
-This guide takes you from an empty machine to a deployed workload using the
-commands Overdrive ships today. You start a control plane, write a TOML spec,
-deploy it, and confirm the control plane accepted it. The service and job
-examples below require artifacts you supply. These paths are placeholders,
-not downloads or images bundled with the CLI. Every command here runs on
-a single node — Phase 1 is single-node by design, so there is no cluster to join
-and no membership to configure first.
+This guide takes you from an empty machine to a deployed workload. You start a
+control plane, write a TOML spec, deploy it, and confirm the control plane
+accepted it. The service and job examples below require artifacts you supply.
+These paths are placeholders, not downloads or images bundled with the CLI.
+Every command here runs on a single node, so there is no cluster to join and no
+membership to configure first.
 
 <Callout title="Prerequisites">
 	A supported Linux node, a build of `overdrive`, and a writable home directory.
@@ -17,8 +16,8 @@ and no membership to configure first.
 	matching `ovd_fwd` module loaded before `serve`. Startup checks these
 	capabilities and refuses incomplete setup. See
 	[guest networking](/docs/concepts/guest-networking#the-node-and-guest-must-supply-matching-kernel-support)
-	for the shared transport prerequisites. The control plane stores state locally;
-	there is no external database to configure.
+	for the shared transport prerequisites. The control plane stores state locally.
+	There is no external database to configure.
 </Callout>
 
 ## Start the control plane
@@ -77,7 +76,7 @@ cpu    = "500m"    # sizes the guest vCPUs
 memory = "128MiB"  # guest RAM
 
 [[listener]]
-port     = 8080   # a port the service holds open
+port     = 8080   # a port the service holds open inside the guest
 protocol = "tcp"
 
 # Readiness — may it receive traffic yet?
@@ -93,6 +92,12 @@ path = "/healthz"
 port = 8080
 ```
 
+All four `[vm]` fields are required. `command` and `args` name the program to run
+inside the guest. `kernel` and `rootfs` are host paths to a bootable kernel and an
+ext4 root filesystem. You supply both, because Overdrive builds neither. The spec
+carries no network settings: the platform assigns the guest's address and wires
+it into the [encrypted mesh](/docs/concepts/transparent-mtls).
+
 ### Health checks
 
 Health checks answer three different questions for a Service. A run-to-completion
@@ -104,7 +109,7 @@ Health checks answer three different questions for a Service. A run-to-completio
   owns the subsequent restart and its shared restart budget.
 - **Two mechanics.** `type = "tcp"` connects to a `port`. `type = "http"`
   issues a plain-HTTP GET to a `path` starting with `/` on a `port`. Both dial
-  through the guest-network owner. In-guest command probes are unbuilt.
+  through the guest-network owner. Probes are TCP and HTTP only.
 - **Omitting startup uses the guest listener gate.** The guest reports each
   declared TCP listener after `listen()` and each declared UDP listener after an
   explicit `bind()`. The default gate passes when the host has received reports
@@ -133,7 +138,7 @@ is lost, the gate does not guess that the listener opened. It fails at the
 startup deadline. A report records an opening, not continued socket health.
 The hooks cannot distinguish an IPv6 wildcard socket with `IPV6_V6ONLY` from
 one that also accepts IPv4, so that report alone does not prove IPv4
-reachability. Overdrive does not support IPv6 service traffic yet.
+reachability. Overdrive does not support IPv6 service traffic.
 
 ## Supply the guest artifacts
 
@@ -147,10 +152,10 @@ runs to completion. This job example uses the same guest artifact contract:
 id = "nightly-report"   # name across the cluster — stop / inspect / re-deploy by it
 
 [vm]
-command = "/usr/bin/report"      # the command run INSIDE the guest
-args     = ["--out", "/var/out"]
-kernel   = "/srv/vm/kernel"      # host path to a bootable kernel image
-rootfs   = "/srv/vm/report.ext4" # host path to an ext4 root filesystem
+command = "/usr/bin/report"
+args    = ["--out", "/var/out"]
+kernel  = "/srv/vm/report/kernel"
+rootfs  = "/srv/vm/report/rootfs.ext4"
 
 [resources]
 cpu    = "500m"    # sizes the guest's vCPUs
@@ -158,9 +163,9 @@ memory = "128MiB"  # sizes the guest's memory
 ```
 
 All four `[vm]` fields are required. `command` and `args` name the program to run
-inside the guest; `kernel` and `rootfs` are host paths to a bootable kernel and an
+inside the guest. `kernel` and `rootfs` are host paths to a bootable kernel and an
 ext4 root filesystem from a matching guest kit. The rootfs must contain the
-kit's `overdrive-init` and `ovd_fwd` module; an arbitrary kernel is unsupported.
+kit's `overdrive-init` and `ovd_fwd` module. An arbitrary kernel is unsupported.
 `cpu` derives the guest vCPU count, and `memory` sets guest memory. The
 [workload spec reference](/docs/reference/workload-spec) lists the accepted forms
 and the values the control plane refuses.
@@ -176,7 +181,7 @@ hypervisor's.
 	vhost-vsock backend. There is no published fork binary to download from these
 	docs. The host must load its matching forwarder module before `serve`. Supply
 	a supported guest kit and a rootfs on a reflink-capable filesystem. The VM
-	uses vsock flow transport; it does not need a per-VM host TAP or bridge. For
+	uses vsock flow transport. It does not need a per-VM host TAP or bridge. For
 	the confinement and artifact contract, see
 	[microVMs](/docs/concepts/microvms).
 </Callout>
@@ -281,3 +286,5 @@ the new intent and the workload's allocations wind down.
 - Why the control plane keeps your declared spec (intent) separate from what is
   actually running (observation), and why deploy is idempotent on a content
   hash: [the intent / observation boundary](/docs/concepts/intent-observation).
+- What a workload runs in, and how it stays isolated:
+  [microVMs](/docs/concepts/microvms).

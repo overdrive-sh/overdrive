@@ -5,12 +5,11 @@ description: One node runs a reconciling Rust control plane over redb, Linux mic
 
 Overdrive runs a control plane and worker in one process on one node. The
 control plane reconciles declared intent into Linux microVM
-allocations. eBPF steers supported service traffic; host mTLS enforcement
-protects mesh TCP; shared vsock transport connects Linux guests without a host
-interface per VM. The [remaining boundaries](#what-is-not-here-yet) distinguish
-implemented behavior from design targets.
+allocations. eBPF steers supported service traffic. Host mTLS enforcement
+protects mesh TCP. Shared vsock transport connects Linux guests without a host
+interface per VM.
 
-The mental model to hold: **you declare what should run; a loop makes it so.**
+The mental model to hold: **you declare what should run. A loop makes it so.**
 Everything below is in service of that loop.
 
 <Mermaid chart={`
@@ -59,15 +58,14 @@ the loop that joins them, the worker, and the kernel dataplane — in that order
 `overdrive` is a single binary. `overdrive serve` starts a control plane and a
 co-resident worker in one process on one host. There is no separate node agent
 to install, no scheduler service to run, and no cluster to join — the node
-identifies itself as `local` and serves only itself. A production multi-node,
-role-at-bootstrap topology is the design target; the shipped path is the
-single-node one, and the rest of this page describes that path.
+identifies itself as `local` and serves only itself. The node is always `local`:
+there is no cluster membership and no multi-region federation.
 
 Before accepting work, startup validates the required host capabilities and
 refuses to boot if a required check fails:
 
 - **Probes the cgroup filesystem.** The worker places VMM processes inside
-  cgroups; if it cannot reach a usable cgroup v2 hierarchy, boot stops with a
+  cgroups. If it cannot reach a usable cgroup v2 hierarchy, boot stops with a
   structured `health.startup.refused` event rather than limping along.
 - **Loads and probes the eBPF dataplane.** The XDP and cgroup programs are
   attached and verified up front, not lazily on first packet.
@@ -91,7 +89,7 @@ see how the pieces connect.
    connection to the control plane, and submits the parsed spec.
 2. The control plane writes the spec to the **IntentStore** and returns an
    outcome — `Inserted` for a new content hash, `Unchanged` for one it already
-   holds. The deploy is now durable; nothing is running yet.
+   holds. The deploy is now durable. Nothing is running yet.
 3. The **convergence loop** notices the new intent, computes the gap between what
    should run and what is running, and emits actions to close it.
 4. An action like `StartAllocation` reaches the **worker**, which selects a
@@ -101,7 +99,7 @@ see how the pieces connect.
    next turn of the loop reads that status as the new "actual," and the gap is
    closed.
 
-Steps 2 and 5 touch the two halves of cluster state; step 3 is the engine that
+Steps 2 and 5 touch the two halves of cluster state. Step 3 is the engine that
 joins them.
 
 ## Two stores, one consistency split
@@ -109,21 +107,21 @@ joins them.
 Overdrive keeps **intent** (what should run) separate from **observation** (what
 is running) — separate traits, separate types, separate files. The
 [intent / observation boundary](/docs/concepts/intent-observation) explains why
-this split is load-bearing. What ships today is the structural separation, not
-yet its multi-node payoff:
+this split is load-bearing:
 
 | | IntentStore | ObservationStore |
 | --- | --- | --- |
-| Holds | declared workload specs | live allocation status, node health, service backends, probe results |
+| Holds | declared workload specs, the sealed workload-CA root | live allocation status, node health, service backends, probe results, certificate issuance audit |
 | Backed by | redb (`intent.redb`) | redb (`observation.redb`) |
 | Written by | the control plane, via typed actions | the node that owns each row |
 | Conflict rule | content-hash idempotency | last-writer-wins on a logical timestamp |
 
-Both stores are local redb files on the one node. The gossip propagation the
-boundary concept describes — every node writing its own rows and the cluster
-converging — is the multi-node design; on a single node there is nothing to
-gossip to. The boundary is built now so that adding nodes later is a change of
-backend, not a change of architecture.
+Both stores are local redb files on the one node, so intent is not replicated and
+observation is not propagated to other nodes. The split does not depend on the
+backend: each store sits behind its own trait, so a replicated backend can
+replace either one without changing the code that uses it. The consistency
+semantics each store promises are in
+[the intent / observation boundary](/docs/concepts/intent-observation).
 
 ## The convergence loop
 
@@ -150,7 +148,7 @@ the rest: it persists the reconciler's memory to a redb-backed view store
 (writing and flushing to disk *before* it treats the action as done, so a crash
 mid-tick resumes cleanly), then dispatches the actions.
 
-Eight reconcilers run today:
+Seven reconcilers run in `overdrive serve`, and an eighth, GatewaySvidLifecycle, runs when you configure the public ingress gateway:
 
 - **WorkloadLifecycle** — drives allocations toward the declared replica count
   and emits `StartAllocation`, `StopAllocation`, or `ReleaseServiceVip`. It
@@ -164,10 +162,10 @@ Eight reconcilers run today:
   WorkloadLifecycle owns restart and
   give-up under one budget. See
   [Health checks close a second loop](#health-checks-close-a-second-loop).
-- **BackendDiscoveryBridge** and **ServiceMapHydrator** — together they turn live
-  allocations into dataplane state, feeding the service map the eBPF programs
-  read. The hydrator reads the programmed map back, as a fingerprint stored with
-  each service's table, and reprograms any service whose map differs from its
+- **ServiceMapHydrator** — turns the backend rows that ServiceLifecycle publishes
+  into dataplane state, feeding the service map the eBPF programs read. The
+  hydrator reads the programmed map back, as a fingerprint stored with each
+  service's table, and reprograms any service whose map differs from its
   backends, including one lost to a reboot or a restart of `serve`.
 - **WorkflowLifecycle** — the bridge to the [workflow](/docs/concepts/workflows)
   engine: it watches workflow instances and re-emits `StartWorkflow` for one that
@@ -180,8 +178,10 @@ Eight reconcilers run today:
   artifacts. It reads its actual state from the host rather than an observation
   row, so it declares no interest. The resync pass evaluates its one target, the
   local node, every 30 seconds.
-- **NoopHeartbeat** — a proof-of-life reconciler that emits a no-op every tick;
-  it exists to anchor the "reconcilers are pure" invariant the test suite checks.
+- **GatewaySvidLifecycle** — issues the SVID the public ingress gateway presents
+  toward backends. It runs only when you configure the gateway.
+- **NoopHeartbeat** — a proof-of-life reconciler that emits a no-op every tick.
+  It exists to anchor the "reconcilers are pure" invariant the test suite checks.
 
 Adding a behavior to the control plane means adding a reconciler, not threading
 logic through the loop. The loop does not know what the reconcilers do. For the
@@ -191,7 +191,7 @@ one — see [reconcilers](/docs/concepts/reconcilers).
 The same shape makes the loop self-heal. A reconciler recomputes the gap between
 desired and actual rather than assuming a past action succeeded. The driver
 registry, allocation-to-driver index, and exit observers retain separate
-ownership even though the only supported workload adapter is `VmDriver`.
+ownership. The only workload adapter is `VmDriver`.
 
 ## The worker runs Linux microVMs
 
@@ -217,8 +217,9 @@ capability leaves no VM adapter to execute work.
 
 See [microVMs](/docs/concepts/microvms) and
 [guest networking](/docs/concepts/guest-networking) for artifact requirements,
-capacity, lifecycle, and traffic limits. Additional guest runtimes remain
-future work.
+capacity, lifecycle, and traffic limits. Linux microVMs through Cloud
+Hypervisor are the only guest runtime. Non-Linux guest networking, unikernel,
+and WASM workloads are not supported.
 
 ## Health checks close a second loop
 
@@ -226,7 +227,7 @@ A Service has three health-check roles. Startup gates `Stable`. Readiness gates
 traffic after `Stable`. Liveness begins at `Stable` and can stop an unhealthy
 allocation. The worker's probe runner observes and writes probe-result rows. An
 explicit TCP probe connects to a port, and an HTTP probe sends a plain-HTTP GET
-through the guest-network owner. Command-execution probes are unbuilt.
+through the guest-network owner. Probes are TCP and HTTP only.
 
 When the operator omits startup probes, the worker runs a platform-supplied
 guest-listener startup check. Guest kernel hooks report each declared TCP
@@ -265,8 +266,8 @@ through shared node listeners. The host opens destination sockets and routes
 mesh TCP into the node agent's mTLS enforcement.
 
 The forwarder moves bytes inside the kernel only after the target accepts
-them, preserving source-socket backpressure. It refuses kTLS sockets; TLS
-termination belongs to the host mTLS path, with a temporary userspace relay for
+them, preserving source-socket backpressure. It refuses kTLS sockets. TLS
+termination belongs to the host mTLS path, with a userspace relay for
 guest delivery. A kernel forwarder is therefore not a claim that the whole
 mesh path avoids userspace payload handling.
 
@@ -277,14 +278,27 @@ resources to end before releasing its address lease.
 
 Guest DNS and remote TCP/UDP are supported, including empty UDP datagrams.
 A guest's UDP datagram to a Service VIP is refused with a policy error,
-and nothing leaves the host. Delivery to a VM backend is
-[unbuilt](https://github.com/overdrive-sh/overdrive/issues/310). The service
-dataplane carries IPv4 backends only, and issue
+and nothing leaves the host. A VM backend does not receive such a datagram, and
+issue [#310](https://github.com/overdrive-sh/overdrive/issues/310) tracks
+delivery. The service dataplane carries IPv4 backends only, and issue
 [#155: IPv6 forwarding for the XDP service load balancer](https://github.com/overdrive-sh/overdrive/issues/155)
-tracks lifting that. The implemented
-mesh is single-node; loaded XDP support does not imply a deployed multi-node
-control plane. See [guest networking](/docs/concepts/guest-networking) and
+tracks lifting that. The mesh is single-node: the control plane cannot place a
+backend on another node, so the remote-backend XDP path is loaded but no deploy
+reaches it. See [guest networking](/docs/concepts/guest-networking) and
 [transparent mTLS](/docs/concepts/transparent-mtls) for the exact boundaries.
+
+A workload reaches another service by hostname through
+[service names](/docs/concepts/service-names). A node-local DNS responder answers
+`<name>.svc.overdrive.local` with a stable frontend address while the service has
+a healthy backend. Names do not use the Service VIP and XDP path. The node
+agent's mTLS enforcement handles the connection to that frontend address.
+
+The [public ingress gateway](/docs/concepts/public-ingress-gateway) serves
+external HTTP/1.1 traffic and reads certificates from files you supply. Issue
+[#341: HTTP/2 and gRPC on the public listener](https://github.com/overdrive-sh/overdrive/issues/341)
+tracks HTTP/2, and issue
+[#57: an embedded ACME client](https://github.com/overdrive-sh/overdrive/issues/57)
+tracks automated certificates.
 
 ## Identity is mutual TLS, minted at boot
 
@@ -293,10 +307,18 @@ mints that CA, issues itself a server leaf and the
 operator a client leaf, and binds a rustls listener. It writes the endpoint, the
 CA pin, and the operator certificate to `~/.overdrive/config` as one unit — the
 "trust triple" every CLI command reads. The connection is mutually
-authenticated; there is no flag to turn that off. These are standard X.509
-certificates. (SPIFFE identifiers also appear in the data model — every workload
-carries one — and they now drive a separate, transparent handshake for traffic
-between workloads; see [transparent mTLS](/docs/concepts/transparent-mtls).)
+authenticated. There is no flag to turn that off. These are standard X.509
+certificates.
+
+The workload mesh uses a separate, persistent workload-identity CA. Its root is
+sealed under the operator's key-encryption key and survives restarts, so a
+restarted node adopts the same root instead of minting a new one. The CA issues a
+SPIFFE SVID for every running allocation, and the node agent holds it. Workloads
+hold no key or certificate. The SVID drives the transparent handshake for traffic
+between workloads, and the ingress gateway holds its own SVID in a dedicated slot
+and uses it toward backends. See [transparent mTLS](/docs/concepts/transparent-mtls),
+the [identity model](/docs/concepts/identity), and the
+[workload identity lifecycle](/docs/concepts/workload-identity-lifecycle).
 
 ## Why it is built on a swappable seam
 
@@ -312,45 +334,16 @@ real world out of core logic. This seam is the foundation
 is built on, and it is why the convergence loop can be tested as a pure function
 rather than against a live cluster.
 
-## What is not here yet
-
-The full design describes a larger system. The following are design-stage — there
-is no wired, functional code for them in what ships today, and these docs will
-not describe them as present until there is:
-
-- **High availability.** Intent lives in single-node redb; there is no Raft
-  replication. `cluster upgrade --mode ha` parses but is not wired.
-- **Gossip-replicated observation.** Observation is local redb; the CR-SQLite /
-  Corrosion gossip layer is the multi-node design target.
-- **Other guest runtimes.** Non-Linux guest networking, unikernel, and WASM
-  drivers are unbuilt. Linux microVMs run through Cloud Hypervisor.
-- **The policy engine, native telemetry, and the LLM self-healing agent.** Each
-  is part of the design. None is wired into `serve`.
-- **HTTP/2 and automated certificates at the
-  [public ingress gateway](/docs/concepts/public-ingress-gateway).** The gateway
-  speaks HTTP/1.1 and reads certificates from files you supply. Issue
-  [#341: HTTP/2 and gRPC on the public listener](https://github.com/overdrive-sh/overdrive/issues/341) tracks HTTP/2,
-  and issue [#57: an embedded ACME client](https://github.com/overdrive-sh/overdrive/issues/57) tracks automated
-  certificates.
-- **Presenting workload identity on every path.** The built-in certificate
-  authority issues, holds, and audits a SPIFFE SVID for every running allocation,
-  and the mesh dataplane presents it on the wire in both directions — a node-agent
-  L4 proxy encrypts connections between workloads with TLS 1.3 (see
-  [transparent mTLS](/docs/concepts/transparent-mtls)). The ingress
-  gateway holds its own SVID in a dedicated slot and uses it toward backends.
-  The telemetry sink that would also read a held SVID is unbuilt.
-  See the [identity model](/docs/concepts/identity) and the
-  [workload identity lifecycle](/docs/concepts/workload-identity-lifecycle).
-- **A deployed multi-node mesh.** The single-node control plane cannot place a
-  backend on another node. Kernel service-steering support does not supply
-  membership, replicated state, or multi-node workload ownership.
-- **Multi-region federation.** The node is always `local`.
+The policy engine, native telemetry, and the LLM self-healing agent are not built, and `overdrive serve` does not run them.
 
 ## Where to go next
 
 - Run the loop end-to-end: [Deploy a workload](/docs/how-to/deploy-a-workload).
+- What a workload runs in: [microVMs](/docs/concepts/microvms).
+- How a workload reaches a live peer by hostname:
+  [service names](/docs/concepts/service-names).
 - The consistency split this rests on:
   [the intent / observation boundary](/docs/concepts/intent-observation).
 - How the pure-function design makes the control plane replayable:
   [deterministic simulation testing](/docs/concepts/deterministic-simulation-testing).
-- Every shipped command: the [CLI reference](/docs/reference/cli).
+- Every command: the [CLI reference](/docs/reference/cli).

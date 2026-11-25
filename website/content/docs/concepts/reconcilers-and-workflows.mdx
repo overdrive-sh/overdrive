@@ -1,6 +1,6 @@
 ---
 title: Reconcilers and workflows
-description: How Overdrive's two control-plane primitives combine — reconcilers converge forever, workflows run once, and both speak one action vocabulary. A reconciler starts a workflow; the workflow emits actions back; a reconciler converges on its result.
+description: How Overdrive's two control-plane primitives combine — reconcilers converge forever, workflows run once, and both speak one action vocabulary. A reconciler starts a workflow. The workflow emits actions back. A reconciler converges on its result.
 ---
 
 Overdrive's control plane has exactly two primitives, and they are built to work
@@ -27,7 +27,7 @@ certificate from a CA like Let's Encrypt: "keep this service holding a valid
 certificate" is a standing invariant — a reconciler — and the rotation it triggers
 when the certificate nears expiry is a terminating sequence — request, wait for the
 DNS challenge to propagate, validate, publish — a workflow. The reconciler decides
-*when*; the workflow performs the *steps*. The split only appears when the steps
+*when*. The workflow performs the *steps*. The split only appears when the steps
 reach outside the cluster. Overdrive's own internal SVIDs rotate with a single
 audited re-issue, so their near-expiry reissue stays wholly inside the
 [lifecycle reconciler](/docs/concepts/workload-identity-lifecycle) — no workflow.
@@ -35,9 +35,9 @@ audited re-issue, so their near-expiry reissue stays wholly inside the
 ## One vocabulary: actions
 
 Both primitives change the cluster the same way: by emitting `Action`s, which a
-single [action shim](/docs/concepts/reconcilers#actions-are-data-the-shim-runs-them)
+single [action shim](/docs/concepts/reconcilers#actions-are-data-and-the-shim-runs-them)
 executes behind one I/O boundary. A reconciler returns `Vec<Action>` from its pure
-`reconcile`; a workflow calls `ctx.emit_action(action)` from its body. It is the
+`reconcile`. A workflow calls `ctx.emit_action(action)` from its body. It is the
 same `Action` enum and the same committed path in both cases, and neither writes
 the IntentStore directly.
 
@@ -79,13 +79,13 @@ A multi-step operation flows around a loop:
 5. A reconciler observes that terminal row and converges the instance — marking it
    done and stopping any re-trigger.
 
-The bridge reconciler that ships today is **WorkflowLifecycle**. It watches
+The bridge reconciler is **WorkflowLifecycle**. It watches
 workflow instances in observed state and re-emits `StartWorkflow` for any that
 should be running but have no live engine task — the signature of a crash. The
 engine's journal load then decides cold start versus resume. So a workflow's
 durability is not a separate recovery system: it is the convergence loop noticing a
 gap, exactly as it would for a crashed allocation. The reconciler keeps the
-workflow alive; the journal keeps it correct.
+workflow alive. The journal keeps it correct.
 
 ## Why two primitives, not one
 
@@ -93,7 +93,7 @@ It is tempting to collapse these into one — to model a workflow as a reconcile
 whose View is a step counter, or to let a reconciler block on a long external
 sequence. Both lose what the other primitive is good at. A reconciler carrying a
 step machine in its View re-derives the entire sequence every tick and has nowhere
-to park while it waits on an external event; a workflow that loops forever has no
+to park while it waits on an external event. A workflow that loops forever has no
 terminal result and defeats the journal that makes it durable. Keeping the two
 separate keeps each one simple — converge forever, or run once — and the shared
 action vocabulary is what lets them hand off cleanly at the boundary between them.
