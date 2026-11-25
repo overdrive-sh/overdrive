@@ -2773,7 +2773,8 @@ async fn dispatch_single(
             let terminal_driver =
                 alloc_drivers.lock().get(&alloc_id).copied().and_then(|kind| drivers.get(kind));
 
-            // `Driver::stop` awaits process quiescence. Its exit observer can
+            // `Driver::stop` returns once the VMM is reaped or killed and past the reap
+            // bound (ADR-0348). Its exit observer can
             // therefore contend with an intentional-stop observation while
             // this arm is inside the cleanup protocol. Re-read the LWW winner
             // after cleanup and once more after a rejected compound write. A

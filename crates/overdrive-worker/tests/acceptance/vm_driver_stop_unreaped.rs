@@ -554,7 +554,6 @@ async fn guard_a_replacement_waits_on_the_claim_and_attaches_after_the_reap() {
 /// call count is read from the scripted-failure queue (see the module doc).
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[should_panic(expected = "no VmHostState::kill_scope call may follow KilledNotReaped in a stop")]
 async fn guard_a_stop_makes_no_scope_kill_after_a_vmm_that_is_not_reaped() {
     let node = Node::new().await;
     node.sim.inject_unreapable_process();
@@ -591,9 +590,6 @@ async fn guard_a_stop_makes_no_scope_kill_after_a_vmm_that_is_not_reaped() {
 /// call count is read from the scripted-failure queue (see the module doc).
 /// CONTRACT_SHAPE: bounded-change.
 #[tokio::test]
-#[should_panic(
-    expected = "no VmHostState::kill_scope call may follow KilledNotReaped in a start-failure cleanup"
-)]
 async fn guard_a_start_failure_cleanup_makes_no_scope_kill_after_a_vmm_that_is_not_reaped() {
     let node = Node::new().await;
     node.sim.inject_unreapable_process();

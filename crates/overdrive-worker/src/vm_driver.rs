@@ -39,7 +39,8 @@ use overdrive_core::traits::driver::{
     OomFacts, Resources, STDERR_TAIL_LINES, VmStartFailure, VolumePayload,
 };
 use overdrive_core::traits::vmm::{
-    VMM_CONSOLE_TAIL_MAX_BYTES, VmControl, VmExitWatch, Vmm, VmmDiagnostics, VmmError, VmmExit,
+    VMM_CONSOLE_TAIL_MAX_BYTES, VmControl, VmExitWatch, VmTermination, Vmm, VmmDiagnostics,
+    VmmError, VmmExit,
 };
 use overdrive_core::traits::volume_backing::{ClaimState, VolumeBackingError};
 use overdrive_core::vm::beacon::{BeaconConnKey, BeaconIo, BeaconMessage, BeaconSocket};
@@ -1310,15 +1311,20 @@ impl VmDriver {
         rootfs: Option<&RootfsPlan>,
     ) -> Vec<StartCleanupFailure> {
         let mut failures = Vec::new();
-        if let Some(control) = control
-            && let Err(err) = self.vmm.terminate(control, Duration::ZERO).await
-        {
-            failures.push(StartCleanupFailure::new(StartCleanupStage::VmmTerminate, err));
+        let mut reap = VmmReap::Reaped;
+        if let Some(control) = control {
+            let outcome = self.vmm.terminate(control, Duration::ZERO).await;
+            reap = VmmReap::after(&outcome);
+            if let Err(err) = outcome {
+                failures.push(StartCleanupFailure::new(StartCleanupStage::VmmTerminate, err));
+            }
         }
         if let Some(rootfs) = rootfs {
             remove_clone_then_index_link_for_start(rootfs, &mut failures).await;
         }
-        if let Some(scope) = scope {
+        // A VMM killed but not reaped still populates its scope: no kill, the scope is left to
+        // `VmReclamation` (ADR-0348).
+        if let Some(scope) = scope.filter(|_| reap == VmmReap::Reaped) {
             // `ResourceBusy` is the cleanup's best effort: the scope is left
             // to `VmReclamation` (ADR-0349, ADR-0351).
             if let Err(err) = self.host_state.kill_scope(scope).await
@@ -1734,16 +1740,47 @@ impl VmDriver {
     }
 }
 
+/// Whether the VMM process the cleanup follows has been reaped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum VmmReap {
+    /// The process is gone: its scope is empty and the cleanup removes it.
+    Reaped,
+    /// SIGKILL was delivered and the process is still not reaped: it populates its scope until it
+    /// is reaped, so the cleanup leaves the scope to `VmReclamation` (ADR-0348).
+    NotReaped,
+}
+
+impl VmmReap {
+    /// The reap state a terminate outcome leaves. Exhaustive: a new [`VmTermination`] variant
+    /// must be classified here.
+    const fn after(outcome: &overdrive_core::traits::vmm::Result<VmTermination>) -> Self {
+        match outcome {
+            Ok(VmTermination::KilledNotReaped) => Self::NotReaped,
+            Ok(VmTermination::ExitedWithinGrace(_) | VmTermination::Killed) | Err(_) => {
+                Self::Reaped
+            }
+        }
+    }
+}
+
 /// Await the existing driver-owned artifact cleanup sequence in its required
 /// order. Results are handled best-effort; completion means every cleanup
 /// call has returned, not that each artifact's absence was verified.
 async fn cleanup_driver_artifacts(
     host_state: &Arc<dyn overdrive_core::traits::vm_host_state::VmHostState>,
     live_vm: &LiveVm,
+    reap: VmmReap,
 ) {
     // The scope's one remover (ADR-0351). A busy scope is left to
-    // `VmReclamation`; no other failure changes the cleanup either.
-    let _ = host_state.kill_scope(&live_vm.scope).await;
+    // `VmReclamation`; no other failure changes the cleanup either. A VMM that is killed but
+    // not reaped still populates its scope, so the kill is omitted and the scope is left to
+    // `VmReclamation` (ADR-0348).
+    match reap {
+        VmmReap::Reaped => {
+            let _ = host_state.kill_scope(&live_vm.scope).await;
+        }
+        VmmReap::NotReaped => {}
+    }
     let _ = tokio::fs::remove_dir_all(live_vm.run_dir.path()).await;
     remove_clone_then_index_link(&live_vm.rootfs).await;
 }
@@ -2135,6 +2172,7 @@ impl Driver for VmDriver {
         // while the same VMM wait continues.
         let termination = self.vmm.terminate(&control, VM_STOP_GRACE);
         tokio::pin!(termination);
+        let reap;
         match beacon.as_ref().and_then(|writer| writer.request_stop()) {
             None => {
                 tracing::info!(
@@ -2143,7 +2181,7 @@ impl Driver for VmDriver {
                     disposition = "absent",
                     "VM beacon writer consumed"
                 );
-                let _ = termination.await;
+                reap = VmmReap::after(&termination.await);
             }
             Some(mut writer_task) => {
                 let writer_deadline = self.clock.sleep(VM_SHUTDOWN_REQUEST_DEADLINE);
@@ -2154,7 +2192,8 @@ impl Driver for VmDriver {
                 // termination is always driven alongside the writer.
                 tokio::select! {
                     biased;
-                    _ = &mut termination => {
+                    outcome = &mut termination => {
+                        reap = VmmReap::after(&outcome);
                         if let Some(writer) = writer {
                             writer.vmm_has_exited();
                         }
@@ -2170,7 +2209,7 @@ impl Driver for VmDriver {
                         }
                     }
                     _ = &mut writer_task => {
-                        let _ = termination.await;
+                        reap = VmmReap::after(&termination.await);
                     }
                     () = &mut writer_deadline => {
                         if let Some(writer) = writer {
@@ -2179,9 +2218,10 @@ impl Driver for VmDriver {
                         tokio::select! {
                             biased;
                             _ = &mut writer_task => {
-                                let _ = termination.await;
+                                reap = VmmReap::after(&termination.await);
                             }
-                            _ = &mut termination => {
+                            outcome = &mut termination => {
+                        reap = VmmReap::after(&outcome);
                                 if let Some(writer) = writer {
                                     writer.vmm_has_exited();
                                 }
@@ -2208,7 +2248,7 @@ impl Driver for VmDriver {
         // `VmDriver::stop` still removes the clone DIRECTLY (it holds this
         // allocation's own `RootfsPlan`); the sweep is the backstop for the
         // without-stop endings, not a replacement for this.
-        cleanup_driver_artifacts(&self.host_state, &live_vm).await;
+        cleanup_driver_artifacts(&self.host_state, &live_vm, reap).await;
 
         tracing::info!(
             name: "vm.lifecycle.cleanup_calls_finished",
@@ -2617,7 +2657,7 @@ async fn run_exit_watcher(
         // session's Live entry. The guard's Drop still covers transition 4.
         return;
     };
-    cleanup_driver_artifacts(&host_state, &live_vm).await;
+    cleanup_driver_artifacts(&host_state, &live_vm, VmmReap::Reaped).await;
     tracing::info!(
         name: "vm.lifecycle.cleanup_calls_finished",
         alloc = %alloc,

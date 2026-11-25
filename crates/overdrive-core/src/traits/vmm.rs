@@ -190,8 +190,7 @@ pub trait Vmm: Send + Sync + 'static {
     ///   instant `terminate` requests the kill.
     ///
     /// The reap bound, `KilledNotReaped` and the late-reap behaviour above
-    /// are implemented by `SimVmm`; `CloudHypervisorVmm` implements them
-    /// from roadmap step 09-02.
+    /// are implemented by `SimVmm` and `CloudHypervisorVmm` alike.
     ///
     /// # Edge cases
     /// - The VMM is already gone (process exited, or was killed by

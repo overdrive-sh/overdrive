@@ -44,7 +44,7 @@ use async_trait::async_trait;
 use overdrive_core::guest_transport::GuestCid;
 use overdrive_core::traits::driver::ConfinementControl;
 use overdrive_core::traits::vmm::{
-    Result, VmControl, VmExitWatch, VmProcess, VmTermination, Vmm, VmmDiagnostics,
+    Result, VMM_REAP_BOUND, VmControl, VmExitWatch, VmProcess, VmTermination, Vmm, VmmDiagnostics,
     VmmDiagnosticsWriter, VmmError, VmmExit, VmmProbeError,
 };
 use overdrive_core::vm::config::{DiskAttachment, VmConfig};
@@ -682,8 +682,7 @@ impl Vmm for CloudHypervisorVmm {
             // §D6: kill immediately, with no await on the grace window
             // itself (the reap still has to happen to report Killed).
             state.kill_now.notify_one();
-            let _ = rx.changed().await;
-            return Ok(VmTermination::Killed);
+            return Ok(await_reap_within_bound(&mut rx).await);
         }
 
         let exited_within_grace = tokio::select! {
@@ -700,8 +699,18 @@ impl Vmm for CloudHypervisorVmm {
         }
 
         state.kill_now.notify_one();
-        let _ = rx.changed().await;
-        Ok(VmTermination::Killed)
+        Ok(await_reap_within_bound(&mut rx).await)
+    }
+}
+
+/// Waits at most [`VMM_REAP_BOUND`] (real time, from the kill request) for the reaper task to
+/// publish the process's exit. A process still not reaped at the bound is `KilledNotReaped`; the
+/// reaper task keeps awaiting it, so a late reap runs the ordinary reap path (exit watch fires,
+/// live record dropped) with nothing the caller wrote changing.
+async fn await_reap_within_bound(rx: &mut watch::Receiver<Option<VmmExit>>) -> VmTermination {
+    match tokio::time::timeout(VMM_REAP_BOUND, rx.changed()).await {
+        Ok(_) => VmTermination::Killed,
+        Err(_elapsed) => VmTermination::KilledNotReaped,
     }
 }
 
