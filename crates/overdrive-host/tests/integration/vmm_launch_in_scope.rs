@@ -29,14 +29,16 @@
 
 #![allow(clippy::doc_markdown, reason = "contract-shape tags in the scenario docs")]
 
+use std::ffi::OsString;
 use std::num::NonZeroU8;
+use std::os::unix::fs::PermissionsExt as _;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use overdrive_core::AllocationId;
 use overdrive_core::cgroup::CgroupPath;
 use overdrive_core::guest_transport::{GUEST_CID_BASE, GuestCid};
-use overdrive_core::traits::vmm::Vmm;
+use overdrive_core::traits::vmm::{Vmm, VmmError};
 use overdrive_core::vm::config::{
     HostArch, KERNEL_MAGIC_WINDOW, KernelCmdline, KernelImage, MemoryPlan, RootfsPlan, VmConfig,
     VmConfinement, VmRunDir,
@@ -210,4 +212,158 @@ async fn create_against_a_scope_with_subtree_control_set_fails_naming_the_step_a
     assert!(text.contains("joining the cgroup failed"), "the detail names the step: {text}");
     assert!(!hypervisor_for(&config.alloc), "no hypervisor process remains");
     assert!(!config.rootfs.clone_dest().exists(), "the rootfs clone is removed");
+}
+
+/// The value of a `key:` line in a `/proc/.../status` file.
+fn status_value(status: &str, key: &str) -> Option<String> {
+    status.lines().find_map(|line| line.strip_prefix(key).map(|value| value.trim().to_owned()))
+}
+
+/// `(tid, NoNewPrivs, Seccomp)` of every thread `pid` has. A thread that exits
+/// while the list is read is skipped.
+fn thread_confinement(pid: u32) -> Vec<(String, String, String)> {
+    let mut threads = Vec::new();
+    for entry in std::fs::read_dir(format!("/proc/{pid}/task")).expect("list the VMM's threads") {
+        let tid = entry.expect("read a task entry").file_name().to_string_lossy().into_owned();
+        let Ok(status) = std::fs::read_to_string(format!("/proc/{pid}/task/{tid}/status")) else {
+            continue;
+        };
+        let field = |key: &str| status_value(&status, key).unwrap_or_else(|| "absent".to_owned());
+        threads.push((tid, field("NoNewPrivs:"), field("Seccomp:")));
+    }
+    threads
+}
+
+/// (ADR-0352, ADR-0129, ADR-0143) The VMM `create` returns runs with
+/// `no_new_privs` set and the launch seccomp filter in filter mode on every
+/// thread it has: the launch sequence sets both in the child before `execve`,
+/// and the confinement wrapper's `exec` chain keeps them. Owner path: the
+/// production `CloudHypervisorVmm::create` with a real Cloud Hypervisor.
+///
+/// CONTRACT_SHAPE: bounded-change. Universe: each thread's `NoNewPrivs` and
+/// `Seccomp` fields in `/proc/<pid>/task/<tid>/status`.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch")]
+#[tokio::test]
+#[serial(vmm_in_scope)]
+async fn a_created_vmm_runs_with_no_new_privs_and_a_seccomp_filter_on_every_thread() {
+    let (_fixture, _run_root, config) = stage("in-scope-confined");
+    std::fs::create_dir_all(scope_dir(&config)).expect("create the scope (the driver's step)");
+    let vmm = CloudHypervisorVmm::default();
+    vmm.probe().await.expect("Vmm::probe succeeds on this host");
+
+    let process = vmm.create(&config, cid(0x0334)).await.expect("create boots a real VMM");
+
+    let threads = thread_confinement(process.control.pid);
+    let _killed = vmm.terminate(&process.control, Duration::ZERO).await;
+    assert!(!threads.is_empty(), "the VMM has at least one thread to read");
+    let unconfined: Vec<_> = threads
+        .iter()
+        .filter(|(_, no_new_privs, seccomp)| {
+            (no_new_privs.as_str(), seccomp.as_str()) != ("1", "2")
+        })
+        .collect();
+    assert!(
+        unconfined.is_empty(),
+        "every thread of the VMM reports NoNewPrivs 1 and Seccomp 2 (filter mode); \
+         (tid, NoNewPrivs, Seccomp) deviating: {unconfined:?}"
+    );
+}
+
+/// The pids of this process's children that have exited and not been reaped.
+fn unreaped_children() -> Vec<u32> {
+    let own = std::process::id().to_string();
+    std::fs::read_dir("/proc")
+        .expect("list /proc")
+        .flatten()
+        .filter_map(|entry| {
+            let pid: u32 = entry.file_name().to_string_lossy().parse().ok()?;
+            let status = std::fs::read_to_string(entry.path().join("status")).ok()?;
+            let parent = status_value(&status, "PPid:")?;
+            let state = status_value(&status, "State:")?;
+            (parent == own && state.starts_with('Z')).then_some(pid)
+        })
+        .collect()
+}
+
+/// Restores `PATH` when dropped, so a failed assertion cannot leave the
+/// process searching a directory that is about to be removed.
+struct SearchPath(Option<OsString>);
+
+impl SearchPath {
+    /// Make `directory` the whole search path.
+    fn only(directory: &Path) -> Self {
+        let prior = std::env::var_os("PATH");
+        // SAFETY: `#[serial(env)]` on the one case that calls this gives it
+        // exclusive access to the process environment.
+        unsafe { std::env::set_var("PATH", directory) };
+        Self(prior)
+    }
+}
+
+impl Drop for SearchPath {
+    fn drop(&mut self) {
+        // SAFETY: as in `only`, the case still holds `#[serial(env)]`.
+        unsafe {
+            match &self.0 {
+                Some(path) => std::env::set_var("PATH", path),
+                None => std::env::remove_var("PATH"),
+            }
+        }
+    }
+}
+
+/// (ADR-0352) A launch whose `execve` is refused fails `create` with a `detail`
+/// that names the step `executing the launch program`, the launched executable
+/// and the `errno`, with no live or unreaped process and the rootfs clone
+/// removed. Fault: the confinement wrapper `prlimit` resolves to a file with no
+/// execute bit (mode 0644; `PATH` holds only that directory), so the child
+/// reaches `execve` and the kernel refuses it with `EACCES`, for root too.
+///
+/// CONTRACT_SHAPE: bounded-change. Universe: the error, the scope's
+/// `cgroup.procs`, this process's unreaped children, the clone path.
+#[overdrive_test(guest = "cgroup-default", profile = "nested-launch")]
+#[tokio::test]
+#[serial(vmm_in_scope, env)]
+async fn create_with_a_launch_program_that_cannot_be_executed_fails_naming_the_step_and_leaves_nothing()
+ {
+    let (_fixture, run_root, config) = stage("in-scope-exec-refused");
+    let scope = scope_dir(&config);
+    std::fs::create_dir_all(&scope).expect("create the scope (the driver's step)");
+    let tools = run_root.join("tools");
+    std::fs::create_dir_all(&tools).expect("create the tools directory");
+    let wrapper = tools.join("prlimit");
+    std::fs::write(&wrapper, b"not a program\n").expect("write the unexecutable wrapper");
+    std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o644))
+        .expect("remove the execute bits");
+    // `create` only checks that the hypervisor binary exists; the launch never reaches it.
+    let hypervisor = tools.join("cloud-hypervisor");
+    std::fs::write(&hypervisor, b"never run\n").expect("write the hypervisor placeholder");
+    let vmm = CloudHypervisorVmm::default().with_binary(hypervisor);
+
+    let search_path = SearchPath::only(&tools);
+    let result = vmm.create(&config, cid(0x0335)).await;
+    drop(search_path);
+
+    let detail = match result {
+        Err(VmmError::Create { detail }) => detail,
+        Err(other) => panic!("a refused execve is a Create error naming its step: {other:?}"),
+        Ok(process) => {
+            let _killed = vmm.terminate(&process.control, Duration::ZERO).await;
+            panic!("create with a launch program that cannot be executed must fail");
+        }
+    };
+    let refusal = std::io::Error::from_raw_os_error(libc::EACCES);
+    assert_eq!(
+        detail,
+        format!("executing the launch program failed: prlimit: {refusal}"),
+        "the detail names the step, the launched executable and the errno"
+    );
+    let members =
+        std::fs::read_to_string(scope.join("cgroup.procs")).expect("read the scope's cgroup.procs");
+    assert_eq!(members.trim(), "", "no process remains in the scope");
+    assert_eq!(unreaped_children(), Vec::<u32>::new(), "the failed launch's child was reaped");
+    assert!(
+        !config.rootfs.clone_dest().exists(),
+        "the rootfs clone is removed on a refused launch"
+    );
 }

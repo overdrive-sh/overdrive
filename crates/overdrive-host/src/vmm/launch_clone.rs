@@ -946,6 +946,70 @@ mod guest_tests {
         assert!(table[&2].starts_with("pipe:"), "standard error is the capture pipe: {table:?}");
     }
 
+    /// The value of a `key:` line in `/proc/<pid>/status`.
+    fn status_field(pid: u32, key: &str) -> String {
+        let status =
+            std::fs::read_to_string(format!("/proc/{pid}/status")).expect("read the status file");
+        status
+            .lines()
+            .find_map(|line| line.strip_prefix(key).map(|value| value.trim().to_owned()))
+            .unwrap_or_else(|| panic!("`{key}` is not in /proc/{pid}/status:\n{status}"))
+    }
+
+    /// Whether `SIGPIPE` is in a `SigIgn:` mask (hexadecimal, bit `signal - 1`).
+    fn sigpipe_is_ignored(sig_ign: &str) -> bool {
+        let mask = u64::from_str_radix(sig_ign, 16).expect("SigIgn is a hexadecimal mask");
+        mask & (1_u64 << (libc::SIGPIPE - 1)) != 0
+    }
+
+    /// (ADR-0352, ADR-0129, ADR-0143) A launched process starts with `SIGPIPE`
+    /// at its default disposition, `no_new_privs` set and the seccomp filter in
+    /// filter mode: the three effects of the launch steps `SignalReset`,
+    /// `NoNewPrivs` and `SeccompLoad`, read from the process that `execve`
+    /// produced. The test process itself ignores `SIGPIPE` (the Rust runtime
+    /// does) and holds neither of the other two, so each value below is the
+    /// launch sequence's doing, not an inheritance.
+    ///
+    /// CONTRACT_SHAPE: bounded-change. Universe: the launched process's
+    /// `SigIgn`, `NoNewPrivs` and `Seccomp` fields in `/proc/<pid>/status`.
+    #[overdrive_test(guest = "cgroup-default")]
+    #[test]
+    fn a_launched_process_starts_with_default_sigpipe_no_new_privs_and_a_seccomp_filter() {
+        let own = std::process::id();
+        let contrast = (
+            sigpipe_is_ignored(&status_field(own, "SigIgn:")),
+            status_field(own, "NoNewPrivs:"),
+            status_field(own, "Seccomp:"),
+        );
+        assert_eq!(
+            contrast,
+            (true, "0".to_owned(), "0".to_owned()),
+            "contrast: the launching process ignores SIGPIPE and holds no_new_privs 0 and \
+             seccomp mode 0"
+        );
+
+        let scope = Scope::create("process-state");
+        let launched = launch_program(&scope, "sleep", &["600"]).expect("launch sleep");
+        let pid = launched.child.pid();
+        wait_until_sleeping(pid);
+        let sig_ign = status_field(pid, "SigIgn:");
+        let no_new_privs = status_field(pid, "NoNewPrivs:");
+        let seccomp = status_field(pid, "Seccomp:");
+        drop(launched);
+
+        let mut deviations = Vec::new();
+        if sigpipe_is_ignored(&sig_ign) {
+            deviations.push(format!("SIGPIPE is ignored (SigIgn {sig_ign}), not at default"));
+        }
+        if no_new_privs != "1" {
+            deviations.push(format!("NoNewPrivs is {no_new_privs}, not 1"));
+        }
+        if seccomp != "2" {
+            deviations.push(format!("Seccomp is {seccomp}, not 2 (filter mode)"));
+        }
+        assert!(deviations.is_empty(), "the launched process deviates: {deviations:?}");
+    }
+
     /// (ADR-0352, module safety argument) Standard I/O is correct when the
     /// parent's own descriptors 0 to 2 are closed: every source the child
     /// duplicates from sits at 3 or above, so no `dup2` clobbers one.
