@@ -477,13 +477,54 @@ fn spawn_in_scope(
         unsafe { child_after_clone(plan) }
     }
     if created < 0 {
-        return Err(step_error(JOINING_THE_CGROUP, io::Error::last_os_error()));
+        return Err(clone3_failure(io::Error::last_os_error()));
     }
+    // SAFETY: the kernel wrote the descriptor through the raw `clone_args.pidfd`
+    // pointer, which the compiler cannot see as a write to `pidfd`, so the read
+    // is volatile: it cannot be elided or hoisted above the syscall. `pidfd` is
+    // a live, aligned `c_int` on this stack.
+    let pidfd = unsafe { std::ptr::read_volatile(std::ptr::addr_of!(pidfd)) };
     // SAFETY: `CLONE_PIDFD` stored a fresh descriptor in `pidfd`, owned by no
     // one else; the guard owns it from here, with no fallible step between.
     let pidfd = unsafe { OwnedFd::from_raw_fd(pidfd) };
     let pid = u32::try_from(created).map_err(|_| io::Error::from(io::ErrorKind::InvalidData))?;
     Ok(LaunchedChild { pid, pidfd: Some(pidfd), runtime })
+}
+
+/// Name a failed `clone3` for the operator. Only an `errno` the
+/// `CLONE_INTO_CGROUP` placement itself returns is a refused placement; any
+/// other (`EAGAIN` from the pid or rlimit limits, `ENOMEM`, `EINVAL`) is
+/// returned as the plain OS error.
+///
+/// The placement errnos, all read in `vendors/linux` at `v7.0`:
+/// - `EBADF`: no descriptor, or not a cgroup2 directory
+///   (`kernel/cgroup/cgroup.c:6798`, `:7248`);
+/// - `ENOENT`: the cgroup is not online or not visible from the cgroup
+///   namespace (`kernel/cgroup/cgroup.c:7262`, `:5340`);
+/// - `ENODEV`: the cgroup is dead (`kernel/cgroup/cgroup.c:6811`);
+/// - `EACCES`: the scope's `cgroup.procs` is not writable, from
+///   `inode_permission` in `cgroup_may_write` (`kernel/cgroup/cgroup.c:5298`);
+/// - `EBUSY`: the destination cannot take processes
+///   (`kernel/cgroup/cgroup.c:2819`);
+/// - `EOPNOTSUPP`: a threaded or domain-mismatched destination
+///   (`kernel/cgroup/cgroup.c:2808`, `:5361`).
+///
+/// `EINVAL` is excluded: `kernel/fork.c:2840` returns it for malformed
+/// `clone_args`, which is not a property of the scope. `ENOMEM`
+/// (`kernel/cgroup/cgroup.c:6846`) is excluded because `copy_process` returns
+/// it too.
+fn clone3_failure(source: io::Error) -> io::Error {
+    match source.raw_os_error() {
+        Some(
+            libc::EBADF
+            | libc::ENOENT
+            | libc::ENODEV
+            | libc::EACCES
+            | libc::EBUSY
+            | libc::EOPNOTSUPP,
+        ) => step_error(JOINING_THE_CGROUP, source),
+        _ => source,
+    }
 }
 
 /// Report the failing step and `errno` on the error pipe and end the child.

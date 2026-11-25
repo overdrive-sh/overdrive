@@ -326,26 +326,19 @@ fn vhost_kernel_vsock_arg(cid: GuestCid) -> String {
     format!("cid={},backend=vhost-kernel", cid.get())
 }
 
-fn classify_launch_spawn_error(
-    launched_executable: &OsStr,
-    wrapper: &[String],
-    source: &io::Error,
-) -> VmmError {
+fn classify_launch_spawn_error(wrapper: &[String], source: &io::Error) -> VmmError {
     let step_failure =
         source.get_ref().and_then(|inner| inner.downcast_ref::<launch_clone::StepFailure>());
     // A refused placement is a property of the scope, never of the wrapper.
     let refused_placement =
         step_failure.is_some_and(|failure| failure.step == launch_clone::JOINING_THE_CGROUP);
-    if source.kind() == io::ErrorKind::NotFound
-        && launched_executable == OsStr::new(&wrapper[0])
-        && !refused_placement
-    {
+    if source.kind() == io::ErrorKind::NotFound && !refused_placement {
         return VmmError::ConfinementUnavailable {
             control: ConfinementControl::UidDrop,
             detail: format!("confinement wrapper {} not found: {source}", wrapper[0]),
         };
     }
-    let executable = launched_executable.to_string_lossy();
+    let executable = &wrapper[0];
     // A failing launch step names itself: `<step> failed: <executable>: <errno>`.
     step_failure.map_or_else(
         || {
@@ -545,14 +538,28 @@ impl Vmm for CloudHypervisorVmm {
                 .await;
                 // A refused placement or a failing step names itself; CH's own
                 // absence is still owned by the pre-check above.
-                return Err(classify_launch_spawn_error(
-                    OsStr::new(&wrapper[0]),
-                    &wrapper,
-                    &source,
-                ));
+                return Err(classify_launch_spawn_error(&wrapper, &source));
             }
         };
         let launch_clone::Launched { child, stderr: stderr_fd } = launched;
+        // Wrapping the stderr capture pipe is a fallible step of `create`: a VM
+        // that cannot be captured would die on its first stderr write with no
+        // explanation. On failure `child` is dropped here, and its guard kills
+        // and reaps the VMM.
+        let stderr_pipe = match Receiver::from_owned_fd(stderr_fd) {
+            Ok(pipe) => pipe,
+            Err(source) => {
+                drop(child);
+                cleanup_rootfs_clone_after_create_failure(
+                    config.rootfs.clone_dest(),
+                    "launch-spawn",
+                )
+                .await;
+                return Err(VmmError::create(format!(
+                    "wrapping the VMM's stderr capture pipe failed: {source}"
+                )));
+            }
+        };
         let pid = child.pid();
         let watch = match child.into_watch() {
             Ok(watch) => watch,
@@ -583,9 +590,7 @@ impl Vmm for CloudHypervisorVmm {
 
         let live = Arc::clone(&self.live);
         tokio::spawn(async move {
-            let reader_handle = Receiver::from_owned_fd(stderr_fd)
-                .ok()
-                .map(|pipe| spawn_stderr_capture(pipe, writer));
+            let reader_handle = spawn_stderr_capture(stderr_pipe, writer);
 
             let status = tokio::select! {
                 biased;
@@ -596,15 +601,13 @@ impl Vmm for CloudHypervisorVmm {
                 }
             };
 
-            if let Some(handle) = reader_handle {
-                for _ in 0..STDERR_DRAIN_MAX_YIELDS {
-                    if handle.is_finished() {
-                        break;
-                    }
-                    tokio::task::yield_now().await;
+            for _ in 0..STDERR_DRAIN_MAX_YIELDS {
+                if reader_handle.is_finished() {
+                    break;
                 }
-                drop(handle);
+                tokio::task::yield_now().await;
             }
+            drop(reader_handle);
 
             // The final tail is read back off the capture AFTER the last
             // append, never separately assembled.
@@ -1256,11 +1259,8 @@ mod tests {
             "the VMM confinement grants no sysfs network access",
         );
 
-        let launcher_absent = classify_launch_spawn_error(
-            OsStr::new("prlimit"),
-            &wrapper,
-            &io::Error::from(io::ErrorKind::NotFound),
-        );
+        let launcher_absent =
+            classify_launch_spawn_error(&wrapper, &io::Error::from(io::ErrorKind::NotFound));
         assert!(
             matches!(
                 launcher_absent,
@@ -1413,7 +1413,7 @@ mod launch_seccomp_kernel {
     use overdrive_testing::overdrive_test;
 
     /// The descriptor the cases hand the scratch TAP queue to in the
-    /// launched child (the hook's `first_closed` is one past it).
+    /// launched child (the launch hook closes every descriptor from one past it).
     #[cfg(target_arch = "x86_64")]
     const CHILD_QUEUE_FD: std::os::fd::RawFd = 3;
 
@@ -1643,7 +1643,7 @@ mod launch_seccomp_kernel {
     #[derive(Clone, Copy)]
     enum Launch {
         /// With the production launch filter installed by the test harness.
-        Hooked { first_closed: std::os::fd::RawFd },
+        Hooked,
         /// The contrast: the same child with no filter.
         Unhooked,
     }
@@ -1807,10 +1807,10 @@ mod launch_seccomp_kernel {
                     Ok(())
                 });
             }
-            if let Launch::Hooked { first_closed } = launch {
+            if matches!(launch, Launch::Hooked) {
                 let filter = super::launch_seccomp::VmmLaunchSeccompFilter::for_target()
                     .expect("the 64-bit x86_64 target has a launch seccomp program");
-                install_filter_for_reexec(&mut cmd, first_closed, filter);
+                install_filter_for_reexec(&mut cmd, CHILD_QUEUE_FD + 1, filter);
             }
             cmd.output().await.expect("spawn the re-exec'd child")
         });
@@ -2140,12 +2140,7 @@ mod launch_seccomp_kernel {
             );
         }
 
-        let filtered = run_child(
-            "requests",
-            &tap,
-            &queue,
-            Launch::Hooked { first_closed: CHILD_QUEUE_FD + 1 },
-        );
+        let filtered = run_child("requests", &tap, &queue, Launch::Hooked);
         filtered.assert_completed();
         let denied: std::collections::BTreeMap<(String, String), String> = filtered
             .records("denied")
@@ -2189,8 +2184,7 @@ mod launch_seccomp_kernel {
         let tap = ScratchTap::create();
         let queue = attach_scratch_queue(&tap.name);
 
-        let child =
-            run_child("tasks", &tap, &queue, Launch::Hooked { first_closed: CHILD_QUEUE_FD + 1 });
+        let child = run_child("tasks", &tap, &queue, Launch::Hooked);
         child.assert_completed();
         let descriptors = child.records("descriptors");
         assert_eq!(descriptors.len(), 1, "one descriptor report: {child}");
@@ -2223,7 +2217,7 @@ mod launch_seccomp_kernel {
     fn foreign_syscall_abis_end_the_filtered_process() {
         let tap = ScratchTap::create();
         let queue = attach_scratch_queue(&tap.name);
-        let hooked = Launch::Hooked { first_closed: CHILD_QUEUE_FD + 1 };
+        let hooked = Launch::Hooked;
 
         // Contrast: unfiltered, the x32 ioctl returns (ENOSYS or EINVAL), so
         // a SIGSYS below is the launch filter's.
