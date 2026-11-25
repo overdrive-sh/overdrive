@@ -179,17 +179,19 @@ use axum::Json;
 use axum::extract::{Path, State as AxumState};
 use axum::http::HeaderMap;
 use itf::Value;
+use overdrive_core::UnixInstant;
 use overdrive_core::aggregate::{DriverInput, ResourcesInput, VmInput, WorkloadKind};
 use overdrive_core::api::submit::{ListenerInput, ServiceSpecInput, SubmitSpecInput};
 use overdrive_core::guest_network::GuestNetworkExecWiring;
 use overdrive_core::guest_transport::{GUEST_CID_BASE, GuestCid, VsockListenPort};
 use overdrive_core::id::{AllocationId, NodeId};
-use overdrive_core::reconcilers::{ReconcilerName, TargetResource};
+use overdrive_core::reconcilers::{Action, ReconcilerName, TargetResource, TickContext};
 use overdrive_core::traits::GuestAttachmentLease;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, ObservationStore};
 use overdrive_core::traits::vm_host_state::VmHostState;
+use overdrive_core::traits::vmm::VMM_REAP_BOUND;
 use overdrive_core::transition_reason::TerminalCondition;
 use overdrive_core::vm::beacon::{BeaconConnKey, BeaconIo};
 use overdrive_core::vm::config::{
@@ -221,6 +223,7 @@ use super::{
     GuestNetworkProvisioner, Result as GuestNetworkResult, SharedGuestNetworkOwner as _,
 };
 use crate::AppState;
+use crate::action_shim::dispatch_with_guest_network_provisioner_for_test;
 use crate::api::{RestartOutcome, SubmitWorkloadRequest};
 use crate::handlers::{restart_workload, stop_workload, submit_workload};
 use crate::reconciler_runtime::{
@@ -444,7 +447,9 @@ impl HeldProvisioner {
         let released = {
             let mut state = self.state.lock();
             let waiting = state.waiting.iter().any(|(k, a)| *k == kind && a == alloc);
-            if waiting {
+            // One grant per waiting call: a repeated release before the call
+            // wakes must not stack a grant a later hold would consume.
+            if waiting && !state.granted.iter().any(|(k, a)| *k == kind && a == alloc) {
                 state.granted.push((kind, alloc.clone()));
             }
             waiting
@@ -609,6 +614,7 @@ fn compose(node: &Node, boot: u32) -> Composed {
         let mut runtime = ReconcilerRuntime::new(&root, Arc::clone(&stores.views))
             .expect("the reconciler runtime over the node's view store");
         runtime.register(crate::workload_lifecycle()).await.expect("register workload-lifecycle");
+        runtime.register(crate::vm_reclamation()).await.expect("register vm-reclamation");
         let reconcilers = Arc::new(runtime);
         let pool = Arc::new(GuestAddressPool::new(
             PREFIX.parse().expect("pool prefix"),
@@ -788,7 +794,9 @@ impl CidLeaseDriver {
         mut cond: impl FnMut(&Self) -> bool,
     ) -> std::result::Result<(), DriverError> {
         let deadline = std::time::Instant::now() + SETTLE_BOUND;
+        self.pass_reclaim_attempts_over_held_scopes();
         while !cond(self) {
+            self.pass_reclaim_attempts_over_held_scopes();
             if std::time::Instant::now() > deadline {
                 return Err(DriverError::Unsettled(what.to_owned()));
             }
@@ -800,6 +808,45 @@ impl CidLeaseDriver {
             }
         }
         Ok(())
+    }
+
+    /// A convergence tick of a redeployed workload also emits the network
+    /// reclaim of its earlier, stopped allocation, which the model keeps as a
+    /// separate step (`LateRelease`). While that allocation's scope is still
+    /// present the attempt changes nothing (the shim keeps the lease), so the
+    /// dispatch is let through the provisioner's teardown; a reclaim over an
+    /// absent scope is `LateRelease`'s, which the driver issues itself.
+    fn pass_reclaim_attempts_over_held_scopes(&self) {
+        let Some(serve) = self.serve.as_ref() else { return };
+        for (kind, alloc) in self.passable_reclaims() {
+            serve.provisioner.release(kind, &alloc);
+        }
+    }
+
+    /// The dispatches parked at a teardown whose reclaim attempt over a
+    /// still-present scope changes nothing: the stopped allocation's lease is
+    /// Retiring, it is not its workload's placement, and its scope is present.
+    /// They are not a model boundary (the model's `Launch` / `Stop` park only
+    /// at the dispatch's own teardown), so `held_for` ignores them and the
+    /// pass-through releases them.
+    fn passable_reclaims(&self) -> Vec<(Held, AllocationId)> {
+        let Some(serve) = self.serve.as_ref() else { return Vec::new() };
+        let Ok(scopes) = self.scopes() else { return Vec::new() };
+        let leases = self.leases();
+        serve
+            .provisioner
+            .waiting()
+            .into_iter()
+            .filter(|(kind, alloc)| {
+                let Some(a) = self.alloc_of.get(alloc) else { return false };
+                *kind == Held::Teardown
+                    && leases
+                        .get(alloc)
+                        .is_some_and(|view| view.state() == GuestAttachmentLease::Retiring)
+                    && self.placement.get(a) != Some(alloc)
+                    && scopes.contains(alloc)
+            })
+            .collect()
     }
 
     /// The live `serve` process's composition as a [`Reader`].
@@ -890,7 +937,22 @@ impl CidLeaseDriver {
         a: i64,
     ) -> Option<(AllocationId, GuestCid, GuestAttachmentLease)> {
         let placement = self.placement.get(&a);
-        self.leases_of(leases, a).into_iter().find(|(lease, _, _)| Some(lease) != placement)
+        self.leases_of(leases, a)
+            .into_iter()
+            .find(|(lease, _, state)| Some(lease) != placement && !self.is_late(lease, *state, a))
+    }
+
+    /// A lease held for an allocation the stop already finished: Retiring, not
+    /// the workload's placement lease and not in flight at a teardown. It is
+    /// the model's `late` entry (decision 12): the shim keeps it until the
+    /// allocation's scope is absent.
+    fn is_late(&self, alloc: &AllocationId, state: GuestAttachmentLease, a: i64) -> bool {
+        state == GuestAttachmentLease::Retiring
+            && self.placement.get(&a) != Some(alloc)
+            && !self
+                .serve
+                .as_ref()
+                .is_some_and(|serve| serve.provisioner.is_held(Held::Teardown, alloc))
     }
 
     /// The VMM of `alloc`'s launch holding `cid`'s device (S arbiter).
@@ -984,10 +1046,12 @@ impl CidLeaseDriver {
     /// `a`'s dispatch is held at one of the provisioner's boundaries.
     fn held_for(&self, a: i64) -> Option<(Held, AllocationId)> {
         let serve = self.serve.as_ref()?;
+        let passable = self.passable_reclaims();
         serve
             .provisioner
             .waiting()
             .into_iter()
+            .filter(|held| !passable.contains(held))
             .find(|(_, alloc)| self.alloc_of.get(alloc) == Some(&a))
     }
 
@@ -1486,62 +1550,191 @@ impl CidLeaseDriver {
     }
 
     /// `StopUnreaped(a)` (decision 12): the stop of `a`'s running allocation
-    /// whose VMM is killed and not reaped at the bound. PENDING OWNER API: the
-    /// real stop handler and tick over an unreapable `SimVmm` process need
-    /// `VmTermination::KilledNotReaped`, `VMM_REAP_BOUND`, the `SimVmm`
-    /// unreapable-process scripting and the shim's scope-gated release (RB-1
-    /// items 1-6, 11); none exists yet. Until the crafter lands them the step
-    /// fails here, naming what it awaits, and the pins that reach it carry
-    /// `#[should_panic]`.
+    /// whose VMM is killed and not reaped at the bound. The production stop
+    /// handler and tick run over a `SimVmm` process that cannot be reaped; the
+    /// shim keeps the lease because the allocation's scope is still present,
+    /// and the stop's dispatch returns.
     fn stop_unreaped(&mut self, a: i64) -> std::result::Result<(), DriverError> {
         let view = self.al_view(a)?;
         if view.st != "running" {
             return Err(not_enabled("StopUnreaped", format!("{a} is {}, not running", view.st)));
         }
-        Err(DriverError::OwnerApiPending {
-            action: "StopUnreaped",
-            awaits: "VmTermination::KilledNotReaped, VMM_REAP_BOUND, an unreapable SimVmm process and the shim's scope-gated lease release",
-        })
+        let (alloc, cid, _) = self
+            .placement_lease(a)
+            .ok_or_else(|| not_enabled("StopUnreaped", format!("{a} has no lease")))?;
+        let pid = self
+            .launch_vmm(&alloc, cid)
+            .ok_or_else(|| not_enabled("StopUnreaped", format!("{a} has no running VMM")))?;
+        if !self.node.vmm.make_process_unreapable(pid) {
+            return Err(not_enabled("StopUnreaped", "the VMM is not live"));
+        }
+        let serve = self.serve("StopUnreaped")?;
+        let _stopped = serve
+            .rt
+            .block_on(stop_workload(AxumState(serve.state.clone()), Path(workload(a))))
+            .map_err(|error| DriverError::Production(format!("stop_workload: {error}")))?;
+        self.node.clock.tick(PAST_BACKOFF);
+        self.spawn_tick("StopUnreaped", a)?;
+        self.settle("the stop kills the VMM and holds at teardown, or returns", |driver| {
+            driver.node.clock.tick(VMM_REAP_BOUND);
+            driver.tick_finished(a)
+                || driver.held_for(a).is_some_and(|(kind, _)| kind == Held::Teardown)
+        })?;
+        self.release_held_teardown("StopUnreaped", a, &alloc)?;
+        self.placement.remove(&a);
+        Ok(())
     }
 
-    /// `Reap(o)` (decision 12): the stuck process at offset `o` is reaped.
-    /// PENDING OWNER API: the scripted `SimVmm::exit_process` of an unreapable
-    /// process (RB-1 item 5), which releases its device and fires its exit.
+    /// Release `a`'s dispatch held at `alloc`'s provisioner teardown (the
+    /// step boundary the model has inside one dispatch), let the dispatch
+    /// return and take its tick.
+    fn release_held_teardown(
+        &mut self,
+        action: &'static str,
+        a: i64,
+        alloc: &AllocationId,
+    ) -> std::result::Result<(), DriverError> {
+        let provisioner = Arc::clone(&self.serve(action)?.provisioner);
+        if provisioner.release(Held::Teardown, alloc) {
+            self.settle("the dispatch returns after the teardown", |driver| {
+                driver.tick_finished(a)
+            })?;
+        }
+        self.reap_tick(action, a)
+    }
+
+    /// `Reap(o)` (decision 12): the stuck process at offset `o` is reaped by
+    /// the scripted `SimVmm::exit_process`, which releases its device and
+    /// fires its exit. It removes no scope.
     fn reap(&mut self, o: i64) -> std::result::Result<(), DriverError> {
-        let _pid = self.orphan_at("Reap", o)?;
-        Err(DriverError::OwnerApiPending {
-            action: "Reap",
-            awaits: "SimVmm scripting of an unreapable process and its scripted exit_process",
-        })
+        let pid = self.orphan_at("Reap", o)?;
+        if !self.node.vmm.is_unreaped(pid) || !self.node.vmm.exit_process(pid, None, Some(9)) {
+            return Err(not_enabled("Reap", format!("the VMM at offset {o} is not unreaped")));
+        }
+        self.serve("Reap")?.beacon.observe_vm_exits();
+        self.node.host.notify();
+        Ok(())
     }
 
-    /// `LateRelease(o)` (decision 12): the production convergence tick that
-    /// dispatches `ReclaimAllocationNetwork` for the terminal allocation whose
-    /// lease is held, after the scope is absent. PENDING OWNER API: the
-    /// shim's scope observation gate on `teardown_guest_network`, and
-    /// `SimVmHostState::kill_scope` removing the scope only once `SimVmm` has
-    /// reaped the process (RB-1 item 11).
+    /// `LateRelease(o)` (decision 12): one production convergence tick of the
+    /// terminal allocation's workload, past the reclaim backoff, which
+    /// dispatches `ReclaimAllocationNetwork`; the shim releases the lease
+    /// because the scope is absent.
     fn late_release(&mut self, o: i64) -> std::result::Result<(), DriverError> {
-        let _serve = self.serve("LateRelease")?;
-        let _ = o;
-        Err(DriverError::OwnerApiPending {
-            action: "LateRelease",
-            awaits: "the shim's scope-gated lease release and SimVmHostState.kill_scope gated on SimVmm's reap",
-        })
+        let cid = self.inst.cid_of(o);
+        let leases = self.leases();
+        let (alloc, a) = leases
+            .iter()
+            .find(|(_, view)| view.cid() == cid)
+            .and_then(|(alloc, _)| self.alloc_of.get(alloc).map(|a| (alloc.clone(), *a)))
+            .ok_or_else(|| not_enabled("LateRelease", format!("no lease holds offset {o}")))?;
+        if !self.is_late(&alloc, GuestAttachmentLease::Retiring, a) {
+            return Err(not_enabled("LateRelease", format!("{alloc} is not a late lease")));
+        }
+        // The reclaim attempt the reconciler's tick emits is the action the
+        // shim executes; a separate dispatch of exactly that action keeps the
+        // step apart from any placement the same tick would also make (the
+        // model's `Assign` is its own step).
+        let provisioner = Arc::clone(&self.serve("LateRelease")?.provisioner);
+        let now = self.node.clock.now();
+        let tick = TickContext {
+            now,
+            now_unix: UnixInstant::from_unix_duration(Duration::from_secs(1_700_000_100)),
+            tick: 1,
+            deadline: now + Duration::from_secs(1),
+        };
+        let serve = self.serve("LateRelease")?;
+        let state = serve.state.clone();
+        let action = Action::ReclaimAllocationNetwork { alloc_id: alloc.clone() };
+        let handle = serve.rt.spawn(async move {
+            dispatch_with_guest_network_provisioner_for_test(
+                vec![action],
+                &state,
+                &tick,
+                provisioner.as_ref(),
+            )
+            .await
+        });
+        let serve = self.serve("LateRelease")?;
+        let provisioner = Arc::clone(&serve.provisioner);
+        let deadline = std::time::Instant::now() + SETTLE_BOUND;
+        loop {
+            if provisioner.release(Held::Teardown, &alloc) || handle.is_finished() {
+                break;
+            }
+            if std::time::Instant::now() > deadline {
+                return Err(DriverError::Unsettled("the reclaim dispatch".to_owned()));
+            }
+            serve.rt.block_on(async { tokio::time::sleep(Duration::from_millis(1)).await });
+        }
+        serve
+            .rt
+            .block_on(handle)
+            .expect("the dispatch did not panic")
+            .map_err(|error| DriverError::Production(format!("the reclaim dispatch: {error}")))?;
+        if self.leases().contains_key(&alloc) {
+            return Err(not_enabled("LateRelease", format!("{alloc}'s lease was not released")));
+        }
+        Ok(())
     }
 
-    /// `RemoveScope(o)` (decisions 16 and N-1): the one remover of a VM scope
-    /// removes it after `cgroup.events` reports `populated 0`. PENDING OWNER
-    /// API: the populated-first scope kill (ADR-0351) and
-    /// `SimVmHostState` scope removal gated on `SimVmm`'s reap exist in no
-    /// owner yet, so the step fails here naming them.
+    /// `RemoveScope(o)` (decisions 16 and N-1): the production `VmReclamation`
+    /// pass, the one remover of a VM scope, which removes it only once the
+    /// VMM is reaped.
     fn remove_scope(&mut self, o: i64) -> std::result::Result<(), DriverError> {
-        let _serve = self.serve("RemoveScope")?;
-        let _ = o;
-        Err(DriverError::OwnerApiPending {
-            action: "RemoveScope",
-            awaits: "the populated-first scope kill (the one scope remover, ADR-0351) and SimVmHostState scope removal gated on SimVmm's reap",
-        })
+        let cid = self.inst.cid_of(o);
+        let alloc = self
+            .leases()
+            .iter()
+            .find(|(_, view)| view.cid() == cid)
+            .map(|(alloc, _)| alloc.clone())
+            .ok_or_else(|| not_enabled("RemoveScope", format!("no lease holds offset {o}")))?;
+        let present = |driver: &Self| driver.scopes().is_ok_and(|scopes| scopes.contains(&alloc));
+        if !present(self) {
+            return Err(not_enabled("RemoveScope", format!("{alloc} has no scope")));
+        }
+        let serve = self.serve_mut("RemoveScope")?;
+        serve.tick_n += 1;
+        let tick_n = serve.tick_n;
+        let now = self.node.clock.now();
+        let serve = self.serve("RemoveScope")?;
+        let provisioner = Arc::clone(&serve.provisioner);
+        let node_target = TargetResource::new(&format!("node/{}", serve.state.node_id))
+            .map_err(|error| DriverError::Production(format!("the node target: {error}")))?;
+        serve
+            .rt
+            .block_on(run_convergence_tick_with_guest_network_provisioner_for_test(
+                &serve.state,
+                &ReconcilerName::new("vm-reclamation")
+                    .map_err(|error| DriverError::Production(format!("{error}")))?,
+                &node_target,
+                now,
+                tick_n,
+                now + Duration::from_secs(1),
+                provisioner.as_ref(),
+            ))
+            .map_err(|error| DriverError::Production(format!("the reclamation pass: {error}")))?;
+        if present(self) {
+            return Err(not_enabled("RemoveScope", format!("{alloc}'s scope was not removed")));
+        }
+        Ok(())
+    }
+
+    /// The allocations whose scope the host reports present with no live
+    /// process: a scope kept after a kill that did not reap.
+    fn scopes(&self) -> std::result::Result<BTreeSet<AllocationId>, DriverError> {
+        let serve = self.serve("project")?;
+        // conformance-lint: sim-arbiter-ok QPROJ-7 the simulated host's VM scopes (VmHostState::observe, the port's own fact), Tier-3 pair V-30 Q2c / Q2d and V-RECLAIM
+        let observation = serve
+            .rt
+            .block_on(serve.state.vm_host_state.observe())
+            .map_err(|error| DriverError::Production(format!("VmHostState::observe: {error}")))?;
+        Ok(observation
+            .scopes
+            .into_iter()
+            .filter(|(_, facts)| facts.pids.is_empty())
+            .map(|(alloc, _)| alloc)
+            .collect())
     }
 
     fn orphan_exit(&mut self, o: i64) -> std::result::Result<(), DriverError> {
@@ -1715,8 +1908,11 @@ impl CidLeaseDriver {
             };
             dev.insert(o, holder);
         }
-        let (lease, cursor, al, att) = if up {
+        let (lease, cursor, al, att, late, scope) = if up {
             let mut lease = (0..offsets).map(|o| (o, 0)).collect::<BTreeMap<_, _>>();
+            let mut late = lease.clone();
+            let mut scope = (0..offsets).map(|o| (o, false)).collect::<BTreeMap<_, _>>();
+            let scopes = self.scopes()?;
             // O QPROJ-2: the live pool, read in one snapshot.
             let observation = self.pool.lease_observation();
             for (alloc, view) in &observation.leases {
@@ -1732,10 +1928,36 @@ impl CidLeaseDriver {
                     .get(alloc)
                     .ok_or_else(|| DriverError::NoPreImage(format!("allocation {alloc}")))?;
                 lease.insert(o, a);
+                if self.is_late(alloc, view.state(), a) {
+                    late.insert(o, a);
+                }
+                if scopes.contains(alloc) {
+                    scope.insert(o, true);
+                }
+            }
+            // A scope outlives the pool that held its lease (a serve crash
+            // drops the pool; the scope is host state): its offset is the CID
+            // its VMM still holds.
+            for (cid, pid) in &holders {
+                if self.inst.is_background(*cid) {
+                    continue;
+                }
+                let Some(o) = self.inst.offset_of(*cid) else { continue };
+                // conformance-lint: sim-arbiter-ok QPROJ-7 the simulated host's VM scopes (which scope a holder VMM belongs to), Tier-3 pair V-30 Q2c / Q2d and V-RECLAIM
+                if scopes.iter().any(|alloc| self.node.host.pids_of(alloc).contains(pid)) {
+                    scope.insert(o, true);
+                }
             }
             let cursor = self.inst.cursor_of(observation.next_fit);
             let (al, att) = self.workloads_in(&self.up_reader()?, &observation.leases)?;
-            (WhileUp::Read(lease), WhileUp::Read(cursor), al, att)
+            (
+                WhileUp::Read(lease),
+                WhileUp::Read(cursor),
+                al,
+                att,
+                WhileUp::Read(late),
+                WhileUp::Read(scope),
+            )
         } else {
             // No `serve` process is up: no pool exists (NO-SURVIVE), so
             // `lease` and `cursor` are not compared (S-4: no literal is fed
@@ -1749,9 +1971,9 @@ impl CidLeaseDriver {
                 &Leases::new(),
             )?;
             drop(reader);
-            (WhileUp::NoPool, WhileUp::NoPool, al, att)
+            (WhileUp::NoPool, WhileUp::NoPool, al, att, WhileUp::NoPool, WhileUp::NoPool)
         };
-        Ok(CidLeaseState { dev, lease, cursor, al, att })
+        Ok(CidLeaseState { dev, lease, cursor, al, att, late, scope })
     }
 }
 
@@ -1881,6 +2103,8 @@ struct CidLeaseState {
     cursor: WhileUp<i64>,
     al: BTreeMap<i64, AlView>,
     att: BTreeMap<i64, i64>,
+    late: WhileUp<BTreeMap<i64, i64>>,
+    scope: WhileUp<BTreeMap<i64, bool>>,
 }
 
 impl CidLeaseState {
@@ -1904,6 +2128,8 @@ impl CidLeaseState {
                 })
             })?,
             att: quint_itf::int_map(vars.var("att")?, quint_itf::int)?,
+            late: WhileUp::Read(quint_itf::int_map(vars.var("late")?, quint_itf::int)?),
+            scope: WhileUp::Read(quint_itf::int_map(vars.var("scope")?, quint_itf::boolean)?),
         })
     }
 }
@@ -2274,7 +2500,6 @@ fn quint_cid_lease_pool_exhausted_restart_cleans_the_predecessor_then_places() -
     max_samples = 1,
     test = "ScopeIsRemovedOnlyAfterItIsEmpty"
 )]
-#[should_panic(expected = "awaits owner API")]
 fn quint_cid_lease_scope_is_removed_only_after_it_is_empty() -> impl Driver {
     CidLeaseDriver::new()
 }
@@ -2290,7 +2515,6 @@ fn quint_cid_lease_scope_is_removed_only_after_it_is_empty() -> impl Driver {
     max_samples = 1,
     test = "NextFitSkipsAnUnreapedLease"
 )]
-#[should_panic(expected = "awaits owner API")]
 fn quint_cid_lease_next_fit_skips_an_unreaped_lease() -> impl Driver {
     CidLeaseThreeDriver { inner: CidLeaseDriver::over(THREE) }
 }

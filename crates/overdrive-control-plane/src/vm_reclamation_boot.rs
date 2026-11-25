@@ -728,6 +728,9 @@ pub(crate) mod sim_vm_host {
         requested: BTreeSet<u32>,
         /// Pids whose kill the test released.
         granted: BTreeSet<u32>,
+        /// Allocations whose VMM was killed and not reaped: the scope stays
+        /// until a `kill_scope` finds every process reaped.
+        lingering: BTreeSet<AllocationId>,
     }
 
     /// The simulated host's VM surfaces over one `SimVmm`.
@@ -744,6 +747,19 @@ pub(crate) mod sim_vm_host {
                 facts: Mutex::new(HostFacts { gated, ..HostFacts::default() }),
                 wake: Notify::new(),
             })
+        }
+
+        /// `pid`'s VMM was killed and not reaped: its allocation's scope stays.
+        fn mark_lingering(&self, pid: u32) {
+            let mut facts = self.facts.lock();
+            let owner = facts
+                .vms
+                .iter()
+                .find(|(_, pids)| pids.contains(&pid))
+                .map(|(alloc, _)| alloc.clone());
+            if let Some(alloc) = owner {
+                facts.lingering.insert(alloc);
+            }
         }
 
         fn record(&self, alloc: AllocationId, pid: u32) {
@@ -810,8 +826,11 @@ pub(crate) mod sim_vm_host {
             let facts = self.facts.lock();
             let mut observation = VmHostObservation::default();
             for (alloc, pids) in &facts.vms {
-                let live = pids.iter().copied().filter(|pid| self.vmm.is_live(*pid)).collect();
-                observation.scopes.insert(alloc.clone(), ScopeFacts { pids: live });
+                let live: BTreeSet<u32> =
+                    pids.iter().copied().filter(|pid| self.vmm.is_live(*pid)).collect();
+                if !live.is_empty() || facts.lingering.contains(alloc) {
+                    observation.scopes.insert(alloc.clone(), ScopeFacts { pids: live });
+                }
                 observation.run_dirs.insert(alloc.clone());
             }
             drop(facts);
@@ -848,6 +867,16 @@ pub(crate) mod sim_vm_host {
                     for pid in live {
                         self.vmm.kill(pid);
                     }
+                    let mut facts = self.facts.lock();
+                    let unreaped = facts
+                        .vms
+                        .get(&alloc)
+                        .is_some_and(|pids| pids.iter().any(|pid| self.vmm.is_unreaped(*pid)));
+                    if unreaped {
+                        return Err(std::io::ErrorKind::ResourceBusy.into());
+                    }
+                    facts.lingering.remove(&alloc);
+                    drop(facts);
                     return Ok(());
                 }
                 notified.await;
@@ -888,7 +917,11 @@ pub(crate) mod sim_vm_host {
             control: &VmControl,
             grace: Duration,
         ) -> VmmResult<VmTermination> {
-            self.inner.terminate(control, grace).await
+            let outcome = self.inner.terminate(control, grace).await;
+            if matches!(outcome, Ok(VmTermination::KilledNotReaped)) {
+                self.host.mark_lingering(control.pid);
+            }
+            outcome
         }
     }
 

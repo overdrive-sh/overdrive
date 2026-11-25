@@ -250,6 +250,18 @@ impl SimVmm {
         self.unreapable_next.store(true, Ordering::SeqCst);
     }
 
+    /// **TEST-HOOK-ONLY.** The already-created live process `pid` cannot be
+    /// reaped: its next [`Vmm::terminate`] behaves as for a process created
+    /// after [`Self::inject_unreapable_process`]. `false` when `pid` is not
+    /// live.
+    pub fn make_process_unreapable(&self, pid: u32) -> bool {
+        let mut state = self.state.lock();
+        state.processes.get_mut(&pid).filter(|entry| !entry.terminated).is_some_and(|entry| {
+            entry.unreapable = true;
+            true
+        })
+    }
+
     /// **TEST-HOOK-ONLY.** `true` iff `pid` was killed and is not yet reaped.
     #[must_use]
     pub fn is_unreaped(&self, pid: u32) -> bool {
