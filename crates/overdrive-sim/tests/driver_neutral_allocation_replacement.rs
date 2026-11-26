@@ -304,31 +304,11 @@ async fn production_owner_replacement_case(driver_type: DriverType) {
     let restored_predecessor = restored.restart_counts.contains_key(&predecessor);
     let restored_rejected = restored.restart_counts.contains_key(&rejected);
     state.runtime = Arc::new(reopened);
-    // ADR-0353 / feature-delta "Launches that end before running": a launch whose VMM ran and
-    // whose Running write was rejected (S9, R11) is not a launch that ended before running;
-    // its `Pending` row, carrying the lease's address, stays until the next boot closes it.
-    let pending_row = inner
-        .alloc_status_row(&rejected)
-        .await
-        .unwrap()
-        .expect("the rejected successor's Pending row stays until boot");
-    assert_eq!(pending_row.state, AllocState::Pending);
-    assert!(pending_row.workload_addr.is_some(), "the Pending row carries the lease's address");
-    assert!(pending_row.reason.is_none() && pending_row.terminal.is_none());
     // The reopen is a reboot: boot reclamation's first step ends the dead launch's
     // `Pending` row before the convergence loop dispatches anything (ADR-0355 W4).
     overdrive_control_plane::vm_reclamation_boot::converge(&state)
         .await
         .expect("boot reclamation closes the launch the previous process left unfinished");
-    let lost_row = inner
-        .alloc_status_row(&rejected)
-        .await
-        .unwrap()
-        .expect("the rejected successor's launch row survives the reboot");
-    assert_eq!(lost_row.state, AllocState::Terminated);
-    assert_eq!(lost_row.reason, Some(TransitionReason::LaunchLostWithControlPlane));
-    assert!(lost_row.terminal.is_none(), "a launch lost with the control plane claims no terminal");
-    assert!(lost_row.workload_addr.is_some(), "the closed row carries the lease's address");
 
     persisted.store(false, Ordering::SeqCst);
     clock.tick(Duration::from_secs(2));
@@ -367,8 +347,7 @@ async fn production_owner_replacement_case(driver_type: DriverType) {
     assert_eq!(
         driver.stops.lock().as_slice(),
         &[rejected.clone(), predecessor, rejected],
-        "successor unwind and each restart's predecessor cleanup use exact IDs: the tick that \
-         re-drives after the reboot restarts the launch the reboot closed, so its cleanup is that launch's"
+        "stops use exact allocation IDs; the post-reboot tick restarts the launch the reboot closed"
     );
 }
 

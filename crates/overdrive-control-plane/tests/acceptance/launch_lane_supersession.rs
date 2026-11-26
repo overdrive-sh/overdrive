@@ -22,7 +22,10 @@
 //! test prints its seeds.
 //!
 //! Status: a test marked PENDING in its own doc is proven RED by `#[should_panic(expected = ...)]`
-//! on the assertion that fails today.
+//! on the assertion that fails today. The one pending test waits on the count rule (ADR-0355 § 2,
+//! RB-13): a superseded launch ends its `Pending` row abandoned, a restartable current row, so the
+//! next evaluation relaunches, but the relaunch still counts the abandoned launch and charges the
+//! restart budget.
 
 #![allow(
     clippy::expect_used,
@@ -1020,9 +1023,7 @@ async fn a_driver_that_ignores_the_signal_is_unchanged() {
 /// The workload is stopped when the restart lands (the operator resumes it): a Running predecessor
 /// would spend the signalled evaluation on `StopAllocation`, and the `Start` would come in the next
 /// evaluation under a fresh, unraised lane, so the scenario would never reach its own superseded start.
-/// Pending until the count rule lands (ADR-0355 § 2, RB-13): the superseded launch now ends its `Pending`
-/// row abandoned (a restartable current row), so the next evaluation relaunches and the generation ends
-/// with one Running allocation; the relaunch still counts the abandoned launch, so the budget is charged.
+/// Pending on the count rule (module header).
 #[tokio::test]
 #[should_panic(expected = "the superseded launch and its relaunch charge nothing")]
 async fn a_restart_the_evaluation_already_hydrated_sees_its_own_start_superseded_once() {

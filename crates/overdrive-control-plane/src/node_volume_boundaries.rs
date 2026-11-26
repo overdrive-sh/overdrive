@@ -250,8 +250,8 @@ fn assert_one_abandoned_superseded_row(rows: &[AllocStatusRow]) {
 /// claim untouched, and the volume kept. The stop's own evaluation, which runs after it, finds
 /// nothing to stop and never reattaches the stale launch: its result is never used.
 ///
-/// Pending (ADR-0353, ADR-0355 W1): today the superseded launch writes no row, so the body
-/// fails at the abandoned-row assertion.
+/// ADR-0353, ADR-0355 W1: the superseded launch's `Pending` row ends abandoned, which the body
+/// asserts.
 #[test]
 fn a_stop_interrupts_the_start_and_its_result_is_never_used() {
     let mut rig = Rig::new();

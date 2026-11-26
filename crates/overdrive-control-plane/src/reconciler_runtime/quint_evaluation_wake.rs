@@ -118,8 +118,7 @@ use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::dataplane::{Backend, DataplaneError};
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver as DriverPort,
-    DriverError as PortDriverError,
-    DriverType, LaunchSupersession, Resources,
+    DriverError as PortDriverError, DriverType, ExitEvent, LaunchSupersession, Resources,
 };
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
@@ -405,6 +404,22 @@ impl DriverPort for StartFaultDriver {
 
     fn on_alloc_running(&self, spec: &AllocationSpec) {
         self.inner.on_alloc_running(spec);
+    }
+
+    fn take_exit_receiver(&self) -> Option<tokio::sync::mpsc::Receiver<ExitEvent>> {
+        self.inner.take_exit_receiver()
+    }
+
+    fn live_allocations(&self) -> Option<Vec<AllocationId>> {
+        self.inner.live_allocations()
+    }
+
+    fn try_begin_reclamation(&self, alloc: &AllocationId) -> bool {
+        self.inner.try_begin_reclamation(alloc)
+    }
+
+    fn release_supervision(&self, alloc: &AllocationId) {
+        self.inner.release_supervision(alloc);
     }
 }
 

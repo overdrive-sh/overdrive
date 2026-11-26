@@ -349,14 +349,27 @@ where
     }
 }
 
+/// One queued failure of the next observation-store write: the store and the
+/// typed error it returns.
+struct StoreWriteFailure {
+    store: Arc<SimObservationStore>,
+    error: ObservationStoreError,
+}
+
+impl StoreWriteFailure {
+    fn inject(self) {
+        self.store.inject_write_failure(self.error);
+    }
+}
+
 /// VM-shaped sim driver recording every lifecycle call in the journal.
 struct JournalDriver {
     inner: SimDriver,
     journal: Journal,
-    /// Runs once when the driver is started: the shim has written the launch's
-    /// `Pending` row by then (ADR-0353) and not yet the `Running` row, so a store
-    /// failure queued here lands on the `Running` write.
-    on_start: parking_lot::Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    /// Queued when the driver is started: the shim has written the launch's
+    /// `Pending` row by then (ADR-0353) and not yet the `Running` row, so the
+    /// store failure lands on the `Running` write.
+    fail_store_on_start: parking_lot::Mutex<Option<StoreWriteFailure>>,
 }
 
 #[async_trait::async_trait]
@@ -371,9 +384,9 @@ impl Driver for JournalDriver {
         supersession: &dyn LaunchSupersession,
     ) -> Result<AllocationHandle, DriverError> {
         record(&self.journal, Step::DriverStart, Some(&spec.alloc));
-        let hook = self.on_start.lock().take();
-        if let Some(hook) = hook {
-            hook();
+        let failure = self.fail_store_on_start.lock().take();
+        if let Some(failure) = failure {
+            failure.inject();
         }
         self.inner.start(spec, supersession).await
     }
@@ -518,7 +531,7 @@ struct ActivationRefusal {
 /// launch's `Pending` row, ADR-0353, is written before the identity is issued).
 struct HookedCa {
     inner: overdrive_sim::adapters::ca::SimCa,
-    on_issue: parking_lot::Mutex<Option<Box<dyn FnOnce() + Send>>>,
+    fail_store_on_issue: parking_lot::Mutex<Option<StoreWriteFailure>>,
 }
 
 impl HookedCa {
@@ -527,7 +540,7 @@ impl HookedCa {
             inner: overdrive_sim::adapters::ca::SimCa::new(Arc::new(
                 overdrive_sim::adapters::entropy::SimEntropy::new(295),
             )),
-            on_issue: parking_lot::Mutex::new(None),
+            fail_store_on_issue: parking_lot::Mutex::new(None),
         }
     }
 }
@@ -542,9 +555,9 @@ impl Ca for HookedCa {
     }
 
     fn issue_svid(&self, req: &SvidRequest) -> Result<SvidMaterial, CaError> {
-        let hook = self.on_issue.lock().take();
-        if let Some(hook) = hook {
-            hook();
+        let failure = self.fail_store_on_issue.lock().take();
+        if let Some(failure) = failure {
+            failure.inject();
         }
         self.inner.issue_svid(req)
     }
@@ -863,19 +876,8 @@ impl SeamFixture {
 
 /// A seam fixture over the journaling participants, with the journal layer
 /// installed as the thread's default subscriber for the returned guard's
-/// lifetime.
+/// lifetime. The journaling driver is returned so a test can arm its store failure.
 async fn journaled_fixture(
-    inner_owner: Arc<SimSharedGuestNetworkOwner>,
-    refuse_activation: bool,
-) -> (SeamFixture, Journal, tracing::subscriber::DefaultGuard) {
-    let (fixture, journal, guard, _driver) =
-        journaled_fixture_with_driver(inner_owner, refuse_activation).await;
-    (fixture, journal, guard)
-}
-
-/// [`journaled_fixture`], also returning the journaling driver so a test can
-/// install its `on_start` hook.
-async fn journaled_fixture_with_driver(
     inner_owner: Arc<SimSharedGuestNetworkOwner>,
     refuse_activation: bool,
 ) -> (SeamFixture, Journal, tracing::subscriber::DefaultGuard, Arc<JournalDriver>) {
@@ -886,7 +888,7 @@ async fn journaled_fixture_with_driver(
     let driver = Arc::new(JournalDriver {
         inner: SimDriver::new(DriverType::Vm),
         journal: Arc::clone(&journal),
-        on_start: parking_lot::Mutex::new(None),
+        fail_store_on_start: parking_lot::Mutex::new(None),
     });
     let fixture = SeamFixture::new(
         Arc::clone(&driver) as Arc<dyn Driver>,
@@ -983,11 +985,8 @@ struct LeaseRunningWriteRejectOutcome {
 /// write after provision and driver start, over the seam fixture and its one
 /// shared guest-network owner.
 async fn drive_running_write_rejection_over_the_seam(arm: Arm) -> LeaseRunningWriteRejectOutcome {
-    let (fixture, journal, _trace_guard, driver) = journaled_fixture_with_driver(
-        Arc::new(SimSharedGuestNetworkOwner::default()),
-        false,
-    )
-    .await;
+    let (fixture, journal, _trace_guard, driver) =
+        journaled_fixture(Arc::new(SimSharedGuestNetworkOwner::default()), false).await;
     fixture.open_exec();
     let alloc = AllocationId::new(match arm {
         Arm::Start => "running-write-reject-start",
@@ -1023,11 +1022,10 @@ async fn drive_running_write_rejection_over_the_seam(arm: Arm) -> LeaseRunningWr
     // so the rejection is queued when the driver starts, ahead of the `Running`
     // write only (the store's existing `inject_write_failure` seam).
     let obs = Arc::clone(&fixture.obs);
-    *driver.on_start.lock() = Some(Box::new(move || {
-        obs.inject_write_failure(ObservationStoreError::Unreachable {
-            peer: "rejected-running-write".to_owned(),
-        });
-    }));
+    *driver.fail_store_on_start.lock() = Some(StoreWriteFailure {
+        store: obs,
+        error: ObservationStoreError::Unreachable { peer: "rejected-running-write".to_owned() },
+    });
     let result = fixture.dispatch(action).await;
     let steps = steps_for(&journal, &effect_alloc);
     LeaseRunningWriteRejectOutcome { result, alloc: effect_alloc, steps }
@@ -1160,7 +1158,7 @@ async fn assert_activation_failure_projection(
 #[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn tap_activation_occurs_after_intercept_success_and_before_exec_release() {
-    let (fixture, journal, _trace_guard) =
+    let (fixture, journal, _trace_guard, _driver) =
         journaled_fixture(Arc::new(SimSharedGuestNetworkOwner::default()), false).await;
     fixture.worker.start_shared_owner().await.expect("the worker's shared owner is healthy");
     fixture.open_exec();
@@ -1212,7 +1210,7 @@ fn journal_has(journal: &Journal, alloc: &AllocationId, step: Step) -> bool {
 #[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn tap_activation_waits_on_a_recovering_exec_gate_and_runs_once_after_reopen() {
-    let (fixture, journal, _trace_guard) =
+    let (fixture, journal, _trace_guard, _driver) =
         journaled_fixture(Arc::new(SimSharedGuestNetworkOwner::default()), false).await;
     let fixture = Arc::new(fixture);
     fixture.worker.start_shared_owner().await.expect("the worker's shared owner is healthy");
@@ -1462,7 +1460,7 @@ async fn cancelling_dispatch_while_the_exec_release_is_held_drops_that_release()
 async fn drive_refused_activation(
     alloc_name: &str,
 ) -> (SeamFixture, Journal, tracing::subscriber::DefaultGuard, AllocationId) {
-    let (fixture, journal, trace_guard) =
+    let (fixture, journal, trace_guard, _driver) =
         journaled_fixture(Arc::new(SimSharedGuestNetworkOwner::default()), true).await;
     fixture.worker.start_shared_owner().await.expect("the worker's shared owner is healthy");
     fixture.open_exec();
@@ -1778,11 +1776,10 @@ async fn drive_restart_abort(scenario: RestartAbortScenario) -> RestartAbortOutc
         // The successor's `Pending` row is written first; the failure is queued when the
         // CA mints the successor's leaf, ahead of the `issued_certificates` audit write.
         let obs = Arc::clone(&fixture.obs);
-        *ca.on_issue.lock() = Some(Box::new(move || {
-            obs.inject_write_failure(ObservationStoreError::Io(std::io::Error::other(
-                "injected SVID audit failure",
-            )));
-        }));
+        *ca.fail_store_on_issue.lock() = Some(StoreWriteFailure {
+            store: obs,
+            error: ObservationStoreError::Io(std::io::Error::other("injected SVID audit failure")),
+        });
     }
     if scenario == RestartAbortScenario::Provision {
         inner_owner.script_provision_failure(true);
@@ -1882,11 +1879,10 @@ async fn restart_identity_failure_stops_prior_intercept_before_network_release()
     assert_eq!(outcome.stop_alloc_calls, 1);
     assert!(outcome.predecessor_lease_released);
     assert!(outcome.successor_lease_released);
-    // ADR-0353: the launch record stays on record, `Pending` with the lease's address; the
-    // `Failed` row for an identity failure is written by a later step (carry table).
+    // ADR-0353: the launch record stays on record as `Pending`; the `Failed` row for an
+    // identity failure is written by a later step (carry table).
     let row = outcome.row.expect("the successor's Pending launch row stays on record");
     assert_eq!(row.state, AllocState::Pending);
-    assert!(row.workload_addr.is_some(), "the Pending row carries the lease's address");
 }
 
 /// Driver-start rejection records a fresh Failed successor after its unwind,

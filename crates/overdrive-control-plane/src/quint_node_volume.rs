@@ -68,18 +68,7 @@
 //! after observing `Free`; no pinned owner accessor counts the claim observations. Fresh allocation ids are discovered for labelling only, from the
 //! reconciler view's issued ids, the rows and `live_allocations`.
 //!
-//! **Status (ADR-0353, ADR-0355).** The shim writes the `Pending` row and the abandoned rows, so the pins replay GREEN; the
-//! `#[should_panic(expected = "awaits owner API")]` markers no longer match anything and are lifted by the orchestrator's activation. Earlier status: the driver is compiled and every test carries `#[should_panic]` naming the
-//! divergence it reaches: every run's second step is `Declare`, and the production spec parser
-//! refuses `[vm.volume]` today (`deny_unknown_fields`), so all traces stop there. **Every handler
-//! after `Declare` is compile-checked only**: no trace has executed one. They are exercised once
-//! DELIVER lands the spec surface, the sim (`SimVolumeBacking`), the lane table
-//! (`supersede_lane` / `supersede_all_lanes`, `StartSuperseded`) and the launch path, at which
-//! point the markers come off. Approximations to confirm against the landed launch path: the
-//! production launch observes the claim and calls `Vmm::create` contiguously, so the model's
-//! `LaunchCheck` and `VmmSpawn` are two driver steps over one production stretch;
-//! `LaunchCmdFail` arms the next `lvm` command, which is the activate effect; the claim poll
-//! interval is the crafter's, so `LaunchPoll` steps the clock inside the bound.
+//! The driver replays every pinned trace against the production launch path, where the shim writes the `Pending` row and the abandoned rows.
 //!
 //! Two actions have no owner port: `GuestWrite` and `DeviceSlow`. `VmmSpawnFail` is a driven-port
 //! fault: the `Vmm` port's `create` refuses (`SimVmm::inject_create_failure`), the launch having

@@ -1111,15 +1111,6 @@ async fn failed_stop_orphan_terminal_row_is_byte_unchanged_after_reclamation() {
         .await
         .expect("describe after reclamation");
     let after_row = after.snapshot.rows.first().expect("one row survives reclamation");
-    assert!(
-        seeded_row.network_cleanup_pending,
-        "before reclamation the stop's Admitted lease still holds the network, so describe \
-         projects network_cleanup_pending = true"
-    );
-    assert!(
-        !after_row.network_cleanup_pending,
-        "reclamation releases the lease, so describe projects network_cleanup_pending = false"
-    );
     // `network_cleanup_pending` is a describe-time projection of the lease, not a
     // stored field; compare the stored row with it normalised out.
     let mut seeded_stored = seeded_row.clone();

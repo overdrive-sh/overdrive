@@ -994,15 +994,14 @@ fn assert_abandoned_launch_row(row: &AllocStatusRow, address: Option<Ipv4Addr>, 
     assert_eq!(row.last_terminated, None, "no crash is recorded for an abandoned launch");
 }
 
-/// PENDING (N-SUP, W1, ADR-0355; was the no-row guard of ADR-0334).
+/// N-SUP, W1, ADR-0355.
 ///
 /// CONTRACT_SHAPE: bounded-change. A `StartAllocation` whose launch returns
 /// `StartSuperseded` ends its `Pending` row with one `Terminated` row
 /// `LaunchSuperseded` (terminal `None`, the lease's address carried), releases
 /// the lease, the SVID and the supervision claim, emits `launch.superseded`,
 /// and returns `Ok(())`. Universe: the allocation's rows, lifecycle events, the
-/// lease, the held SVID, the driver's supervision releases. Today the shim
-/// writes no row, so the allocation has none.
+/// lease, the held SVID, the driver's supervision releases.
 #[tokio::test]
 async fn start_arm_superseded_launch_ends_its_row_as_abandoned_and_releases_lease_svid_and_claim() {
     let driver = Arc::new(ScriptedStartDriver::new());
@@ -1041,7 +1040,7 @@ async fn start_arm_superseded_launch_ends_its_row_as_abandoned_and_releases_leas
     assert!(driver.stops.lock().is_empty(), "nothing started, so nothing is stopped");
 }
 
-/// PENDING (N-SUP, W2, ADR-0355).
+/// N-SUP, W2, ADR-0355.
 ///
 /// CONTRACT_SHAPE: bounded-change. A `RestartAllocation` whose successor launch
 /// returns `StartSuperseded` ends the successor's `Pending` row as abandoned
@@ -1094,7 +1093,7 @@ async fn restart_arm_superseded_successor_ends_its_row_as_abandoned_and_runs_exa
     assert!(rig.event_names().contains(&"launch.superseded"), "one launch.superseded event");
 }
 
-/// PENDING (N-SUP, W1, ADR-0355 section 4). A failing lease teardown does not
+/// N-SUP, W1, ADR-0355 section 4. A failing lease teardown does not
 /// suppress the abandoned row: the row is written, then the teardown error is
 /// returned.
 #[tokio::test]
@@ -1118,7 +1117,7 @@ async fn start_arm_teardown_failure_does_not_suppress_the_abandoned_row() {
     assert_eq!(rig.teardowns_of(id), 1, "the teardown was attempted once");
 }
 
-/// PENDING (N-SUP, N-REC, ADR-0355 section 4). A failing write of the
+/// N-SUP, N-REC, ADR-0355 section 4. A failing write of the
 /// abandoned row is the typed observation error; the `Pending` row stays for
 /// the next boot to close.
 #[tokio::test]
@@ -1142,11 +1141,10 @@ async fn start_arm_failing_abandoned_row_write_is_returned_as_the_typed_observat
     );
 }
 
-/// PENDING (RB-8 W3, ADR-0355 section 4; was DE-1's "internal typed error with
-/// no row"). A non-start `DriverError` from `driver.start` ends the launch's
-/// `Pending` row as a `Failed` row `DriverInternalError` (charged like any start
-/// failure), carrying the address and releasing the lease; the launch is never
-/// left as a `Pending` row. Today the arm returns the error and writes no row.
+/// RB-8 W3, ADR-0355 section 4. A non-start `DriverError` from `driver.start`
+/// ends the launch's `Pending` row as a `Failed` row `DriverInternalError`
+/// (charged like any start failure), carrying the address and releasing the
+/// lease; the launch is never left as a `Pending` row.
 #[tokio::test]
 async fn start_arm_a_non_start_driver_error_ends_in_a_failed_driver_internal_error_row() {
     let driver = Arc::new(ScriptedStartDriver::other_error());
@@ -1174,7 +1172,7 @@ async fn start_arm_a_non_start_driver_error_ends_in_a_failed_driver_internal_err
 // N-2: the guest address is on record before the VMM can exist.
 // ---------------------------------------------------------------------------
 
-/// PENDING (RB-6, ADR-0353). When the launch reaches the driver, so before
+/// RB-6, ADR-0353. When the launch reaches the driver, so before
 /// `Vmm::create` is reachable, the store holds the allocation's `Pending` row
 /// and its `workload_addr` is the address of the lease the pool handed out
 /// (the transport the shim injected into the spec).
@@ -1199,7 +1197,7 @@ async fn start_arm_records_the_pending_row_with_the_leases_address_before_the_dr
     assert_eq!((row.started_at, row.reason.is_none(), row.terminal.clone()), (None, true, None));
 }
 
-/// PENDING (RB-6, ADR-0353). The restart arm records the successor's `Pending`
+/// RB-6, ADR-0353. The restart arm records the successor's `Pending`
 /// row with the successor lease's address before the successor reaches the
 /// driver.
 #[tokio::test]
@@ -1225,7 +1223,7 @@ async fn restart_arm_records_the_successors_pending_row_with_the_leases_address_
     assert_eq!(row.workload_addr, Some(address), "the row carries the lease's address");
 }
 
-/// PENDING (RB-6, N-REC, ADR-0353). When the `Pending` write fails no VMM can
+/// RB-6, N-REC, ADR-0353. When the `Pending` write fails no VMM can
 /// exist: the driver is never reached, the lease is retired and torn down, and
 /// the typed error is returned.
 #[tokio::test]
@@ -1250,7 +1248,7 @@ async fn start_arm_failing_pending_write_never_reaches_the_driver_and_releases_t
     assert_eq!(rig.teardowns_of(id), 1, "the lease's network is torn down once");
 }
 
-/// PENDING (RB-6, ADR-0353 terminal-row carry). The `Failed` row of a start the
+/// RB-6, ADR-0353 terminal-row carry. The `Failed` row of a start the
 /// driver rejects carries the `Pending` row's address.
 #[tokio::test]
 async fn start_arm_failed_start_row_carries_the_pending_rows_address() {
@@ -1291,7 +1289,7 @@ async fn running_vm_over_a_host(id: &str) -> (Rig, SimVmHostState) {
     (rig, host)
 }
 
-/// PENDING (RB-2, ADR-0156 amended). A stop whose VM still has its cgroup scope
+/// RB-2, ADR-0156 amended. A stop whose VM still has its cgroup scope
 /// (the VMM was killed and is not yet reaped) completes (the row is
 /// `Terminated`) but keeps the guest-address lease: the lease is released only
 /// once the scope is observed absent, because the scope's presence is the proof
@@ -1335,7 +1333,7 @@ async fn a_stop_keeps_the_lease_held_while_the_vms_scope_is_present_and_a_reclai
     assert!(!rig.has_lease(id), "the reclaim attempt releases the lease once the scope is absent");
 }
 
-/// PENDING (RB-6, ADR-0353 terminal-row carry). The stop's terminal row carries
+/// RB-6, ADR-0353 terminal-row carry. The stop's terminal row carries
 /// the running row's `workload_addr`: boot reserves a stuck VM's offset from the
 /// allocation's last row, and a stopped-but-unreaped VMM is exactly that VM.
 #[tokio::test]
@@ -1406,8 +1404,8 @@ async fn guard_a_duplicate_restart_dispatch_never_regresses_the_successors_runni
     );
 }
 
-/// GUARD (RB-2). With no scope left, a stop releases the lease at once, as it
-/// does today and after the change: the gate costs nothing for a reaped VMM.
+/// GUARD (RB-2). With no scope left, a stop releases the lease at once: the
+/// scope gate costs nothing for a reaped VMM.
 #[tokio::test]
 async fn guard_a_stop_releases_the_lease_at_once_when_no_scope_remains() {
     let id = "alloc-prelaunch-service-0";
@@ -1544,7 +1542,7 @@ fn operator_stop(id: &str) -> Action {
     }
 }
 
-/// PENDING (RB-2 Tier 1 (a), ADR-0156 amended). A stop whose VMM was killed and
+/// RB-2 Tier 1 (a), ADR-0156 amended. A stop whose VMM was killed and
 /// not reaped completes (`Terminated`) and leaves the allocation's lease
 /// Retiring: it counts toward the cap, and an assign that wraps to its offset
 /// takes another, so no launch is handed the CID the unreaped VMM still holds.
@@ -1597,7 +1595,7 @@ async fn a_stop_of_an_unreapable_vm_keeps_its_lease_counted_and_no_wrapping_assi
     );
 }
 
-/// PENDING (RB-2 Tier 1 (b), ADR-0156 amended). After the scripted reap
+/// RB-2 Tier 1 (b), ADR-0156 amended. After the scripted reap
 /// (`SimVmm::exit_process`), a `VmReclamation` pass removes the scope and a
 /// network reclaim attempt releases the lease; a launch on the freed CID is not
 /// refused by the device, so no launch clashed.
@@ -1640,15 +1638,14 @@ async fn after_the_reap_a_reclamation_pass_and_a_reclaim_attempt_release_the_lea
     );
 }
 
-/// PENDING (RB-2 Tier 1 (c), ADR-0156 amended). When the scope observation at
+/// RB-2 Tier 1 (c), ADR-0156 amended. When the scope observation at
 /// the stop fails, the stop returns the typed `ShimError::Reclamation` before
 /// any effect: no teardown, no terminal row (the `Running` row stands), and the
 /// replay of the same stop succeeds.
 ///
 /// Fault: `SimVmHostState::script_observe_failure`. Oracle: the dispatch
 /// result, the row, the owner's journal, the lease, then the replay's row and
-/// lease. Today the stop reads no scope, so the scripted failure is never met
-/// and the stop completes.
+/// lease.
 #[tokio::test]
 async fn a_failing_scope_observation_at_the_stop_gives_a_typed_error_with_no_teardown_and_no_row_and_the_replay_succeeds()
  {
@@ -1683,7 +1680,7 @@ async fn a_failing_scope_observation_at_the_stop_gives_a_typed_error_with_no_tea
     assert_eq!(rig.teardowns_of(id), 1, "the replay tears the network down once");
 }
 
-/// PENDING (RB-2 Tier 1 (d), ADR-0156 amended). While the scope is held, every
+/// RB-2 Tier 1 (d), ADR-0156 amended. While the scope is held, every
 /// reclaim attempt `WorkloadLifecycle` makes leaves the lease held: the scope's
 /// presence, not the number of attempts, decides. The lease is released by the
 /// first attempt after the reap and the pass's removal of the scope.
@@ -2629,8 +2626,8 @@ const RACE_POLLS: u32 = 400;
 /// stop of a running allocation, releasing the lease.
 ///
 /// The signal is raised through `ReconcilerRuntime::supersede_lane` with the
-/// lane open (the tick has not returned). Today the lane table is a scaffold
-/// and the call is a no-op; the assertions hold either way.
+/// lane open (the tick has not returned); the assertions hold whether or not
+/// the signal reaches the launch.
 #[tokio::test]
 async fn a_launch_that_won_its_boot_race_before_the_stop_signal_is_stopped_as_an_ordinary_running_allocation()
  {
