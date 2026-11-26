@@ -201,36 +201,6 @@ fn emit_launch_superseded(alloc: &AllocationId, workload: &WorkloadId) {
     );
 }
 
-/// The allocation's `Pending` row (ADR-0353): the launch record written once
-/// the pool has handed out the guest address and before the VMM can exist.
-/// Nothing but the address and the action's kind is set.
-#[allow(clippy::too_many_arguments)]
-fn pending_launch_row(
-    alloc_id: AllocationId,
-    workload_id: WorkloadId,
-    node_id: NodeId,
-    kind: overdrive_core::aggregate::WorkloadKind,
-    address: std::net::Ipv4Addr,
-    updated_at: LogicalTimestamp,
-    prior: Option<&AllocStatusRow>,
-) -> AllocStatusRow {
-    build_alloc_status_row(
-        alloc_id,
-        workload_id,
-        node_id,
-        AllocState::Pending,
-        updated_at,
-        None,
-        None,
-        None,
-        None,
-        kind,
-        None,
-        Some(address),
-        prior,
-    )
-}
-
 /// Write the launch's `Pending` row (ADR-0353). `existing` is the row the
 /// allocation's own key holds: a non-terminal row is the record of the launch
 /// already (a duplicate dispatch), so none is written over it. `Ok(None)` means
@@ -250,23 +220,34 @@ async fn record_pending_launch(
     let Some(address) = address else {
         return Ok(None);
     };
+    // A stale duplicate dispatch of one allocation (for a restart, the driver's
+    // `AllocationAlreadyOwned`): the non-terminal row stands as the launch's
+    // record and carries the same address, so none is written over it. No
+    // path from the reconciler was found that dispatches one id twice (each
+    // decision mints an id above every existing row), so this is the idempotent
+    // no-op the design names, not a reachable steady-state case.
     if existing.is_some_and(|row| !row.state.is_terminal()) {
         return Ok(None);
     }
     // The launch record only has to dominate the allocation's own prior row; the
     // rows that end the launch dominate it in turn.
-    let updated_at = LogicalTimestamp::dominating(
-        tick.tick,
-        node_id.clone(),
-        existing.map(|r| &r.updated_at),
-    );
-    let row = pending_launch_row(
+    let updated_at =
+        LogicalTimestamp::dominating(tick.tick, node_id.clone(), existing.map(|r| &r.updated_at));
+    // The launch record (ADR-0353): nothing but the address and the action's
+    // kind is set.
+    let row = build_alloc_status_row(
         alloc_id.clone(),
         workload_id.clone(),
         node_id.clone(),
-        kind,
-        address,
+        AllocState::Pending,
         updated_at,
+        None,
+        None,
+        None,
+        None,
+        kind,
+        None,
+        Some(address),
         existing,
     );
     obs.write_alloc_lifecycle(row.clone(), TransitionSource::Reconciler).await?;
@@ -312,6 +293,27 @@ async fn end_abandoned_launch(
     let occurrence = obs.write_alloc_lifecycle(row, TransitionSource::Reconciler).await?;
     emit_lifecycle_occurrence(bus, occurrence.as_ref());
     Ok(())
+}
+
+/// A failed `Pending` write creates no VMM: retire the lease and tear it down
+/// for the dispatch. A failed teardown is logged beside the write error, which
+/// stays the dispatch's outcome.
+async fn abort_launch_after_failed_pending_write(
+    alloc_id: &AllocationId,
+    guest_network: GuestNetworkProvisionerAndPool<'_>,
+    host: &dyn VmHostState,
+    write_error: &ShimError,
+) {
+    retire_guest_network_lease(alloc_id, guest_network);
+    if let Err(cleanup_error) = teardown_for_dispatch(alloc_id, guest_network, host).await {
+        tracing::error!(
+            name: "launch.pending.abort.cleanup.failed",
+            alloc = %alloc_id,
+            primary = %write_error,
+            cleanup = %cleanup_error,
+            "the Pending write failed and the lease teardown also failed"
+        );
+    }
 }
 
 /// Release what the shim owns for a superseded launch: the driver's
@@ -2064,18 +2066,13 @@ async fn dispatch_single(
             {
                 Ok(pending_row) => pending_row,
                 Err(write_error) => {
-                    retire_guest_network_lease(&alloc_id, guest_network);
-                    if let Err(cleanup_error) =
-                        teardown_for_dispatch(&alloc_id, guest_network, host).await
-                    {
-                        tracing::error!(
-                            name: "start.pending.abort.cleanup.failed",
-                            alloc = %alloc_id,
-                            primary = %write_error,
-                            cleanup = %cleanup_error,
-                            "the Pending write failed and the lease teardown also failed"
-                        );
-                    }
+                    abort_launch_after_failed_pending_write(
+                        &alloc_id,
+                        guest_network,
+                        host,
+                        &write_error,
+                    )
+                    .await;
                     return Err(write_error);
                 }
             };
@@ -2147,15 +2144,26 @@ async fn dispatch_single(
                 release_superseded_launch(drivers, driver_kind, identity, &alloc_id, &workload_id);
                 retire_guest_network_lease(&alloc_id, guest_network);
                 let teardown = teardown_for_dispatch(&alloc_id, guest_network, host).await;
-                if let Some(pending) = &pending_row {
-                    end_abandoned_launch(
+                if let Some(pending) = &pending_row
+                    && let Err(row_error) = end_abandoned_launch(
                         obs,
                         bus,
                         tick,
                         pending,
                         TransitionReason::LaunchSuperseded,
                     )
-                    .await?;
+                    .await
+                {
+                    if let Err(cleanup_error) = &teardown {
+                        tracing::error!(
+                            name: "launch.superseded.cleanup.failed",
+                            alloc = %alloc_id,
+                            primary = %row_error,
+                            cleanup = %cleanup_error,
+                            "the abandoned row write failed and the lease teardown also failed"
+                        );
+                    }
+                    return Err(row_error);
                 }
                 return teardown;
             }
@@ -2235,9 +2243,8 @@ async fn dispatch_single(
             // (injected at the C3 provision seam off `plan.workload_addr`), an
             // OBSERVED INPUT (the materialised slot×base-at-provision snapshot
             // the node provisioned this alloc into; no recompute, no derivation).
-            // A failed start (`state == Failed`) never reached the provisioned
-            // netns, so it carries `None`. Successor / terminal writers (exit
-            // observer, FinalizeFailed) forward-carry `prior.workload_addr`.
+            // Successor / terminal writers (exit observer, FinalizeFailed)
+            // forward-carry `prior.workload_addr`.
             //
             // ADR-0353: a failed start carries the `Pending` row's address (the
             // lease's), so boot can reserve the offset of a VMM that may still
@@ -2592,19 +2599,13 @@ async fn dispatch_single(
                     let pending_row = match pending_result {
                         Ok(pending_row) => pending_row,
                         Err(write_error) => {
-                            retire_guest_network_lease(&successor_alloc_id, guest_network);
-                            if let Err(cleanup_error) =
-                                teardown_for_dispatch(&successor_alloc_id, guest_network, host)
-                                    .await
-                            {
-                                tracing::error!(
-                                    name: "restart.pending.abort.cleanup.failed",
-                                    alloc = %successor_alloc_id,
-                                    primary = %write_error,
-                                    cleanup = %cleanup_error,
-                                    "the successor's Pending write failed and the lease teardown also failed"
-                                );
-                            }
+                            abort_launch_after_failed_pending_write(
+                                &successor_alloc_id,
+                                guest_network,
+                                host,
+                                &write_error,
+                            )
+                            .await;
                             return finish_restart(
                                 Err(write_error),
                                 &prior_drivers,
@@ -2781,6 +2782,17 @@ async fn dispatch_single(
                                 }
                                 None => Ok(()),
                             };
+                            if let (Err(row_error), Some(cleanup_error)) =
+                                (&row_outcome, &successor_abort_cleanup)
+                            {
+                                tracing::error!(
+                                    name: "restart.superseded.cleanup.failed",
+                                    alloc = %successor_alloc_id,
+                                    primary = %row_error,
+                                    cleanup = ?cleanup_error,
+                                    "the abandoned row write failed and the successor unwind also failed"
+                                );
+                            }
                             return finish_restart(
                                 row_outcome.and(successor_abort_cleanup.map_or(Ok(()), Err)),
                                 &prior_drivers,

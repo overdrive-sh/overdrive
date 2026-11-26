@@ -169,15 +169,13 @@ pub async fn converge(state: &AppState) -> Result<(), ConvergeError> {
 /// nothing. Another node's `Pending` row is not this boot's launch.
 async fn close_lost_launches(state: &AppState) -> Result<(), ReclamationError> {
     let rows = state.obs.alloc_status_rows().await?;
-    let tick_floor = state.clock.unix_now().as_secs();
     for pending in
         rows.iter().filter(|row| row.state == AllocState::Pending && row.node_id == state.node_id)
     {
-        let updated_at = LogicalTimestamp::dominating(
-            tick_floor,
-            state.node_id.clone(),
-            Some(&pending.updated_at),
-        );
+        // The closing row dominates the `Pending` row through its prior; no tick
+        // floor is needed, and a wall-clock value is not a Lamport counter.
+        let updated_at =
+            LogicalTimestamp::dominating(0, state.node_id.clone(), Some(&pending.updated_at));
         let closed =
             abandoned_launch_row(pending, TransitionReason::LaunchLostWithControlPlane, updated_at);
         state.obs.write_alloc_lifecycle(closed, TransitionSource::Reconciler).await?;
@@ -1973,9 +1971,9 @@ mod mid_boot_volume_reclamation {
             .expect("the second process shuts down within its drain deadline");
     }
 
-    /// M7 (the named cell; the crash leaves the launch's `Pending` row).
-    /// PENDING (ADR-0353, ADR-0355 W4): today no `Pending` row is written
-    /// before `Vmm::create`, so the precondition fails.
+    /// M7 (the named cell; the crash leaves the launch's `Pending` row). The
+    /// shim writes that row before `Vmm::create` (ADR-0353), so boot reclaims
+    /// the mid-boot VMM and closes the row (ADR-0355 W4).
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn boot_reclamation_ends_a_mid_boot_vmm_before_any_launch_for_its_workload() {
@@ -1983,7 +1981,7 @@ mod mid_boot_volume_reclamation {
     }
 
     /// M7 (c): the same when the crash leaves a `Running` row, so the
-    /// reclamation is a `ReclaimAllocation`. PENDING on the same precondition.
+    /// reclamation is a `ReclaimAllocation`.
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn boot_reclamation_ends_a_mid_boot_vmm_when_the_crash_left_a_running_row() {
@@ -2209,8 +2207,8 @@ mod launches_lost_with_the_control_plane {
 
     const ADDRESS: Ipv4Addr = Ipv4Addr::new(100, 95, 0, 9);
 
-    /// PENDING (RB-11, W4). A `Pending` row whose launch left no host artifact
-    /// ends `Terminated` / `LaunchLostWithControlPlane`, address carried.
+    /// A `Pending` row whose launch left no host artifact ends `Terminated` /
+    /// `LaunchLostWithControlPlane`, address carried.
     /// CONTRACT_SHAPE: bounded-change. Universe: the node's rows.
     #[tokio::test]
     async fn a_pending_row_with_no_host_artifact_ends_as_lost_with_the_control_plane() {
@@ -2224,10 +2222,10 @@ mod launches_lost_with_the_control_plane {
         assert_lost_with_the_control_plane(&row(&state, "lost-bare-0").await, ADDRESS);
     }
 
-    /// PENDING (RB-11, W4). A `Pending` row whose VM left a settled scope, a
-    /// run directory and a clone ends as lost with the control plane, not as
-    /// `Stopped { PlatformReclaimed }`; the executors discard the artifacts
-    /// and leave the reason alone.
+    /// A `Pending` row whose VM left a settled scope, a run directory and a
+    /// clone ends as lost with the control plane, not as
+    /// `Stopped { PlatformReclaimed }`; the executors discard the artifacts and
+    /// leave the reason alone.
     #[tokio::test]
     async fn a_pending_row_whose_vm_left_a_settled_scope_ends_as_lost_with_the_control_plane() {
         let tmp = TempDir::new().expect("tmpdir");
@@ -2246,8 +2244,8 @@ mod launches_lost_with_the_control_plane {
         assert!(host.artifacts_absent(&id), "the executors discard the launch's artifacts");
     }
 
-    /// PENDING (RB-11). A second boot over the closed rows writes nothing: the
-    /// closing step is idempotent.
+    /// A second boot over the closed rows writes nothing: the closing step is
+    /// idempotent.
     #[tokio::test]
     async fn a_second_boot_over_the_closed_rows_writes_nothing() {
         let tmp = TempDir::new().expect("tmpdir");
@@ -2356,9 +2354,8 @@ mod launches_lost_with_the_control_plane {
         );
     }
 
-    /// PENDING (RB-6, ADR-0353 terminal-row carry). The row the reclamation
-    /// executor writes for a `Running` row whose scope settled carries the prior
-    /// row's address (it was `None`).
+    /// The row the reclamation executor writes for a `Running` row whose scope
+    /// settled carries the prior row's address (it was `None`).
     #[tokio::test]
     async fn a_platform_reclaimed_row_carries_the_prior_rows_address() {
         let tmp = TempDir::new().expect("tmpdir");
