@@ -26,7 +26,7 @@ owned-range address is delivered.
 - Owned-range answer: not delivered as an address; the guest gets a definite result, never silence.
 - Non-owned private answer: delivered unchanged.
 - Mixed answer set: the owned address is not delivered.
-- The set of owned ranges has one SSOT shared with the allocators (frontend `10.98.0.0/16` today; `10.99.0.0/16` is DESIGN's call given #303 D4).
+- The set of owned ranges has one SSOT shared with the allocators (frontend `10.98.0.0/16`, the service VIP pool, and the guest prefix `100.95.0.0/16`; `10.99.0.0/16` is not guarded because no production path steers a guest connection to it as mesh traffic).
 
 ## Carpaccio taste tests
 

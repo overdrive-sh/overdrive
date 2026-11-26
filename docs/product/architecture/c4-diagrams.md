@@ -5,6 +5,44 @@ This file collects per-phase / per-feature C4 diagrams referenced from
 snapshot of the system at the close of a feature; superseded sections
 remain for traceability.
 
+## Guest public DNS resolution (GH #382, ACCEPTED)
+
+**ACCEPTED** (decisions GPD-1 to GPD-8 approved by the user 2026-11-25; [feature delta](../../feature/guest-public-dns-resolution/feature-delta.md)). Level 1 and level 2 only.
+
+```mermaid
+C4Context
+  title System Context - guest public DNS resolution
+  Person(operator, "Operator", "Deploys VM workloads")
+  System(overdrive, "Overdrive node", "Runs VM workloads, answers their DNS at the guest gateway")
+  System_Ext(guest, "Guest workload", "Calls getaddrinfo with the gateway as its only nameserver")
+  System_Ext(upstream, "Host upstream resolvers", "Resolve public names for the node")
+  Rel(operator, overdrive, "Deploys the VM with")
+  Rel(guest, overdrive, "Sends DNS queries to")
+  Rel(overdrive, upstream, "Forwards non-mesh queries to")
+```
+
+```mermaid
+C4Container
+  title Container Diagram - DNS responder with the non-mesh arm
+  Container(guest, "Guest resolver", "libc", "One nameserver: the gateway")
+  Container(owner, "Guest-flow owner", "Rust", "Pairs the guest datagram or stream with a host socket to gateway:53")
+  Container(resp, "DnsResponder", "Rust", "UDP wildcard and TCP gateway sockets, source-pinned replies")
+  Container(cls, "Classifier", "Rust", "Mesh name, unknown platform name, or forwardable")
+  Container(idx, "NameIndex", "Rust", "Answers mesh names from service_backends rows")
+  Container(fwd, "Forwarder", "Rust", "Budgeted failover, in-flight permits (ADR-0362), owned-range guard")
+  Container(owned, "OwnedAddressRanges", "Rust", "The one list of Overdrive-owned address ranges")
+  ContainerDb(rc, "Host resolver file", "/etc/resolv.conf", "Nameservers, re-read per forwarded query")
+  System_Ext(up, "Host upstream resolvers", "DNS over UDP or TCP")
+  Rel(guest, owner, "Sends queries through")
+  Rel(owner, resp, "Delivers queries to")
+  Rel(resp, cls, "Classifies each question with")
+  Rel(resp, idx, "Answers mesh names from")
+  Rel(resp, fwd, "Hands forwardable queries to")
+  Rel(fwd, rc, "Reads nameservers from")
+  Rel(fwd, up, "Exchanges one query per socket with")
+  Rel(fwd, owned, "Checks reply addresses against")
+```
+
 ## Node-local persistent volume
 
 **ACCEPTED** (GH #348; decisions VD-1 to VD-10 (VD-7a to VD-7c) approved by the user on 2026-11-17,
