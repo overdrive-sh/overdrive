@@ -113,9 +113,15 @@ while :; do
   dd if=/dev/null of=$dev bs=512 count=0 conv=notrunc,fsync 2>/dev/null || exit 7
 done"#;
 
+/// A workload with no volume (S-VOL-T3-12 boot variant, the second launch): only the declared
+/// listener, so the startup gate passes.
+const LISTEN_SCRIPT: &str = r"(while :; do nc -l -p 18081 >/dev/null 2>&1 || sleep 1; done) &
+exec sleep 3600";
+
 /// Stages a per-test copy of the shared rootfs with a static busybox shell and `/sbin/boots`.
 fn stage_rootfs(tmp: &Path, fixture: &VmFixture) -> PathBuf {
-    let scripts: [(&str, &str); 3] = [
+    let scripts: [(&str, &str); 4] = [
+        ("listen", LISTEN_SCRIPT),
         ("boots", BOOTS_SCRIPT),
         ("boots-writing", BOOTS_WRITING_SCRIPT),
         ("flushprobe", FLUSH_PROBE_SCRIPT),
@@ -171,6 +177,11 @@ fn service_toml(id: &str, command: &str, kernel: &Path, rootfs: &Path) -> String
         kernel.display(),
         rootfs.display(),
     )
+}
+
+/// The same Service spec without `[vm.volume]`.
+fn service_toml_without_volume(id: &str, command: &str, kernel: &Path, rootfs: &Path) -> String {
+    service_toml(id, command, kernel, rootfs).replace("[vm.volume]\nsize = \"1GiB\"\n\n", "")
 }
 
 async fn describe_once(cfg: &Path, id: &str) -> WorkloadDescribeOutput {
@@ -393,6 +404,26 @@ impl Journey {
 
     async fn deploy(&self, id: &str) -> String {
         self.deploy_running("/sbin/boots", id).await
+    }
+
+    async fn deploy_without_volume(&self, id: &str) -> String {
+        let spec = self.tmp.path().join(format!("{id}.toml"));
+        std::fs::write(
+            &spec,
+            service_toml_without_volume(
+                id,
+                "/sbin/listen",
+                &self.fixture.kernel_path,
+                &self.rootfs,
+            ),
+        )
+        .expect("write spec");
+        deploy(DeployArgs { spec, config_path: self.cfg() })
+            .await
+            .unwrap_or_else(|error| {
+                panic!("a workload without a volume must deploy ({id}): {error}")
+            })
+            .workload_id
     }
 
     async fn deploy_running(&self, command: &str, id: &str) -> String {
@@ -901,6 +932,9 @@ async fn a_node_boots_past_a_vm_stuck_in_exit_left_over_by_a_serve_crash() {
     wait_for_records(&device, 1, Duration::from_secs(60)).await;
     let name = device.file_name().expect("node name").to_string_lossy().into_owned();
     let old_vmm = cloud_hypervisor_pid(&first_alloc);
+    // The stuck VMM's CID, read from its own `--vsock cid=` argument while it is alive: a killed
+    // VMM held in exit is a zombie whose command line is gone.
+    let stuck_cid = super::vsock_support::vsock_cid(&cloud_hypervisor_argv(&first_alloc).join(" "));
     suspend_with_a_flush_held(&name, old_vmm).await;
     kill(old_vmm);
 
@@ -927,6 +961,23 @@ async fn a_node_boots_past_a_vm_stuck_in_exit_left_over_by_a_serve_crash() {
     assert!(
         workload_scope(&first_alloc).exists(),
         "boot keeps the scope of the VM it could not remove for the reclamation pass"
+    );
+
+    // A launch while the stuck VMM's scope is held never receives the stuck VMM's CID: the
+    // platform withholds a CID for as long as a task of the VMM that bound it is still exiting.
+    let other = journey.deploy_without_volume("vol-boot-other").await;
+    let other_running =
+        running_other_than(&journey.cfg(), &other, None, Duration::from_secs(120)).await;
+    let other_cid = super::vsock_support::vsock_cid(
+        &cloud_hypervisor_argv(&running_alloc(&other_running)).join(" "),
+    );
+    assert_ne!(
+        other_cid, stuck_cid,
+        "a launch while the stuck VMM's scope is held must not receive the stuck VMM's CID {stuck_cid}"
+    );
+    assert!(
+        workload_scope(&first_alloc).exists(),
+        "the stuck VMM's scope is still held when the second launch took its CID"
     );
 
     // The device drains: the scope is removed and the workload is launched again with its data.
