@@ -11588,6 +11588,25 @@ subsystem and the hydration boundary (see `c4-diagrams.md`, L3).
   VIP-release latch is not reachable through `serve` + `deploy` today; that work moved to
   GH #211.
 
+## Guest public DNS resolution extension (GH #382, ACCEPTED)
+
+Application Architecture addendum. **Accepted**; decisions GPD-1..GPD-8 approved by the user 2026-11-25 (ADR-0356 to ADR-0363). Detail and numbers: `docs/feature/guest-public-dns-resolution/feature-delta.md` § DESIGN; C4 in `c4-diagrams.md`.
+
+The node DNS responder (ADR-0072, ADR-0116, ADR-0154) gains a non-mesh arm. It stays the only resolver and the guest's resolver configuration stays one nameserver, the gateway.
+
+- Forward gateway-addressed non-mesh queries to the host resolvers, one verbatim exchange per query off the receive thread; SERVFAIL when no upstream answers inside the budget; no cache — [ADR-0356](adr-0356-the-node-dns-responder-forwards-gateway-addressed-non-mesh-queries-to-the-host-resolvers.md).
+- Forwards in flight are bounded by the process descriptor limit; excess is shed at once (SERVFAIL on UDP, connection closed on TCP) — [ADR-0362](adr-0362-dns-forwards-in-flight-are-bounded-by-the-descriptor-limit-and-excess-is-shed-at-once.md).
+- The `overdrive serve` binary entry raises the soft descriptor limit to the hard limit once, reads it back and injects the value through the guest-flow host seam — [ADR-0363](adr-0363-overdrive-serve-raises-its-soft-descriptor-limit-once-at-the-binary-entry-and-injects-the-read-back-value.md).
+- `overdrive.local` is a platform zone answered by the node, never forwarded; one classifier over decoded labels — [ADR-0357](adr-0357-overdrive-local-is-a-platform-zone-answered-by-the-node-and-never-forwarded.md).
+- Upstreams read from the host resolver file on each forwarded query; only the gateway is excluded; an unusable source is SERVFAIL, never a boot refusal — [ADR-0358](adr-0358-upstream-resolvers-are-read-from-the-host-resolver-file-on-each-forwarded-query.md).
+- A reply carrying an Overdrive-owned address is emptied whole and marked Blocked; one owned-range list (mesh frontend range, service VIP pool, guest prefix) — [ADR-0359](adr-0359-a-forwarded-reply-carrying-an-overdrive-owned-address-is-emptied-whole-and-marked-blocked.md).
+- TCP/53 bound to the gateway, one query per connection — [ADR-0360](adr-0360-the-node-dns-responder-also-serves-tcp-53-bound-to-the-guest-gateway.md).
+- Non-mesh record types, EDNS and DNSSEC bits pass through unchanged — [ADR-0361](adr-0361-every-non-mesh-record-type-edns-option-and-dnssec-bit-passes-through-the-forwarder-unchanged.md).
+
+New components, all in `overdrive-control-plane::dns_responder`: `Forwarder`, the `UpstreamResolvers` and `UpstreamExchange` ports with host and sim adapters, `OwnedAddressRanges`. The `overdrive serve` binary entry raises the soft descriptor limit to the hard limit before the server starts. No new crate, dependency or configuration surface. The upstream resolver is the one new external integration (standard DNS wire; no consumer-driven contract tooling fits).
+
+Scope limitations: the upstream set comes only from the host resolver file, a stand-in until upstreams can be set in the worker node configuration ([#384](https://github.com/overdrive-sh/overdrive/issues/384)); the appliance image (#259) must write a usable resolver file. No per-guest fairness for forwarded queries ([#385](https://github.com/overdrive-sh/overdrive/issues/385)). No allowlist on non-mesh lookups ([#383](https://github.com/overdrive-sh/overdrive/issues/383)).
+
 ## Changelog
 
 | Date | Change |

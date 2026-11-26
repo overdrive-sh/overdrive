@@ -21,6 +21,27 @@ wire contract, `IP_PKTINFO` source-pinning, and the Tier-3 wire evidence are
 unchanged, and the lifecycle port does not simulate the socket path DDN-4 kept
 real.
 
+**Amended (2026-11-25) by ADR-0356 and ADR-0357 (GH #382, approved by the
+user 2026-11-25): the responder's treatment of names that are not mesh names.**
+This ADR is operative on `main`. *Contract as accepted and retained here:* the
+responder answers only a name that is a valid
+`<workload>.svc.overdrive.local` (`MeshServiceName`, DDN-7); any other
+decodable query is silently dropped (`WireError::NotMeshName` from
+`wire::decode`, dropped by `answer_datagram`), whatever address the datagram
+was sent to. *New contract:* `WireError::NotMeshName` is replaced by one
+classifier over the decoded labels (feature-delta
+`docs/feature/guest-public-dns-resolution/feature-delta.md`, *Interface
+contracts*). (1) A name under `overdrive.local` that is not a valid mesh name
+gets NXDOMAIN with the zone SOA, negative TTL as DDN-8. (2) A non-mesh name
+outside `overdrive.local`, in a datagram addressed to the guest gateway, is
+forwarded to the host's resolvers (ADR-0356). (3) A non-mesh query in a
+datagram not addressed to the gateway is still silently dropped. (4) A datagram
+that is not a single-question IN-class query is still dropped. DDN-8's mesh
+NXDOMAIN, NODATA and SOA contract, the stable per-`<job>` frontend answer, the
+`IP_PKTINFO` source-pinning and the wire contract are unchanged. ADR-0116,
+ADR-0154 and ADR-0167 were checked for the dropped-non-mesh wording and carry
+none; they are unchanged.
+
 **Partially superseded 2026-11-10 (user ruling: only VM workloads are
 supported).** The parts of this ADR that bind the responder to per-workload
 network namespaces (the per-netns gateway set read from
