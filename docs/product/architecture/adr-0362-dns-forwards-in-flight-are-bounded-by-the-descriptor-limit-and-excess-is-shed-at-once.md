@@ -16,7 +16,7 @@ Every in-flight DNS forward holds process descriptors: a UDP forward holds its u
 - A forward holds one permit for its whole life. A UDP forward takes it when the query is found forwardable. A TCP connection takes it when it is accepted, so the guest's connection and the upstream exchange run under one permit.
 - A query or connection that cannot get a permit is shed at once, without waiting. A shed UDP query is answered SERVFAIL; a shed TCP connection is closed unread. A shed query opens no upstream socket and reads no upstream configuration. Mesh answers over UDP never take a permit.
 - The permit count and the soft limit it came from are logged once at boot.
-- Shedding is visible to the operator as one episode warn: one `dns.forward.shed_started` when shedding starts and one `dns.forward.shed_cleared` when it ends. The episode ends only when the permits have drained to at most half held, so a saturated bound that releases and re-acquires one permit at a time is one episode, not a pair of warns per release.
+- Shedding is visible to the operator as one episode warn: one `dns.forward.shed_started` when shedding starts and one `dns.forward.shed_cleared` when it ends. The episode ends only when the permits have drained to at most half held, so a saturated bound that releases and re-acquires one permit at a time is one episode, not a pair of warns per release. The clearing swap of the flag is itself conditional on that threshold (measured before the acquire): below it the flag is left untouched. A clear is logged on the next qualifying acquire, so a late or absent clear when traffic stops is intended; a race between the check and the swap yields at most one early clear followed by a new start, a log-timing artifact only.
 
 ## Alternatives considered
 

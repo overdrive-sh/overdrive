@@ -29,6 +29,6 @@ Two forces. Changing a process-global limit from library code changes it for eve
 
 ## Consequences
 
-- Positive: in-process tests never change the process limit; the probe and the permit count cannot disagree; the injected value cannot be set to contradict the production path, because production gets it only from the read-back.
+- Positive: in-process tests never change the process limit; the probe and the permit count cannot disagree; production gets the value only from the read-back at the binary entry; test compositions pass the sim value.
 - Negative: the production host adapter constructors take the value, so every composition that builds the host bundle supplies it; tests supply the sim seam's value (feature-delta lists the call sites).
 - The raise is a bounded effect on the `serve` process: soft limit to hard limit only, inherited by the non-VMM children `serve` spawns. VMMs are unaffected because the launcher sets their limit explicitly.
