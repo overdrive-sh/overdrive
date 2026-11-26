@@ -2235,8 +2235,11 @@ Exposures with a stated bound:
   leaves the generation pending and re-issues one id per tick, as on `main`. A disk-level fault ends the evaluation at the View write first
   (`reconciler_runtime.rs:1557-1561`); a fault confined to `observation.redb` is a node-fatal store fault and no row-based remedy applies.
   The same fault on the abandoned-row write (N-4, W1, W2) returns the typed error and leaves the launch's `Pending` row until the next boot closes it
-  (W4); the workload is not relaunched in between. A launch whose VMM runs when its `Running` write fails keeps its `Pending` row until the next
-  boot closes it (W4) and the executors reclaim its VM. When that launch's teardown also keeps its lease (the VMM was killed and not reaped, its scope
+  (W4). That stale `Pending` current row is not `Running`, not restartable and not a natural exit, so `WorkloadLifecycle` falls through to
+  fresh placement and relaunches in the same boot under the next attempt id, one id per tick as on `main`. A launch whose VMM runs when its
+  `Running` write fails is stopped in the shim's rejected-write arm (`driver.stop`, then `release_supervision`), which then retires the lease and
+  tears down, so no duplicate VM runs beside the relaunch. Its `Pending` row stays until the next boot closes it (W4); boot's executors reclaim
+  only a leftover scope or artifacts. When that launch's teardown also keeps its lease (the VMM was killed and not reaped, its scope
   still present: the release gate of ADR-0348), the lease stays Retiring and counts toward the cap until that boot, with the row; the pool is rebuilt
   at boot and step 4 of § "Boot proceeds past a stuck VM" reserves the address from the closed row if the scope remains. No reclaim of the lease
   exists before then, because the reclaim retry acts only on a terminal row and a `Pending` row is a live launch.

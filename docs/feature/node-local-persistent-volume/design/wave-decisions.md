@@ -146,7 +146,8 @@ non-terminal row would release the lease of a launch that is still running. Boot
 pool is rebuilt empty, and step 4 of § "Boot proceeds past a stuck VM" reserves the address from the closed row if the scope remains. So the
 lease stays Retiring and counted toward the cap, with its allocation row, until the next boot. This is the existing N-REC exposure: the
 fault is a failure of the observation write of the launch's own row, which `observation.redb` confines to a node-fatal store fault, and the
-workload is not relaunched in between either. Rejected: a second terminal-row write on this path (the same fault makes it fail too, so it is a
+workload is relaunched in the same boot under the next attempt id (the stale `Pending` row falls through to fresh placement, one id per tick
+as on `main`; the first VM is already stopped in the shim's rejected-write arm). Rejected: a second terminal-row write on this path (the same fault makes it fail too, so it is a
 retry heuristic; the reasons that exist misdescribe it, `LaunchSuperseded` being a stop, restart or shutdown and `Failed` charging the restart
 budget for a store fault; a new reason is a persisted variant); the reclaim retry treating a non-terminal row as reclaimable (releases a live
 launch's lease). The lease is named in the N-REC exposure of the feature delta; no code or roadmap step changes.
