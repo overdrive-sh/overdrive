@@ -70,7 +70,7 @@ State 2: <lease_bugLaunchBeforeRecord_cid_lease_Assign line 1584, col 3 to line 
 /\ lease_bugLaunchBeforeRecord_cid_lease_bootLeft = -1
 /\ lease_bugLaunchBeforeRecord_cid_lease_scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
 
-State 3: <lease_bugLaunchBeforeRecord_cid_lease_Launch line 1742, col 3 to line 1847, col 59 of module lease_bugLaunchBeforeRecord>
+State 3: <lease_bugLaunchBeforeRecord_cid_lease_Launch line 1742, col 3 to line 1883, col 59 of module lease_bugLaunchBeforeRecord>
 /\ lease_bugLaunchBeforeRecord_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ lease_bugLaunchBeforeRecord_cid_lease_up = TRUE
 /\ lease_bugLaunchBeforeRecord_cid_lease_att = <<0, 0>>
@@ -106,7 +106,7 @@ State 3: <lease_bugLaunchBeforeRecord_cid_lease_Launch line 1742, col 3 to line 
 /\ lease_bugLaunchBeforeRecord_cid_lease_bootLeft = -1
 /\ lease_bugLaunchBeforeRecord_cid_lease_scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
 
-State 4: <lease_bugLaunchBeforeRecord_cid_lease_Crash line 2072, col 3 to line 2191, col 59 of module lease_bugLaunchBeforeRecord>
+State 4: <lease_bugLaunchBeforeRecord_cid_lease_Crash line 2108, col 3 to line 2227, col 59 of module lease_bugLaunchBeforeRecord>
 /\ lease_bugLaunchBeforeRecord_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ lease_bugLaunchBeforeRecord_cid_lease_up = FALSE
 /\ lease_bugLaunchBeforeRecord_cid_lease_att = <<0, 0>>
@@ -178,7 +178,7 @@ State 5: <lease_bugLaunchBeforeRecord_cid_lease_Restart line 1460, col 3 to line
 /\ lease_bugLaunchBeforeRecord_cid_lease_bootLeft = -1
 /\ lease_bugLaunchBeforeRecord_cid_lease_scope = (0 :> FALSE @@ 1 :> FALSE @@ 2 :> FALSE)
 
-State 6: <lease_bugLaunchBeforeRecord_cid_lease_Reclaim line 2197, col 3 to line 2291, col 50 of module lease_bugLaunchBeforeRecord>
+State 6: <lease_bugLaunchBeforeRecord_cid_lease_Reclaim line 2233, col 3 to line 2327, col 50 of module lease_bugLaunchBeforeRecord>
 /\ lease_bugLaunchBeforeRecord_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ lease_bugLaunchBeforeRecord_cid_lease_up = TRUE
 /\ lease_bugLaunchBeforeRecord_cid_lease_att = <<0, 0>>
@@ -250,7 +250,7 @@ State 7: <lease_bugLaunchBeforeRecord_cid_lease_Assign line 1584, col 3 to line 
 /\ lease_bugLaunchBeforeRecord_cid_lease_bootLeft = -1
 /\ lease_bugLaunchBeforeRecord_cid_lease_scope = (0 :> TRUE @@ 1 :> FALSE @@ 2 :> FALSE)
 
-State 8: <lease_bugLaunchBeforeRecord_cid_lease_Launch line 1742, col 3 to line 1847, col 59 of module lease_bugLaunchBeforeRecord>
+State 8: <lease_bugLaunchBeforeRecord_cid_lease_Launch line 1742, col 3 to line 1883, col 59 of module lease_bugLaunchBeforeRecord>
 /\ lease_bugLaunchBeforeRecord_cid_lease_conf_step = [init |-> [tag |-> "UNIT"]]
 /\ lease_bugLaunchBeforeRecord_cid_lease_up = TRUE
 /\ lease_bugLaunchBeforeRecord_cid_lease_att = <<0, 0>>

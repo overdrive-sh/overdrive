@@ -6,16 +6,16 @@
 
   1) lease_conf_bugCrashLosesPlacedGeneration::cid_lease::RedeployLeasedAtServeCrashIsPlacedAgain:
        Error [QNT508]: Expect condition does not hold true
-        at /home/ubuntu/overdrive-worktrees/9d340a8ca57d5ca89b626cece0d62d03770aa9cd213856dc63ec27e31d3a81cc/specs/quint/guest-flow-owner/cid_lease.qnt:971:49
-        971:   run RedeployLeasedAtServeCrashIsPlacedAgain = init
+        at /home/ubuntu/overdrive-worktrees/9d340a8ca57d5ca89b626cece0d62d03770aa9cd213856dc63ec27e31d3a81cc/specs/quint/guest-flow-owner/cid_lease.qnt:978:49
+        978:   run RedeployLeasedAtServeCrashIsPlacedAgain = init
                                                              ^^^^
-        972:     .then(Assign(1)).then(Launch(1)).then(Stop(1)).then(Release(1)).expect(Safety and st(1) == "done")
+        979:     .then(Assign(1)).then(Launch(1)).then(Stop(1)).then(Release(1)).expect(Safety and st(1) == "done")
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        973:     .then(Redeploy(1)).then(Assign(1)).expect(Safety and st(1) == "leased" and g.pendingGen.get(1) == "done")
+        980:     .then(Redeploy(1)).then(Assign(1)).expect(Safety and st(1) == "leased" and g.pendingGen.get(1) == "done")
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        974:     .then(Crash).expect(Safety and st(1) == "wait")
+        981:     .then(Crash).expect(Safety and st(1) == "wait")
              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    Use --seed=0x5004c5a3a2240e5b --match=lease_conf_bugCrashLosesPlacedGeneration::cid_lease::RedeployLeasedAtServeCrashIsPlacedAgain to repeat.
+    Use --seed=0xfe40bfd063931e52 --match=lease_conf_bugCrashLosesPlacedGeneration::cid_lease::RedeployLeasedAtServeCrashIsPlacedAgain to repeat.
 
 
   Use --verbosity=3 to show executions.

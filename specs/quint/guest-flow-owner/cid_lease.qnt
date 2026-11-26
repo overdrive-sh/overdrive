@@ -435,8 +435,15 @@ module cid_lease {
       dev' = dev, al' = al.set(a, failedA(a)),
       g' = { ...g, clash: true, lastEnd: endAs(a, "crash"), pendingGen: g.pendingGen.set(a, "") },
     },
-    att' = att, lease' = lease, late' = late, cursor' = cursor, up' = up, reclaimed' = reclaimed, bootLeft' = bootLeft,
-    scope' = scope, recorded' = recorded,
+    // ADR-0350: the start action's dispatch also runs the same tick's `ReclaimAllocationNetwork(old)` for the workload's
+    // predecessor (`WorkloadLifecycle::append_reclaim_actions`); it re-reads the host scope and, if the scope is already
+    // gone, releases that workload's boot reservation through `teardown_guest_network`. So a reservation held by `a`
+    // whose scope is absent is released inside `Launch`; one whose scope is present stays (the attempt is a no-op)
+    lease' = OFFS.mapBy(o => if (late.get(o) == a and scopeAbsent(o)) 0 else lease.get(o)),
+    late' = OFFS.mapBy(o => if (late.get(o) == a and scopeAbsent(o)) 0 else late.get(o)),
+    recorded' = OFFS.mapBy(o => if (late.get(o) == a and scopeAbsent(o)) 0 else recorded.get(o)),
+    att' = att, cursor' = cursor, up' = up, reclaimed' = reclaimed, bootLeft' = bootLeft,
+    scope' = scope,
     conf_step' = if (REC) variant("Launch", { a: a }) else conf_step,
   }
   // The VMM fails (a crash, or a guest reset: RESET-EXIT): the last close of its device frees the CID and the exit
