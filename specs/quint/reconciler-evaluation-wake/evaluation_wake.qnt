@@ -90,10 +90,13 @@
  *                nothing lands, so no LAND consequence, EXCEPT for a failed k1 start: the start path issues and holds the SVID
  *                (ensure_intercept_identity, action_shim/mod.rs:1858) BEFORE driver.start and the Running-row write (:2044); a
  *                failed write tears the workload down (:2055-2096) but never releases the held SVID, so the failed start leaves
- *                an ORPHAN held SVID (no allocation row, no Running allocation): held, has(k4) (svid_lifecycle.rs managed_targets
- *                :317-323), need(k4) (DropSvid of a held SVID of a non-Running allocation). service-lifecycle manages no target
- *                (no allocation row: has(k3) unchanged). A later landed start mints a fresh allocation id (the View's
- *                restart_counts reserves the failed one, workload_lifecycle.rs next_allocation_attempt), so the orphan stays held
+ *                a held SVID of an allocation that is not Running, whose Pending row stays on record (ADR-0353: the shim writes the launch's
+ *                Pending row before identity and driver.start, so the failed Running write leaves it): held, has(k4) (svid_lifecycle.rs
+ *                managed_targets :317-323), need(k4) (DropSvid of a held SVID of a non-Running allocation). The allocation row makes
+ *                service-lifecycle manage the target (service_lifecycle.rs managed_targets: an alloc_status row): has(k3), and v3
+ *                (its next tick records the Pending allocation in `observed`, service_lifecycle.rs reconcile). need(k3) is unchanged
+ *                (a Pending allocation is not in the Running projection and has no Stable to commit), rowNE is unchanged. A later landed start mints a fresh allocation id (the View's
+ *                restart_counts reserves the failed one, workload_lifecycle.rs next_allocation_attempt), so the held SVID stays
  *                and needy until a landed k4 drop.
  *   dpFail       (hydrator only) the dataplane update failed; the shim logs dataplane.update_service.failed and returns Ok, no row, no handoff.
  * Backoff windows (D-3, D11). Two reconcilers have one: the hydrator (View RetryMemory) and svid-lifecycle (View IssueRetry). A
@@ -414,7 +417,7 @@ module evaluation_wake {
     val landE2 = e2 and acts and (o == "ok" or (o == "dispatchErr" and stU))
     val landK = k != "k3" and acts and (o == "ok" or (o == "dispatchErr" and k == "k4" and not(running)))
     val lands = landK
-    // a failed k1 start leaves the SVID it issued held, for an allocation that has no row (see the header)
+    // a failed k1 start leaves the SVID it issued held, for an allocation whose Pending row stays on record (see the header)
     val orphan = o == "dispatchErr" and acts and k == "k1"
     val persisted = o == "ok" or o == "dispatchErr" or o == "dpFail"
     // an emitted action is dispatched on ok and on dispatchErr (dispatch isolates actions, so the EnqueueEvaluation actions
@@ -450,7 +453,7 @@ module evaluation_wake {
       active.contains(k),
       allowed,
       need' = if (landed) needL else if (orphan) need.union(Set("k4")) else need,
-      has' = if (landed) withK4(hasL, needL, heldL) else if (orphan) withK4(has, need.union(Set("k4")), true) else has,
+      has' = if (landed) withK4(hasL, needL, heldL) else if (orphan) withK4(has.union(Set("k3")), need.union(Set("k4")), true) else has,
       held' = if (lands) heldL else if (orphan) true else held,
       // a failed dataplane update (hydrator) or a failed IssueSvid (svid-lifecycle: IssueRetry recorded at emit, nothing held)
       // leaves the key inside its backoff window
@@ -460,7 +463,7 @@ module evaluation_wake {
                else if (landE2) inWin.exclude(Set("k2")) else inWin,
       // a persisted tick (ok, dispatchErr, dpFail) records every allocation service-lifecycle sees and rewrites svid-lifecycle's
       // retry map to the entries of Running unheld allocations; a k1 start adds an allocation service-lifecycle has not seen
-      v3' = if (lands and k == "k1") true else if (k == "k3" and persisted) false else v3,
+      v3' = if ((lands or orphan) and k == "k1") true else if (k == "k3" and persisted) false else v3,
       r4' = if (k == "k4" and persisted) (sn and running) else r4,
       // a landed k2 tick programs what the row carries (empty: purge); a landed k3 publish writes a row with the allocations'
       // backends
@@ -580,9 +583,9 @@ module evaluation_wake {
   // D-3, D11: a backoff window (the hydrator's, svid-lifecycle's) only exists for a needy key
   val WindowOnlyForNeedy: bool = inWin.subseteq(need)
   // world: the workload-target reconcilers derive from one intent (k3, k4 managed imply k1 managed), a Running allocation's row makes
-  // service-lifecycle manage the Service (k4 implies k3 except the orphan state, a held SVID of an allocation that is not Running: D7; an orphan has no row), and a published backend row implies a service-lifecycle target
+  // service-lifecycle manage the Service (k4 implies k3, including the failed-start state, a held SVID of an allocation whose Pending row stays on record: D7, ADR-0353), and a published backend row implies a service-lifecycle target
   val SharedIntentImpliesBase: bool = and { has.contains("k3").implies(has.contains("k1")), has.contains("k4").implies(has.contains("k1")),
-                                            has.contains("k4").implies(has.contains("k3") or (held and not(running))), has.contains("k2").implies(has.contains("k3")) }
+                                            has.contains("k4").implies(has.contains("k3")), has.contains("k2").implies(has.contains("k3")) }
   // D-1a: svid-lifecycle manages the target iff the workload has a Running allocation or a held SVID (so has(k4) can shrink)
   val K4ManagedIffRunningOrHeld: bool = has.contains("k4") == (running or held)
   // D-21: an assigned VIP makes the hydrator manage the Service

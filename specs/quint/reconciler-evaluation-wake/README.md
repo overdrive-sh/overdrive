@@ -30,12 +30,12 @@ production fact: `vip` (the listener has an assigned VIP) and `held` (an SVID is
 (D9, below): `v3` (service-lifecycle's next tick would change its View) and `r4` (svid-lifecycle's stored View holds an `IssueRetry`
 entry). Both are model-only (never projected).
 
-### Failed k1 start leaves an orphan held SVID
+### Failed k1 start leaves a held SVID and a Pending row
 
 The start path issues and holds the SVID (`ensure_intercept_identity`, `action_shim/mod.rs:1858`) before `driver.start` and before the Running-row
 write (`:2044`). A failed write tears the workload down (`:2055-2096`) and never releases the SVID. `Finish(k1, dispatchErr)` therefore sets
-`held`, `need(k4)` (DropSvid) and `has(k4)` (`svid_lifecycle.rs` `managed_targets`, `:317-323`) with no allocation row (`has(k3)` unchanged). The retried
-start mints a fresh allocation id (`next_allocation_attempt`), so the orphan stays needy until a landed `k4` drop. The fault seam is not the cause: the
+`held`, `need(k4)` (DropSvid) and `has(k4)` (`svid_lifecycle.rs` `managed_targets`, `:317-323`) and the allocation's `Pending` row stays on record (ADR-0353: the shim writes it before identity and `driver.start`), so service-lifecycle manages the target (`has(k3)`, `service_lifecycle.rs` `managed_targets`) and `v3` is set (its next tick records the Pending allocation in `observed`); `need(k3)` and `rowNE` are unchanged. The retried
+start mints a fresh allocation id (`next_allocation_attempt`), so the held SVID stays needy until a landed `k4` drop. The fault seam is not the cause: the
 SVID audit write (a generic write) succeeds and the lifecycle write fails, as it would on a real observation store error.
 
 ### A failed dispatch leaves the other actions landed (per-action isolation)
@@ -48,14 +48,14 @@ projection: `WriteServiceBackendRow` + `EnqueueEvaluation(k2)`, only with a VIP)
 
 | Key | Ordered effects of the action | What a `dispatchErr` hits | World after |
 |---|---|---|---|
-| `k1` | issue + hold SVID, `driver.start`, Running row (lifecycle write, `action_shim/mod.rs:2044`) | the Running row | workload torn down, SVID stays held (orphan, above) |
+| `k1` | issue + hold SVID, `driver.start`, Running row (lifecycle write, `action_shim/mod.rs:2044`) | the Running row | workload torn down, SVID stays held, Pending row stays (above) |
 | `k2` | `dataplane.update_service` only; no observation row (`dataplane_update_service.rs`: a failed update is logged, the shim returns Ok) | nothing: no `dispatchErr` is offered for `k2`; its only failure is `dpFail` | n/a |
 | `k3` | `FinalizeFailed{Stable}` (lifecycle write, only if `stU`), `WriteServiceBackendRow` + `EnqueueEvaluation(k2)` (generic write, only if VIP and `rowD`) | no VIP: the Stable commit. VIP and `stU`: the Stable commit (it consumes the generic seam first), so the row lands. VIP and not `stU`: the row write | per effect landed; `need(k3) := stU' or rowD'` |
 | `k4` | `IssueSvid`: CA issue + audit write (generic), hold. `DropSvid`: no write (`issue_svid.rs` `dispatch_drop`) | `IssueSvid`: the audit write, nothing held, window. `DropSvid`: the injected failure is never consumed | `DropSvid` lands as in `ok` |
 
 ### Managed-set coupling (`SharedIntentImpliesBase`)
 
-`has(k3) => has(k1)`, `has(k4) => has(k1)`, `has(k4) and running => has(k3)` (D7: an allocation row makes service-lifecycle manage the Service; an orphan held SVID, below, has no row),
+`has(k3) => has(k1)`, `has(k4) => has(k1)`, `has(k4) => has(k3)` (D7: an allocation row makes service-lifecycle manage the Service; a failed start's Pending row counts, below),
 `has(k2) => has(k3)`, and `vip => has(k2)` (D-21: the hydrator manages a Service whenever its intent has an assigned VIP, so every
 step that makes `vip` true, a `k3` or `k2` world change, also adds `k2` to `has`). `has(k1)`, `has(k2)`, `has(k3)` never shrink (dropping the intent or a row is not
 modelled). `has(k4)` is not monotone: svid-lifecycle manages the target iff the workload has a Running allocation or a held SVID
