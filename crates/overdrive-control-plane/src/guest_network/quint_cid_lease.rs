@@ -522,6 +522,9 @@ struct Serve {
     beacon_port: VsockPort,
     /// The boot reclamation of this process (C): pending, or its result.
     reclaim: Option<JoinHandle<std::result::Result<(), ConvergeError>>>,
+    /// Holds the boot reclamation back until its `Reclaim` step (see
+    /// `boot_serve`); `None` once released or when it was never held.
+    reclaim_gate: Option<tokio::sync::oneshot::Sender<()>>,
     reclaimed: bool,
     /// What the boot reclamation refused with, when it returned an error.
     reclaim_refusal: Option<String>,
@@ -671,7 +674,26 @@ fn boot_serve(node: &Node, boot: u32) -> (Serve, Arc<GuestAddressPool>, Arc<Reco
         )
     };
     let reclaim_state = state.clone();
-    let reclaim = rt.spawn(async move { converge(&reclaim_state).await });
+    // The model's `Restart` leaves boot reclamation to its own `Reclaim` step
+    // whenever an orphan holds a device. A kill parks `converge` until the
+    // driver grants it, but a VMM stuck before the crash is already dead and
+    // needs no kill: its scope answers busy at once and `converge` would
+    // reserve once no live orphan is left to wait for (or at once, with none).
+    // While any orphan is such a stuck VMM the driver starts `converge` at the
+    // step that models it: `Reclaim`, or the exit of the last orphan.
+    let gated = {
+        // conformance-lint: sim-arbiter-ok QPROJ-7 SimVmm vsock_device_holders (the kernel's vhost-vsock holder per CID), Tier-3 pair overdrive-host vsock_vmm_device
+        let holders = node.vmm.vsock_device_holders();
+        holders.values().any(|pid| node.vmm.is_unreaped(*pid))
+    };
+    let (gate, opened) = tokio::sync::oneshot::channel::<()>();
+    let (gate, opened) = if gated { (Some(gate), Some(opened)) } else { (None, None) };
+    let reclaim = rt.spawn(async move {
+        if let Some(opened) = opened {
+            let _ = opened.await;
+        }
+        converge(&reclaim_state).await
+    });
     let serve = Serve {
         rt,
         state,
@@ -679,6 +701,7 @@ fn boot_serve(node: &Node, boot: u32) -> (Serve, Arc<GuestAddressPool>, Arc<Reco
         beacon,
         beacon_port,
         reclaim: Some(reclaim),
+        reclaim_gate: gate,
         reclaimed: false,
         reclaim_refusal: None,
         ticks: BTreeMap::new(),
@@ -1094,6 +1117,9 @@ impl CidLeaseDriver {
     /// Settles boot reclamation: until it returned, or it waits on a held
     /// kill of a live orphan.
     fn settle_reclaim(&mut self) -> std::result::Result<(), DriverError> {
+        if self.serve.as_ref().is_some_and(|serve| serve.reclaim_gate.is_some()) {
+            return Ok(());
+        }
         self.settle("boot reclamation returns or parks on a held kill", |driver| {
             let Some(serve) = driver.serve.as_ref() else { return true };
             let parked =
@@ -1520,9 +1546,15 @@ impl CidLeaseDriver {
         if self.serve("Reclaim")?.reclaim.is_none() {
             return Err(not_enabled("Reclaim", "this process's boot reclamation already returned"));
         }
+        self.open_reclaim_gate();
         let mut stuck = BTreeSet::new();
         for o in s {
             let pid = self.orphan_at("Reclaim", *o)?;
+            if self.node.vmm.is_unreaped(pid) {
+                // stuck before the crash: already killed, not reaped
+                stuck.insert(pid);
+                continue;
+            }
             if !self.node.host.make_unreapable(pid) {
                 return Err(not_enabled(
                     "Reclaim",
@@ -1788,7 +1820,21 @@ impl CidLeaseDriver {
         let pid = self.orphan_at("OrphanExit", o)?;
         self.node.vmm.exit_process(pid, Some(0), None);
         self.node.host.notify();
+        // The model's boot reclamation completes with the last orphan's exit.
+        // conformance-lint: sim-arbiter-ok QPROJ-7 SimVmm vsock_device_holders (the kernel's vhost-vsock holder per CID), Tier-3 pair overdrive-host vsock_vmm_device
+        let orphans_remain =
+            self.node.vmm.vsock_device_holders().keys().any(|cid| !self.inst.is_background(*cid));
+        if !orphans_remain {
+            self.open_reclaim_gate();
+        }
         self.settle_reclaim()
+    }
+
+    /// Start the held-back boot reclamation (see `boot_serve`).
+    fn open_reclaim_gate(&mut self) {
+        if let Some(gate) = self.serve.as_mut().and_then(|serve| serve.reclaim_gate.take()) {
+            let _ = gate.send(());
+        }
     }
 
     // ----- the projection ------------------------------------------------------
@@ -1939,20 +1985,25 @@ impl CidLeaseDriver {
                 .inst
                 .offset_of(*cid)
                 .ok_or_else(|| DriverError::NoPreImage(format!("held CID {}", cid.get())))?;
-            let holder = match leases.iter().find(|(_, view)| view.cid() == *cid) {
-                // conformance-lint: sim-arbiter-ok QPROJ-7 the simulated host's VM scopes (which launch a holder VMM belongs to), Tier-3 pair overdrive-host vm_host_state_equivalence
-                Some((alloc, _)) if self.node.host.pids_of(alloc).contains(pid) => *self
-                    .alloc_of
-                    .get(alloc)
-                    .ok_or_else(|| DriverError::NoPreImage(format!("allocation {alloc}")))?,
-                Some((alloc, _)) => {
-                    return Err(DriverError::NoPreImage(format!(
-                        "VMM {pid} on {alloc}'s CID is not its launch"
-                    ))
-                    .into());
-                }
-                None => -2,
-            };
+            // A `Reserved` lease (boot reservation, decision 14) carries no
+            // launch: the VMM holding its CID is the leftover orphan, the
+            // model's -2, not a launch of the allocation the lease names.
+            let holder =
+                match leases.iter().find(|(_, view)| view.cid() == *cid && view.launch().is_some())
+                {
+                    // conformance-lint: sim-arbiter-ok QPROJ-7 the simulated host's VM scopes (which launch a holder VMM belongs to), Tier-3 pair overdrive-host vm_host_state_equivalence
+                    Some((alloc, _)) if self.node.host.pids_of(alloc).contains(pid) => *self
+                        .alloc_of
+                        .get(alloc)
+                        .ok_or_else(|| DriverError::NoPreImage(format!("allocation {alloc}")))?,
+                    Some((alloc, _)) => {
+                        return Err(DriverError::NoPreImage(format!(
+                            "VMM {pid} on {alloc}'s CID is not its launch"
+                        ))
+                        .into());
+                    }
+                    None => -2,
+                };
             dev.insert(o, holder);
         }
         let (lease, cursor, al, att, late, scope) = if up {
