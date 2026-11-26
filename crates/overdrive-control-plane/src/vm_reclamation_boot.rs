@@ -41,7 +41,9 @@
 //! tick — same input, same `plan_reclamation`, same executor.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::io::ErrorKind;
 
+use overdrive_core::id::AllocationId;
 use overdrive_core::reconcilers::Action;
 use overdrive_core::traits::driver::DriverType;
 use overdrive_core::traits::observation_store::{AllocState, LogicalTimestamp, TransitionSource};
@@ -52,7 +54,7 @@ use overdrive_reconcilers::{VmReclamationState, plan_reclamation};
 use crate::AppState;
 use crate::action_shim::abandoned_launch_row;
 use crate::action_shim::reclamation::{
-    ReclamationError, execute_discard_stranded_artifacts, execute_reclaim_allocation,
+    ReclamationError, execute_discard_stranded_artifacts, execute_reclaim_allocation_at_boot,
 };
 use crate::reconciler_runtime::build_hydration_context;
 
@@ -123,20 +125,62 @@ pub async fn converge(state: &AppState) -> Result<(), ConvergeError> {
 
     let actual = VmReclamationState { allocations: BTreeMap::new(), host, supervision };
 
-    for action in plan_reclamation(&desired, &actual) {
+    // ADR-0350: every executor runs to completion together, so boot waits one
+    // settle bound however many VMs are stuck. Results keep the planner's order.
+    let executions = plan_reclamation(&desired, &actual).into_iter().filter_map(|action| {
         match action {
-            Action::DiscardStrandedArtifacts { alloc_id } => {
+            Action::DiscardStrandedArtifacts { alloc_id } => Some(Execution::Discard(alloc_id)),
+            Action::ReclaimAllocation { alloc_id } => Some(Execution::Reclaim(alloc_id)),
+            // `plan_reclamation` (this reconciler's own pure diff) never emits
+            // any other `Action` variant — the wildcard exists only because
+            // `Action` is the workspace-shared action enum.
+            _ => None,
+        }
+    });
+    let outcomes = futures::future::join_all(executions.map(|execution| async move {
+        let result = execution.run(state).await;
+        (execution.into_alloc_id(), result)
+    }))
+    .await;
+
+    // Every busy scope's offset is reserved before the first error is
+    // returned: one scope's failure never drops another's reservation.
+    let mut first_error: Option<ReclamationError> = None;
+    for (alloc_id, result) in outcomes {
+        let outcome = match result {
+            Ok(()) => Ok(()),
+            Err(ReclamationError::Host(error)) if error.kind() == ErrorKind::ResourceBusy => {
+                reserve_busy_scope(state, &alloc_id).await
+            }
+            Err(other) => Err(other),
+        };
+        if let (Err(error), None) = (outcome, &first_error) {
+            first_error = Some(error);
+        }
+    }
+    first_error.map_or(Ok(()), |error| Err(ConvergeError::Reclamation(error)))
+}
+
+/// One reclamation executor the planner asked for.
+enum Execution {
+    Discard(AllocationId),
+    Reclaim(AllocationId),
+}
+
+impl Execution {
+    async fn run(&self, state: &AppState) -> Result<(), ReclamationError> {
+        match self {
+            Self::Discard(alloc_id) => {
                 execute_discard_stranded_artifacts(
-                    &alloc_id,
+                    alloc_id,
                     &state.drivers,
                     state.vm_host_state.as_ref(),
                 )
                 .await
-                .map_err(ConvergeError::Reclamation)?;
             }
-            Action::ReclaimAllocation { alloc_id } => {
-                execute_reclaim_allocation(
-                    &alloc_id,
+            Self::Reclaim(alloc_id) => {
+                execute_reclaim_allocation_at_boot(
+                    alloc_id,
                     &state.drivers,
                     state.vm_host_state.as_ref(),
                     state.obs.as_ref(),
@@ -145,16 +189,32 @@ pub async fn converge(state: &AppState) -> Result<(), ConvergeError> {
                     &state.runtime,
                 )
                 .await
-                .map_err(ConvergeError::Reclamation)?;
             }
-            // `plan_reclamation` (this reconciler's own pure diff) never
-            // emits any other `Action` variant — the wildcard exists
-            // only because `Action` is the workspace-shared action enum;
-            // no production `Vec<Action>` reaching this loop can
-            // populate it.
-            _ => {}
         }
     }
+
+    fn into_alloc_id(self) -> AllocationId {
+        match self {
+            Self::Discard(alloc_id) | Self::Reclaim(alloc_id) => alloc_id,
+        }
+    }
+}
+
+/// Reserve the guest address the row of a busy (stuck) VM recorded, so no
+/// launch is handed its CID while the VMM still holds its device (ADR-0350).
+/// A row with no address, or no row, reserves nothing: the address is on record
+/// before the VMM exists, so such a VM holds no CID.
+async fn reserve_busy_scope(
+    state: &AppState,
+    alloc_id: &AllocationId,
+) -> Result<(), ReclamationError> {
+    let Some(row) = state.obs.alloc_status_row(alloc_id).await? else {
+        return Ok(());
+    };
+    let Some(address) = row.workload_addr else {
+        return Ok(());
+    };
+    state.guest_pool.reserve_leftover(alloc_id, address)?;
     Ok(())
 }
 
@@ -2316,7 +2376,6 @@ mod launches_lost_with_the_control_plane {
     /// CONTRACT_SHAPE: bounded-change. Universe: the allocation's row, the
     /// host's scopes, the pool's occupancy and lease of the allocation.
     #[tokio::test]
-    #[should_panic(expected = "a busy scope never refuses the boot")]
     async fn a_busy_scope_boots_ends_the_running_row_and_reserves_its_address() {
         let tmp = TempDir::new().expect("tmpdir");
         let host = SimVmHostState::new();
@@ -2358,7 +2417,6 @@ mod launches_lost_with_the_control_plane {
     /// lost with the control plane (not platform-reclaimed) and its offset is
     /// reserved from the closed row's carried address.
     #[tokio::test]
-    #[should_panic(expected = "a busy scope never refuses the boot")]
     async fn a_busy_scope_of_a_pending_row_ends_as_lost_and_reserves_the_carried_address() {
         let tmp = TempDir::new().expect("tmpdir");
         let host = SimVmHostState::new();
@@ -2893,7 +2951,6 @@ mod stuck_vm_boot {
     /// reported `Reserved`: the CID its offset derives, no launch token, no plan.
     /// CONTRACT_SHAPE: bounded-change. Universe: leases, snapshot.
     #[tokio::test]
-    #[should_panic(expected = "a busy scope never refuses the boot")]
     async fn a_busy_scope_is_reserved_as_a_retiring_reservation_with_no_launch_token() {
         let tmp = TempDir::new().expect("tmpdir");
         let host = SimVmHostState::new();
@@ -2922,7 +2979,6 @@ mod stuck_vm_boot {
     /// the boot proceeds, the row is terminal, nothing is reserved.
     /// CONTRACT_SHAPE: bounded-change. Universe: the row, the pool's leases.
     #[tokio::test]
-    #[should_panic(expected = "a busy scope never refuses the boot")]
     async fn a_busy_scope_whose_row_records_no_address_reserves_nothing() {
         let tmp = TempDir::new().expect("tmpdir");
         let host = SimVmHostState::new();
@@ -2946,7 +3002,6 @@ mod stuck_vm_boot {
     /// `VmReclamation`, nothing is reserved.
     /// CONTRACT_SHAPE: bounded-change. Universe: the pool's leases, the host.
     #[tokio::test]
-    #[should_panic(expected = "a busy scope never refuses the boot")]
     async fn a_busy_scope_with_no_row_reserves_nothing_and_does_not_refuse_the_boot() {
         let tmp = TempDir::new().expect("tmpdir");
         let host = SimVmHostState::new();
@@ -2971,7 +3026,6 @@ mod stuck_vm_boot {
     /// error naming the allocation and the address; nothing panics.
     /// CONTRACT_SHAPE: bounded-change. Universe: the result, the pool's leases.
     #[tokio::test]
-    #[should_panic(expected = "a corrupt leftover row refuses the boot naming the allocation")]
     async fn a_row_address_outside_the_guest_prefix_refuses_the_boot_naming_the_allocation() {
         let tmp = TempDir::new().expect("tmpdir");
         let host = SimVmHostState::new();
@@ -3007,7 +3061,6 @@ mod stuck_vm_boot {
     /// reservation was made before the refusal).
     /// CONTRACT_SHAPE: bounded-change. Universe: the result, both rows, the pool.
     #[tokio::test]
-    #[should_panic(expected = "a corrupt leftover row refuses the boot naming the allocation")]
     async fn two_busy_rows_naming_one_address_refuse_the_boot_and_keep_the_first_reservation() {
         let tmp = TempDir::new().expect("tmpdir");
         let host = SimVmHostState::new();
@@ -3043,7 +3096,6 @@ mod stuck_vm_boot {
     /// completes the boot, and every stuck VM's offset is reserved.
     /// CONTRACT_SHAPE: bounded-change. Universe: the clock, rows, the pool.
     #[tokio::test]
-    #[should_panic(expected = "every stuck scope's wait starts together")]
     async fn several_stuck_scopes_cost_one_bound_of_boot_delay_and_are_all_reserved() {
         const STUCK: usize = 3;
         let tmp = TempDir::new().expect("tmpdir");
@@ -3131,7 +3183,6 @@ mod stuck_vm_boot {
     /// PENDING (ADR-0350 item 5). The refusal comes from the scope the planner
     /// reaches first; the stuck VM behind it is still killed, closed and reserved.
     #[tokio::test]
-    #[should_panic(expected = "one scope's failure never drops another scope's reservation")]
     async fn a_refusal_before_a_stuck_vm_never_drops_its_reservation() {
         refusal_beside_a_stuck_vm("fail-a-0", "stuck-b-0").await;
     }
@@ -3139,7 +3190,6 @@ mod stuck_vm_boot {
     /// PENDING (ADR-0350 item 5). The stuck VM comes first: the boot is still
     /// refused for the later scope's non-busy error, with the reservation made.
     #[tokio::test]
-    #[should_panic(expected = "the refusal is the first non-busy executor error")]
     async fn a_refusal_after_a_stuck_vm_still_refuses_the_boot_with_its_reservation_made() {
         refusal_beside_a_stuck_vm("fail-b-0", "busy-a-0").await;
     }
@@ -3152,7 +3202,6 @@ mod stuck_vm_boot {
     /// arbiter.
     /// CONTRACT_SHAPE: bounded-change. Universe: pool leases, vsock holders.
     #[tokio::test]
-    #[should_panic(expected = "a busy scope never refuses the boot")]
     async fn a_launch_sweep_across_the_whole_offset_range_never_receives_the_stuck_vmms_cid() {
         let tmp = TempDir::new().expect("tmpdir");
         let prefix: Ipv4Net = "100.95.0.0/29".parse().expect("prefix");
@@ -3218,7 +3267,6 @@ mod stuck_vm_boot {
     /// (a reservation has no plan).
     /// CONTRACT_SHAPE: bounded-change. Universe: pool leases, teardowns.
     #[tokio::test]
-    #[should_panic(expected = "a busy scope never refuses the boot")]
     async fn repeated_reclaim_attempts_over_a_reservation_return_ok_and_keep_it_while_the_scope_is_held()
      {
         let tmp = TempDir::new().expect("tmpdir");
@@ -3258,7 +3306,6 @@ mod stuck_vm_boot {
     /// was recorded for it.
     /// CONTRACT_SHAPE: bounded-change. Universe: pool leases, host scopes, teardowns.
     #[tokio::test]
-    #[should_panic(expected = "a busy scope never refuses the boot")]
     async fn a_reservation_is_released_by_a_reclaim_attempt_after_the_reap_and_a_reclamation_pass()
     {
         let tmp = TempDir::new().expect("tmpdir");
@@ -3312,7 +3359,6 @@ mod stuck_vm_boot {
     /// discards them and writes no row.
     /// CONTRACT_SHAPE: bounded-change. Universe: the row, the host's surfaces.
     #[tokio::test]
-    #[should_panic(expected = "a busy scope never refuses the boot")]
     async fn a_busy_boot_step_writes_the_row_and_the_next_pass_discards_the_artifacts() {
         let tmp = TempDir::new().expect("tmpdir");
         let host = SimVmHostState::new();
@@ -3349,7 +3395,6 @@ mod stuck_vm_boot {
     /// unchanged and still discards nothing.
     /// CONTRACT_SHAPE: unbounded-preservation. Universe: the row, host surfaces.
     #[tokio::test]
-    #[should_panic(expected = "a busy scope never refuses the boot")]
     async fn the_steady_state_tick_that_meets_the_busy_scope_leaves_the_boot_written_row_unchanged()
     {
         let tmp = TempDir::new().expect("tmpdir");

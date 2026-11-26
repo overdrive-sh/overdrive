@@ -685,13 +685,6 @@ impl GuestAddressPool {
     /// offset another lease (or this allocation at another offset) already
     /// holds, is returned as [`CorruptLeftoverRow`]. A repeat for the same
     /// allocation and address changes nothing.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "no caller until boot reclamation reserves a stuck VM's address (ADR-0350)"
-        )
-    )]
     pub(crate) fn reserve_leftover(
         &self,
         alloc: &AllocationId,

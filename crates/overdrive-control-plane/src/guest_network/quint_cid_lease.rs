@@ -2630,7 +2630,6 @@ fn quint_cid_lease_next_fit_skips_an_unreaped_lease() -> impl Driver {
     max_samples = 1,
     test = "ServeCrashDuringGuestBootReservesFromTheRecordedAddress"
 )]
-#[should_panic(expected = "a busy scope never refuses the boot")]
 fn quint_cid_lease_serve_crash_during_guest_boot_reserves_from_the_recorded_address() -> impl Driver
 {
     CidLeaseDriver::new()
@@ -2645,7 +2644,6 @@ fn quint_cid_lease_serve_crash_during_guest_boot_reserves_from_the_recorded_addr
 /// run is marked `#[should_panic]` until the crafter wires them.
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_run(spec = "../../specs/quint/guest-flow-owner/cid_lease.qnt", main = "lease_conf_ok")]
-#[should_panic(expected = "a busy scope never refuses the boot")]
 fn quint_cid_lease_lease_conf_ok() -> impl Driver {
     CidLeaseDriver::new()
 }

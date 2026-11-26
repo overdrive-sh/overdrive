@@ -921,7 +921,6 @@ async fn a_workload_stop_during_a_held_claim_returns_promptly_with_no_failed_row
 #[overdrive_test(guest = "cgroup-default", profile = "volume-pool")]
 #[tokio::test]
 #[serial(cgroup)]
-#[should_panic(expected = "a node must boot past a VM whose scope cannot be removed")]
 async fn a_node_boots_past_a_vm_stuck_in_exit_left_over_by_a_serve_crash() {
     let journey = Journey::new();
     let handle = serve_at(&journey.data_dir(), &journey.config_dir()).await;

@@ -222,7 +222,7 @@ pub async fn execute_reclaim_allocation(
     runtime: &ReconcilerRuntime,
 ) -> Result<(), ReclamationError> {
     let submission = EvaluationSubmission::Runtime(runtime);
-    execute_reclaim_allocation_with_submission(
+    reclaim_allocation(
         alloc_id,
         drivers,
         host,
@@ -230,8 +230,50 @@ pub async fn execute_reclaim_allocation(
         clock,
         writer_node,
         &submission,
+        ScopeBusy::LeavesRowUnwritten,
     )
     .await
+}
+
+/// The boot drive's form of [`execute_reclaim_allocation`] (ADR-0354): a scope
+/// that stays busy at the settle bound still ends the allocation's row (the
+/// kill is delivered, so the VMM can run no guest code) and the artifacts are
+/// left for `VmReclamation`. The busy error is still returned, so the caller
+/// reserves the stuck VM's address.
+///
+/// # Errors
+///
+/// As [`execute_reclaim_allocation`].
+pub(crate) async fn execute_reclaim_allocation_at_boot(
+    alloc_id: &AllocationId,
+    drivers: &DriverRegistry,
+    host: &dyn VmHostState,
+    obs: &dyn ObservationStore,
+    clock: &dyn Clock,
+    writer_node: &NodeId,
+    runtime: &ReconcilerRuntime,
+) -> Result<(), ReclamationError> {
+    let submission = EvaluationSubmission::Runtime(runtime);
+    reclaim_allocation(
+        alloc_id,
+        drivers,
+        host,
+        obs,
+        clock,
+        writer_node,
+        &submission,
+        ScopeBusy::EndsRow,
+    )
+    .await
+}
+
+/// What the reclaim executor does when `kill_scope` answers busy.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ScopeBusy {
+    /// The steady-state tick: no row, no discard; the next pass retries.
+    LeavesRowUnwritten,
+    /// The boot step: the row is ended, the artifacts are kept.
+    EndsRow,
 }
 
 pub(super) async fn execute_reclaim_allocation_with_submission(
@@ -243,6 +285,31 @@ pub(super) async fn execute_reclaim_allocation_with_submission(
     writer_node: &NodeId,
     submission: &EvaluationSubmission<'_>,
 ) -> Result<(), ReclamationError> {
+    reclaim_allocation(
+        alloc_id,
+        drivers,
+        host,
+        obs,
+        clock,
+        writer_node,
+        submission,
+        ScopeBusy::LeavesRowUnwritten,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn reclaim_allocation(
+    alloc_id: &AllocationId,
+    drivers: &DriverRegistry,
+    host: &dyn VmHostState,
+    obs: &dyn ObservationStore,
+    clock: &dyn Clock,
+    writer_node: &NodeId,
+    submission: &EvaluationSubmission<'_>,
+    on_busy: ScopeBusy,
+) -> Result<(), ReclamationError> {
+
     let Some(_lease) = ReclamationLease::try_acquire(drivers, alloc_id) else {
         tracing::info!(
             name: "vm.reclamation.refused",
@@ -281,8 +348,19 @@ pub(super) async fn execute_reclaim_allocation_with_submission(
 
     // AUTHORISED — kill the scope, discard the run-dir/clone artifacts.
     let scope = overdrive_core::cgroup::CgroupPath::for_alloc(alloc_id);
-    host.kill_scope(&scope).await?;
-    host.discard_artifacts(alloc_id).await?;
+    let busy = match host.kill_scope(&scope).await {
+        Ok(()) => None,
+        Err(error)
+            if on_busy == ScopeBusy::EndsRow
+                && error.kind() == std::io::ErrorKind::ResourceBusy =>
+        {
+            Some(error)
+        }
+        Err(error) => return Err(error.into()),
+    };
+    if busy.is_none() {
+        host.discard_artifacts(alloc_id).await?;
+    }
 
     // Write the terminal row through the existing LWW merge. `tick_floor`
     // has no `TickContext` to source from here (the executor's pinned
@@ -343,7 +421,7 @@ pub(super) async fn execute_reclaim_allocation_with_submission(
         );
     }
 
-    Ok(())
+    busy.map_or(Ok(()), |error| Err(error.into()))
 }
 
 /// `Action::DiscardStrandedArtifacts` executor (brief.md §105a.5).
