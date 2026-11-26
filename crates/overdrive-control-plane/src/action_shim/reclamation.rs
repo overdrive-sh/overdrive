@@ -307,7 +307,7 @@ pub(super) async fn execute_reclaim_allocation_with_submission(
         None,
         prior_row.kind,
         prior_row.started_at,
-        None,
+        prior_row.workload_addr,
         Some(&prior_row),
     );
     obs.write_alloc_lifecycle(row.clone(), TransitionSource::Reconciler).await?;

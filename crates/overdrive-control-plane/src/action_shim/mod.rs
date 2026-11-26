@@ -191,18 +191,132 @@ const fn guest_command_release_permitted(
     running_committed && (!intercept_required || stable_exact_rule_baseline)
 }
 
-/// Record that a launch ended superseded: no allocation row was written.
+/// Record that a launch ended superseded: its `Pending` row ends abandoned.
 fn emit_launch_superseded(alloc: &AllocationId, workload: &WorkloadId) {
     tracing::info!(
         name: "launch.superseded",
         alloc = %alloc,
         workload = %workload,
-        "launch superseded before it started; no allocation row written"
+        "launch superseded before it started; its Pending row ends abandoned"
     );
 }
 
+/// The allocation's `Pending` row (ADR-0353): the launch record written once
+/// the pool has handed out the guest address and before the VMM can exist.
+/// Nothing but the address and the action's kind is set.
+#[allow(clippy::too_many_arguments)]
+fn pending_launch_row(
+    alloc_id: AllocationId,
+    workload_id: WorkloadId,
+    node_id: NodeId,
+    kind: overdrive_core::aggregate::WorkloadKind,
+    address: std::net::Ipv4Addr,
+    updated_at: LogicalTimestamp,
+    prior: Option<&AllocStatusRow>,
+) -> AllocStatusRow {
+    build_alloc_status_row(
+        alloc_id,
+        workload_id,
+        node_id,
+        AllocState::Pending,
+        updated_at,
+        None,
+        None,
+        None,
+        None,
+        kind,
+        None,
+        Some(address),
+        prior,
+    )
+}
+
+/// Write the launch's `Pending` row (ADR-0353). `existing` is the row the
+/// allocation's own key holds: a non-terminal row is the record of the launch
+/// already (a duplicate dispatch), so none is written over it. `Ok(None)` means
+/// no row was written (no guest lease, or a non-terminal row stands); a failed
+/// write is the typed observation error and no VMM may be created.
+#[allow(clippy::too_many_arguments)]
+async fn record_pending_launch(
+    obs: &dyn ObservationStore,
+    tick: &TickContext,
+    alloc_id: &AllocationId,
+    workload_id: &WorkloadId,
+    node_id: &NodeId,
+    kind: overdrive_core::aggregate::WorkloadKind,
+    address: Option<std::net::Ipv4Addr>,
+    existing: Option<&AllocStatusRow>,
+) -> Result<Option<AllocStatusRow>, ShimError> {
+    let Some(address) = address else {
+        return Ok(None);
+    };
+    if existing.is_some_and(|row| !row.state.is_terminal()) {
+        return Ok(None);
+    }
+    // The launch record only has to dominate the allocation's own prior row; the
+    // rows that end the launch dominate it in turn.
+    let updated_at = LogicalTimestamp::dominating(
+        tick.tick,
+        node_id.clone(),
+        existing.map(|r| &r.updated_at),
+    );
+    let row = pending_launch_row(
+        alloc_id.clone(),
+        workload_id.clone(),
+        node_id.clone(),
+        kind,
+        address,
+        updated_at,
+        existing,
+    );
+    obs.write_alloc_lifecycle(row.clone(), TransitionSource::Reconciler).await?;
+    Ok(Some(row))
+}
+
+/// The row that ends a launch which never ran (ADR-0355): `Terminated`, no
+/// terminal claim, never started, with the `Pending` row's address, kind and
+/// crash facts carried.
+pub(crate) fn abandoned_launch_row(
+    pending: &AllocStatusRow,
+    reason: TransitionReason,
+    updated_at: LogicalTimestamp,
+) -> AllocStatusRow {
+    build_alloc_status_row(
+        pending.alloc_id.clone(),
+        pending.workload_id.clone(),
+        pending.node_id.clone(),
+        AllocState::Terminated,
+        updated_at,
+        Some(reason),
+        None,
+        None,
+        None,
+        pending.kind,
+        None,
+        pending.workload_addr,
+        Some(pending),
+    )
+}
+
+/// End a launch's `Pending` row as abandoned and announce the transition.
+async fn end_abandoned_launch(
+    obs: &dyn ObservationStore,
+    bus: &broadcast::Sender<LifecycleEvent>,
+    tick: &TickContext,
+    pending: &AllocStatusRow,
+    reason: TransitionReason,
+) -> Result<(), ShimError> {
+    let updated_at =
+        LogicalTimestamp::dominating(tick.tick, pending.node_id.clone(), Some(&pending.updated_at));
+    let row = abandoned_launch_row(pending, reason, updated_at);
+    let occurrence = obs.write_alloc_lifecycle(row, TransitionSource::Reconciler).await?;
+    emit_lifecycle_occurrence(bus, occurrence.as_ref());
+    Ok(())
+}
+
 /// Release what the shim owns for a superseded launch: the driver's
-/// supervision claim and the SVID, then record the outcome. Writes no row.
+/// supervision claim and the SVID, then record the outcome. Writes no row;
+/// the caller ends the launch's `Pending` row.
 fn release_superseded_launch(
     drivers: &DriverRegistry,
     driver_kind: DriverType,
@@ -763,7 +877,7 @@ async fn fail_closed_on_mtls_install_with_guest(
         None,
         running_row.kind,
         running_row.started_at,
-        None,
+        running_row.workload_addr,
         Some(running_row),
     );
     let write = obs.write_alloc_lifecycle(failed_row, TransitionSource::Reconciler).await;
@@ -840,7 +954,7 @@ async fn fail_closed_on_guest_network_activation(
         None,
         running_row.kind,
         running_row.started_at,
-        None,
+        running_row.workload_addr,
         Some(running_row),
     );
     let write = obs.write_alloc_lifecycle(failed_row, TransitionSource::Reconciler).await;
@@ -1723,10 +1837,10 @@ async fn dispatch_single(
                 prior_stderr_tail,
                 prior_row.kind,
                 prior_started_at,
-                // Keep the per-instance address only while the row stays
-                // Running (the Stable success claim); a genuine terminal
-                // drops it to `None` — a dead alloc is not a live backend.
-                if is_stable { prior_workload_addr } else { None },
+                // Every later row of the allocation carries the address
+                // (ADR-0353): boot reserves a stuck VM's offset from the
+                // newest row, and a terminal row is not a live backend.
+                prior_workload_addr,
                 // ADR-0078 § D2 site 3: FORWARDS, it does NOT snapshot. The
                 // dominant case is `terminal → terminal` — an already-`Failed`
                 // row re-stamped with a terminal claim while forward-carrying
@@ -1930,6 +2044,41 @@ async fn dispatch_single(
             // separate, earlier check; this is the dispatch-time
             // fallback for whatever reaches here regardless.
             let driver_kind = spec.driver.driver_type();
+            // ADR-0353: the lease's address is on record as soon as the pool
+            // has handed it out, before any identity is issued and before the
+            // VMM can exist. A failed write creates no VMM: the lease is
+            // retired and torn down and the typed error is returned.
+            let lease_address =
+                spec.transport.as_ref().map(GuestTransportAssignment::workload_addr);
+            let pending_row = match record_pending_launch(
+                obs,
+                tick,
+                &alloc_id,
+                &workload_id,
+                &node_id,
+                kind,
+                lease_address,
+                prior_row.as_ref(),
+            )
+            .await
+            {
+                Ok(pending_row) => pending_row,
+                Err(write_error) => {
+                    retire_guest_network_lease(&alloc_id, guest_network);
+                    if let Err(cleanup_error) =
+                        teardown_for_dispatch(&alloc_id, guest_network, host).await
+                    {
+                        tracing::error!(
+                            name: "start.pending.abort.cleanup.failed",
+                            alloc = %alloc_id,
+                            primary = %write_error,
+                            cleanup = %cleanup_error,
+                            "the Pending write failed and the lease teardown also failed"
+                        );
+                    }
+                    return Err(write_error);
+                }
+            };
             if let Err(issue_error) = ensure_intercept_identity(
                 &alloc_id,
                 &workload_id,
@@ -1945,6 +2094,10 @@ async fn dispatch_single(
                 teardown_for_dispatch(&alloc_id, guest_network, host).await?;
                 return Err(issue_error);
             }
+            // The newest stamp this launch wrote: later rows dominate it.
+            let launch_updated_at: Option<LogicalTimestamp> =
+                pending_row.as_ref().map(|row| row.updated_at.clone()).or(prior_updated_at);
+
             let supersession = broker.lane_supersession(&workload_id);
             let start_outcome: Result<AllocationHandle, DriverError> =
                 match drivers.get(driver_kind) {
@@ -1985,14 +2138,26 @@ async fn dispatch_single(
             ) {
                 return Ok(());
             }
-            // ADR-0334: a superseded launch is a clean no-row outcome. The
-            // driver already tore down what it created; the shim releases what
-            // it owns (supervision claim, SVID, guest lease and network).
+            // ADR-0334, ADR-0355 W1: a superseded launch is a clean outcome.
+            // The driver already tore down what it created; the shim releases
+            // what it owns (supervision claim, SVID, guest lease and network),
+            // then ends the launch's `Pending` row as abandoned. A teardown
+            // failure never suppresses the row and is returned after it.
             if matches!(&start_outcome, Err(DriverError::StartSuperseded)) {
                 release_superseded_launch(drivers, driver_kind, identity, &alloc_id, &workload_id);
                 retire_guest_network_lease(&alloc_id, guest_network);
-                teardown_for_dispatch(&alloc_id, guest_network, host).await?;
-                return Ok(());
+                let teardown = teardown_for_dispatch(&alloc_id, guest_network, host).await;
+                if let Some(pending) = &pending_row {
+                    end_abandoned_launch(
+                        obs,
+                        bus,
+                        tick,
+                        pending,
+                        TransitionReason::LaunchSuperseded,
+                    )
+                    .await?;
+                }
+                return teardown;
             }
             let (start_outcome, rejected_network_cleanup) = match start_outcome {
                 Ok(handle) => (Ok(handle), None),
@@ -2001,6 +2166,9 @@ async fn dispatch_single(
                     (Err(error), teardown_for_dispatch(&alloc_id, guest_network, host).await.err())
                 }
             };
+            // ADR-0355 W3: a non-start driver error is returned after its
+            // `Failed` row is written.
+            let mut deferred_driver_error: Option<ShimError> = None;
             let (handle_opt, state, reason, detail, source): (
                 Option<AllocationHandle>,
                 AllocState,
@@ -2031,7 +2199,17 @@ async fn dispatch_single(
                     Some(failure.detail.clone()),
                     TransitionSource::Driver(failure.class.driver_type()),
                 ),
-                Err(other) => return Err(ShimError::Driver(other)),
+                Err(other) => {
+                    let detail = other.to_string();
+                    deferred_driver_error = Some(ShimError::Driver(other));
+                    (
+                        None,
+                        AllocState::Failed,
+                        Some(TransitionReason::DriverInternalError { detail: detail.clone() }),
+                        Some(detail),
+                        TransitionSource::Driver(driver_kind),
+                    )
+                }
             };
             // Per ADR-0037 §4: StartAllocation is never a terminal
             // claim — WorkloadLifecycle emits FinalizeFailed on a separate
@@ -2060,13 +2238,16 @@ async fn dispatch_single(
             // A failed start (`state == Failed`) never reached the provisioned
             // netns, so it carries `None`. Successor / terminal writers (exit
             // observer, FinalizeFailed) forward-carry `prior.workload_addr`.
-            let workload_addr = if state == AllocState::Running {
-                spec.transport.as_ref().map(GuestTransportAssignment::workload_addr)
-            } else {
-                None
-            };
-            let updated_at =
-                LogicalTimestamp::dominating(tick.tick, node_id.clone(), prior_updated_at.as_ref());
+            //
+            // ADR-0353: a failed start carries the `Pending` row's address (the
+            // lease's), so boot can reserve the offset of a VMM that may still
+            // hold its CID.
+            let workload_addr = lease_address;
+            let updated_at = LogicalTimestamp::dominating(
+                tick.tick,
+                node_id.clone(),
+                launch_updated_at.as_ref(),
+            );
             let row = build_alloc_status_row(
                 alloc_id,
                 workload_id,
@@ -2274,6 +2455,9 @@ async fn dispatch_single(
                 // a probe runner.
             }
             emit_lifecycle_occurrence(bus, occurrence.as_ref());
+            if let Some(error) = deferred_driver_error {
+                return Err(error);
+            }
             if let Some(error) = rejected_network_cleanup {
                 return Err(error);
             }
@@ -2380,6 +2564,60 @@ async fn dispatch_single(
                     }
                 }
                 Ok(plan) => {
+                    // ADR-0353: the successor's lease address is on record as
+                    // soon as the pool has handed it out, before any identity
+                    // is issued and before its VMM can exist. A failed read or write
+                    // creates no VMM: the lease is retired and torn down, the
+                    // typed error is the successor outcome, and the exact-old
+                    // predecessor cleanup still runs.
+                    let lease_address =
+                        spec.transport.as_ref().map(GuestTransportAssignment::workload_addr);
+                    let pending_result = match find_prior_alloc_row(obs, &successor_alloc_id).await
+                    {
+                        Ok(existing) => {
+                            record_pending_launch(
+                                obs,
+                                tick,
+                                &successor_alloc_id,
+                                &prior_row.workload_id,
+                                &prior_row.node_id,
+                                kind,
+                                lease_address,
+                                existing.as_ref(),
+                            )
+                            .await
+                        }
+                        Err(read_error) => Err(read_error),
+                    };
+                    let pending_row = match pending_result {
+                        Ok(pending_row) => pending_row,
+                        Err(write_error) => {
+                            retire_guest_network_lease(&successor_alloc_id, guest_network);
+                            if let Err(cleanup_error) =
+                                teardown_for_dispatch(&successor_alloc_id, guest_network, host)
+                                    .await
+                            {
+                                tracing::error!(
+                                    name: "restart.pending.abort.cleanup.failed",
+                                    alloc = %successor_alloc_id,
+                                    primary = %write_error,
+                                    cleanup = %cleanup_error,
+                                    "the successor's Pending write failed and the lease teardown also failed"
+                                );
+                            }
+                            return finish_restart(
+                                Err(write_error),
+                                &prior_drivers,
+                                &predecessor_handle,
+                                alloc_drivers,
+                                mtls_lifecycle,
+                                guest_network,
+                                host,
+                            )
+                            .await;
+                        }
+                    };
+
                     if let Err(issue_error) = ensure_intercept_identity(
                         &successor_alloc_id,
                         &prior_row.workload_id,
@@ -2419,6 +2657,9 @@ async fn dispatch_single(
                         )
                         .await;
                     }
+
+                    let launch_updated_at: Option<LogicalTimestamp> =
+                        pending_row.as_ref().map(|row| row.updated_at.clone());
 
                     // Route the supplied successor payload to its composed driver.
                     let supersession = broker.lane_supersession(&prior_row.workload_id);
@@ -2474,6 +2715,9 @@ async fn dispatch_single(
                         }
                     };
 
+                    // ADR-0355 W3: a non-start driver error is the successor
+                    // outcome after its `Failed` row is written.
+                    let mut deferred_driver_error: Option<ShimError> = None;
                     let (handle_opt, state, reason, detail, source): (
                         Option<AllocationHandle>,
                         AllocState,
@@ -2512,8 +2756,11 @@ async fn dispatch_single(
                             )
                         }
                         Err(DriverError::StartSuperseded) => {
-                            // ADR-0334: no row; the successor's lease, network
-                            // and mTLS ownership are already unwound above.
+                            // ADR-0334, ADR-0355 W2: the successor's lease,
+                            // network and mTLS ownership are already unwound
+                            // above; its `Pending` row ends abandoned. A
+                            // failed row write is the successor outcome, ahead
+                            // of a cleanup failure.
                             release_superseded_launch(
                                 drivers,
                                 driver_kind,
@@ -2521,8 +2768,21 @@ async fn dispatch_single(
                                 &successor_alloc_id,
                                 &prior_row.workload_id,
                             );
+                            let row_outcome = match &pending_row {
+                                Some(pending) => {
+                                    end_abandoned_launch(
+                                        obs,
+                                        bus,
+                                        tick,
+                                        pending,
+                                        TransitionReason::LaunchSuperseded,
+                                    )
+                                    .await
+                                }
+                                None => Ok(()),
+                            };
                             return finish_restart(
-                                successor_abort_cleanup.map_or(Ok(()), Err),
+                                row_outcome.and(successor_abort_cleanup.map_or(Ok(()), Err)),
                                 &prior_drivers,
                                 &predecessor_handle,
                                 alloc_drivers,
@@ -2542,33 +2802,36 @@ async fn dispatch_single(
                                     "successor start failure retained as primary after successor unwind failed"
                                 );
                             }
-                            return finish_restart(
-                                Err(ShimError::Driver(other)),
-                                &prior_drivers,
-                                &predecessor_handle,
-                                alloc_drivers,
-                                mtls_lifecycle,
-                                guest_network,
-                                host,
+                            let detail = other.to_string();
+                            deferred_driver_error = Some(ShimError::Driver(other));
+                            (
+                                None,
+                                AllocState::Failed,
+                                Some(TransitionReason::DriverInternalError {
+                                    detail: detail.clone(),
+                                }),
+                                Some(detail),
+                                TransitionSource::Driver(driver_kind),
                             )
-                            .await;
                         }
                     };
 
                     // A fresh successor starts with zero/None per-allocation
                     // history. A failed launch never reached Running.
                     let started_at = (state == AllocState::Running).then_some(tick.now_unix);
-                    let workload_addr = (state == AllocState::Running)
-                        .then_some(
-                            spec.transport.as_ref().map(GuestTransportAssignment::workload_addr),
-                        )
-                        .flatten();
+                    // ADR-0353: a failed successor carries the `Pending` row's
+                    // address, as the Running row does.
+                    let workload_addr = lease_address;
                     let row = build_alloc_status_row(
                         successor_alloc_id.clone(),
                         prior_row.workload_id.clone(),
                         prior_row.node_id.clone(),
                         state,
-                        LogicalTimestamp::dominating(tick.tick, prior_row.node_id.clone(), None),
+                        LogicalTimestamp::dominating(
+                            tick.tick,
+                            prior_row.node_id.clone(),
+                            launch_updated_at.as_ref(),
+                        ),
                         reason,
                         detail,
                         None,
@@ -2650,7 +2913,8 @@ async fn dispatch_single(
                             driver.release_supervision(&successor_alloc_id);
                         }
                         emit_lifecycle_occurrence(bus, occurrence.as_ref());
-                        let successor_outcome = successor_abort_cleanup.map_or(Ok(()), Err);
+                        let successor_outcome = deferred_driver_error
+                            .map_or_else(|| successor_abort_cleanup.map_or(Ok(()), Err), Err);
                         return finish_restart(
                             successor_outcome,
                             &prior_drivers,
@@ -2902,10 +3166,11 @@ async fn dispatch_single(
                     None,
                     prior_row.kind,
                     prior_started_at,
-                    // Terminated row — a stopped alloc is not a live backend
-                    // (the backend projection renders only `state == Running`), so it
-                    // carries no per-instance address.
-                    None,
+                    // Every later row carries the allocation's address
+                    // (ADR-0353): boot reserves a stopped-but-unreaped VM's
+                    // offset from the newest row. The backend projection
+                    // renders only `state == Running`, so it is not a backend.
+                    prior_row.workload_addr,
                     // ADR-0078 § D2 site 6: FORWARDS — the stop terminal
                     // derives from the current LWW winner observed after
                     // cleanup. This is normally Running, but can be the exit
@@ -4057,9 +4322,6 @@ mod fail_closed_mtls_tests {
     /// handler drops it.
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test]
-    #[should_panic(
-        expected = "the superseding Failed row must carry the Running row's workload_addr"
-    )]
     async fn install_failure_supersedes_running_with_failed_and_never_releases_the_gate() {
         for (label, cause, expected_stage) in install_error_cases() {
             let expected_detail = cause.to_string();

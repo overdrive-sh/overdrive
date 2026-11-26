@@ -559,7 +559,6 @@ fn assert_abandoned_superseded(rows: &[AllocStatusRow], expected: usize, context
 
 /// Boundary 4a (e), edge: the signal for workload X never reaches workload Y's launch.
 #[tokio::test]
-#[should_panic(expected = "a superseded launch ends its Pending row as an abandoned row")]
 async fn supersede_lane_for_one_workload_never_raises_another_workloads_lane() {
     let mut rig = Rig::new().await;
     rig.declare("lane-x").await;
@@ -615,7 +614,6 @@ async fn supersede_lane_never_cancels_the_shutdown_token() {
 /// Seeded schedule (boundary 4a (h), edge): wherever `supersede_all_lanes` falls in a
 /// sequence of lane opens, every launch abandons. The position comes from the printed seed.
 #[tokio::test]
-#[should_panic(expected = "a superseded launch ends its Pending row as an abandoned row")]
 async fn supersede_all_lanes_at_any_point_of_a_seeded_schedule_abandons_every_launch() {
     const LANES: u64 = 3;
     for seed in 0_u64..4 {
@@ -794,7 +792,6 @@ async fn evaluations_submitted_for_a_busy_target_never_raise_its_lane() {
 /// claim, the guest network lease and the SVID, and the dispatch returned `Ok(())`. No simulated clock
 /// advances.
 #[tokio::test]
-#[should_panic(expected = "a superseded launch ends its Pending row as an abandoned row")]
 async fn a_restart_while_a_launch_waits_ends_it_at_once_and_charges_nothing() {
     let mut rig = Rig::new().await;
     rig.declare("lane-x").await;
@@ -848,7 +845,6 @@ async fn a_restart_while_a_launch_waits_ends_it_at_once_and_charges_nothing() {
 /// workload stays down: the stop's evaluation starts nothing, and only the next restart places a new
 /// launch.
 #[tokio::test]
-#[should_panic(expected = "a superseded launch ends its Pending row as an abandoned row")]
 async fn a_stop_while_a_launch_waits_ends_it_and_the_workload_stays_down_until_the_next_restart() {
     let mut rig = Rig::new().await;
     rig.declare("lane-x").await;
@@ -884,7 +880,6 @@ async fn a_stop_while_a_launch_waits_ends_it_and_the_workload_stays_down_until_t
 /// running workload waits ends that launch: no successor row, the successor's lease, SVID and
 /// supervision claim released, and the exact-old predecessor cleanup ran. Nothing is charged.
 #[tokio::test]
-#[should_panic(expected = "a superseded launch ends its Pending row as an abandoned row")]
 async fn a_second_restart_while_the_replacement_launch_waits_runs_the_exact_old_cleanup() {
     let mut rig = Rig::new().await;
     rig.declare("lane-x").await;
@@ -1025,10 +1020,11 @@ async fn a_driver_that_ignores_the_signal_is_unchanged() {
 /// The workload is stopped when the restart lands (the operator resumes it): a Running predecessor
 /// would spend the signalled evaluation on `StopAllocation`, and the `Start` would come in the next
 /// evaluation under a fresh, unraised lane, so the scenario would never reach its own superseded start.
-/// Pending until the generation rule lands: the compat rule counts the superseded launch's generation
-/// as handled, so the next evaluation relaunches nothing.
+/// Pending until the count rule lands (ADR-0355 § 2, RB-13): the superseded launch now ends its `Pending`
+/// row abandoned (a restartable current row), so the next evaluation relaunches and the generation ends
+/// with one Running allocation; the relaunch still counts the abandoned launch, so the budget is charged.
 #[tokio::test]
-#[should_panic(expected = "the generation ends with exactly one Running allocation")]
+#[should_panic(expected = "the superseded launch and its relaunch charge nothing")]
 async fn a_restart_the_evaluation_already_hydrated_sees_its_own_start_superseded_once() {
     let mut rig = Rig::new().await;
     rig.declare("lane-x").await;

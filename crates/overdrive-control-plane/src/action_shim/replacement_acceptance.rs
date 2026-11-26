@@ -741,7 +741,30 @@ async fn successor_and_cleanup_outcomes_follow_the_ratified_precedence_table() {
                         Some(&RecordingMtlsStateKind::Live)
                     );
                 } else {
-                    assert!(obs.alloc_status_row(&successor).await.unwrap().is_none());
+                    // ADR-0355 W3: a non-start driver error ends the launch with a
+                    // `Failed` `DriverInternalError` row carrying the Pending row's
+                    // address (ADR-0353 carry table), written before the error is
+                    // returned.
+                    let failed = obs
+                        .alloc_status_row(&successor)
+                        .await
+                        .unwrap()
+                        .expect("a failed successor start ends with its Failed row");
+                    assert_eq!(failed.state, AllocState::Failed);
+                    assert!(
+                        matches!(
+                            &failed.reason,
+                            Some(TransitionReason::DriverInternalError { detail })
+                                if detail.contains("injected successor start failure")
+                        ),
+                        "reason: {:?}",
+                        failed.reason
+                    );
+                    assert!(failed.terminal.is_none());
+                    assert!(
+                        failed.workload_addr.is_some(),
+                        "the Failed row carries the lease's address"
+                    );
                     assert!(!index.lock().contains_key(&successor));
                     assert!(!lifecycle.allocations.contains_key(&successor));
                 }
@@ -967,7 +990,18 @@ async fn rejected_successor_publication_fully_unwinds_without_immediate_second_p
         "rejected Running publication cannot make successor mTLS live"
     );
     assert_eq!(obs.running_attempts.load(Ordering::SeqCst), 1);
-    assert!(obs.alloc_status_row(&successor).await.unwrap().is_none());
+    // ADR-0353 / feature-delta "Launches that end before running" (W2-W4): the
+    // successor's VMM ran and its Running write was rejected (S9, R11), so the
+    // launch did not end before running; its `Pending` row, carrying the lease's
+    // address, stays until the next boot closes it.
+    let rejected_row = obs
+        .alloc_status_row(&successor)
+        .await
+        .unwrap()
+        .expect("the rejected successor's Pending row stays until boot");
+    assert_eq!(rejected_row.state, AllocState::Pending);
+    assert!(rejected_row.workload_addr.is_some(), "the Pending row carries the lease's address");
+    assert!(rejected_row.reason.is_none() && rejected_row.terminal.is_none());
     assert_eq!(obs.alloc_status_row(&predecessor).await.unwrap(), Some(before));
     assert_eq!(driver.starts.lock().as_slice(), std::slice::from_ref(&successor));
     assert_eq!(

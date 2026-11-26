@@ -244,9 +244,6 @@ proptest! {
     /// regression of the `Completed -> Terminated` mapping back to
     /// unconditional `Failed`.
     #[test]
-    #[should_panic(
-        expected = "a FinalizeFailed row forward-carries the prior row's workload_addr"
-    )]
     fn finalize_failed_genuine_terminal_forward_carries_workload_addr(
         a in any::<u8>(), b in any::<u8>(), c in any::<u8>(), d in any::<u8>(),
         terminal in prop_oneof![

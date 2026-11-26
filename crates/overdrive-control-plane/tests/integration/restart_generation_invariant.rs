@@ -1282,12 +1282,13 @@ async fn restart_of_a_running_workload_overridden_by_a_second_restart_places_exa
 
 /// PENDING (ADR-0335): a restart of a `Running` workload whose
 /// replacement launch is held is abandoned by node shutdown (`supersede_all_lanes`); the next boot
-/// relaunches the same generation once, uncharged. The signal ends the launch; the stamp-on-emit rule
-/// still counts the abandoned launch's generation as handled, so nothing is relaunched.
+/// relaunches the same generation once, uncharged. The launch ends its `Pending` row `LaunchSuperseded`
+/// (ADR-0355 W2), a restartable row, so the relaunch happens; it still counts the abandoned row, so the
+/// first failing assertion is the charge. Pending until the count rule of ADR-0355 section 2 lands.
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]
 #[should_panic(
-    expected = "the abandoned generation must be relaunched: after Shutdown the workload has no Running allocation for the committed generation 1"
+    expected = "an abandoned replacement launch must charge nothing"
 )]
 async fn restart_of_a_running_workload_abandoned_by_shutdown_is_relaunched_on_the_next_boot() {
     run_cell(Origin::RunningRestart, Interruption::Shutdown, Pre::None, "running-restart/shutdown")
@@ -1296,12 +1297,13 @@ async fn restart_of_a_running_workload_abandoned_by_shutdown_is_relaunched_on_th
 
 /// PENDING (ADR-0335): a restart of a `Running` workload whose replacement launch is held when the
 /// control plane dies. The View was persisted before the dispatch and records the issued id; the
-/// launch left no row. The next boot must relaunch the generation (it is handled only when its
-/// successor is observed). Today the generation is stamped on emit and the workload stays down.
+/// launch left its `Pending` row, which boot ends `LaunchLostWithControlPlane` (ADR-0355 W4) and the next
+/// evaluation relaunches. The relaunch still counts the abandoned row, so the first failing assertion is
+/// the charge. Pending until the count rule of ADR-0355 section 2 lands.
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]
 #[should_panic(
-    expected = "the abandoned generation must be relaunched: after Crash the workload has no Running allocation for the committed generation 1"
+    expected = "an abandoned replacement launch must charge nothing"
 )]
 async fn restart_of_a_running_workload_lost_with_the_control_plane_is_relaunched_on_the_next_boot()
 {
@@ -1332,11 +1334,12 @@ async fn resume_of_a_stopped_workload_overridden_by_a_second_restart_places_exac
 
 /// PENDING (ADR-0335): the resume of an operator-stopped
 /// workload whose launch is held is abandoned by node shutdown; the next boot relaunches it. The
-/// stamp-on-emit rule still counts the abandoned launch's generation as handled.
+/// launch ends `LaunchSuperseded` (ADR-0355 W1) and the relaunch still counts that row, so the first
+/// failing assertion is the charge. Pending until the count rule of ADR-0355 section 2 lands.
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]
 #[should_panic(
-    expected = "the abandoned generation must be relaunched: after Shutdown the workload has no Running allocation for the committed generation 1"
+    expected = "an abandoned replacement launch must charge nothing"
 )]
 async fn resume_of_a_stopped_workload_abandoned_by_shutdown_is_relaunched_on_the_next_boot() {
     run_cell(Origin::StoppedResume, Interruption::Shutdown, Pre::None, "stopped-resume/shutdown")
@@ -1344,13 +1347,13 @@ async fn resume_of_a_stopped_workload_abandoned_by_shutdown_is_relaunched_on_the
 }
 
 /// PENDING (ADR-0335): the resume of an operator-stopped workload whose launch is lost with the
-/// control plane. The operator-stop veto must not fire while the generation is pending: today the
-/// stamp-on-emit marks the generation handled, the veto re-arms against the old stopped row, and
-/// the workload stays down although the operator resumed it.
+/// control plane. Boot ends the `Pending` row `LaunchLostWithControlPlane` (ADR-0355 W4) and the
+/// workload is relaunched, but the relaunch still counts that row, so the first failing assertion is the
+/// charge. Pending until the count rule of ADR-0355 section 2 lands.
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]
 #[should_panic(
-    expected = "the abandoned generation must be relaunched: after Crash the workload has no Running allocation for the committed generation 1"
+    expected = "an abandoned replacement launch must charge nothing"
 )]
 async fn resume_of_a_stopped_workload_lost_with_the_control_plane_is_relaunched_on_the_next_boot() {
     run_cell(Origin::StoppedResume, Interruption::Crash, Pre::None, "stopped-resume/crash").await;
@@ -1367,7 +1370,7 @@ async fn resume_of_a_stopped_workload_lost_with_the_control_plane_is_relaunched_
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]
 #[should_panic(
-    expected = "a transient identity_issue failure must write a charged Failed row and be relaunched until a launch reaches the driver (ADR-0337)"
+    expected = "transient failures must present as Failed rows MtlsInterceptInstallFailed"
 )]
 async fn a_transient_identity_fault_then_an_interrupted_launch_places_once() {
     for (origin, label) in [
@@ -1718,7 +1721,7 @@ async fn job_identity_failure(seed: u64, label: &str) {
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]
 #[should_panic(
-    expected = "a Job whose SVID issuance fails must write exactly one Failed row (J-1)"
+    expected = "a Job whose SVID issuance fails must write one Failed row MtlsInterceptInstallFailed"
 )]
 async fn a_job_whose_identity_issuance_persistently_fails_is_finalised_failed_and_never_relaunched()
 {
@@ -1785,20 +1788,28 @@ async fn crash_restart_successor_abandoned(seed: u64, interruption: Interruption
     }
 }
 
-/// GUARD, charge (c): a crash-restart successor lost with the control plane is relaunched with the
-/// same count. It passes today: the crash restart has no generation, and the failed predecessor
-/// is still the current row.
+/// PENDING (ADR-0355 section 2, RB-13), charge (c): a crash-restart successor lost with the control
+/// plane is relaunched with the same count. It was a guard while an abandoned launch left no row; now
+/// boot ends the launch's `Pending` row `LaunchLostWithControlPlane` and the relaunch counts that row
+/// (2, not 1). Pending until the count rule lands.
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]
+#[should_panic(
+    expected = "a crash-restart relaunch must re-assign the count of the abandoned launch (1), not charge twice"
+)]
 async fn a_crash_restart_successor_lost_with_the_control_plane_is_relaunched_with_the_same_count() {
     for seed in SEEDS {
         crash_restart_successor_abandoned(seed, Interruption::Crash, "crash-restart/crash").await;
     }
 }
 
-/// ADR-0334: the same for a launch abandoned by node shutdown.
+/// PENDING (ADR-0355 section 2, RB-13): the same for a launch abandoned by node shutdown
+/// (`LaunchSuperseded`).
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]
+#[should_panic(
+    expected = "a crash-restart relaunch must re-assign the count of the abandoned launch (1), not charge twice"
+)]
 async fn a_crash_restart_successor_abandoned_by_shutdown_is_relaunched_with_the_same_count() {
     for seed in SEEDS {
         crash_restart_successor_abandoned(seed, Interruption::Shutdown, "crash-restart/shutdown")
@@ -1871,10 +1882,13 @@ async fn job_first_launch_abandoned(seed: u64, interruption: Interruption, label
     }
 }
 
-/// S-INV-01, Job dimension: a Job whose first launch is lost with the control plane is
-/// relaunched once on the next boot and is not finalised.
+/// PENDING (ADR-0355 section 2, RB-13), S-INV-01, Job dimension: a Job whose first launch is lost with
+/// the control plane is relaunched once on the next boot and is not finalised. `is_natural_exit`
+/// excludes the abandoned row, so the Job is relaunched and not finalised. Pending on the RB-13 count
+/// rule: the relaunch still charges the abandoned launch (restart_counts = 1) instead of nothing.
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]
+#[should_panic(expected = "a launch abandoned before anything ran must charge nothing")]
 async fn a_job_whose_first_launch_is_lost_with_the_control_plane_is_relaunched_once_and_not_finalised()
  {
     for seed in SEEDS {
@@ -1882,10 +1896,12 @@ async fn a_job_whose_first_launch_is_lost_with_the_control_plane_is_relaunched_o
     }
 }
 
-/// S-INV-01, Job dimension: a Job whose first launch is abandoned by node shutdown is
-/// relaunched once on the next boot and is not finalised.
+/// PENDING (ADR-0355 section 2, RB-13), S-INV-01, Job dimension: a Job whose first launch is abandoned
+/// by node shutdown is relaunched once on the next boot and is not finalised. Pending on the RB-13
+/// count rule (see the lost-launch sibling).
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]
+#[should_panic(expected = "a launch abandoned before anything ran must charge nothing")]
 async fn a_job_whose_first_launch_is_abandoned_by_shutdown_is_relaunched_once_and_not_finalised() {
     for seed in SEEDS {
         job_first_launch_abandoned(seed, Interruption::Shutdown, "job/first-launch-shutdown").await;

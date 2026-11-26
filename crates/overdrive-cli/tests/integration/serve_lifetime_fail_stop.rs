@@ -136,7 +136,7 @@ const SUPERVISOR_FAIL_STOP_EVENT: &str = "guest_network.shared_owner_fail_stop";
 const SUPERVISOR_FAIL_STOP_CLEANUP: &str = "abandoned_to_shutdown";
 const UNHEALTHY_EVENT: &str = "guest_network.shared_owner_unhealthy";
 const RETRY_EVENT: &str = "guest_network.shared_owner_retry";
-const RECOVERED_EVENT: &str = "guest_network.shared_owner_recovered";
+const RESTORED_EVENT: &str = "guest_network.shared_owner_restored";
 /// Harness bound for the real composition to boot.
 const BOOT_BOUND: Duration = Duration::from_secs(90);
 /// Pre-fault window spanning at least one one-second supervisor audit.
@@ -353,10 +353,10 @@ fn tproxy_ports(listing: &Value) -> Vec<u16> {
         .collect()
 }
 
-/// The recorded leg-F and leg-C listener targets, read from the kernel. The
-/// prerouting chain carries exactly two TPROXY rules; in chain order the first
-/// targets leg F and the second leg C.
-fn recorded_listener_targets() -> (u16, u16) {
+/// The recorded leg-C listener target, read from the kernel. The prerouting
+/// chain carries exactly one TPROXY rule, the registered-destination diversion
+/// to leg C; the program has no leg-F rule.
+fn recorded_listener_target() -> u16 {
     let output = Command::new("nft")
         .args([
             "-j",
@@ -378,12 +378,10 @@ fn recorded_listener_targets() -> (u16, u16) {
     let listing: Value =
         serde_json::from_slice(&output.stdout).expect("the nft JSON listing parses");
     let ports = tproxy_ports(&listing);
-    let [leg_f, leg_c] = ports.as_slice() else {
-        panic!(
-            "expected exactly two TPROXY targets (leg F, leg C) in the listing, found {ports:?}"
-        );
+    let [leg_c] = ports.as_slice() else {
+        panic!("expected exactly one TPROXY target (leg C) in the listing, found {ports:?}");
     };
-    (*leg_f, *leg_c)
+    *leg_c
 }
 
 /// Assert that `wrong` differs from `recorded` in exactly one owned constant
@@ -463,35 +461,37 @@ impl Drop for RetargetedSharedRule {
 async fn retarget_one_owned_ipv4_rule(
     capture: &Capture,
 ) -> (Duration, Captured, RetargetedSharedRule) {
-    let (leg_f, leg_c) = recorded_listener_targets();
+    let leg_c = recorded_listener_target();
+    // The shared program carries no leg-F rule, so the leg-F port does not
+    // enter the identity; any non-zero value builds the same program.
+    let leg_f = leg_c;
     let recorded = SharedIpInterceptIdentity::for_listener_ports(leg_f, leg_c)
         .expect("canonical identity for the recorded listener targets");
     assert_eq!(
         observe_shared_ipv4_program().as_ref(),
         Some(&recorded),
-        "precondition: the listed TPROXY targets (leg F {leg_f}, leg C {leg_c}) rebuild exactly \
+        "precondition: the listed TPROXY targets (leg C {leg_c}) rebuild exactly \
          the program the adapter observes"
     );
-    let wrong_leg_f = (1..=u16::MAX)
-        .map(|step| leg_f.wrapping_add(step))
-        .find(|port| ![0, leg_f, leg_c].contains(port))
-        .expect("a non-zero listener target distinct from both recorded targets");
-    let wrong = SharedIpInterceptIdentity::for_listener_ports(wrong_leg_f, leg_c)
-        .expect("canonical identity for the wrong leg-F target");
+    let wrong_leg_c = (1..=u16::MAX)
+        .map(|step| leg_c.wrapping_add(step))
+        .find(|port| *port != 0 && *port != leg_c)
+        .expect("a non-zero listener target distinct from the recorded target");
+    let wrong = SharedIpInterceptIdentity::for_listener_ports(leg_f, wrong_leg_c)
+        .expect("canonical identity for the wrong leg-C target");
     let changed_rule = one_differing_owned_rule(&recorded, &wrong);
 
     let fault_at = capture.start.elapsed();
     nft::replace_shared_ip_intercept_atomically(Some(&recorded), Some(&wrong)).expect(
-        "rewrite the owned leg-F rule to the wrong target (the conditional replace refuses \
+        "rewrite the owned leg-C rule to the wrong target (the conditional replace refuses \
          non-empty sets; this proof deploys nothing)",
     );
     let retarget = RetargetedSharedRule {
         wrong,
         record: format!(
             "fault +{}ms: rewrote `ip {SHARED_IPV4_INTERCEPT_TABLE}` \
-             {SHARED_IPV4_PREROUTING_CHAIN} rule {changed_rule} from leg-F target \
-             127.0.0.1:{leg_f} to 127.0.0.1:{wrong_leg_f}; leg C 127.0.0.1:{leg_c}, the table \
-             and chains, the set schemas, and every output rule are unchanged",
+             {SHARED_IPV4_PREROUTING_CHAIN} rule {changed_rule} from leg-C target \
+             127.0.0.1:{leg_c} to 127.0.0.1:{wrong_leg_c}; the table and chains, the set schemas, and every output rule are unchanged",
             fault_at.as_millis()
         ),
     };
@@ -515,9 +515,13 @@ async fn retarget_one_owned_ipv4_rule(
 }
 
 fn staging_root(prefix: &str) -> tempfile::TempDir {
+    let root = shared_staging_root();
+    // `VmFixture::provision` creates the staging root, and these tests do not
+    // call it; create it here, idempotently.
+    std::fs::create_dir_all(&root).expect("create the metal staging root");
     tempfile::Builder::new()
         .prefix(prefix)
-        .tempdir_in(shared_staging_root())
+        .tempdir_in(root)
         .expect("proof tempdir on the metal staging root")
 }
 
@@ -843,7 +847,7 @@ fn a_repaired_shared_network_loss_never_ends_serve() {
         let pending_through_window = !lifetime.is_finished();
         let fail_stop_events = capture.count(SUPERVISOR_FAIL_STOP_EVENT);
         let unhealthy = capture.first(UNHEALTHY_EVENT);
-        let recovered = capture.first(RECOVERED_EVENT);
+        let restored = capture.first(RESTORED_EVENT);
         let program_after_window = observe_shared_ipv4_program();
         let armed_through_window = clock.armed();
 
@@ -893,12 +897,12 @@ fn a_repaired_shared_network_loss_never_ends_serve() {
             Verdict {
                 claim: "the supervisor reports the repair after detecting the loss",
                 green: matches!(
-                    (&unhealthy, &recovered),
-                    (Some(unhealthy), Some(recovered)) if recovered.at >= unhealthy.at
+                    (&unhealthy, &restored),
+                    (Some(unhealthy), Some(restored)) if restored.at >= unhealthy.at
                 ),
                 evidence: format!(
-                    "{RECOVERED_EVENT}: {}",
-                    describe_event(recovered.as_ref(), lost_at)
+                    "{RESTORED_EVENT}: {}",
+                    describe_event(restored.as_ref(), lost_at)
                 ),
             },
             Verdict {
@@ -942,7 +946,7 @@ fn a_repaired_shared_network_loss_never_ends_serve() {
             capture.render(&[
                 UNHEALTHY_EVENT,
                 RETRY_EVENT,
-                RECOVERED_EVENT,
+                RESTORED_EVENT,
                 SUPERVISOR_FAIL_STOP_EVENT
             ])
         );

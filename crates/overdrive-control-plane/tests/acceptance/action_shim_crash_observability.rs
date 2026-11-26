@@ -306,7 +306,9 @@ async fn driver_rejected_start_persists_failed_occurrence_before_release() {
     assert_eq!(outcome.row.state, AllocState::Failed);
     assert_eq!(outcome.occurrence.alloc_id, outcome.row.alloc_id);
     assert_eq!(outcome.occurrence.to, outcome.row.state);
-    assert_eq!(outcome.occurrence.from, AllocLifecyclePredecessor::Absent);
+    // ADR-0353: the launch wrote its `Pending` row before the VMM could exist, so
+    // the rejected start's `Failed` row supersedes it.
+    assert_eq!(outcome.occurrence.from, AllocLifecyclePredecessor::State(AllocState::Pending));
     assert_eq!(outcome.occurrence.source, TransitionSource::Driver(DriverType::Vm));
     assert_eq!(outcome.terminal_calls, 1, "supervision releases only after Failed is durable");
     assert_eq!(outcome.teardown_attempts, 1);

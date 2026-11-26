@@ -1832,7 +1832,14 @@ fn is_natural_exit(row: &AllocStatusRow) -> bool {
     // platform-reclaimed row (its `state == Terminated` and it is not
     // `is_intentionally_stopped`), so the allocation is genuinely
     // re-driven rather than finalised.
-    row.state.is_terminal() && !is_intentionally_stopped(row) && !is_platform_reclaimed(row)
+    //
+    // `&& !is_launch_abandoned(row)` (ADR-0355): a launch that ended before
+    // it ran did not exit, so a Job whose launch never ran is relaunched,
+    // not finalised `Failed { exit_code: Some(0) }`.
+    row.state.is_terminal()
+        && !is_intentionally_stopped(row)
+        && !is_platform_reclaimed(row)
+        && !is_launch_abandoned(row)
 }
 
 /// Classify a natural-exit alloc row into the typed

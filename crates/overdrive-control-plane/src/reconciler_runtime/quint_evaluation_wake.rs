@@ -36,7 +36,7 @@
 //! | `Tick` | the period timer is not a driving port (the driver calls `resync_reconciler` directly): the runtime is driven to quiescence and the comparison checks the timer firing changed no broker state |
 //! | `PassStep({enumOk})` | `resync_reconciler(state, <the next reconciler in pass order>)`; `enumOk = false` arms a sticky read fault at the `SimObservationStore` for that reconciler's enumeration read (allocation rows for `workload-lifecycle` / `service-lifecycle` / `svid-lifecycle`, service rows for `service-map-hydrator`), disarmed after the call |
 //! | `Drain` | `BrokerDrain::drain_pending(cap - in_flight, in_flight_targets, now, now_unix)`; the admitted evaluations are the driver's in-flight set (its stimulus) |
-//! | `Finish({k, o})` | `run_convergence_tick` for the admitted evaluation of `k`, with `o` injected at its driven port first: `ok` none; `dpFail` `SimDataplane::script_update_service_failure`; `hydrateErr` a sticky read fault at `SimObservationStore`; `persistErr` a failing durable write at the View store; `dispatchErr` a one-shot write failure at `SimObservationStore` (`inject_alloc_lifecycle_write_failure` for `workload-lifecycle`, and for `service-lifecycle` while the listener has no VIP, because it then writes no service row (its write is the Stable commit); `inject_write_failure` for `service-map-hydrator`, for `service-lifecycle` with a VIP (the service-row writers) and for `svid-lifecycle` (the `IssueSvid` audit write goes through `ObservationStore::write`, so a failed issue leaves the SVID unheld and puts `k4` in its own backoff window)). The handoff wakes (`k1` -> `k3`, `k4`; `k3` -> `k2`, only with a VIP) are submitted by the production action shim during the tick, not by the driver |
+//! | `Finish({k, o})` | `run_convergence_tick` for the admitted evaluation of `k`, with `o` injected at its driven port first: `ok` none; `dpFail` `SimDataplane::script_update_service_failure`; `hydrateErr` a sticky read fault at `SimObservationStore`; `persistErr` a failing durable write at the View store; `dispatchErr` a one-shot write failure at `SimObservationStore` (for `workload-lifecycle` the failure is queued as `inject_alloc_lifecycle_write_failure` when the driver starts, so it lands on the `Running` write after the SVID is held, the shim having written `Pending` before; and for `service-lifecycle` while the listener has no VIP, because it then writes no service row (its write is the Stable commit); `inject_write_failure` for `service-map-hydrator`, for `service-lifecycle` with a VIP (the service-row writers) and for `svid-lifecycle` (the `IssueSvid` audit write goes through `ObservationStore::write`, so a failed issue leaves the SVID unheld and puts `k4` in its own backoff window)). The handoff wakes (`k1` -> `k3`, `k4`; `k3` -> `k2`, only with a VIP) are submitted by the production action shim during the tick, not by the driver |
 //! | `DivergeWake({k})` | the world change of `DivergeDrop`, then `ReconcilerRuntime::submit_evaluation(.., Immediate)` |
 //! | `DivergeDrop({k})` | the world change alone, through the intent store and `SimObservationStore` (see below) |
 //! | `EdgeWake({k})` | `ReconcilerRuntime::submit_evaluation(.., Immediate)` |
@@ -116,7 +116,11 @@ use overdrive_core::id::{AllocationId, NodeId, ServiceId, ServiceVip, WorkloadId
 use overdrive_core::reconcilers::{ReconcilerName, TargetResource};
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::dataplane::{Backend, DataplaneError};
-use overdrive_core::traits::driver::{Driver as DriverPort, DriverType};
+use overdrive_core::traits::driver::{
+    AllocationHandle, AllocationSpec, AllocationState, Driver as DriverPort,
+    DriverError as PortDriverError,
+    DriverType, LaunchSupersession, Resources,
+};
 use overdrive_core::traits::intent_store::IntentStore;
 use overdrive_core::traits::observation_store::{
     AllocState, AllocStatusRow, LogicalTimestamp, ObservationStore, ObservationStoreError,
@@ -338,6 +342,72 @@ impl ViewStore for FaultableViewStore {
     }
 }
 
+/// The sim driver with one driven-port seam: a `Running`-write fault armed when the driver
+/// starts. The shim writes the launch's `Pending` row before `driver.start` (ADR-0353), so a
+/// store failure queued at start lands on the `Running` write, the point the model's `dispatchErr`
+/// of `k1` names (after the SVID is issued and held).
+struct StartFaultDriver {
+    inner: SimDriver,
+    obs: Arc<SimObservationStore>,
+    armed: parking_lot::Mutex<Option<ObservationStoreError>>,
+}
+
+impl StartFaultDriver {
+    fn arm_running_write_failure(&self, error: ObservationStoreError) {
+        *self.armed.lock() = Some(error);
+    }
+
+    fn disarm(&self) {
+        *self.armed.lock() = None;
+    }
+}
+
+#[async_trait]
+impl DriverPort for StartFaultDriver {
+    fn r#type(&self) -> DriverType {
+        self.inner.r#type()
+    }
+
+    async fn start(
+        &self,
+        spec: &AllocationSpec,
+        supersession: &dyn LaunchSupersession,
+    ) -> std::result::Result<AllocationHandle, PortDriverError> {
+        let armed = self.armed.lock().take();
+        if let Some(error) = armed {
+            self.obs.inject_alloc_lifecycle_write_failure(error);
+        }
+        self.inner.start(spec, supersession).await
+    }
+
+    async fn stop(&self, handle: &AllocationHandle) -> std::result::Result<(), PortDriverError> {
+        self.inner.stop(handle).await
+    }
+
+    async fn status(
+        &self,
+        handle: &AllocationHandle,
+    ) -> std::result::Result<AllocationState, PortDriverError> {
+        self.inner.status(handle).await
+    }
+
+    async fn resize(
+        &self,
+        handle: &AllocationHandle,
+        resources: Resources,
+    ) -> std::result::Result<(), PortDriverError> {
+        self.inner.resize(handle, resources).await
+    }
+
+    async fn release_for_exit_emission(&self, handle: &AllocationHandle) {
+        self.inner.release_for_exit_emission(handle).await;
+    }
+
+    fn on_alloc_running(&self, spec: &AllocationSpec) {
+        self.inner.on_alloc_running(spec);
+    }
+}
+
 // ---------------------------------------------------------------- the world
 
 struct WakeWorld {
@@ -345,6 +415,7 @@ struct WakeWorld {
     obs: Arc<SimObservationStore>,
     clock: Arc<SimClock>,
     dataplane: Arc<SimDataplane>,
+    driver: Arc<StartFaultDriver>,
     view_store: Arc<FaultableViewStore>,
     /// The hydrator key's target, `service/<id>` of the `orders` listener.
     service_target: TargetResource,
@@ -382,7 +453,11 @@ impl WakeWorld {
         let store = Arc::new(LocalIntentStore::open(&store_path).expect("open intent store"));
         let obs = Arc::new(SimObservationStore::single_peer(node("local"), 0));
         let clock = Arc::new(SimClock::new());
-        let driver = Arc::new(SimDriver::with_clock(DriverType::Vm, clock.clone()));
+        let driver = Arc::new(StartFaultDriver {
+            inner: SimDriver::with_clock(DriverType::Vm, clock.clone()),
+            obs: Arc::clone(&obs),
+            armed: parking_lot::Mutex::new(None),
+        });
         let dataplane = Arc::new(SimDataplane::new());
         let allocator = crate::test_default_allocator(Arc::clone(&store) as Arc<dyn IntentStore>);
         let mtls_worker = crate::shared_network_test_ports::mtls_worker();
@@ -443,6 +518,7 @@ impl WakeWorld {
             obs,
             clock,
             dataplane,
+            driver,
             view_store,
             service_target: target(&format!("service/{service_id}")),
             service_id,
@@ -804,6 +880,11 @@ impl WakeWorld {
                 let writes_generic_row = key == Key::K4 || (key == Key::K3 && self.vip_assigned);
                 if writes_generic_row {
                     self.obs.inject_write_failure(error);
+                } else if key == Key::K1 {
+                    // The start path writes `Pending`, then issues and holds the SVID, then starts the
+                    // driver, then writes `Running`: the fault is queued at driver start so it lands
+                    // on the `Running` write (the model's orphan held SVID).
+                    self.driver.arm_running_write_failure(error);
                 } else {
                     self.obs.inject_alloc_lifecycle_write_failure(error);
                 }
@@ -824,6 +905,7 @@ impl WakeWorld {
         self.arm_read_fault(key.reconciler_name(), false);
         self.view_store.set_fsync_fails(false);
         self.obs.clear_write_failures();
+        self.driver.disarm();
         match (outcome, result) {
             (Outcome::Ok | Outcome::DpFail, Err(error)) => {
                 Err(DriverError::Tick(error.to_string()))

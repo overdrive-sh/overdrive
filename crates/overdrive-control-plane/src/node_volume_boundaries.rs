@@ -253,7 +253,6 @@ fn assert_one_abandoned_superseded_row(rows: &[AllocStatusRow]) {
 /// Pending (ADR-0353, ADR-0355 W1): today the superseded launch writes no row, so the body
 /// fails at the abandoned-row assertion.
 #[test]
-#[should_panic(expected = "a superseded launch ends its Pending row as an abandoned row")]
 fn a_stop_interrupts_the_start_and_its_result_is_never_used() {
     let mut rig = Rig::new();
     rig.declare();
@@ -510,9 +509,6 @@ mod loop_shutdown {
     /// `Driver::start`. The launch returns `StartSuperseded`, its `Pending` row ends abandoned (ADR-0355), the loop drains and
     /// exits, and the simulated clock never advances (the launch's own bound is never reached).
     #[tokio::test(flavor = "current_thread")]
-    #[should_panic(
-        expected = "a launch abandoned by shutdown ends its Pending row as an abandoned row"
-    )]
     async fn node_shutdown_ends_a_waiting_launch_with_an_abandoned_row_and_the_loop_exits() {
         let rig = LoopRig::new().await;
         let park = rig.sim.park_next_start(true);

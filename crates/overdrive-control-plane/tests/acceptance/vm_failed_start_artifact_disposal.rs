@@ -294,10 +294,14 @@ async fn failed_vm_cleanup_hands_only_stranded_vm_artifacts_to_disposal() {
     assert!(detail.contains("injected VMM create rejection"));
     assert!(detail.contains("rootfs clone remove:"));
     let occurrences = obs.alloc_lifecycle_occurrences(&alloc).await.expect("read occurrences");
-    assert_eq!(occurrences.len(), 1);
+    // ADR-0353: the launch's `Pending` row precedes the VMM create, so the
+    // allocation's history is `Absent -> Pending -> Failed`.
+    assert_eq!(occurrences.len(), 2);
     assert_eq!(occurrences[0].from, AllocLifecyclePredecessor::Absent);
-    assert_eq!(occurrences[0].to, AllocState::Failed);
-    assert_eq!(occurrences[0].source, TransitionSource::Driver(DriverType::Vm));
+    assert_eq!(occurrences[0].to, AllocState::Pending);
+    assert_eq!(occurrences[1].from, AllocLifecyclePredecessor::State(AllocState::Pending));
+    assert_eq!(occurrences[1].to, AllocState::Failed);
+    assert_eq!(occurrences[1].source, TransitionSource::Driver(DriverType::Vm));
     assert_eq!(driver.live_allocations(), Some(Vec::new()), "claim releases after the write");
     assert_eq!(vmm.creates.load(Ordering::SeqCst), 1);
     assert_eq!(vmm.terminates.load(Ordering::SeqCst), 0, "no VMM control/EXEC existed");

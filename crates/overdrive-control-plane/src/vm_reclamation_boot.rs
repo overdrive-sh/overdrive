@@ -44,10 +44,13 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use overdrive_core::reconcilers::Action;
 use overdrive_core::traits::driver::DriverType;
+use overdrive_core::traits::observation_store::{AllocState, LogicalTimestamp, TransitionSource};
+use overdrive_core::transition_reason::TransitionReason;
 use overdrive_reconcilers::vm_reclamation::SupervisionSet;
 use overdrive_reconcilers::{VmReclamationState, plan_reclamation};
 
 use crate::AppState;
+use crate::action_shim::abandoned_launch_row;
 use crate::action_shim::reclamation::{
     ReclamationError, execute_discard_stranded_artifacts, execute_reclaim_allocation,
 };
@@ -73,6 +76,12 @@ use crate::reconciler_runtime::build_hydration_context;
               borrow-bundle and must outlive the desired-side join .await"
 )]
 pub async fn converge(state: &AppState) -> Result<(), ConvergeError> {
+    // ADR-0355 W4: the first step closes every launch the previous control
+    // plane left unfinished, before anything is observed or killed, so the
+    // executors below meet a terminal row and never write a second reason for
+    // the same fact.
+    close_lost_launches(state).await?;
+
     // brief.md §105a.2's pinned order, extended to the desired side by
     // §105a.6: rows (this drive's own `hydrate_vm_reclamation_desired`
     // call) FIRST, THEN `observe()`, supervision LAST. The
@@ -145,6 +154,33 @@ pub async fn converge(state: &AppState) -> Result<(), ConvergeError> {
             // populate it.
             _ => {}
         }
+    }
+    Ok(())
+}
+
+/// End every `Pending` row of this node `Terminated` /
+/// `LaunchLostWithControlPlane` with the row's address carried (ADR-0355 W4).
+///
+/// A boot process owns no launch from before the restart, and boot
+/// reclamation completes before the convergence loop dispatches anything, so
+/// every `Pending` row of this node at this point belongs to a dead launch,
+/// whether or not its VM left a scope, a run directory or a clone. The step is
+/// idempotent (the row it writes is terminal), reserves nothing and kills
+/// nothing. Another node's `Pending` row is not this boot's launch.
+async fn close_lost_launches(state: &AppState) -> Result<(), ReclamationError> {
+    let rows = state.obs.alloc_status_rows().await?;
+    let tick_floor = state.clock.unix_now().as_secs();
+    for pending in
+        rows.iter().filter(|row| row.state == AllocState::Pending && row.node_id == state.node_id)
+    {
+        let updated_at = LogicalTimestamp::dominating(
+            tick_floor,
+            state.node_id.clone(),
+            Some(&pending.updated_at),
+        );
+        let closed =
+            abandoned_launch_row(pending, TransitionReason::LaunchLostWithControlPlane, updated_at);
+        state.obs.write_alloc_lifecycle(closed, TransitionSource::Reconciler).await?;
     }
     Ok(())
 }
@@ -1784,6 +1820,7 @@ mod mid_boot_volume_reclamation {
     fn running_row(
         alloc_id: &AllocationId,
         workload_addr: Option<std::net::Ipv4Addr>,
+        pending: &LogicalTimestamp,
     ) -> AllocStatusRow {
         let node = NodeId::new("local").expect("valid NodeId");
         AllocStatusRow {
@@ -1791,8 +1828,8 @@ mod mid_boot_volume_reclamation {
             workload_id: workload(),
             node_id: node.clone(),
             state: AllocState::Running,
-            // Dominates the launch's `Pending` row (counter 1).
-            updated_at: LogicalTimestamp { counter: 2, writer: node },
+            // Dominates the launch's stored `Pending` row, as the shim's Running write does.
+            updated_at: LogicalTimestamp::dominating(0, node, Some(pending)),
             reason: Some(TransitionReason::Started),
             detail: None,
             terminal: None,
@@ -1857,7 +1894,7 @@ mod mid_boot_volume_reclamation {
         if matches!(residue, Residue::RunningRow) {
             node.obs
                 .write_alloc_lifecycle(
-                    running_row(&orphan_alloc, recorded_addr),
+                    running_row(&orphan_alloc, recorded_addr, &pending.updated_at),
                     TransitionSource::Reconciler,
                 )
                 .await
@@ -1941,7 +1978,6 @@ mod mid_boot_volume_reclamation {
     /// before `Vmm::create`, so the precondition fails.
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[should_panic(expected = "the parked launch's Pending row is on record before its VMM exists")]
     async fn boot_reclamation_ends_a_mid_boot_vmm_before_any_launch_for_its_workload() {
         scenario(Residue::NoRow).await;
     }
@@ -1950,7 +1986,6 @@ mod mid_boot_volume_reclamation {
     /// reclamation is a `ReclaimAllocation`. PENDING on the same precondition.
     /// CONTRACT_SHAPE: bounded-change.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    #[should_panic(expected = "the parked launch's Pending row is on record before its VMM exists")]
     async fn boot_reclamation_ends_a_mid_boot_vmm_when_the_crash_left_a_running_row() {
         scenario(Residue::RunningRow).await;
     }
@@ -2178,7 +2213,6 @@ mod launches_lost_with_the_control_plane {
     /// ends `Terminated` / `LaunchLostWithControlPlane`, address carried.
     /// CONTRACT_SHAPE: bounded-change. Universe: the node's rows.
     #[tokio::test]
-    #[should_panic(expected = "a launch lost with the control plane ends Terminated")]
     async fn a_pending_row_with_no_host_artifact_ends_as_lost_with_the_control_plane() {
         let tmp = TempDir::new().expect("tmpdir");
         let host = SimVmHostState::new();
@@ -2195,7 +2229,6 @@ mod launches_lost_with_the_control_plane {
     /// `Stopped { PlatformReclaimed }`; the executors discard the artifacts
     /// and leave the reason alone.
     #[tokio::test]
-    #[should_panic(expected = "the row names why: `launch abandoned: lost with the control plane`")]
     async fn a_pending_row_whose_vm_left_a_settled_scope_ends_as_lost_with_the_control_plane() {
         let tmp = TempDir::new().expect("tmpdir");
         let host = SimVmHostState::new();
@@ -2216,7 +2249,6 @@ mod launches_lost_with_the_control_plane {
     /// PENDING (RB-11). A second boot over the closed rows writes nothing: the
     /// closing step is idempotent.
     #[tokio::test]
-    #[should_panic(expected = "a launch lost with the control plane ends Terminated")]
     async fn a_second_boot_over_the_closed_rows_writes_nothing() {
         let tmp = TempDir::new().expect("tmpdir");
         let host = SimVmHostState::new();
@@ -2328,7 +2360,6 @@ mod launches_lost_with_the_control_plane {
     /// executor writes for a `Running` row whose scope settled carries the prior
     /// row's address (it was `None`).
     #[tokio::test]
-    #[should_panic(expected = "the platform-reclaimed row carries the prior row's workload_addr")]
     async fn a_platform_reclaimed_row_carries_the_prior_rows_address() {
         let tmp = TempDir::new().expect("tmpdir");
         let host = SimVmHostState::new();

@@ -505,9 +505,6 @@ fn a_shutdown_abandoned_replacement_is_relaunched_as_a_generation_replacement_wi
 /// `is_natural_exit` excludes an abandoned row: a Job's launch that ended before it ran is
 /// relaunched, never finalised `Failed { exit_code: Some(0) }` as if the workload had exited.
 #[test]
-#[should_panic(
-    expected = "a Job whose launch never ran must not be finalised Failed { exit_code: Some(0) }"
-)]
 fn a_job_whose_launch_never_ran_is_relaunched_and_not_finalised() {
     for why in Abandon::BOTH {
         let rows = [abandoned(0, WorkloadKind::Job, why)];

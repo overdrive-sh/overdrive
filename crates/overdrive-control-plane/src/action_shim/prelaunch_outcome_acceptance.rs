@@ -1004,7 +1004,6 @@ fn assert_abandoned_launch_row(row: &AllocStatusRow, address: Option<Ipv4Addr>, 
 /// lease, the held SVID, the driver's supervision releases. Today the shim
 /// writes no row, so the allocation has none.
 #[tokio::test]
-#[should_panic(expected = "a superseded launch ends its Pending row with an abandoned row")]
 async fn start_arm_superseded_launch_ends_its_row_as_abandoned_and_releases_lease_svid_and_claim() {
     let driver = Arc::new(ScriptedStartDriver::new());
     let rig = Rig::build(Arc::clone(&driver) as Arc<dyn Driver>).await;
@@ -1050,7 +1049,6 @@ async fn start_arm_superseded_launch_ends_its_row_as_abandoned_and_releases_leas
 /// and supervision claim, leaves the predecessor's row unchanged, and still
 /// runs the exact-old predecessor cleanup once.
 #[tokio::test]
-#[should_panic(expected = "a superseded successor ends its Pending row with an abandoned row")]
 async fn restart_arm_superseded_successor_ends_its_row_as_abandoned_and_runs_exact_old_predecessor_cleanup()
  {
     let driver = Arc::new(ScriptedStartDriver::new());
@@ -1100,7 +1098,6 @@ async fn restart_arm_superseded_successor_ends_its_row_as_abandoned_and_runs_exa
 /// suppress the abandoned row: the row is written, then the teardown error is
 /// returned.
 #[tokio::test]
-#[should_panic(expected = "the abandoned row is written even when the lease teardown fails")]
 async fn start_arm_teardown_failure_does_not_suppress_the_abandoned_row() {
     let driver = Arc::new(ScriptedStartDriver::new());
     let rig = Rig::build(Arc::clone(&driver) as Arc<dyn Driver>).await;
@@ -1125,9 +1122,6 @@ async fn start_arm_teardown_failure_does_not_suppress_the_abandoned_row() {
 /// abandoned row is the typed observation error; the `Pending` row stays for
 /// the next boot to close.
 #[tokio::test]
-#[should_panic(
-    expected = "a failing abandoned-row write is returned as the typed observation error"
-)]
 async fn start_arm_failing_abandoned_row_write_is_returned_as_the_typed_observation_error() {
     let driver = Arc::new(ScriptedStartDriver::new());
     let rig = Rig::build(Arc::clone(&driver) as Arc<dyn Driver>).await;
@@ -1154,9 +1148,6 @@ async fn start_arm_failing_abandoned_row_write_is_returned_as_the_typed_observat
 /// failure), carrying the address and releasing the lease; the launch is never
 /// left as a `Pending` row. Today the arm returns the error and writes no row.
 #[tokio::test]
-#[should_panic(
-    expected = "a non-start driver error ends the launch in a Failed DriverInternalError row"
-)]
 async fn start_arm_a_non_start_driver_error_ends_in_a_failed_driver_internal_error_row() {
     let driver = Arc::new(ScriptedStartDriver::other_error());
     let rig = Rig::build(Arc::clone(&driver) as Arc<dyn Driver>).await;
@@ -1191,7 +1182,6 @@ async fn start_arm_a_non_start_driver_error_ends_in_a_failed_driver_internal_err
 /// CONTRACT_SHAPE: bounded-change. Universe: the allocation's row at the
 /// instant of `Driver::start`.
 #[tokio::test]
-#[should_panic(expected = "the store holds the launch's Pending row when the driver starts")]
 async fn start_arm_records_the_pending_row_with_the_leases_address_before_the_driver_starts() {
     let driver = Arc::new(ScriptedStartDriver::new());
     let rig = Rig::build(Arc::clone(&driver) as Arc<dyn Driver>).await;
@@ -1213,7 +1203,6 @@ async fn start_arm_records_the_pending_row_with_the_leases_address_before_the_dr
 /// row with the successor lease's address before the successor reaches the
 /// driver.
 #[tokio::test]
-#[should_panic(expected = "the store holds the successor's Pending row when the driver starts")]
 async fn restart_arm_records_the_successors_pending_row_with_the_leases_address_before_the_driver_starts()
  {
     let driver = Arc::new(ScriptedStartDriver::new());
@@ -1240,7 +1229,6 @@ async fn restart_arm_records_the_successors_pending_row_with_the_leases_address_
 /// exist: the driver is never reached, the lease is retired and torn down, and
 /// the typed error is returned.
 #[tokio::test]
-#[should_panic(expected = "the driver is never reached when the Pending write fails")]
 async fn start_arm_failing_pending_write_never_reaches_the_driver_and_releases_the_lease() {
     let driver = Arc::new(ScriptedStartDriver::new());
     let rig = Rig::build(Arc::clone(&driver) as Arc<dyn Driver>).await;
@@ -1265,7 +1253,6 @@ async fn start_arm_failing_pending_write_never_reaches_the_driver_and_releases_t
 /// PENDING (RB-6, ADR-0353 terminal-row carry). The `Failed` row of a start the
 /// driver rejects carries the `Pending` row's address.
 #[tokio::test]
-#[should_panic(expected = "the Failed row of a rejected start carries the Pending row's address")]
 async fn start_arm_failed_start_row_carries_the_pending_rows_address() {
     let driver = Arc::new(SimDriver::new(DriverType::Vm));
     driver.script_next_start_rejection(Some("scripted rejection"));
@@ -1352,7 +1339,6 @@ async fn a_stop_keeps_the_lease_held_while_the_vms_scope_is_present_and_a_reclai
 /// the running row's `workload_addr`: boot reserves a stuck VM's offset from the
 /// allocation's last row, and a stopped-but-unreaped VMM is exactly that VM.
 #[tokio::test]
-#[should_panic(expected = "the stop's terminal row carries the prior row's workload_addr")]
 async fn a_stops_terminal_row_carries_the_prior_rows_workload_addr() {
     let id = "alloc-prelaunch-service-0";
     let (rig, _host) = running_vm_over_a_host(id).await;
@@ -1858,7 +1844,7 @@ async fn a_job_identity_issue_failure_writes_the_same_failed_row() {
 /// PENDING (S5, teardown fault). A guest-network teardown failure does not
 /// suppress the row, and is returned after it.
 #[tokio::test]
-#[should_panic(expected = "the identity_issue row is written even when the lease teardown fails")]
+#[should_panic(expected = "expected MtlsInterceptInstallFailed identity_issue, got None")]
 async fn start_arm_teardown_failure_does_not_suppress_the_identity_issue_row() {
     let driver = Arc::new(SimDriver::new(DriverType::Vm));
     let rig = Rig::build(Arc::clone(&driver) as Arc<dyn Driver>).await;

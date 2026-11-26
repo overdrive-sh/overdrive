@@ -1042,9 +1042,12 @@ async fn restart_orphan_terminal_row_is_byte_unchanged_after_reclamation() {
 /// `reason: Stopped { by: Reconciler }` -- the shim's own `StopAllocation`
 /// arm disposition) while the scope removal genuinely fails (the induced
 /// cgroup-child fault). The later sweep's `DiscardStrandedArtifacts`
-/// reclaims the artifacts and writes NO row -- the row is byte-unchanged
-/// at every field this wire surface exposes, same shape as S-VM-25
-/// shape (a).
+/// reclaims the artifacts and writes NO row -- the STORED row is
+/// byte-unchanged, same shape as S-VM-25 shape (a). `network_cleanup_pending`
+/// is not stored: describe projects it from the guest pool's lease, so it
+/// reads `true` while the stop's lease is still Admitted and `false` once
+/// reclamation releases it. It is excluded from the stored-row comparison and
+/// asserted separately.
 #[overdrive_test(guest = "cgroup-default", profile = "nested-launch-rustc")]
 #[tokio::test]
 #[serial(cgroup)]
@@ -1108,9 +1111,24 @@ async fn failed_stop_orphan_terminal_row_is_byte_unchanged_after_reclamation() {
         .await
         .expect("describe after reclamation");
     let after_row = after.snapshot.rows.first().expect("one row survives reclamation");
+    assert!(
+        seeded_row.network_cleanup_pending,
+        "before reclamation the stop's Admitted lease still holds the network, so describe \
+         projects network_cleanup_pending = true"
+    );
+    assert!(
+        !after_row.network_cleanup_pending,
+        "reclamation releases the lease, so describe projects network_cleanup_pending = false"
+    );
+    // `network_cleanup_pending` is a describe-time projection of the lease, not a
+    // stored field; compare the stored row with it normalised out.
+    let mut seeded_stored = seeded_row.clone();
+    let mut after_stored = after_row.clone();
+    seeded_stored.network_cleanup_pending = false;
+    after_stored.network_cleanup_pending = false;
     assert_eq!(
-        after_row, &seeded_row,
-        "the row must be byte-unchanged on every field this wire surface exposes -- \
+        after_stored, seeded_stored,
+        "the stored row must be byte-unchanged on every stored field -- \
          DiscardStrandedArtifacts writes no row at all"
     );
 

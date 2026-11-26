@@ -115,7 +115,10 @@ use overdrive_core::guest_network::{
 use overdrive_core::id::{AllocationId, CertSerial, NodeId, SpiffeId, WorkloadId};
 use overdrive_core::reconcilers::{Action, TickContext};
 use overdrive_core::traits::IdentityRead;
-use overdrive_core::traits::ca::{CaCertDer, CaCertPem, CaKeyPem, SvidMaterial};
+use overdrive_core::traits::ca::{
+    Ca, CaCertDer, CaCertPem, CaError, CaKeyPem, IntermediateHandle, RootCaHandle, SvidMaterial,
+    SvidRequest, TrustBundle,
+};
 use overdrive_core::traits::driver::{
     AllocationHandle, AllocationSpec, AllocationState, Driver, DriverError, DriverStartClass,
     DriverStartFailure, DriverType, LaunchSupersession, Resources,
@@ -350,6 +353,10 @@ where
 struct JournalDriver {
     inner: SimDriver,
     journal: Journal,
+    /// Runs once when the driver is started: the shim has written the launch's
+    /// `Pending` row by then (ADR-0353) and not yet the `Running` row, so a store
+    /// failure queued here lands on the `Running` write.
+    on_start: parking_lot::Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 
 #[async_trait::async_trait]
@@ -364,6 +371,10 @@ impl Driver for JournalDriver {
         supersession: &dyn LaunchSupersession,
     ) -> Result<AllocationHandle, DriverError> {
         record(&self.journal, Step::DriverStart, Some(&spec.alloc));
+        let hook = self.on_start.lock().take();
+        if let Some(hook) = hook {
+            hook();
+        }
         self.inner.start(spec, supersession).await
     }
 
@@ -498,6 +509,49 @@ struct ActivationRefusal {
     /// `(operation, expected, observed)` when the refusal is a source-less
     /// `GuestNetworkError::PostconditionMismatch`.
     mismatch: Option<(GuestNetworkOperation, GuestNetworkFact, Option<GuestNetworkFact>)>,
+}
+
+/// A workload CA that runs a one-shot hook when it mints a leaf, and delegates
+/// every call to the sim CA. The mint is followed by the audit write
+/// (`issued_certificates`), so a write failure queued from the hook lands on
+/// that audit write and on no earlier observation write of the dispatch (the
+/// launch's `Pending` row, ADR-0353, is written before the identity is issued).
+struct HookedCa {
+    inner: overdrive_sim::adapters::ca::SimCa,
+    on_issue: parking_lot::Mutex<Option<Box<dyn FnOnce() + Send>>>,
+}
+
+impl HookedCa {
+    fn new() -> Self {
+        Self {
+            inner: overdrive_sim::adapters::ca::SimCa::new(Arc::new(
+                overdrive_sim::adapters::entropy::SimEntropy::new(295),
+            )),
+            on_issue: parking_lot::Mutex::new(None),
+        }
+    }
+}
+
+impl Ca for HookedCa {
+    fn root(&self) -> Result<RootCaHandle, CaError> {
+        self.inner.root()
+    }
+
+    fn issue_intermediate(&self, node: &NodeId) -> Result<IntermediateHandle, CaError> {
+        self.inner.issue_intermediate(node)
+    }
+
+    fn issue_svid(&self, req: &SvidRequest) -> Result<SvidMaterial, CaError> {
+        let hook = self.on_issue.lock().take();
+        if let Some(hook) = hook {
+            hook();
+        }
+        self.inner.issue_svid(req)
+    }
+
+    fn trust_bundle(&self) -> Result<TrustBundle, CaError> {
+        self.inner.trust_bundle()
+    }
 }
 
 /// The one owner instance: a journaling decorator over the pinned
@@ -717,6 +771,20 @@ impl SeamFixture {
         owner: Arc<JournalOwner>,
         identity: Arc<overdrive_control_plane::identity_mgr::IdentityMgr>,
     ) -> Self {
+        let ca = Arc::new(overdrive_sim::adapters::ca::SimCa::new(Arc::new(
+            overdrive_sim::adapters::entropy::SimEntropy::new(295),
+        )));
+        Self::new_with_ca(driver, intercept, owner, identity, ca).await
+    }
+
+    /// [`SeamFixture::new`] over a caller-supplied workload CA.
+    async fn new_with_ca(
+        driver: Arc<dyn Driver>,
+        intercept: Arc<dyn MtlsIntercept>,
+        owner: Arc<JournalOwner>,
+        identity: Arc<overdrive_control_plane::identity_mgr::IdentityMgr>,
+        ca: Arc<dyn Ca>,
+    ) -> Self {
         let tmp = TempDir::new().expect("tempdir");
         let store_path = tmp.path().join("intent.redb");
         let store = Arc::new(LocalIntentStore::open(&store_path).expect("open store"));
@@ -750,9 +818,7 @@ impl SeamFixture {
             driver,
             clock,
             Arc::new(overdrive_sim::adapters::dataplane::SimDataplane::new()),
-            Arc::new(overdrive_sim::adapters::ca::SimCa::new(Arc::new(
-                overdrive_sim::adapters::entropy::SimEntropy::new(295),
-            ))),
+            ca,
             identity,
             NodeId::new("node-001").expect("node id"),
             build_vip_allocator(
@@ -802,15 +868,28 @@ async fn journaled_fixture(
     inner_owner: Arc<SimSharedGuestNetworkOwner>,
     refuse_activation: bool,
 ) -> (SeamFixture, Journal, tracing::subscriber::DefaultGuard) {
+    let (fixture, journal, guard, _driver) =
+        journaled_fixture_with_driver(inner_owner, refuse_activation).await;
+    (fixture, journal, guard)
+}
+
+/// [`journaled_fixture`], also returning the journaling driver so a test can
+/// install its `on_start` hook.
+async fn journaled_fixture_with_driver(
+    inner_owner: Arc<SimSharedGuestNetworkOwner>,
+    refuse_activation: bool,
+) -> (SeamFixture, Journal, tracing::subscriber::DefaultGuard, Arc<JournalDriver>) {
     let journal: Journal = Arc::new(parking_lot::Mutex::new(Vec::new()));
     let guard = tracing::subscriber::set_default(
         tracing_subscriber::registry().with(JournalLayer(Arc::clone(&journal))),
     );
+    let driver = Arc::new(JournalDriver {
+        inner: SimDriver::new(DriverType::Vm),
+        journal: Arc::clone(&journal),
+        on_start: parking_lot::Mutex::new(None),
+    });
     let fixture = SeamFixture::new(
-        Arc::new(JournalDriver {
-            inner: SimDriver::new(DriverType::Vm),
-            journal: Arc::clone(&journal),
-        }),
+        Arc::clone(&driver) as Arc<dyn Driver>,
         Arc::new(JournalIntercept {
             inner: SimMtlsIntercept::new(),
             journal: Arc::clone(&journal),
@@ -819,7 +898,7 @@ async fn journaled_fixture(
         Arc::new(overdrive_control_plane::identity_mgr::IdentityMgr::new(None)),
     )
     .await;
-    (fixture, journal, guard)
+    (fixture, journal, guard, driver)
 }
 
 // ---------------------------------------------------------------------------
@@ -904,8 +983,11 @@ struct LeaseRunningWriteRejectOutcome {
 /// write after provision and driver start, over the seam fixture and its one
 /// shared guest-network owner.
 async fn drive_running_write_rejection_over_the_seam(arm: Arm) -> LeaseRunningWriteRejectOutcome {
-    let (fixture, journal, _trace_guard) =
-        journaled_fixture(Arc::new(SimSharedGuestNetworkOwner::default()), false).await;
+    let (fixture, journal, _trace_guard, driver) = journaled_fixture_with_driver(
+        Arc::new(SimSharedGuestNetworkOwner::default()),
+        false,
+    )
+    .await;
     fixture.open_exec();
     let alloc = AllocationId::new(match arm {
         Arm::Start => "running-write-reject-start",
@@ -937,9 +1019,15 @@ async fn drive_running_write_rejection_over_the_seam(arm: Arm) -> LeaseRunningWr
             }
         }
     };
-    fixture.obs.inject_write_failure(ObservationStoreError::Unreachable {
-        peer: "rejected-running-write".to_owned(),
-    });
+    // ADR-0353: the launch's `Pending` row is written before the driver starts,
+    // so the rejection is queued when the driver starts, ahead of the `Running`
+    // write only (the store's existing `inject_write_failure` seam).
+    let obs = Arc::clone(&fixture.obs);
+    *driver.on_start.lock() = Some(Box::new(move || {
+        obs.inject_write_failure(ObservationStoreError::Unreachable {
+            peer: "rejected-running-write".to_owned(),
+        });
+    }));
     let result = fixture.dispatch(action).await;
     let steps = steps_for(&journal, &effect_alloc);
     LeaseRunningWriteRejectOutcome { result, alloc: effect_alloc, steps }
@@ -1644,7 +1732,8 @@ async fn drive_restart_abort(scenario: RestartAbortScenario) -> RestartAbortOutc
     });
     let inner_owner = Arc::new(SimSharedGuestNetworkOwner::default());
     let owner = Arc::new(JournalOwner::new(Arc::clone(&inner_owner), Arc::clone(&journal), false));
-    let fixture = SeamFixture::new(
+    let ca = Arc::new(HookedCa::new());
+    let fixture = SeamFixture::new_with_ca(
         Arc::clone(&driver) as Arc<dyn Driver>,
         Arc::new(JournalIntercept {
             inner: SimMtlsIntercept::new(),
@@ -1652,6 +1741,7 @@ async fn drive_restart_abort(scenario: RestartAbortScenario) -> RestartAbortOutc
         }),
         Arc::clone(&owner),
         Arc::new(overdrive_control_plane::identity_mgr::IdentityMgr::new(None)),
+        Arc::clone(&ca) as Arc<dyn Ca>,
     )
     .await;
     fixture.open_exec();
@@ -1685,9 +1775,14 @@ async fn drive_restart_abort(scenario: RestartAbortScenario) -> RestartAbortOutc
         .expect("predecessor row read")
         .expect("eligible terminal predecessor row");
     if scenario == RestartAbortScenario::Identity {
-        fixture.obs.inject_write_failure(ObservationStoreError::Io(std::io::Error::other(
-            "injected SVID audit failure",
-        )));
+        // The successor's `Pending` row is written first; the failure is queued when the
+        // CA mints the successor's leaf, ahead of the `issued_certificates` audit write.
+        let obs = Arc::clone(&fixture.obs);
+        *ca.on_issue.lock() = Some(Box::new(move || {
+            obs.inject_write_failure(ObservationStoreError::Io(std::io::Error::other(
+                "injected SVID audit failure",
+            )));
+        }));
     }
     if scenario == RestartAbortScenario::Provision {
         inner_owner.script_provision_failure(true);
@@ -1787,7 +1882,11 @@ async fn restart_identity_failure_stops_prior_intercept_before_network_release()
     assert_eq!(outcome.stop_alloc_calls, 1);
     assert!(outcome.predecessor_lease_released);
     assert!(outcome.successor_lease_released);
-    assert!(outcome.row.is_none());
+    // ADR-0353: the launch record stays on record, `Pending` with the lease's address; the
+    // `Failed` row for an identity failure is written by a later step (carry table).
+    let row = outcome.row.expect("the successor's Pending launch row stays on record");
+    assert_eq!(row.state, AllocState::Pending);
+    assert!(row.workload_addr.is_some(), "the Pending row carries the lease's address");
 }
 
 /// Driver-start rejection records a fresh Failed successor after its unwind,
