@@ -769,6 +769,10 @@ pub(crate) mod sim_vm_host {
         /// separate surface from the scope: discarding it never removes the
         /// scope, and an unreaped process keeps the scope.
         run_dirs_discarded: BTreeSet<AllocationId>,
+        /// Pids whose VMM cannot be reaped: the kill `kill_scope` delivers
+        /// ends them `KilledNotReaped` (the bound waited on the VMM's clock)
+        /// and the scope stays busy until a scripted reap.
+        stuck: BTreeSet<u32>,
     }
 
     /// The simulated host's VM surfaces over one `SimVmm`.
@@ -810,6 +814,18 @@ pub(crate) mod sim_vm_host {
         #[cfg(all(test, feature = "integration-tests"))]
         pub(crate) fn kills_requested(&self) -> BTreeSet<u32> {
             self.facts.lock().requested.clone()
+        }
+
+        /// The VMM `pid` cannot be reaped: the kill `kill_scope` delivers to
+        /// it leaves its scope busy (`ResourceBusy`) until `SimVmm::exit_process`
+        /// reaps it. `false` when `pid` is not a live process.
+        #[cfg(all(test, feature = "integration-tests"))]
+        pub(crate) fn make_unreapable(&self, pid: u32) -> bool {
+            if !self.vmm.make_process_unreapable(pid) {
+                return false;
+            }
+            self.facts.lock().stuck.insert(pid);
+            true
         }
 
         /// Release the held kill of `pid` (gated).
@@ -912,7 +928,18 @@ pub(crate) mod sim_vm_host {
                 };
                 if let Some(live) = ready {
                     for pid in live {
-                        self.vmm.kill(pid);
+                        let stuck = self.facts.lock().stuck.contains(&pid);
+                        if stuck {
+                            // SIGKILL is delivered; the process is never
+                            // reaped: `terminate` waits the reap bound on the
+                            // VMM's clock and reports `KilledNotReaped`.
+                            let control =
+                                VmControl { pid, api_socket: PathBuf::from("/sim/stuck/api.sock") };
+                            let _ = self.vmm.terminate(&control, Duration::ZERO).await;
+                            self.mark_lingering(pid);
+                        } else {
+                            self.vmm.kill(pid);
+                        }
                     }
                     let mut facts = self.facts.lock();
                     let unreaped = facts
