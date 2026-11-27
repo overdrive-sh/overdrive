@@ -77,14 +77,12 @@
 //! | `RemoveScope(o)` | decisions 16 and N-1 (ADR-0349, ADR-0351): the production `VmReclamation` pass, the one remover of a VM scope, which removes it only once the VMM is reaped |
 //! | `AssignPick(a)`, `AssignTake(a)` | hazard-only (`assignSplit`); an error |
 //!
-//! **Pending behaviour (the stuck-VM design, ADR-0350, ADR-0354).** The two
-//! pins that reach a `Reclaim` with a non-empty busy set
+//! **The stuck-VM behaviour (ADR-0350, ADR-0354).** The pins that reach a
+//! `Reclaim` with a non-empty busy set
 //! (`ServeCrashDuringGuestBootReservesFromTheRecordedAddress` and the
-//! randomized `lease_conf_ok` traces) carry
-//! `#[should_panic(expected = "a busy scope never refuses the boot")]`: each
-//! runs the production `converge` over a stuck orphan, which refuses the boot
-//! today. DELIVER's `converge` busy branch makes them pass and removes the
-//! markers. The model variable `recorded` is not projected: production keeps
+//! randomized `lease_conf_ok` traces) run the production `converge` over a
+//! stuck orphan: boot proceeds past it, ends its row, keeps its scope and
+//! reserves its address. The model variable `recorded` is not projected: production keeps
 //! the address on a terminal row after the release, so no accessor yields the
 //! model's cleared `recorded`; the reservation is observed through `lease`
 //! and `late` (`GuestAddressPool::lease_observation`), `scope` through
@@ -525,9 +523,9 @@ struct Serve {
     /// Holds the boot reclamation back until its `Reclaim` step (see
     /// `boot_serve`); `None` once released or when it was never held.
     reclaim_gate: Option<tokio::sync::oneshot::Sender<()>>,
-    reclaimed: bool,
-    /// What the boot reclamation refused with, when it returned an error.
-    reclaim_refusal: Option<String>,
+    /// What the boot reclamation returned: `None` while it is pending, `Ok` once it returned,
+    /// `Err` with the refusal's text when it refused.
+    reclaim_outcome: Option<std::result::Result<(), String>>,
     /// The tick of each model workload whose dispatch has not returned.
     ticks: BTreeMap<i64, JoinHandle<std::result::Result<(), ConvergenceError>>>,
     tick_n: u64,
@@ -702,8 +700,7 @@ fn boot_serve(node: &Node, boot: u32) -> (Serve, Arc<GuestAddressPool>, Arc<Reco
         beacon_port,
         reclaim: Some(reclaim),
         reclaim_gate: gate,
-        reclaimed: false,
-        reclaim_refusal: None,
+        reclaim_outcome: None,
         ticks: BTreeMap::new(),
         tick_n: 0,
     };
@@ -1131,8 +1128,7 @@ impl CidLeaseDriver {
         {
             let handle = serve.reclaim.take().expect("checked above");
             let outcome = serve.rt.block_on(handle).expect("converge did not panic");
-            serve.reclaimed = outcome.is_ok();
-            serve.reclaim_refusal = outcome.err().map(|error| error.to_string());
+            serve.reclaim_outcome = Some(outcome.map_err(|error| error.to_string()));
         }
         Ok(())
     }
@@ -1555,7 +1551,7 @@ impl CidLeaseDriver {
                 stuck.insert(pid);
                 continue;
             }
-            if !self.node.host.make_unreapable(pid) {
+            if !self.node.vmm.make_process_unreapable(pid) {
                 return Err(not_enabled(
                     "Reclaim",
                     format!("the orphan at offset {o} is not live"),
@@ -1603,13 +1599,14 @@ impl CidLeaseDriver {
                 }
             }
         }
-        if !self.serve("Reclaim")?.reclaimed {
-            return Err(match self.serve("Reclaim")?.reclaim_refusal.clone() {
-                Some(refusal) if !s.is_empty() => DriverError::Production(format!(
-                    "a busy scope never refuses the boot: boot reclamation refused with: {refusal}"
-                )),
-                _ => not_enabled("Reclaim", "boot reclamation returned an error"),
-            });
+        match self.serve("Reclaim")?.reclaim_outcome.clone() {
+            Some(Ok(())) => {}
+            Some(Err(refusal)) => {
+                return Err(DriverError::Production(format!(
+                    "boot reclamation refused with: {refusal}"
+                )));
+            }
+            None => return Err(not_enabled("Reclaim", "boot reclamation has not returned")),
         }
         self.tick_stopped_takes_no_lease("Reclaim")
     }
@@ -2621,8 +2618,8 @@ fn quint_cid_lease_next_fit_skips_an_unreaped_lease() -> impl Driver {
 /// parked in guest boot; the allocation's address is on record; boot kills the
 /// VMM, its scope stays busy and its offset is reserved from the record before
 /// the first assign, which skips it; the orphan exits, the scope is removed
-/// and the reservation is released. PENDING OWNER API (see the module docs):
-/// `Reclaim` with a busy set awaits the boot reservation.
+/// and the reservation is released. The `Reclaim` with a busy set runs the
+/// production boot reservation (see the module docs).
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/guest-flow-owner/cid_lease.qnt",
@@ -2638,10 +2635,8 @@ fn quint_cid_lease_serve_crash_during_guest_boot_reserves_from_the_recorded_addr
 // ----- randomized traces -----------------------------------------------------------
 
 /// Randomized traces of the conformance main (seed printed on failure).
-/// PENDING OWNER API (the stuck-VM design): a trace that takes `StopUnreaped`,
-/// `Reap`, `LateRelease`, `RemoveScope` or a `Reclaim` with a busy set fails
-/// at that step naming the missing port, so the
-/// run is marked `#[should_panic]` until the crafter wires them.
+/// A trace may take `StopUnreaped`, `Reap`, `LateRelease`, `RemoveScope` or a
+/// `Reclaim` with a busy set; each step drives its production owner.
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_run(spec = "../../specs/quint/guest-flow-owner/cid_lease.qnt", main = "lease_conf_ok")]
 fn quint_cid_lease_lease_conf_ok() -> impl Driver {

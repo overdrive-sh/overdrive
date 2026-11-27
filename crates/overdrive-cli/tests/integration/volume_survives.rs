@@ -172,8 +172,21 @@ fn stage_rootfs(tmp: &Path, fixture: &VmFixture) -> PathBuf {
 /// generation, "A finished Job"). The one declared listener is the Service admission shape; the
 /// guest scripts open it (a background `nc` loop on `LISTENER_PORT`) so the startup gate over the declared listener passes.
 fn service_toml(id: &str, command: &str, kernel: &Path, rootfs: &Path) -> String {
+    service_toml_with(id, command, kernel, rootfs, VOLUME_BLOCK)
+}
+
+/// The `[vm.volume]` table the volume journeys declare.
+const VOLUME_BLOCK: &str = "[vm.volume]\nsize = \"1GiB\"\n\n";
+
+fn service_toml_with(
+    id: &str,
+    command: &str,
+    kernel: &Path,
+    rootfs: &Path,
+    volume_block: &str,
+) -> String {
     format!(
-        "[service]\nid = \"{id}\"\nreplicas = 1\n\n[[listener]]\nport = {LISTENER_PORT}\nprotocol = \"tcp\"\n\n[vm]\ncommand = \"{command}\"\nargs = []\nkernel = \"{}\"\nrootfs = \"{}\"\n\n[vm.volume]\nsize = \"1GiB\"\n\n[resources]\ncpu = '500m'\nmemory = '128MiB'\n",
+        "[service]\nid = \"{id}\"\nreplicas = 1\n\n[[listener]]\nport = {LISTENER_PORT}\nprotocol = \"tcp\"\n\n[vm]\ncommand = \"{command}\"\nargs = []\nkernel = \"{}\"\nrootfs = \"{}\"\n\n{volume_block}[resources]\ncpu = '500m'\nmemory = '128MiB'\n",
         kernel.display(),
         rootfs.display(),
     )
@@ -181,7 +194,7 @@ fn service_toml(id: &str, command: &str, kernel: &Path, rootfs: &Path) -> String
 
 /// The same Service spec without `[vm.volume]`.
 fn service_toml_without_volume(id: &str, command: &str, kernel: &Path, rootfs: &Path) -> String {
-    service_toml(id, command, kernel, rootfs).replace("[vm.volume]\nsize = \"1GiB\"\n\n", "")
+    service_toml_with(id, command, kernel, rootfs, "")
 }
 
 async fn describe_once(cfg: &Path, id: &str) -> WorkloadDescribeOutput {
@@ -311,6 +324,24 @@ fn cloud_hypervisor_argv(alloc: &str) -> Vec<String> {
     panic!("no cloud-hypervisor process for {alloc}");
 }
 
+/// The CID of every live VMM (a `cloud-hypervisor` process whose command line carries a
+/// `--vsock cid=`): a killed VMM held in exit is a zombie with an empty command line and is not
+/// listed.
+fn live_vmm_cids() -> Vec<u32> {
+    let mut cids = Vec::new();
+    for entry in std::fs::read_dir("/proc").expect("read /proc").flatten() {
+        let Ok(cmdline) = std::fs::read(entry.path().join("cmdline")) else { continue };
+        let args: Vec<String> =
+            cmdline.split(|b| *b == 0).map(|a| String::from_utf8_lossy(a).into_owned()).collect();
+        if args.first().is_some_and(|a| a.ends_with("cloud-hypervisor"))
+            && args.iter().any(|a| a.contains("cid="))
+        {
+            cids.push(super::vsock_support::vsock_cid(&args.join(" ")));
+        }
+    }
+    cids
+}
+
 fn cloud_hypervisor_pid(alloc: &str) -> i32 {
     for entry in std::fs::read_dir("/proc").expect("read /proc").flatten() {
         let Ok(pid) = entry.file_name().to_string_lossy().parse::<i32>() else { continue };
@@ -407,34 +438,26 @@ impl Journey {
     }
 
     async fn deploy_without_volume(&self, id: &str) -> String {
-        let spec = self.tmp.path().join(format!("{id}.toml"));
-        std::fs::write(
-            &spec,
-            service_toml_without_volume(
-                id,
-                "/sbin/listen",
-                &self.fixture.kernel_path,
-                &self.rootfs,
-            ),
-        )
-        .expect("write spec");
-        deploy(DeployArgs { spec, config_path: self.cfg() })
-            .await
-            .unwrap_or_else(|error| {
-                panic!("a workload without a volume must deploy ({id}): {error}")
-            })
-            .workload_id
+        let toml = service_toml_without_volume(
+            id,
+            "/sbin/listen",
+            &self.fixture.kernel_path,
+            &self.rootfs,
+        );
+        self.deploy_spec(id, &toml).await
     }
 
     async fn deploy_running(&self, command: &str, id: &str) -> String {
+        let toml = service_toml(id, command, &self.fixture.kernel_path, &self.rootfs);
+        self.deploy_spec(id, &toml).await
+    }
+
+    async fn deploy_spec(&self, id: &str, toml: &str) -> String {
         let spec = self.tmp.path().join(format!("{id}.toml"));
-        std::fs::write(&spec, service_toml(id, command, &self.fixture.kernel_path, &self.rootfs))
-            .expect("write spec");
+        std::fs::write(&spec, toml).expect("write spec");
         deploy(DeployArgs { spec, config_path: self.cfg() })
             .await
-            .unwrap_or_else(|error| {
-                panic!("a VM workload that declares [vm.volume] must deploy ({id}): {error}")
-            })
+            .unwrap_or_else(|error| panic!("the workload spec must deploy ({id}): {error}"))
             .workload_id
     }
 }
@@ -934,6 +957,14 @@ async fn a_node_boots_past_a_vm_stuck_in_exit_left_over_by_a_serve_crash() {
     // The stuck VMM's CID, read from its own `--vsock cid=` argument while it is alive: a killed
     // VMM held in exit is a zombie whose command line is gone.
     let stuck_cid = super::vsock_support::vsock_cid(&cloud_hypervisor_argv(&first_alloc).join(" "));
+    // The stuck VMM's guest address (its CID derives from it one to one), read from its own row.
+    let stuck_addr = first
+        .snapshot
+        .rows
+        .iter()
+        .find(|row| row.alloc_id == first_alloc)
+        .and_then(|row| row.workload_addr)
+        .expect("the running VM's row carries its guest address");
     suspend_with_a_flush_held(&name, old_vmm).await;
     kill(old_vmm);
 
@@ -965,14 +996,28 @@ async fn a_node_boots_past_a_vm_stuck_in_exit_left_over_by_a_serve_crash() {
     // A launch while the stuck VMM's scope is held never receives the stuck VMM's CID: the
     // platform withholds a CID for as long as a task of the VMM that bound it is still exiting.
     let other = journey.deploy_without_volume("vol-boot-other").await;
-    let other_running =
-        running_other_than(&journey.cfg(), &other, None, Duration::from_secs(120)).await;
-    let other_cid = super::vsock_support::vsock_cid(
-        &cloud_hypervisor_argv(&running_alloc(&other_running)).join(" "),
-    );
-    assert_ne!(
-        other_cid, stuck_cid,
-        "a launch while the stuck VMM's scope is held must not receive the stuck VMM's CID {stuck_cid}"
+    running_other_than(&journey.cfg(), &other, None, Duration::from_secs(120)).await;
+    // No launch attempt of either workload (the second workload, or the stuck workload's own
+    // replacement) was handed the stuck VMM's guest address, in any row state, and none failed
+    // or was charged for a refused CID.
+    for workload in [&other, &id] {
+        let described = describe_once(&journey.cfg(), workload).await;
+        for row in described.snapshot.rows.iter().filter(|row| row.alloc_id != first_alloc) {
+            assert_ne!(
+                row.workload_addr,
+                Some(stuck_addr),
+                "allocation {} of {workload} was handed the stuck VMM's guest address {stuck_addr}; rows: {:?}",
+                row.alloc_id,
+                described.snapshot.rows
+            );
+        }
+        assert_nothing_failed_or_charged(&described, Some(&first_alloc), "launch past a stuck VMM");
+    }
+    let live = live_vmm_cids();
+    assert!(
+        !live.contains(&stuck_cid),
+        "no VMM launched while the stuck VMM's scope is held (the second workload or the stuck \
+         workload's own replacement) may carry the stuck VMM's CID {stuck_cid}; live CIDs: {live:?}"
     );
     assert!(
         workload_scope(&first_alloc).exists(),

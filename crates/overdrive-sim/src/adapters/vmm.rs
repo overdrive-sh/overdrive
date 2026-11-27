@@ -447,9 +447,23 @@ impl SimVmm {
     /// **TEST-HOOK-ONLY.** Process `pid` is killed from outside the adapter —
     /// a `cgroup.kill` of its scope, the SIGKILL boot reclamation sends an
     /// orphan of a previous `serve` process (NO-SURVIVE). It ends with signal
-    /// 9 and its device is released. `false` when `pid` is not a live
-    /// process.
+    /// 9 and its device is released. A process made unreapable
+    /// ([`Self::make_process_unreapable`]) is delivered the same SIGKILL but
+    /// stays a task stuck in exit: it is not reaped, its exit watch does not
+    /// fire and its device stays held until [`Self::exit_process`] reaps it.
+    /// `false` when `pid` is not a live process.
     pub fn kill(&self, pid: u32) -> bool {
+        {
+            let mut state = self.state.lock();
+            if let Some(entry) = state.processes.get_mut(&pid)
+                && !entry.terminated
+                && entry.unreapable
+            {
+                entry.terminated = true;
+                entry.unreaped = true;
+                return true;
+            }
+        }
         self.end_process(pid, (None, Some(9)))
     }
 
@@ -798,5 +812,26 @@ mod tests {
         assert!(sim.vsock_device_holders().is_empty());
         assert!(sim.live_pids().is_empty());
         assert!(!sim.exit_process(pid, Some(0), None), "a killed process cannot exit again");
+    }
+
+    #[tokio::test]
+    async fn a_killed_unreapable_process_stays_unreaped_and_keeps_its_device_until_reaped() {
+        let root = tempfile::tempdir().expect("tempdir");
+        let sim = SimVmm::new(std::sync::Arc::new(crate::adapters::clock::SimClock::new()));
+        let pid = {
+            let process =
+                sim.create(&config(root.path(), "dev-stuck"), cid(6)).await.expect("create");
+            process.control.pid
+        };
+        assert!(sim.make_process_unreapable(pid));
+
+        assert!(sim.kill(pid), "the kill reaches the stuck process");
+        assert!(sim.is_unreaped(pid), "the killed process is not reaped");
+        assert_eq!(sim.vsock_device_holders(), BTreeMap::from([(cid(6), pid)]), "still held");
+        assert!(sim.live_pids().is_empty());
+
+        assert!(sim.exit_process(pid, None, Some(9)), "the late reap");
+        assert!(!sim.is_unreaped(pid));
+        assert!(sim.vsock_device_holders().is_empty());
     }
 }

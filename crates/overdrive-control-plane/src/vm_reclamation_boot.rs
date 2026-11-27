@@ -839,10 +839,6 @@ pub(crate) mod sim_vm_host {
         /// separate surface from the scope: discarding it never removes the
         /// scope, and an unreaped process keeps the scope.
         run_dirs_discarded: BTreeSet<AllocationId>,
-        /// Pids whose VMM cannot be reaped: the kill `kill_scope` delivers
-        /// ends them `KilledNotReaped` (the bound waited on the VMM's clock)
-        /// and the scope stays busy until a scripted reap.
-        stuck: BTreeSet<u32>,
     }
 
     /// The simulated host's VM surfaces over one `SimVmm`.
@@ -884,18 +880,6 @@ pub(crate) mod sim_vm_host {
         #[cfg(all(test, feature = "integration-tests"))]
         pub(crate) fn kills_requested(&self) -> BTreeSet<u32> {
             self.facts.lock().requested.clone()
-        }
-
-        /// The VMM `pid` cannot be reaped: the kill `kill_scope` delivers to
-        /// it leaves its scope busy (`ResourceBusy`) until `SimVmm::exit_process`
-        /// reaps it. `false` when `pid` is not a live process.
-        #[cfg(all(test, feature = "integration-tests"))]
-        pub(crate) fn make_unreapable(&self, pid: u32) -> bool {
-            if !self.vmm.make_process_unreapable(pid) {
-                return false;
-            }
-            self.facts.lock().stuck.insert(pid);
-            true
         }
 
         /// Release the held kill of `pid` (gated).
@@ -998,17 +982,11 @@ pub(crate) mod sim_vm_host {
                 };
                 if let Some(live) = ready {
                     for pid in live {
-                        let stuck = self.facts.lock().stuck.contains(&pid);
-                        if stuck {
-                            // SIGKILL is delivered; the process is never
-                            // reaped: `terminate` waits the reap bound on the
-                            // VMM's clock and reports `KilledNotReaped`.
-                            let control =
-                                VmControl { pid, api_socket: PathBuf::from("/sim/stuck/api.sock") };
-                            let _ = self.vmm.terminate(&control, Duration::ZERO).await;
+                        // SIGKILL; a process the sim holds unreapable stays a task
+                        // stuck in exit, and its scope stays.
+                        self.vmm.kill(pid);
+                        if self.vmm.is_unreaped(pid) {
                             self.mark_lingering(pid);
-                        } else {
-                            self.vmm.kill(pid);
                         }
                     }
                     let mut facts = self.facts.lock();
@@ -1462,10 +1440,8 @@ mod boot_reclamation_before_assign {
 /// pool reported and whether the orphan was still live,
 /// `SimVolumeBacking::claim_state`, and the observation store's rows.
 ///
-/// PENDING: the production spec parser refuses `[vm.volume]`, so the deploy is
-/// refused and each test stops at "a workload declaring a volume must be
-/// accepted"; its reclamation assertions are first exercised when the spec
-/// surface, the launch path and `SimVolumeBacking` land.
+/// Each test deploys a workload declaring `[vm.volume]` and asserts the
+/// reclamation outcome over `SimVolumeBacking`.
 ///
 /// Tier 1, in-process over `Sim*` adapters. `host_pure`.
 #[cfg(all(test, feature = "integration-tests"))]
@@ -2110,8 +2086,7 @@ mod mid_boot_volume_reclamation {
 ///
 /// # Tier and placement
 ///
-/// Tier 1 layer 2, `host_pure`. Pending tests keep their full body under
-/// `#[should_panic(expected = ...)]` naming the assertion that fails today.
+/// Tier 1 layer 2, `host_pure`.
 #[cfg(test)]
 #[allow(
     clippy::expect_used,
@@ -2359,7 +2334,7 @@ mod launches_lost_with_the_control_plane {
     }
 
     /// GUARD (RB-11). Another node's `Pending` row is not this boot's launch:
-    /// the closing step leaves it alone, today and after the change.
+    /// the closing step leaves it alone.
     #[tokio::test]
     async fn guard_another_nodes_pending_row_is_left_alone() {
         let tmp = TempDir::new().expect("tmpdir");
@@ -2376,12 +2351,12 @@ mod launches_lost_with_the_control_plane {
         );
     }
 
-    /// PENDING (RB-4, RB-7, ADR-0350, ADR-0354). A `Running` row whose scope
+    /// A `Running` row whose scope
     /// is busy (the kill is delivered, the scope stays) never refuses the boot:
     /// `converge` returns `Ok`, the row is ended as platform-reclaimed carrying
     /// the address, the scope stays for `VmReclamation`, and the guest-address
     /// offset the row names is held (a Retiring lease) so no launch can be
-    /// handed that CID. Today the busy error refuses the boot.
+    /// handed that CID.
     ///
     /// CONTRACT_SHAPE: bounded-change. Universe: the allocation's row, the
     /// host's scopes, the pool's occupancy and lease of the allocation.
@@ -2423,7 +2398,7 @@ mod launches_lost_with_the_control_plane {
         assert_eq!(after.occupancy.retiring, 1, "and is Retiring");
     }
 
-    /// PENDING (RB-11, RB-4). A `Pending` row whose VM left a busy scope ends as
+    /// A `Pending` row whose VM left a busy scope ends as
     /// lost with the control plane (not platform-reclaimed) and its offset is
     /// reserved from the closed row's carried address.
     #[tokio::test]
@@ -2517,9 +2492,7 @@ mod launches_lost_with_the_control_plane {
 /// observation, the pool's `lease_observation` / `observe`, `SimVmm`'s vsock
 /// holders and the injected clock.
 ///
-/// Tier 1 layer 2, `host_pure`. A GUARD passes today; a PENDING test keeps its
-/// whole body under `#[should_panic(expected = ...)]` naming the assertion
-/// that fails today.
+/// Tier 1 layer 2, `host_pure`.
 #[cfg(test)]
 #[allow(
     clippy::expect_used,
@@ -2957,7 +2930,7 @@ mod stuck_vm_boot {
     // ADR-0350: boot reserves what is still busy and proceeds
     // -----------------------------------------------------------------
 
-    /// PENDING (ADR-0350, QPROJ-2). The reservation a busy scope makes is
+    /// The reservation a busy scope makes is
     /// reported `Reserved`: the CID its offset derives, no launch token, no plan.
     /// CONTRACT_SHAPE: bounded-change. Universe: leases, snapshot.
     #[tokio::test]
@@ -2984,7 +2957,7 @@ mod stuck_vm_boot {
         assert!(state.guest_pool.snapshot().is_empty(), "a reservation carries no plan");
     }
 
-    /// PENDING (ADR-0350 item 4). A busy scope whose row records no address
+    /// A busy scope whose row records no address
     /// cannot hold a CID (the address is on record before the VMM exists):
     /// the boot proceeds, the row is terminal, nothing is reserved.
     /// CONTRACT_SHAPE: bounded-change. Universe: the row, the pool's leases.
@@ -3007,7 +2980,7 @@ mod stuck_vm_boot {
         assert_eq!(observed.occupancy.held, 0);
     }
 
-    /// PENDING (ADR-0350 item 4, plan_reclamation row 5). A busy scope with no
+    /// A busy scope with no
     /// row is a stranded artifact: the boot proceeds, the artifacts stay for
     /// `VmReclamation`, nothing is reserved.
     /// CONTRACT_SHAPE: bounded-change. Universe: the pool's leases, the host.
@@ -3031,7 +3004,7 @@ mod stuck_vm_boot {
         );
     }
 
-    /// PENDING (ADR-0350 corrupt rows). A busy scope whose row names an address
+    /// A busy scope whose row names an address
     /// outside the guest prefix refuses the boot with the typed corrupt-row
     /// error naming the allocation and the address; nothing panics.
     /// CONTRACT_SHAPE: bounded-change. Universe: the result, the pool's leases.
@@ -3065,7 +3038,7 @@ mod stuck_vm_boot {
         );
     }
 
-    /// PENDING (ADR-0350 corrupt rows, ordering). Two busy rows naming one
+    /// Two busy rows naming one
     /// address refuse the boot naming the second allocation and its holder; the
     /// first allocation's reservation stands (every executor ran, every valid
     /// reservation was made before the refusal).
@@ -3100,7 +3073,7 @@ mod stuck_vm_boot {
         assert_platform_reclaimed(&row(&state, "dup-b-0").await, Some(ADDRESS));
     }
 
-    /// PENDING (ADR-0350 item 3, "boot waits one bound"). Several stuck scopes
+    /// Several stuck scopes
     /// cost one bound of boot delay: every executor's wait starts before any
     /// ends, so one advance of the injected clock by `KILL_SCOPE_SETTLE_BOUND`
     /// completes the boot, and every stuck VM's offset is reserved.
@@ -3190,21 +3163,61 @@ mod stuck_vm_boot {
         assert_platform_reclaimed(&row(&state, stuck).await, Some(ADDRESS));
     }
 
-    /// PENDING (ADR-0350 item 5). The refusal comes from the scope the planner
+    /// The refusal comes from the scope the planner
     /// reaches first; the stuck VM behind it is still killed, closed and reserved.
     #[tokio::test]
     async fn a_refusal_before_a_stuck_vm_never_drops_its_reservation() {
         refusal_beside_a_stuck_vm("fail-a-0", "stuck-b-0").await;
     }
 
-    /// PENDING (ADR-0350 item 5). The stuck VM comes first: the boot is still
+    /// The stuck VM comes first: the boot is still
     /// refused for the later scope's non-busy error, with the reservation made.
     #[tokio::test]
     async fn a_refusal_after_a_stuck_vm_still_refuses_the_boot_with_its_reservation_made() {
         refusal_beside_a_stuck_vm("fail-b-0", "busy-a-0").await;
     }
 
-    /// PENDING (ADR-0350, G-V0, QPROJ-7). A stuck VMM keeps its vsock device:
+    /// ADR-0350 item 5: a corrupt busy row planned first never masks a later non-busy
+    /// executor error. The boot refuses with the executor error, and the reservations of
+    /// both busy scopes were attempted: the corrupt row reserved nothing, and the valid stuck
+    /// VM planned after the executor failure is reserved.
+    /// CONTRACT_SHAPE: bounded-change. Universe: the result, the pool's leases.
+    #[tokio::test]
+    async fn a_corrupt_busy_row_never_masks_a_later_executor_error_and_both_reservations_are_attempted()
+     {
+        let tmp = TempDir::new().expect("tmpdir");
+        let host = SimVmHostState::new();
+        let (corrupt, failing, stuck) =
+            (alloc("a-corrupt-0"), alloc("b-failing-0"), alloc("c-stuck-0"));
+        hold(&host, &corrupt);
+        hold(&host, &stuck);
+        host.set_scope(failing.clone(), BTreeSet::from([4343]));
+        // A held scope answers busy before the queue; the one un-held kill takes the refusal.
+        host.script_kill_scope_failure(std::io::ErrorKind::PermissionDenied);
+        let state = app_state(&tmp, Arc::new(host.clone()), &SimClock::new()).await;
+        put_vm_job(&state).await;
+        write_running(&state, corrupt.as_str(), Some(Ipv4Addr::new(10, 1, 2, 3))).await;
+        write_running(&state, failing.as_str(), Some(Ipv4Addr::new(100, 95, 0, 20))).await;
+        write_running(&state, stuck.as_str(), Some(ADDRESS)).await;
+
+        let result = converge(&state).await;
+
+        assert!(
+            matches!(&result, Err(ConvergeError::Reclamation(ReclamationError::Host(error)))
+                if error.kind() == std::io::ErrorKind::PermissionDenied),
+            "the boot refuses with the first non-busy executor error, not the corrupt row: {result:?}"
+        );
+        let observed = state.guest_pool.observe(&[corrupt.clone(), failing.clone(), stuck.clone()]);
+        assert_eq!(observed.leases.get(&corrupt), None, "the corrupt row reserved nothing");
+        assert_eq!(observed.leases.get(&failing), None, "the refused VM reserved nothing");
+        assert_eq!(
+            observed.leases.get(&stuck),
+            Some(&GuestAttachmentLease::Retiring),
+            "the valid stuck VM's reservation was attempted past the corrupt row and the error"
+        );
+    }
+
+    /// A stuck VMM keeps its vsock device:
     /// the restarted boot proceeds, reserves its offset, and a launch sweep
     /// across the whole offset range (a next-fit wrap included) never receives
     /// its CID; every launch opens its own device (no clash) and the stuck
@@ -3270,7 +3283,7 @@ mod stuck_vm_boot {
     // ADR-0350: the one release site over a reservation
     // -----------------------------------------------------------------
 
-    /// PENDING (ADR-0350, feature delta "The late release"). Repeated
+    /// Repeated
     /// `ReclaimAllocationNetwork` attempts over a reservation, with no driver
     /// entry for the allocation (a restarted process), return `Ok` promptly,
     /// keep the reservation while the scope is held and tear nothing down
@@ -3310,7 +3323,7 @@ mod stuck_vm_boot {
         );
     }
 
-    /// PENDING (ADR-0350, ADR-0348 (b)). After the scripted reap, a
+    /// After the scripted reap, a
     /// `VmReclamation` pass removes the scope and one more reclaim attempt
     /// releases the reservation: the offset is assignable again, and no teardown
     /// was recorded for it.
@@ -3363,7 +3376,7 @@ mod stuck_vm_boot {
     // ADR-0354: a busy boot executor step writes the row, not the discard
     // -----------------------------------------------------------------
 
-    /// PENDING (ADR-0354, S-RB-13). A busy boot step ends the `Running` row as
+    /// A busy boot step ends the `Running` row as
     /// platform-reclaimed carrying the address and leaves the scope, run
     /// directory and clone; once the hold clears the next `VmReclamation` pass
     /// discards them and writes no row.
@@ -3400,7 +3413,7 @@ mod stuck_vm_boot {
         assert_eq!(row(&state, "busy-boot-0").await, after_boot, "the pass writes no row");
     }
 
-    /// PENDING (ADR-0354 consequences). After boot ended the row, a
+    /// After boot ended the row, a
     /// steady-state tick that meets the same busy scope leaves the row
     /// unchanged and still discards nothing.
     /// CONTRACT_SHAPE: unbounded-preservation. Universe: the row, host surfaces.
