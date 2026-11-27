@@ -13,19 +13,25 @@
 //!
 //! # The held launch
 //!
-//! The model's launch is one held dispatch: `WlStart(a)` issues allocation `a` and a later action
-//! resolves it **by the environment flags at that instant, in the shim's order: admission, then
-//! identity issuance, then the driver**. Holding the dispatch at the driver would already have
-//! passed admission and identity at `WlStart`, so a `CapFill` or `IdFaultOn` between the two
-//! could never produce `LaunchRefused` or `LaunchPreFail`. The test-owned seam is therefore the
-//! observation store's point read `alloc_status_row`: it is the first thing either launch arm does
-//! (`find_prior_alloc_row`), after the reconciler's hydration (which reads `alloc_status_rows`,
-//! never the point read) and the View write that records the issued id, and before admission.
-//! `WlStart` arms a one-shot hold on that read (`HoldObs`, a delegating `ObservationStore`
-//! double: a driven port), spawns the convergence tick and waits for the dispatch to be parked
-//! there. A resolution action arms the sim for its outcome, releases the hold and lets the real
-//! dispatch run to its end. Only `LaunchLost` also parks `SimDriver::start`
-//! (`park_next_start(true)`), because the lane signal is observed by the driver's wait.
+//! The model's launch is one held dispatch, resolved in the shim's order: admission
+//! (`provision_and_inject_netns`), the `Pending` row write (ADR-0353), identity issuance, then
+//! `driver.start`. `WlStart(a)` issues allocation `a` and holds the dispatch before admission:
+//! ISSUED, no row. Two test-owned seams, both on the observation store's driven port (`HoldObs`, a
+//! delegating `ObservationStore` double), park a launch:
+//!
+//! 1. the point read `alloc_status_row`, the first thing a launch arm does
+//!    (`find_prior_alloc_row`), after the reconciler's hydration and the View write that records
+//!    the issued id and before admission: the ISSUED hold, armed by `WlStart`;
+//! 2. `next_issuance_ordinal`, the first observation call of identity issuance
+//!    (`ca_issuance::issue_and_audit`), which follows the `Pending` write: the PENDING hold, armed
+//!    by `LaunchPending` before it releases the first.
+//!
+//! `LaunchRefused` and `LaunchPending` resolve admission by the pool's state at that instant (at its
+//! cap, or admitting); `LaunchRefused` ends the dispatch with `Err(AdmissionCapReached)` and no row,
+//! `LaunchPending` runs provision and the `Pending` write and parks at the second hold. The other
+//! resolutions release the second hold with the sim armed for their outcome. Only `LaunchLost` also
+//! parks `SimDriver::start` (`park_next_start(true)`), because the lane signal is observed by the
+//! driver's wait.
 //!
 //! | Action | Owner call or environment stimulus |
 //! |---|---|
@@ -34,14 +40,16 @@
 //! | `OpStop` | `stop_workload` |
 //! | `OpResume` | `restart_workload` (`Resumed`) |
 //! | `WorkloadRestart(a)` | `restart_workload` (`Restarted`), then one convergence tick when `a` is `Running` (the tick emits the stop) |
-//! | `WlStart(a)` | one convergence tick, parked before the action shim's admission |
-//! | `LaunchRunning(a)` / `LaunchPreFail(a)` / `LaunchRefused(a)` | release the held dispatch; the sim CA flag and the sim guest pool are as `IdFault*` / `Cap*` left them |
-//! | `LaunchStartFail(a)` | arm the next `Driver::start` to fail with a typed start failure, release the held dispatch |
-//! | `LaunchLost(a)` | park `SimDriver::start` observing the lane signal, release the held dispatch, `ReconcilerRuntime::supersede_lane` |
+//! | `WlStart(a)` | one convergence tick, parked before the action shim's admission (ISSUED) |
+//! | `LaunchRefused(a)` | release the held dispatch with the sim guest pool at its cap (`CapFill`): no row, `Err(AdmissionCapReached)` |
+//! | `LaunchPending(a)` | release the held dispatch with the pool admitting: provision and the `Pending` write run, the dispatch parks again before identity issuance (PENDING) |
+//! | `LaunchRunning(a)` / `LaunchPreFail(a)` | release the second hold; the sim CA flag is as `IdFault*` left it |
+//! | `LaunchStartFail(a)` | arm the next `Driver::start` to fail with a typed start failure, release the second hold |
+//! | `LaunchLost(a)` | park `SimDriver::start` observing the lane signal, release the second hold, `ReconcilerRuntime::supersede_lane` |
 //! | `StopAlloc(a)` | the convergence tick that emits `StopAllocation` and its dispatch |
 //! | `VmmCrash(a)` | `SimDriver::inject_exit_after`; the production exit observer writes the `Failed` row |
 //! | `JobExit(a)` | `SimDriver::inject_exit_after` (a clean exit); the exit observer writes the row |
-//! | `CpCrash` | the `serve` runtime is dropped (every task dies with it, the held tick included), the next composition reopens the stores and runs boot reclamation |
+//! | `CpCrash` | the `serve` runtime is dropped (every task dies with it, the held tick included), the next composition reopens the stores and runs boot reclamation; an ISSUED launch leaves no row (minted, no row) |
 //! | `NodeReboot` | every `Running` allocation's process exits, then as `CpCrash` |
 //! | `IdFaultOn` / `IdFaultOff` | the sim CA's `issue_svid` fails / succeeds |
 //! | `CapFill` / `CapDrain` | fill the sim guest pool to its cap through its own admission / release the fillers |
@@ -67,18 +75,17 @@
 //! | `why == W_PREFAIL` | a `Failed` row with an identity-issue or driver-internal reason |
 //! | `why == W_REFUSED` | no row, not live in the driver, the dispatch's own `Err(AdmissionCapReached)` |
 //! | `as == ABANDONED` (`why == W_LOST`) | a `Terminated` row with `terminal == None` and reason `LaunchSuperseded` or `LaunchLostWithControlPlane` (ADR-0355), not live in the driver, the held tick over (completed `Ok`, or dropped by a rebuild). The row is written by the shim and read through `alloc_status_rows()`; a launch that ended with no such row fails the projection |
-//! | `as == PENDING` | issued, the `Pending` row of the allocation (ADR-0353), the held tick future has not completed. The shim writes the row after admission, so the held launch (parked before admission) has none yet: the projection awaits a hold after that write |
+//! | `as == ISSUED` | issued, no row, the held tick has not completed |
+//! | `as == PENDING` | issued, the `Pending` row of the allocation (ADR-0353) in `alloc_status_rows()` |
+//! | `why == W_UNWRITTEN` | an ISSUED launch lost with its `serve` process: no row, the held tick dropped by the rebuild |
 //! | `jobTerm(a)` | a `kind == Job` row with a `terminal` |
 //!
 //! `faults`, `declared`, `idFault`, `capFull`, `conf_step`, `og` and `gl` are model-only.
 //!
 //! **Status: pending.** The driver is compiled. A run whose trace reaches behaviour DELIVER has
-//! not built carries `#[should_panic(expected = ...)]` naming its own divergence; a run that
-//! passes against production today is a GUARD and carries none. See each test's doc. Every
-//! `rg_conf` / `rg_conf_job` run reaches a `PENDING` allocation, which the hold parks before the shim's
-//! admission, while the `Pending` row (ADR-0353) is written after it, so every pin carries
-//! `#[should_panic(expected = "awaits owner API")]` until a hold after that write exists. The derived
-//! `charged` and `exhausted` read the count basis (RB-13), and an abandoned row projects as state 5.
+//! not built carries `#[should_panic(expected = ...)]`; a run that passes against production today
+//! is a GUARD and carries none. See each test's doc. The derived `charged` and `exhausted` read the
+//! count basis (RB-13), and an abandoned row projects as state 5.
 //!
 //! Lane: `integration-tests` (it spawns the `quint` CLI through quint-connect).
 
@@ -198,11 +205,6 @@ enum RgError {
     Step { step: u64, action: &'static str, why: String },
     #[error("restart-generation divergence at step {step} projection: {why}")]
     Projection { step: u64, why: String },
-    /// The driver has no seam for what the model now says: the step names it.
-    #[error(
-        "restart-generation step {step} awaits owner API that does not exist yet (ADR-0353, ADR-0355): {awaits}"
-    )]
-    OwnerApiPending { step: u64, awaits: &'static str },
     #[error("ITF: {0}")]
     Itf(#[from] ItfError),
 }
@@ -256,24 +258,40 @@ impl Hold {
     }
 }
 
-/// Delegating `ObservationStore` over `SimObservationStore` with one scripted fault at the driven
-/// port: a one-shot hold on the next point read `alloc_status_row`, the first thing a launch arm
-/// of the action shim does (before admission).
+/// Delegating `ObservationStore` over `SimObservationStore` with two scripted one-shot holds at the
+/// driven port: on the next point read `alloc_status_row`, the first thing a launch arm of the
+/// action shim does (before admission), and on the next `next_issuance_ordinal`, the first
+/// observation call of identity issuance (after the `Pending` row write, before `driver.start`).
 struct HoldObs {
     inner: Arc<SimObservationStore>,
     hold: Mutex<Option<Arc<Hold>>>,
+    /// A one-shot hold on the next `next_issuance_ordinal`, the first observation call of identity
+    /// issuance (`ca_issuance::issue_and_audit`), which follows the `Pending` row write.
+    issue_hold: Mutex<Option<Arc<Hold>>>,
 }
 
 impl HoldObs {
     fn over(inner: Arc<SimObservationStore>) -> Arc<Self> {
-        Arc::new(Self { inner, hold: Mutex::new(None) })
+        Arc::new(Self { inner, hold: Mutex::new(None), issue_hold: Mutex::new(None) })
     }
 
-    fn arm(&self) -> Arc<Hold> {
+    fn new_hold() -> Arc<Hold> {
         let (entered, _) = watch::channel(false);
         let (released, _) = watch::channel(false);
-        let hold = Arc::new(Hold { entered, released });
+        Arc::new(Hold { entered, released })
+    }
+
+    /// Arms the hold before admission (the point read of the launch's prior row).
+    fn arm(&self) -> Arc<Hold> {
+        let hold = Self::new_hold();
         *self.hold.lock() = Some(Arc::clone(&hold));
+        hold
+    }
+
+    /// Arms the hold after the `Pending` row write, before identity issuance.
+    fn arm_issue(&self) -> Arc<Hold> {
+        let hold = Self::new_hold();
+        *self.issue_hold.lock() = Some(Arc::clone(&hold));
         hold
     }
 }
@@ -363,6 +381,14 @@ impl ObservationStore for HoldObs {
     }
 
     async fn next_issuance_ordinal(&self) -> Result<IssuanceOrdinal, ObservationStoreError> {
+        let hold = self.issue_hold.lock().take();
+        if let Some(hold) = hold {
+            hold.entered.send_replace(true);
+            let mut released = hold.released.subscribe();
+            if released.wait_for(|released| *released).await.is_err() {
+                // the hold was dropped without a release: the call proceeds
+            }
+        }
         self.inner.next_issuance_ordinal().await
     }
 
@@ -1040,6 +1066,42 @@ impl RgCore {
         self.finalize_observed()
     }
 
+    /// Admission passes: releases the dispatch held before admission with the pool admitting, so
+    /// provision and the `Pending` row write happen, and holds the dispatch again before identity
+    /// issuance. The held entry of `a` now carries that second hold.
+    fn launch_pending(&mut self, a: i64) -> std::result::Result<(), Why> {
+        let first = self
+            .serve()?
+            .ticks
+            .get(&a)
+            .map(|(_, hold)| Arc::clone(hold))
+            .ok_or_else(|| why(format!("allocation {a} has no held dispatch")))?;
+        let second = self.node()?.obs.arm_issue();
+        first.release();
+        self.settle(
+            "the dispatch writes its Pending row and parks before identity issuance",
+            |core| {
+                second.has_entered()
+                    || core
+                        .serve
+                        .as_ref()
+                        .and_then(|serve| serve.ticks.get(&a))
+                        .is_none_or(|(tick, _)| tick.is_finished())
+            },
+        )?;
+        if !second.has_entered() {
+            self.reap(a)?;
+            let end = self.ends.get(&a).cloned();
+            return Err(why(format!(
+                "the dispatch of allocation {a} ended ({end:?}) before it reached identity issuance"
+            )));
+        }
+        if let Some(entry) = self.serve_mut()?.ticks.get_mut(&a) {
+            entry.1 = second;
+        }
+        Ok(())
+    }
+
     fn launch_start_fail(&mut self, a: i64) -> std::result::Result<(), Why> {
         self.serve()?.driver.fail_next_start.store(true, Ordering::SeqCst);
         self.resolve(a)
@@ -1203,6 +1265,7 @@ macro_rules! rg_driver {
                     WorkloadRestart(a: i64) => core.at("WorkloadRestart", |c| c.workload_restart(a))?,
                     WlStart(a: i64) => core.at("WlStart", |c| c.wl_start(a))?,
                     StopAlloc(a: i64) => core.at("StopAlloc", |c| c.stop_alloc(a))?,
+                    LaunchPending(a: i64) => core.at("LaunchPending", |c| c.launch_pending(a))?,
                     LaunchRunning(a: i64) => core.at("LaunchRunning", |c| c.resolve(a))?,
                     LaunchPreFail(a: i64) => core.at("LaunchPreFail", |c| c.resolve(a))?,
                     LaunchRefused(a: i64) => core.at("LaunchRefused", |c| c.resolve(a))?,
@@ -1248,12 +1311,16 @@ enum WhyClass {
     Refused,
     /// A launch that ended before running without a failure: an abandoned row (`W_LOST`, ADR-0355).
     Lost,
+    /// An issued launch lost with the control plane before its `Pending` row was written: no row,
+    /// no charge (`W_UNWRITTEN`).
+    Unwritten,
 }
 
 /// The compared facts of one model allocation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct AllocFacts {
-    /// 0 unminted, 1 pending, 2 running, 3 failed, 4 terminated, 5 abandoned (ADR-0355).
+    /// 0 unminted, 1 pending, 2 running, 3 failed, 4 terminated, 5 abandoned (ADR-0355), 6 issued
+    /// (the launch holds the lane and no row exists yet).
     state: i64,
     why: WhyClass,
     /// The generation the allocation was issued for.
@@ -1288,8 +1355,10 @@ impl RgState {
         let cnt = quint_itf::int_map(quint_itf::field(st, "cnt")?, quint_itf::int)?;
         // The spec's derived defs, over its own state: `hasRow`, `curA`, `charged`, `exhausted`.
         // A PENDING allocation has its `Pending` row (ADR-0353), an abandoned launch (state 5) its terminal row
-        // (ADR-0355); only a refused launch (`W_REFUSED`) has none.
-        let has_row = |a: i64| matches!(as_.get(&a), Some(1..=5)) && why_.get(&a) != Some(&10);
+        // (ADR-0355); an ISSUED launch (state 6), a refused launch (`W_REFUSED`) and a launch lost
+        // before its row was written (`W_UNWRITTEN`) have none.
+        let has_row =
+            |a: i64| matches!(as_.get(&a), Some(1..=5)) && !matches!(why_.get(&a), Some(10 | 13));
         // RB-13 (ADR-0355): the count basis is the newest row that ran, `last_ran_alloc`: the newest row that is not abandoned.
         let basis_a = (1..=NA).filter(|a| has_row(*a) && as_.get(a) != Some(&5)).max().unwrap_or(0);
         let charged = if basis_a == 0 {
@@ -1297,7 +1366,7 @@ impl RgState {
         } else {
             cnt.get(&basis_a).copied().unwrap_or(0) + i64::from(as_.get(&basis_a) == Some(&3))
         };
-        let non_terminal = as_.values().any(|state| *state == 1 || *state == 2);
+        let non_terminal = as_.values().any(|state| matches!(*state, 1 | 2 | 6));
         let mut allocs = BTreeMap::new();
         for a in 1..=NA {
             let state = as_.get(&a).copied().unwrap_or(0);
@@ -1309,6 +1378,7 @@ impl RgState {
                         Some(9) => WhyClass::PreFail,
                         Some(10) => WhyClass::Refused,
                         Some(7) => WhyClass::Lost,
+                        Some(13) => WhyClass::Unwritten,
                         _ => WhyClass::Other,
                     },
                     ig: ig.get(&a).copied().unwrap_or(0),
@@ -1404,23 +1474,33 @@ impl RgState {
                 (state, why)
             } else {
                 let held = serve.ticks.get(&a).is_some_and(|(tick, _)| !tick.is_finished());
-                if held {
-                    // The hold parks the launch at the point read of its prior row, before the shim's
-                    // admission; the `Pending` row (ADR-0353) is written after admission, once the pool
-                    // has handed the lease out. No test-owned seam holds the launch after that write.
-                    return Err(RgError::OwnerApiPending {
-                        step,
-                        awaits: "a hold of the launch after its `Pending` row is written: the hold parks before admission, which precedes the row (ADR-0353)",
-                    });
-                }
                 if live.contains(alloc) {
                     return Err(fail(format!(
                         "allocation {a} has no row but is live in the driver"
                     )));
                 }
+                if held {
+                    // ISSUED: the id is issued, the dispatch is held before the `Pending` row
+                    // (ADR-0353) and the tick has not completed: no row.
+                    allocs.insert(
+                        a,
+                        AllocFacts {
+                            state: 6,
+                            why: WhyClass::Other,
+                            ig: i64::try_from(ig)
+                                .map_err(|_| fail("generation out of range".into()))?,
+                            cnt: i64::from(cnt) - 1,
+                            job_term: false,
+                        },
+                    );
+                    continue;
+                }
                 match core.ends.get(&a) {
                     Some(TickEnd::Refused) => (3, WhyClass::Refused),
-                    Some(TickEnd::Done | TickEnd::Lost) => {
+                    // The control plane died with the launch issued and no row written: no row,
+                    // no charge (`W_UNWRITTEN`).
+                    Some(TickEnd::Lost) => (3, WhyClass::Unwritten),
+                    Some(TickEnd::Done) => {
                         return Err(fail(format!(
                             "the launch of allocation {a} ended before running and left no abandoned row (ADR-0355)"
                         )));
@@ -1472,7 +1552,7 @@ impl<'de> Deserialize<'de> for RgState {
 // ----- named runs (critical scenarios, one per `rg_conf` / `rg_conf_job` run) ----------
 
 /// Named run `control_plane_crash_during_restart_launch_relaunches_once`.
-/// PENDING (ADR-0353, ADR-0355: no `Pending` row, no abandoned row; awaits owner API). Also SD-6, ADR-0335: the restart generation is stamped when emitted, so after the control plane lost the replacement launch (step 7) the next evaluation (step 8) places nothing; it waits for "a generation is handled when its successor is observed".
+/// PENDING (ADR-0355 RB-11): the model ends a `Pending` launch `Abandoned` at boot (`LaunchLostWithControlPlane`, ADR-0355 RB-11), boot reclamation leaves the `Pending` row (step 8, `CpCrash`). Later steps (SD-6: the next evaluation places nothing until the successor is observed) are unobserved until it lands.
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/restart-generation/restart_generation.qnt",
@@ -1480,13 +1560,13 @@ impl<'de> Deserialize<'de> for RgState {
     test = "control_plane_crash_during_restart_launch_relaunches_once",
     max_samples = 1
 )]
-#[should_panic(expected = "awaits owner API")]
+#[should_panic(expected = "State invariant failed")]
 fn quint_rg_control_plane_crash_during_restart_launch_relaunches_once() -> impl QuintDriver {
     RgDriver::new()
 }
 
 /// Named run `second_restart_loses_launch_then_one_placement`.
-/// PENDING (ADR-0353, ADR-0355: no `Pending` row, no abandoned row; awaits owner API). Also ADR-0334: `ReconcilerRuntime::supersede_lane` is a scaffold; it waits for the convergence lane table (step 10). SD-6 (the steps after the loss) is unobserved until it lands.
+/// Passes against production once the count basis (RB-13) lands (step 09-08): the count is read from the newest row that ran, so the relaunch after two lost launches carries the count the model carries. The marker is lifted with that step.
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/restart-generation/restart_generation.qnt",
@@ -1494,13 +1574,13 @@ fn quint_rg_control_plane_crash_during_restart_launch_relaunches_once() -> impl 
     test = "second_restart_loses_launch_then_one_placement",
     max_samples = 1
 )]
-#[should_panic(expected = "awaits owner API")]
+#[should_panic(expected = "State invariant failed")]
 fn quint_rg_second_restart_loses_launch_then_one_placement() -> impl QuintDriver {
     RgDriver::new()
 }
 
 /// Named run `resume_while_running_stops_and_replaces`.
-/// PENDING (ADR-0353: the `Pending` row of a launch in flight is not written yet, step 3 awaits owner API); a GUARD once it is (passes against production before ADR-0353: a restart with no lost launch); keeps passing once SD-6 lands.
+/// GUARD: passes against production (a restart with no lost launch); keeps passing once SD-6 lands.
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/restart-generation/restart_generation.qnt",
@@ -1508,13 +1588,12 @@ fn quint_rg_second_restart_loses_launch_then_one_placement() -> impl QuintDriver
     test = "resume_while_running_stops_and_replaces",
     max_samples = 1
 )]
-#[should_panic(expected = "awaits owner API")]
 fn quint_rg_resume_while_running_stops_and_replaces() -> impl QuintDriver {
     RgDriver::new()
 }
 
 /// Named run `restart_of_exhausted_workload_relaunches_uncharged`.
-/// PENDING (ADR-0353: no `Pending` row; awaits owner API). Also ADR-0337: a pre-driver failure (identity issuance) returns `Err` and writes no row (step 5); it waits for the charged `Failed` row. Later steps (SD-6 replacement of an exhausted row) are unobserved until it lands.
+/// PENDING (ADR-0337): the model ends the launch with a charged `Failed` row when identity issuance fails (ADR-0337), production keeps the `Pending` row and returns the error (step 5, `LaunchPreFail`). Later steps (the uncharged replacement of an exhausted row) are unobserved until it lands.
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/restart-generation/restart_generation.qnt",
@@ -1522,13 +1601,13 @@ fn quint_rg_resume_while_running_stops_and_replaces() -> impl QuintDriver {
     test = "restart_of_exhausted_workload_relaunches_uncharged",
     max_samples = 1
 )]
-#[should_panic(expected = "awaits owner API")]
+#[should_panic(expected = "State invariant failed")]
 fn quint_rg_restart_of_exhausted_workload_relaunches_uncharged() -> impl QuintDriver {
     RgDriver::new()
 }
 
 /// Named run `generation_replacement_forgives_predecessor_failure`.
-/// PENDING (ADR-0337): as above (step 5). Later steps (the carried count of a generation replacement) are unobserved until it lands.
+/// PENDING (ADR-0337): the model ends the launch with a charged `Failed` row when identity issuance fails (ADR-0337), production keeps the `Pending` row and returns the error (step 5, `LaunchPreFail`). Later steps (the carried count of a generation replacement) are unobserved until it lands.
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/restart-generation/restart_generation.qnt",
@@ -1536,13 +1615,13 @@ fn quint_rg_restart_of_exhausted_workload_relaunches_uncharged() -> impl QuintDr
     test = "generation_replacement_forgives_predecessor_failure",
     max_samples = 1
 )]
-#[should_panic(expected = "awaits owner API")]
+#[should_panic(expected = "State invariant failed")]
 fn quint_rg_generation_replacement_forgives_predecessor_failure() -> impl QuintDriver {
     RgDriver::new()
 }
 
 /// Named run `persistent_prelaunch_failure_ends_in_backoff_exhausted`.
-/// PENDING (ADR-0337): as above (step 5); `BackoffExhausted` after the pre-driver failures is unobserved until it lands.
+/// PENDING (ADR-0337): the model ends the launch with a charged `Failed` row when identity issuance fails (ADR-0337), production keeps the `Pending` row and returns the error (step 5, `LaunchPreFail`). `BackoffExhausted` after the pre-driver failures is unobserved until it lands.
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/restart-generation/restart_generation.qnt",
@@ -1550,13 +1629,13 @@ fn quint_rg_generation_replacement_forgives_predecessor_failure() -> impl QuintD
     test = "persistent_prelaunch_failure_ends_in_backoff_exhausted",
     max_samples = 1
 )]
-#[should_panic(expected = "awaits owner API")]
+#[should_panic(expected = "State invariant failed")]
 fn quint_rg_persistent_prelaunch_failure_ends_in_backoff_exhausted() -> impl QuintDriver {
     RgDriver::new()
 }
 
 /// Named run `transient_prelaunch_failure_recovers`.
-/// PENDING (ADR-0337): as above (step 5).
+/// PENDING (ADR-0337): the model ends the launch with a charged `Failed` row when identity issuance fails (ADR-0337), production keeps the `Pending` row and returns the error (step 5, `LaunchPreFail`).
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/restart-generation/restart_generation.qnt",
@@ -1564,13 +1643,13 @@ fn quint_rg_persistent_prelaunch_failure_ends_in_backoff_exhausted() -> impl Qui
     test = "transient_prelaunch_failure_recovers",
     max_samples = 1
 )]
-#[should_panic(expected = "awaits owner API")]
+#[should_panic(expected = "State invariant failed")]
 fn quint_rg_transient_prelaunch_failure_recovers() -> impl QuintDriver {
     RgDriver::new()
 }
 
 /// Named run `admission_refusal_leaves_no_row_and_waits_for_capacity`.
-/// PENDING (ADR-0353: the `Pending` row of a launch in flight is not written yet, step 3 awaits owner API); a GUARD once it is (passes against production before ADR-0353: the refusal already writes no row and charges nothing, ADR-0338); keeps passing once the occupancy gate lands.
+/// GUARD: passes against production (the refusal writes no row and charges nothing, ADR-0338); keeps passing once the occupancy gate lands.
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/restart-generation/restart_generation.qnt",
@@ -1578,13 +1657,12 @@ fn quint_rg_transient_prelaunch_failure_recovers() -> impl QuintDriver {
     test = "admission_refusal_leaves_no_row_and_waits_for_capacity",
     max_samples = 1
 )]
-#[should_panic(expected = "awaits owner API")]
 fn quint_rg_admission_refusal_leaves_no_row_and_waits_for_capacity() -> impl QuintDriver {
     RgDriver::new()
 }
 
 /// Named run `restart_of_completed_job_does_nothing_and_issues_no_id`.
-/// PENDING (ADR-0353: the `Pending` row of a launch in flight is not written yet, step 3 awaits owner API); a GUARD once it is (passes against production before ADR-0353: a finished Job's row is final and a restart issues no id, ADR-0335 item 3).
+/// GUARD: passes against production (a finished Job's row is final and a restart issues no id, ADR-0335 item 3).
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/restart-generation/restart_generation.qnt",
@@ -1592,14 +1670,12 @@ fn quint_rg_admission_refusal_leaves_no_row_and_waits_for_capacity() -> impl Qui
     test = "restart_of_completed_job_does_nothing_and_issues_no_id",
     max_samples = 1
 )]
-#[should_panic(expected = "awaits owner API")]
 fn quint_rg_restart_of_completed_job_does_nothing_and_issues_no_id() -> impl QuintDriver {
     RgJobDriver::new()
 }
 
 /// Named run `resume_of_stopped_job_does_nothing_and_issues_no_id`.
-/// PENDING (ADR-0353: no `Pending` row; awaits owner API). Also: today production gives a resumed operator-stopped Job a new allocation id (the check that the
-/// Job issues no id the model names was vacuous before); DELIVER step 9 (generation helper) ends it.
+/// PENDING (DELIVER step 9, the generation helper): production gives a resumed operator-stopped Job a new allocation id (step 7, `OpResume`); the projection refuses an id no model allocation names.
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/restart-generation/restart_generation.qnt",
@@ -1607,17 +1683,17 @@ fn quint_rg_restart_of_completed_job_does_nothing_and_issues_no_id() -> impl Qui
     test = "resume_of_stopped_job_does_nothing_and_issues_no_id",
     max_samples = 1
 )]
-#[should_panic(expected = "awaits owner API")]
+#[should_panic(expected = "the Job issued allocation id")]
 fn quint_rg_resume_of_stopped_job_does_nothing_and_issues_no_id() -> impl QuintDriver {
     RgJobDriver::new()
 }
 
-/// PENDING (ADR-0353, ADR-0355): every trace that places an allocation reaches the `Pending` row no owner writes yet, so
-/// the first divergence a seed hits is the owner-API pending error (`awaits owner API`), at a projection.
+/// PENDING (ADR-0337, ADR-0355 RB-11): a trace that fails an identity issuance (seeds 1 and 2) or crashes the control plane
+/// over a `Pending` launch (seed 3) diverges, as the pins above do. A seed whose traces hit neither would pass and fail this marker.
 /// Randomized `rg_conf` traces (seed printed on failure).
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_run(spec = "../../specs/quint/restart-generation/restart_generation.qnt", main = "rg_conf")]
-#[should_panic(expected = "awaits owner API")]
+#[should_panic(expected = "State invariant failed")]
 fn quint_rg_randomized() -> impl QuintDriver {
     RgDriver::new()
 }
