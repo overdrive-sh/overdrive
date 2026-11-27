@@ -12,7 +12,7 @@ State 1: <Initial predicate>
   idFault |-> FALSE,
   capFull |-> FALSE ]
 
-State 2: <rg_bugAbandonedRowCounts_restart_generation_Declare line 307, col 3 to line 311, col 44 of module rg_bugAbandonedRowCounts>
+State 2: <rg_bugAbandonedRowCounts_restart_generation_Declare line 321, col 3 to line 325, col 44 of module rg_bugAbandonedRowCounts>
 /\ rg_bugAbandonedRowCounts_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ rg_bugAbandonedRowCounts_restart_generation_st = [ declared |-> TRUE,
   stopped |-> FALSE,
@@ -26,7 +26,21 @@ State 2: <rg_bugAbandonedRowCounts_restart_generation_Declare line 307, col 3 to
   idFault |-> FALSE,
   capFull |-> FALSE ]
 
-State 3: <rg_bugAbandonedRowCounts_restart_generation_WlStart line 1042, col 3 to line 1075, col 61 of module rg_bugAbandonedRowCounts>
+State 3: <rg_bugAbandonedRowCounts_restart_generation_WlStart line 1088, col 3 to line 1121, col 61 of module rg_bugAbandonedRowCounts>
+/\ rg_bugAbandonedRowCounts_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
+/\ rg_bugAbandonedRowCounts_restart_generation_st = [ declared |-> TRUE,
+  stopped |-> FALSE,
+  as |-> <<6, 0, 0, 0>>,
+  why |-> <<0, 0, 0, 0>>,
+  faults |-> 1,
+  dg |-> 0,
+  ig |-> <<0, 0, 0, 0>>,
+  cnt |-> <<0, 0, 0, 0>>,
+  og |-> 0,
+  idFault |-> FALSE,
+  capFull |-> FALSE ]
+
+State 4: <rg_bugAbandonedRowCounts_restart_generation_LaunchPending line 632, col 3 to line 646, col 61 of module rg_bugAbandonedRowCounts>
 /\ rg_bugAbandonedRowCounts_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ rg_bugAbandonedRowCounts_restart_generation_st = [ declared |-> TRUE,
   stopped |-> FALSE,
@@ -40,7 +54,7 @@ State 3: <rg_bugAbandonedRowCounts_restart_generation_WlStart line 1042, col 3 t
   idFault |-> FALSE,
   capFull |-> FALSE ]
 
-State 4: <rg_bugAbandonedRowCounts_restart_generation_LaunchLost line 362, col 3 to line 388, col 61 of module rg_bugAbandonedRowCounts>
+State 5: <rg_bugAbandonedRowCounts_restart_generation_LaunchLost line 376, col 3 to line 401, col 61 of module rg_bugAbandonedRowCounts>
 /\ rg_bugAbandonedRowCounts_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ rg_bugAbandonedRowCounts_restart_generation_st = [ declared |-> TRUE,
   stopped |-> FALSE,
@@ -54,11 +68,11 @@ State 4: <rg_bugAbandonedRowCounts_restart_generation_LaunchLost line 362, col 3
   idFault |-> FALSE,
   capFull |-> FALSE ]
 
-State 5: <rg_bugAbandonedRowCounts_restart_generation_WlStart line 1042, col 3 to line 1075, col 61 of module rg_bugAbandonedRowCounts>
+State 6: <rg_bugAbandonedRowCounts_restart_generation_WlStart line 1088, col 3 to line 1121, col 61 of module rg_bugAbandonedRowCounts>
 /\ rg_bugAbandonedRowCounts_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ rg_bugAbandonedRowCounts_restart_generation_st = [ declared |-> TRUE,
   stopped |-> FALSE,
-  as |-> <<5, 1, 0, 0>>,
+  as |-> <<5, 6, 0, 0>>,
   why |-> <<7, 0, 0, 0>>,
   faults |-> 1,
   dg |-> 0,

@@ -6,27 +6,35 @@
  *
  * ONE node, ONE workload (`replicas = 1`), NA allocation ids (each minted once).
  *
- * Abstraction of the launch: a launch is ONE HELD DISPATCH. `WlStart(a)` issues allocation `a` (the evaluation's tick: the
- * lane opens, the View records the issued id) and the allocation is PENDING, which stands for "a launch holds the lane"
- * (production writes no row before the dispatch resolves). One later action resolves it, chosen by the environment flags
- * at that instant, in the order the shim runs: ADMISSION, then IDENTITY issuance, then the DRIVER. Resolutions:
- *   LaunchRefused    capFull                       no row, no charge (the guest-network pool refused; ADR-0338)
- *   LaunchPreFail    not capFull, idFault          a Failed row (SVID issuance or a non-start driver error; ADR-0337)
- *   LaunchRunning    no flag                       a Running row
- *   LaunchStartFail  no flag                       a Failed row (any typed start failure, volume causes included)
- *   LaunchLost       environment event (OPS "lost") an ABANDONED row, no charge: a launch superseded by a stop, a restart or
+ * Abstraction of the launch: a launch is ONE HELD DISPATCH in the order the action shim runs (ADR-0353, ADR-0355):
+ * ADMISSION (`provision_and_inject_netns` hands out the lease), then the `Pending` row write, then IDENTITY issuance, then the
+ * DRIVER. `WlStart(a)` issues allocation `a` (the evaluation's tick: the lane opens, the View records the issued id) and the
+ * allocation is ISSUED: a launch holds the lane and NO row exists. Admission has two outcomes: `LaunchRefused` (capFull: no row,
+ * no charge, the pool refused; ADR-0338) or `LaunchPending` (the lease is handed out and the `Pending` row is written; the
+ * allocation is PENDING, which means the row is written, ADR-0353). Admission is passed for good: from PENDING the flag `capFull`
+ * no longer matters. One later action resolves a PENDING launch, chosen by the environment flags at that instant: IDENTITY
+ * issuance, then the DRIVER. Resolutions:
+ *   LaunchRefused    ISSUED, capFull               no row, no charge (the guest-network pool refused; ADR-0338)
+ *   LaunchPending    ISSUED, not capFull           the `Pending` row is written (ADR-0353); the allocation is PENDING
+ *   LaunchPreFail    PENDING, idFault              a Failed row replaces the `Pending` row (identity issuance or a non-start driver error; ADR-0337)
+ *   LaunchRunning    PENDING, no idFault           a Running row
+ *   LaunchStartFail  PENDING, no idFault           a Failed row (any typed start failure, volume causes included)
+ *   LaunchLost       environment event (OPS "lost") a PENDING launch ends ABANDONED, no charge: a launch superseded by a stop, a restart or
  *                                                  shutdown, or lost with the control plane (ADR-0355: the `Pending` row it
  *                                                  wrote before the VMM existed ends `Terminated`, `terminal: None`, reason
  *                                                  `LaunchSuperseded` or `LaunchLostWithControlPlane`). No lane signal is
  *                                                  modelled: for the generation rule a superseded launch and a lost one are
  *                                                  identical. CpCrash and NodeReboot take every PENDING allocation to ABANDONED
- *                                                  at the boot step (`converge`'s first step, RB-11).
+ *                                                  at the boot step (`converge`'s first step, RB-11). A control-plane loss before the
+ *                                                  row is written (an ISSUED launch) ends the launch with NO row and no charge
+ *                                                  (W_UNWRITTEN): there is no `Pending` row for boot to close.
  * ABANDONED is a terminal, restartable, uncharged class that is not a natural exit. The row is the newest row (`curA`), but a
  * launch that never ran does not count (RB-13): the count, the pending generation and the ceiling are derived from the newest row
  * that ran (`basisA`), so the relaunch carries what it would carry if the abandoned rows were deleted; after a stop nothing is
  * relaunched (`canStart` needs no stop intent).
  * `hasRow` is the model of "an allocation row exists": a PENDING allocation has its `Pending` row (ADR-0353) and an abandoned
- * launch its terminal row; only a refused launch (the guest-network pool refused admission before any row is written) has NONE.
+ * launch its terminal row; an ISSUED launch, a refused launch (the guest-network pool refused admission before any row is
+ * written) and a launch lost before its row was written (W_UNWRITTEN) have NONE.
  * `ig` is the View's issued-generation map, `dg` the
  * `workloads/<id>/generation` key, `og` a marker no production rule reads (the hazard's stamp on emit).
  *
@@ -56,7 +64,7 @@ module restart_generation_conf {
     | Init
     | Declare | OpStop | OpResume | IdFaultOn | IdFaultOff | CapFill | CapDrain
     | WorkloadRestart({ a: int }) | WlStart({ a: int }) | StopAlloc({ a: int }) | VmmCrash({ a: int }) | JobExit({ a: int })
-    | LaunchRefused({ a: int }) | LaunchPreFail({ a: int }) | LaunchLost({ a: int })
+    | LaunchRefused({ a: int }) | LaunchPending({ a: int }) | LaunchPreFail({ a: int }) | LaunchLost({ a: int })
     | LaunchRunning({ a: int }) | LaunchStartFail({ a: int })
     | CpCrash | NodeReboot
 }
@@ -82,6 +90,7 @@ module restart_generation {
   val FAILED = 3
   val TERMINATED = 4
   val ABANDONED = 5     // a launch that ended before running: a Terminated row, `terminal: None`, uncharged (ADR-0355)
+  val ISSUED = 6        // the launch holds the lane and has passed no admission: NO row yet (the Pending row is written after admission)
   // why an allocation ended (the numbering of the volume spec where the code exists there)
   val W_NONE = 0
   val W_CRASH = 1       // the VMM crashed, or was lost to a node reboot
@@ -92,6 +101,7 @@ module restart_generation {
   val W_REFUSED = 10    // the guest-network pool refused admission: no row, no charge
   val W_STARTFAIL = 11  // one typed start failure (volume unavailable, held, driver rejection): a Failed row
   val W_DONE = 12       // a Job ran to completion (its natural exit): a Terminated row (JOB only)
+  val W_UNWRITTEN = 13  // an ISSUED launch lost with the control plane before its Pending row was written: no row, no charge
 
   type S = {
     declared: bool, stopped: bool,
@@ -127,22 +137,25 @@ module restart_generation {
   }
 
   // ---------------------------------------------------------------- definitions
-  def nonTerminal(s: S): bool = AL.exists(a => s.as.get(a) == PENDING or s.as.get(a) == RUNNING)
+  def nonTerminal(s: S): bool = AL.exists(a => s.as.get(a) == ISSUED or s.as.get(a) == PENDING or s.as.get(a) == RUNNING)
   // abandonWritesNoRow (ADR-0355): an abandoned launch is left `Pending` although nothing will ever resolve it
   def dead(s: S, a: int): bool = s.as.get(a) == PENDING and s.why.get(a) == W_LOST
   // a launch or an allocation is in flight: a live PENDING launch or a RUNNING allocation (a dead PENDING row blocks a
   // placement, like any non-terminal row, but nothing is in flight)
-  def inFlight(s: S): bool = AL.exists(a => (s.as.get(a) == PENDING and not(dead(s, a))) or s.as.get(a) == RUNNING)
+  def inFlight(s: S): bool =
+    AL.exists(a => s.as.get(a) == ISSUED or (s.as.get(a) == PENDING and not(dead(s, a))) or s.as.get(a) == RUNNING)
   def s_issued(s: S, a: int): bool = s.as.get(a) != UNMINTED
   def mintedIds(s: S): int = AL.filter(a => s.as.get(a) != UNMINTED).size()
   // "an allocation row exists for a": a PENDING allocation has its `Pending` row (ADR-0353), an abandoned launch its terminal
-  // row (ADR-0355) and a pre-launch failure (W_PREFAIL) its Failed row; an admission refusal (W_REFUSED) has none.
+  // row (ADR-0355) and a pre-launch failure (W_PREFAIL) its Failed row; an ISSUED launch (no admission yet), an admission
+  // refusal (W_REFUSED) and a launch lost before its row (W_UNWRITTEN) have none.
   // Hazard "prefailNoRow" (ADR-0337): a pre-driver failure writes no row. Hazard "refusalCharged" (ADR-0338): an admission
   // refusal writes a (charged) row.
   def hasRow(s: S, a: int): bool = and {
     s.as.get(a) == PENDING or s.as.get(a) == RUNNING or s.as.get(a) == FAILED or s.as.get(a) == TERMINATED
       or s.as.get(a) == ABANDONED,
     OFF.contains("refusalCharged") or s.why.get(a) != W_REFUSED,
+    s.why.get(a) != W_UNWRITTEN,
     not(OFF.contains("prefailNoRow")) or s.why.get(a) != W_PREFAIL,
   }
   // production `current_alloc` over the observed rows: the highest id with a row, 0 when none
@@ -214,12 +227,13 @@ module restart_generation {
     commit({ ...cur, capFull: false }, variant("CapDrain", ())),
   }
   // the loss a control-plane death inflicts on in-flight launches: boot's first step ends every PENDING row ABANDONED (reason
-  // `LaunchLostWithControlPlane`, no charge, the count unchanged); a RUNNING allocation stays RUNNING (the VMM survives the
-  // crash). abandonWritesNoRow: the row is left PENDING (and nothing resolves it)
+  // `LaunchLostWithControlPlane`, no charge, the count unchanged); an ISSUED launch has no row, so boot has none to close: it
+  // ends with no row and no charge (W_UNWRITTEN); a RUNNING allocation stays RUNNING (the VMM survives the crash).
+  // abandonWritesNoRow: the PENDING row is left PENDING (and nothing resolves it)
   def abandonedAs: int = if (OFF.contains("abandonWritesNoRow")) PENDING else ABANDONED
   def crashLoss(s: S): S =
-    { ...s, as: AL.mapBy(a => if (s.as.get(a) == PENDING) abandonedAs else s.as.get(a)),
-      why: AL.mapBy(a => if (s.as.get(a) == PENDING) W_LOST else s.why.get(a)) }
+    { ...s, as: AL.mapBy(a => if (s.as.get(a) == PENDING) abandonedAs else if (s.as.get(a) == ISSUED) FAILED else s.as.get(a)),
+      why: AL.mapBy(a => if (s.as.get(a) == PENDING) W_LOST else if (s.as.get(a) == ISSUED) W_UNWRITTEN else s.why.get(a)) }
 
   // ---------------------------------------------------------------- workload-lifecycle
   def canStart(s: S, a: int): bool = and {
@@ -237,7 +251,7 @@ module restart_generation {
   def canWlStart(s: S, a: int): bool = canStart(s, a) and not(s.capFull)
   action WlStart(a: int): bool = all {
     canWlStart(cur, a),
-    commit({ ...cur, as: cur.as.set(a, PENDING),
+    commit({ ...cur, as: cur.as.set(a, ISSUED),
              ig: cur.ig.set(a, cur.dg), cnt: cur.cnt.set(a, startCnt(cur)),
              og: if (OFF.contains("stampOnEmit")) cur.dg else cur.og }, variant("WlStart", { a: a })),
   }
@@ -247,7 +261,7 @@ module restart_generation {
     commit({ ...cur, as: cur.as.set(a, TERMINATED), why: cur.why.set(a, if (pendingGen(cur)) W_RESTART else W_STOP) },
       variant("StopAlloc", { a: a })),
   }
-  // `workload restart`: the generation bump. A RUNNING allocation ends; a PENDING one changes nothing but the generation;
+  // `workload restart`: the generation bump. A RUNNING allocation ends; an ISSUED or PENDING one changes nothing but the generation;
   // a FAILED current row (an exhausted workload included) stays as it is and the generation becomes pending
   action WorkloadRestart(a: int): bool = all {
     OPS.contains("restart"), cur.declared, not(cur.stopped), cur.dg < DGMAX,
@@ -258,7 +272,7 @@ module restart_generation {
           variant("WorkloadRestart", { a: a })),
       },
       all {
-        cur.as.get(a) == PENDING,
+        cur.as.get(a) == ISSUED or cur.as.get(a) == PENDING,
         commit({ ...cur, dg: cur.dg + 1 }, variant("WorkloadRestart", { a: a })),
       },
       all {
@@ -273,31 +287,40 @@ module restart_generation {
     },
   }
 
-  // ---------------------------------------------------------------- the launch resolutions (shim order: admission, identity, driver)
+  // ---------------------------------------------------------------- the launch resolutions (shim order: admission, the Pending row, identity, driver)
+  // admission (`provision_and_inject_netns`): the pool refuses before the lease is taken and before any row is written (ADR-0338)
   action LaunchRefused(a: int): bool = all {
-    cur.as.get(a) == PENDING, not(dead(cur, a)), cur.capFull,
+    cur.as.get(a) == ISSUED, cur.capFull,
     commit({ ...cur, as: cur.as.set(a, FAILED), why: cur.why.set(a, W_REFUSED) },
       variant("LaunchRefused", { a: a })),
   }
+  // admission passed: the lease is handed out and the `Pending` row is written with its address (ADR-0353). Provision failures
+  // other than the refusal are not modelled (README)
+  action LaunchPending(a: int): bool = all {
+    cur.as.get(a) == ISSUED, not(cur.capFull),
+    commit({ ...cur, as: cur.as.set(a, PENDING) }, variant("LaunchPending", { a: a })),
+  }
+  // identity issuance fails after the `Pending` write: a charged `Failed` row ends the `Pending` row (ADR-0337)
   action LaunchPreFail(a: int): bool = all {
-    cur.as.get(a) == PENDING, not(dead(cur, a)), not(cur.capFull), cur.idFault,
+    cur.as.get(a) == PENDING, not(dead(cur, a)), cur.idFault,
     commit({ ...cur, as: cur.as.set(a, FAILED), why: cur.why.set(a, W_PREFAIL) },
       variant("LaunchPreFail", { a: a })),
   }
   // environment event (OPS "lost"): the launch is superseded by a stop, a restart or shutdown, or lost with the control plane:
-  // its `Pending` row ends ABANDONED (ADR-0355), no charge. Guarded in the shim's order (admission, identity issuance, then the
-  // driver observes the signal), so it needs no flag; CpCrash / NodeReboot lose a launch at any moment. No fairness; not part
-  // of `Progress`. abandonWritesNoRow: the row is left PENDING
+  // its `Pending` row ends ABANDONED (ADR-0355), no charge. Only a PENDING launch (the row is written; supersession is observed
+  // at the driver). Guarded in the shim's order (identity issuance, then the driver observes the signal), so it needs no
+  // admission flag; CpCrash / NodeReboot lose a launch at any moment, an ISSUED one included (no row, W_UNWRITTEN). No fairness;
+  // not part of `Progress`. abandonWritesNoRow: the row is left PENDING
   action LaunchLost(a: int): bool = all {
-    OPS.contains("lost"), cur.as.get(a) == PENDING, not(dead(cur, a)), not(cur.capFull), not(cur.idFault),
+    OPS.contains("lost"), cur.as.get(a) == PENDING, not(dead(cur, a)), not(cur.idFault),
     commit({ ...cur, as: cur.as.set(a, abandonedAs), why: cur.why.set(a, W_LOST) }, variant("LaunchLost", { a: a })),
   }
   action LaunchRunning(a: int): bool = all {
-    cur.as.get(a) == PENDING, not(dead(cur, a)), not(cur.capFull), not(cur.idFault),
+    cur.as.get(a) == PENDING, not(dead(cur, a)), not(cur.idFault),
     commit({ ...cur, as: cur.as.set(a, RUNNING) }, variant("LaunchRunning", { a: a })),
   }
   action LaunchStartFail(a: int): bool = all {
-    cur.as.get(a) == PENDING, not(dead(cur, a)), not(cur.capFull), not(cur.idFault),
+    cur.as.get(a) == PENDING, not(dead(cur, a)), not(cur.idFault),
     commit({ ...cur, as: cur.as.set(a, FAILED), why: cur.why.set(a, W_STARTFAIL) }, variant("LaunchStartFail", { a: a })),
   }
 
@@ -331,7 +354,7 @@ module restart_generation {
   // ---------------------------------------------------------------- composition
   action Progress = {
     nondet a = AL.oneOf()
-    any { WlStart(a), StopAlloc(a), LaunchRefused(a), LaunchPreFail(a), LaunchRunning(a), LaunchStartFail(a) }
+    any { WlStart(a), StopAlloc(a), LaunchRefused(a), LaunchPending(a), LaunchPreFail(a), LaunchRunning(a), LaunchStartFail(a) }
   }
   action step = {
     nondet a = AL.oneOf()
@@ -351,7 +374,8 @@ module restart_generation {
   // counted: they leave no row). Vacuous for JOB = false.
   val I_FINISHED_JOB_ISSUES_NO_ID = not(JOB) or and {
     AL.filter(a => hasRow(st, a) and st.as.get(a) != ABANDONED).size() <= 1,
-    jobTerm(st, basisA(st)) implies not(AL.exists(a => a > basisA(st) and (st.as.get(a) == PENDING or hasRow(st, a)))),
+    jobTerm(st, basisA(st)) implies
+      not(AL.exists(a => a > basisA(st) and (st.as.get(a) == ISSUED or st.as.get(a) == PENDING or hasRow(st, a)))),
   }
   // RB-13 (ADR-0355 item 2, deletion-equivalence): deleting the abandoned rows from the chain changes no later launch's count.
   // Every allocation's count at issue equals the count derived over the chain of the lower ids with the abandoned rows DELETED
@@ -369,13 +393,14 @@ module restart_generation {
   action fWlStart = { nondet a = AL.oneOf() WlStart(a) }
   action fStopAlloc = { nondet a = AL.oneOf() StopAlloc(a) }
   action fRefused = { nondet a = AL.oneOf() LaunchRefused(a) }
+  action fPending = { nondet a = AL.oneOf() LaunchPending(a) }
   action fPreFail = { nondet a = AL.oneOf() LaunchPreFail(a) }
   action fRunning = { nondet a = AL.oneOf() LaunchRunning(a) }
   action fStartFail = { nondet a = AL.oneOf() LaunchStartFail(a) }
-  // every progress action of the spec, the four launch resolutions among them; environment events (`LaunchLost` included) carry none
+  // every progress action of the spec, the five launch resolutions among them; environment events (`LaunchLost` included) carry none
   temporal FairProgress = and {
     weakFair(fWlStart, (st, conf_step)), weakFair(fStopAlloc, (st, conf_step)), weakFair(fRefused, (st, conf_step)),
-    weakFair(fPreFail, (st, conf_step)), weakFair(fRunning, (st, conf_step)), weakFair(fStartFail, (st, conf_step)),
+    weakFair(fPending, (st, conf_step)), weakFair(fPreFail, (st, conf_step)), weakFair(fRunning, (st, conf_step)), weakFair(fStartFail, (st, conf_step)),
   }
   // intent says run, the node is up and nothing blocks it, and no launch is in flight: a launch for the current generation
   // must eventually be issued
@@ -393,20 +418,20 @@ module restart_generation {
   })
 
   // ---------------------------------------------------------------- named runs (one per critical scenario)
-  action running1 = init.then(Declare).then(WlStart(1)).then(LaunchRunning(1))
+  action running1 = init.then(Declare).then(WlStart(1)).then(LaunchPending(1)).then(LaunchRunning(1))
   // allocations 1 and 2 failed as pre-launch failures (the identity fault is still on), nothing in flight
-  action prefail2 = init.then(Declare).then(IdFaultOn).then(WlStart(1)).then(LaunchPreFail(1))
-    .then(WlStart(2)).then(LaunchPreFail(2))
+  action prefail2 = init.then(Declare).then(IdFaultOn).then(WlStart(1)).then(LaunchPending(1)).then(LaunchPreFail(1))
+    .then(WlStart(2)).then(LaunchPending(2)).then(LaunchPreFail(2))
 
   // SD-6, ADR-0355: a control-plane crash during the replacement launch loses the launch: boot ends its `Pending` row ABANDONED,
   // no charge; the abandoned row is restartable, so one fresh allocation is placed carrying its count
   run control_plane_crash_during_restart_launch_relaunches_once = running1
-    .then(WorkloadRestart(1)).then(WlStart(2)).then(CpCrash)
+    .then(WorkloadRestart(1)).then(WlStart(2)).then(LaunchPending(2)).then(CpCrash)
     .expect(st.as.get(2) == ABANDONED and st.why.get(2) == W_LOST and hasRow(st, 2) and curA(st) == 2 and basisA(st) == 1
             and charged(st) == 0 and pendingGen(st) and canStart(st, 3) and Safety)
     .then(WlStart(3))
     .expect(st.ig.get(3) == 1 and st.cnt.get(3) == st.cnt.get(1) and Safety)
-    .then(LaunchRunning(3))
+    .then(LaunchPending(3)).then(LaunchRunning(3))
     .expect(st.as.get(3) == RUNNING and curA(st) == 3 and not(pendingGen(st)) and charged(st) == 0 and Safety)
 
   // RB-13 (ADR-0355 item 2): a crash restart abandoned by an operator restart forgives the crash. #1 crashed (Failed, count 0), #2 is
@@ -414,18 +439,21 @@ module restart_generation {
   // handles nothing), so #3 is a generation replacement carrying the BASIS row's count 0, not #2's 1
   run crash_restart_abandoned_by_operator_restart_forgives_the_crash = running1
     .then(VmmCrash(1)).then(WlStart(2))
+    .expect(st.cnt.get(2) == 1 and not(hasRow(st, 2)) and basisA(st) == 1 and charged(st) == 1 and Safety)
+    .then(LaunchPending(2))
     .expect(st.cnt.get(2) == 1 and basisA(st) == 2 and charged(st) == 1 and Safety)
     .then(WorkloadRestart(2)).then(LaunchLost(2))
     .expect(st.as.get(2) == ABANDONED and curA(st) == 2 and basisA(st) == 1 and pendingGen(st) and charged(st) == 1 and Safety)
     .then(WlStart(3))
     .expect(st.cnt.get(3) == 0 and st.ig.get(3) == 1 and Safety)
-    .then(LaunchRunning(3))
+    .then(LaunchPending(3)).then(LaunchRunning(3))
     .expect(st.as.get(3) == RUNNING and not(pendingGen(st)) and charged(st) == 0 and Safety)
 
   // RB-13: a lost launch with no operator action charges the crash once, however many consecutive launches were lost: #2, #3 abandoned,
   // #4 carries #1's count + 1 = 1 (not 2 or 3), and no generation is pending
   run consecutive_abandoned_launches_charge_the_crash_once = running1
-    .then(VmmCrash(1)).then(WlStart(2)).then(LaunchLost(2)).then(WlStart(3)).then(LaunchLost(3))
+    .then(VmmCrash(1)).then(WlStart(2)).then(LaunchPending(2)).then(LaunchLost(2))
+    .then(WlStart(3)).then(LaunchPending(3)).then(LaunchLost(3))
     .expect(st.as.get(2) == ABANDONED and st.as.get(3) == ABANDONED and curA(st) == 3 and basisA(st) == 1
             and not(pendingGen(st)) and charged(st) == 1 and canStart(st, 4) and Safety)
     .then(WlStart(4))
@@ -435,13 +463,13 @@ module restart_generation {
   // lost one): an ABANDONED row, no charge, the generation stays pending, and exactly one launch is placed for the latest generation.
   // A restart commit enables the loss but does not force it.
   run second_restart_loses_launch_then_one_placement = running1
-    .then(OpStop).then(StopAlloc(1)).then(OpResume).then(WlStart(2)).then(WorkloadRestart(2))
+    .then(OpStop).then(StopAlloc(1)).then(OpResume).then(WlStart(2)).then(LaunchPending(2)).then(WorkloadRestart(2))
     .expect(st.dg == 2 and Safety)
     .then(LaunchLost(2))
     .expect(st.as.get(2) == ABANDONED and st.why.get(2) == W_LOST and hasRow(st, 2) and pendingGen(st) and charged(st) == 0 and Safety)
     .then(WlStart(3))
     .expect(st.ig.get(3) == 2 and Safety)
-    .then(LaunchRunning(3))
+    .then(LaunchPending(3)).then(LaunchRunning(3))
     .expect(st.as.get(3) == RUNNING and not(pendingGen(st)) and charged(st) == 0
             and AL.filter(a => st.ig.get(a) == 2 and hasRow(st, a)).size() == 1 and Safety)
 
@@ -453,7 +481,7 @@ module restart_generation {
             and Safety)
     .then(StopAlloc(1))
     .expect(st.as.get(1) == TERMINATED and st.why.get(1) == W_RESTART and not(vetoed(st)) and pendingGen(st) and Safety)
-    .then(WlStart(2)).then(LaunchRunning(2))
+    .then(WlStart(2)).then(LaunchPending(2)).then(LaunchRunning(2))
     .expect(st.as.get(2) == RUNNING and curA(st) == 2 and not(pendingGen(st)) and charged(st) == 0
             and AL.filter(a => st.ig.get(a) == 1 and hasRow(st, a)).size() == 1 and Safety)
 
@@ -461,14 +489,16 @@ module restart_generation {
   // starts uncharged (R-1 = A: it carries the predecessor's count, so the failure it replaced stops counting: `charged`
   // drops from LIMIT to LIMIT - 1 once the replacement has a row)
   run restart_of_exhausted_workload_relaunches_uncharged = init.then(Declare).then(IdFaultOn)
-    .then(WlStart(1)).then(LaunchPreFail(1)).then(WlStart(2)).then(LaunchPreFail(2)).then(WlStart(3)).then(LaunchPreFail(3))
+    .then(WlStart(1)).then(LaunchPending(1)).then(LaunchPreFail(1))
+    .then(WlStart(2)).then(LaunchPending(2)).then(LaunchPreFail(2))
+    .then(WlStart(3)).then(LaunchPending(3)).then(LaunchPreFail(3))
     .expect(exhausted(st) and charged(st) == LIMIT and AL.forall(a => not(canStart(st, a))) and Safety)
     .then(IdFaultOff).then(WorkloadRestart(3))
     .expect(st.dg == 1 and pendingGen(st) and st.as.get(3) == FAILED and st.why.get(3) == W_PREFAIL and curA(st) == 3
             and charged(st) == LIMIT and canStart(st, 4) and Safety)
     .then(WlStart(4))
     .expect(st.ig.get(4) == 1 and st.cnt.get(4) == st.cnt.get(3) and Safety)
-    .then(LaunchRunning(4))
+    .then(LaunchPending(4)).then(LaunchRunning(4))
     .expect(st.as.get(4) == RUNNING and curA(st) == 4 and not(pendingGen(st)) and charged(st) == LIMIT - 1 and Safety)
 
   // R-1 = A, the divergence of the earlier running count: two pre-launch failures, `workload restart`, the replacement runs,
@@ -480,14 +510,14 @@ module restart_generation {
     .expect(st.dg == 1 and pendingGen(st) and charged(st) == 2 and Safety)
     .then(WlStart(3))
     .expect(st.ig.get(3) == 1 and st.cnt.get(3) == 1 and Safety)
-    .then(LaunchRunning(3))
+    .then(LaunchPending(3)).then(LaunchRunning(3))
     .expect(st.as.get(3) == RUNNING and charged(st) == 1 and Safety)
     .then(VmmCrash(3))
     .expect(st.as.get(3) == FAILED and st.why.get(3) == W_CRASH and charged(st) == 2 and not(exhausted(st))
             and canStart(st, 4) and Safety)
     .then(WlStart(4))
     .expect(st.cnt.get(4) == 2 and Safety)
-    .then(LaunchStartFail(4))
+    .then(LaunchPending(4)).then(LaunchStartFail(4))
     .expect(st.why.get(4) == W_STARTFAIL and exhausted(st) and charged(st) == LIMIT and mintedIds(st) == 4
             and AL.forall(a => not(canStart(st, a))) and Safety)
 
@@ -495,29 +525,35 @@ module restart_generation {
   // then BackoffExhausted; the ids minted equal the restart ceiling and none is launched after
   run persistent_prelaunch_failure_ends_in_backoff_exhausted = init.then(Declare).then(IdFaultOn)
     .then(WlStart(1))
-    .expect(st.as.get(1) == PENDING and not(canWlStart(st, 2)) and Safety)
+    .expect(st.as.get(1) == ISSUED and not(hasRow(st, 1)) and not(canWlStart(st, 2)) and Safety)
+    .then(LaunchPending(1))
+    .expect(st.as.get(1) == PENDING and hasRow(st, 1) and curA(st) == 1 and not(canWlStart(st, 2)) and Safety)
     .then(LaunchPreFail(1))
     .expect(st.as.get(1) == FAILED and st.why.get(1) == W_PREFAIL and hasRow(st, 1) and charged(st) == 1 and Safety)
-    .then(WlStart(2)).then(LaunchPreFail(2)).then(WlStart(3)).then(LaunchPreFail(3))
+    .then(WlStart(2)).then(LaunchPending(2)).then(LaunchPreFail(2))
+    .then(WlStart(3)).then(LaunchPending(3)).then(LaunchPreFail(3))
     .expect(charged(st) == LIMIT and exhausted(st) and AL.forall(a => not(canWlStart(st, a))) and mintedIds(st) == LIMIT
             and Safety)
 
   // SD-6 ruling B: a transient pre-launch failure: the failed launch is a charged Failed row, the next launch runs
   run transient_prelaunch_failure_recovers = init.then(Declare).then(IdFaultOn)
-    .then(WlStart(1)).then(LaunchPreFail(1))
+    .then(WlStart(1)).then(LaunchPending(1)).then(LaunchPreFail(1))
     .expect(st.as.get(1) == FAILED and st.why.get(1) == W_PREFAIL and charged(st) == 1 and Safety)
-    .then(IdFaultOff).then(WlStart(2)).then(LaunchRunning(2))
+    .then(IdFaultOff).then(WlStart(2)).then(LaunchPending(2)).then(LaunchRunning(2))
     .expect(st.as.get(2) == RUNNING and charged(st) == 1 and curA(st) == 2 and Safety)
 
-  // SD-6 (D-1 = A): the pool filled between the occupancy check and the dispatch: the refusal writes no row and charges nothing;
+  // SD-6 (D-1 = A): the pool filled between the occupancy check and the dispatch: admission refuses the ISSUED launch before the
+  // `Pending` row exists (ADR-0353: the row is written after admission), so the refusal writes no row and charges nothing;
   // the occupancy gate (`WlStart` disabled while the pool is at its cap) paces it; when occupancy drops the next launch runs
-  run admission_refusal_leaves_no_row_and_waits_for_capacity = init.then(Declare).then(WlStart(1)).then(CapFill)
+  run admission_refusal_leaves_no_row_and_waits_for_capacity = init.then(Declare).then(WlStart(1))
+    .expect(st.as.get(1) == ISSUED and not(hasRow(st, 1)) and curA(st) == 0 and Safety)
+    .then(CapFill)
     .then(LaunchRefused(1))
     .expect(st.as.get(1) == FAILED and st.why.get(1) == W_REFUSED and not(hasRow(st, 1)) and curA(st) == 0 and charged(st) == 0
             and canStart(st, 2) and not(canWlStart(st, 2)) and Safety)
     .then(CapDrain)
     .expect(canWlStart(st, 2))
-    .then(WlStart(2)).then(LaunchRunning(2))
+    .then(WlStart(2)).then(LaunchPending(2)).then(LaunchRunning(2))
     .expect(st.as.get(2) == RUNNING and curA(st) == 2 and charged(st) == 0 and Safety)
   // H1: `workload restart` of a Job that completed: the generation advances, nothing is pending, no id is issued
   run restart_of_completed_job_does_nothing_and_issues_no_id = running1

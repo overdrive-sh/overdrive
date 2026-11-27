@@ -1,4 +1,4 @@
-# rg-hazard-refusal-charged: counterexample, 9 state(s) (from the TLC trace)
+# rg-hazard-refusal-charged: counterexample, 12 state(s) (from the TLC trace)
 
 State 1
   conf_step = [Init |-> [tag |-> "UNIT"]]
@@ -8,22 +8,31 @@ State 2 [Declare]
   st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<0, 0, 0, 0>>, why |-> <<0, 0, 0, 0>>, faults |-> 0, dg |-> 0, ig |-> <<0, 0, 0, 0>>, cnt |-> <<0, 0, 0, 0>>, og |-> 0, idFault |-> FALSE, capFull |-> FALSE ]
 
 State 3 [WlStart]
-  st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<1, 0, 0, 0>>, why |-> <<0, 0, 0, 0>>, faults |-> 0, dg |-> 0, ig |-> <<0, 0, 0, 0>>, cnt |-> <<0, 0, 0, 0>>, og |-> 0, idFault |-> FALSE, capFull |-> FALSE ]
+  st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<6, 0, 0, 0>>, why |-> <<0, 0, 0, 0>>, faults |-> 0, dg |-> 0, ig |-> <<0, 0, 0, 0>>, cnt |-> <<0, 0, 0, 0>>, og |-> 0, idFault |-> FALSE, capFull |-> FALSE ]
 
-State 4 [LaunchStartFail]
-  st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<3, 0, 0, 0>>, why |-> <<11, 0, 0, 0>>, faults |-> 0, dg |-> 0, ig |-> <<0, 0, 0, 0>>, cnt |-> <<0, 0, 0, 0>>, og |-> 0, idFault |-> FALSE, capFull |-> FALSE ]
+State 4 [CapFill]
+  st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<6, 0, 0, 0>>, why |-> <<0, 0, 0, 0>>, faults |-> 0, dg |-> 0, ig |-> <<0, 0, 0, 0>>, cnt |-> <<0, 0, 0, 0>>, og |-> 0, idFault |-> FALSE, capFull |-> TRUE ]
 
-State 5 [WlStart]
-  st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<3, 1, 0, 0>>, why |-> <<11, 0, 0, 0>>, faults |-> 0, dg |-> 0, ig |-> <<0, 0, 0, 0>>, cnt |-> <<0, 1, 0, 0>>, og |-> 0, idFault |-> FALSE, capFull |-> FALSE ]
+State 5 [LaunchRefused]
+  st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<3, 0, 0, 0>>, why |-> <<10, 0, 0, 0>>, faults |-> 0, dg |-> 0, ig |-> <<0, 0, 0, 0>>, cnt |-> <<0, 0, 0, 0>>, og |-> 0, idFault |-> FALSE, capFull |-> TRUE ]
 
-State 6 [LaunchStartFail]
-  st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<3, 3, 0, 0>>, why |-> <<11, 11, 0, 0>>, faults |-> 0, dg |-> 0, ig |-> <<0, 0, 0, 0>>, cnt |-> <<0, 1, 0, 0>>, og |-> 0, idFault |-> FALSE, capFull |-> FALSE ]
+State 6 [CapDrain]
+  st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<3, 0, 0, 0>>, why |-> <<10, 0, 0, 0>>, faults |-> 0, dg |-> 0, ig |-> <<0, 0, 0, 0>>, cnt |-> <<0, 0, 0, 0>>, og |-> 0, idFault |-> FALSE, capFull |-> FALSE ]
 
 State 7 [WlStart]
-  st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<3, 3, 1, 0>>, why |-> <<11, 11, 0, 0>>, faults |-> 0, dg |-> 0, ig |-> <<0, 0, 0, 0>>, cnt |-> <<0, 1, 2, 0>>, og |-> 0, idFault |-> FALSE, capFull |-> FALSE ]
+  st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<3, 6, 0, 0>>, why |-> <<10, 0, 0, 0>>, faults |-> 0, dg |-> 0, ig |-> <<0, 0, 0, 0>>, cnt |-> <<0, 1, 0, 0>>, og |-> 0, idFault |-> FALSE, capFull |-> FALSE ]
 
-State 8 [CapFill]
-  st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<3, 3, 1, 0>>, why |-> <<11, 11, 0, 0>>, faults |-> 0, dg |-> 0, ig |-> <<0, 0, 0, 0>>, cnt |-> <<0, 1, 2, 0>>, og |-> 0, idFault |-> FALSE, capFull |-> TRUE ]
+State 8 [LaunchPending]
+  st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<3, 1, 0, 0>>, why |-> <<10, 0, 0, 0>>, faults |-> 0, dg |-> 0, ig |-> <<0, 0, 0, 0>>, cnt |-> <<0, 1, 0, 0>>, og |-> 0, idFault |-> FALSE, capFull |-> FALSE ]
 
-State 9 [LaunchRefused]
-  st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<3, 3, 3, 0>>, why |-> <<11, 11, 10, 0>>, faults |-> 0, dg |-> 0, ig |-> <<0, 0, 0, 0>>, cnt |-> <<0, 1, 2, 0>>, og |-> 0, idFault |-> FALSE, capFull |-> TRUE ]
+State 9 [LaunchStartFail]
+  st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<3, 3, 0, 0>>, why |-> <<10, 11, 0, 0>>, faults |-> 0, dg |-> 0, ig |-> <<0, 0, 0, 0>>, cnt |-> <<0, 1, 0, 0>>, og |-> 0, idFault |-> FALSE, capFull |-> FALSE ]
+
+State 10 [WlStart]
+  st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<3, 3, 6, 0>>, why |-> <<10, 11, 0, 0>>, faults |-> 0, dg |-> 0, ig |-> <<0, 0, 0, 0>>, cnt |-> <<0, 1, 2, 0>>, og |-> 0, idFault |-> FALSE, capFull |-> FALSE ]
+
+State 11 [CapFill]
+  st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<3, 3, 6, 0>>, why |-> <<10, 11, 0, 0>>, faults |-> 0, dg |-> 0, ig |-> <<0, 0, 0, 0>>, cnt |-> <<0, 1, 2, 0>>, og |-> 0, idFault |-> FALSE, capFull |-> TRUE ]
+
+State 12 [LaunchRefused]
+  st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<3, 3, 3, 0>>, why |-> <<10, 11, 10, 0>>, faults |-> 0, dg |-> 0, ig |-> <<0, 0, 0, 0>>, cnt |-> <<0, 1, 2, 0>>, og |-> 0, idFault |-> FALSE, capFull |-> TRUE ]

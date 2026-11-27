@@ -11,7 +11,7 @@ main = "rg_ok"
 invariant = "Safety"
 backend = "tlc"
 expect = "holds"
-ci = true
+ci = false  # 130 s with the ISSUED state (was 88 s): over the two-minute rule
 timeout_secs = 900
 
 [[check]]

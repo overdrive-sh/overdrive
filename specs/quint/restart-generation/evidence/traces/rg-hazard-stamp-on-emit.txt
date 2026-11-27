@@ -1,4 +1,4 @@
-# rg-hazard-stamp-on-emit: counterexample, 9 state(s) (from the TLC trace)
+# rg-hazard-stamp-on-emit: counterexample, 10 state(s) (from the TLC trace)
 
 State 1
   conf_step = [Init |-> [tag |-> "UNIT"]]
@@ -8,24 +8,27 @@ State 2 [Declare]
   st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<0, 0, 0>>, why |-> <<0, 0, 0>>, faults |-> 0, dg |-> 0, ig |-> <<0, 0, 0>>, cnt |-> <<0, 0, 0>>, og |-> 0, idFault |-> FALSE, capFull |-> FALSE ]
 
 State 3 [WlStart]
+  st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<6, 0, 0>>, why |-> <<0, 0, 0>>, faults |-> 0, dg |-> 0, ig |-> <<0, 0, 0>>, cnt |-> <<0, 0, 0>>, og |-> 0, idFault |-> FALSE, capFull |-> FALSE ]
+
+State 4 [LaunchPending]
   st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<1, 0, 0>>, why |-> <<0, 0, 0>>, faults |-> 0, dg |-> 0, ig |-> <<0, 0, 0>>, cnt |-> <<0, 0, 0>>, og |-> 0, idFault |-> FALSE, capFull |-> FALSE ]
 
-State 4 [LaunchRunning]
+State 5 [LaunchRunning]
   st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<2, 0, 0>>, why |-> <<0, 0, 0>>, faults |-> 0, dg |-> 0, ig |-> <<0, 0, 0>>, cnt |-> <<0, 0, 0>>, og |-> 0, idFault |-> FALSE, capFull |-> FALSE ]
 
-State 5 [WorkloadRestart]
+State 6 [WorkloadRestart]
   st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<4, 0, 0>>, why |-> <<6, 0, 0>>, faults |-> 0, dg |-> 1, ig |-> <<0, 0, 0>>, cnt |-> <<0, 0, 0>>, og |-> 0, idFault |-> FALSE, capFull |-> FALSE ]
 
-State 6 [WlStart]
-  st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<4, 1, 0>>, why |-> <<6, 0, 0>>, faults |-> 0, dg |-> 1, ig |-> <<0, 1, 0>>, cnt |-> <<0, 0, 0>>, og |-> 1, idFault |-> FALSE, capFull |-> FALSE ]
+State 7 [WlStart]
+  st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<4, 6, 0>>, why |-> <<6, 0, 0>>, faults |-> 0, dg |-> 1, ig |-> <<0, 1, 0>>, cnt |-> <<0, 0, 0>>, og |-> 1, idFault |-> FALSE, capFull |-> FALSE ]
 
-State 7 [CapFill]
-  st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<4, 1, 0>>, why |-> <<6, 0, 0>>, faults |-> 0, dg |-> 1, ig |-> <<0, 1, 0>>, cnt |-> <<0, 0, 0>>, og |-> 1, idFault |-> FALSE, capFull |-> TRUE ]
+State 8 [CapFill]
+  st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<4, 6, 0>>, why |-> <<6, 0, 0>>, faults |-> 0, dg |-> 1, ig |-> <<0, 1, 0>>, cnt |-> <<0, 0, 0>>, og |-> 1, idFault |-> FALSE, capFull |-> TRUE ]
 
-State 8 [LaunchRefused]
+State 9 [LaunchRefused]
   st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<4, 3, 0>>, why |-> <<6, 10, 0>>, faults |-> 0, dg |-> 1, ig |-> <<0, 1, 0>>, cnt |-> <<0, 0, 0>>, og |-> 1, idFault |-> FALSE, capFull |-> TRUE ]
 
-State 9 [CapDrain]
+State 10 [CapDrain]
   st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<4, 3, 0>>, why |-> <<6, 10, 0>>, faults |-> 0, dg |-> 1, ig |-> <<0, 1, 0>>, cnt |-> <<0, 0, 0>>, og |-> 1, idFault |-> FALSE, capFull |-> FALSE ]
 
--> stutters forever in State 9
+-> stutters forever in State 10
