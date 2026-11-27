@@ -1,16 +1,15 @@
 //! `upstream_host` — the host adapters of the two upstream ports (ADR-0358).
 //!
-//! DISTILL scaffold: constructors are real; port bodies are `todo!`.
+//! The resolver-file reader is real; the exchange body is still a `todo!`
+//! scaffold.
 
 #![allow(
     clippy::todo,
-    clippy::missing_const_for_fn,
     clippy::unused_async,
-    clippy::needless_pass_by_value,
-    clippy::doc_markdown,
-    reason = "DISTILL scaffold: bodies are todo until DELIVER (ADR-0358)"
+    reason = "HostUpstreamExchange is still a scaffold until DELIVER (ADR-0356)"
 )]
 
+use std::io;
 use std::net::IpAddr;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -35,9 +34,26 @@ impl ResolvConfUpstreams {
 #[async_trait::async_trait]
 impl UpstreamResolvers for ResolvConfUpstreams {
     async fn candidates(&self) -> Result<Vec<IpAddr>, UpstreamConfigError> {
-        let _ = &self.path;
-        todo!("resolver file: re-read the file on every call and list its nameserver addresses")
+        let bytes = tokio::fs::read(&self.path).await.map_err(|source| match source.kind() {
+            io::ErrorKind::NotFound => UpstreamConfigError::Absent,
+            _ => UpstreamConfigError::Unreadable { source },
+        })?;
+        Ok(nameserver_addresses(&String::from_utf8_lossy(&bytes)))
     }
+}
+
+/// The plain IPv4/IPv6 addresses of the `nameserver` lines, in file order.
+/// Comments, other keywords, scoped (`fe80::1%eth0`) and malformed tokens are
+/// skipped.
+fn nameserver_addresses(contents: &str) -> Vec<IpAddr> {
+    contents
+        .lines()
+        .filter_map(|line| {
+            let mut tokens = line.split_whitespace();
+            (tokens.next() == Some("nameserver")).then_some(())?;
+            tokens.next()?.parse::<IpAddr>().ok()
+        })
+        .collect()
 }
 
 /// Tokio UDP/TCP exchange, one fresh socket per exchange.
