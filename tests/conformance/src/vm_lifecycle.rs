@@ -182,6 +182,7 @@ impl VmLifecycleWorld {
             &config,
             Arc::new(RealCgroupFs::new()),
             Arc::new(SimKek::for_boot()),
+            1_048_576,
         )
         .expect("the host bundle opens the stores");
         let handle = run_server(config, adapters).await.expect("start the production server");

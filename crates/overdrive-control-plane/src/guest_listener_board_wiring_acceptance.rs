@@ -159,6 +159,7 @@ impl Node {
             &config,
             Arc::new(RealCgroupFs::new()),
             Arc::new(SimKek::for_boot()),
+            1_048_576,
         )
         .expect("the host bundle opens stores under the fixture data directory");
         adapters.boot.dataplane = Arc::new(TestDataplaneComposer::new(Ipv4Addr::LOCALHOST));

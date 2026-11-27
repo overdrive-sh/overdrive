@@ -624,6 +624,7 @@ impl DirectHandlerHarness {
             &config,
             Arc::new(overdrive_sim::adapters::SimCgroupFs::new()),
             Arc::new(overdrive_sim::adapters::SimKek::for_boot()),
+            1_048_576,
         )
         .expect("the host bundle opens the handler's stores");
         let obs: Arc<dyn ObservationStore> = Arc::new(SimObservationStore::single_peer(

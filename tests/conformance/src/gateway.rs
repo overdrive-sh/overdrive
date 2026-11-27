@@ -1911,8 +1911,9 @@ async fn start_server(
     // The hermetic KEK carries the boot KEK and the gateway's custody KEK.
     let custody_kek = KekId::new("overdrive-public-certified-key").expect("custody KEK id");
     let kek = SimKek::for_boot().with(&custody_kek, [0x5a; KEK_LEN]);
-    let adapters = NodeAdapters::host(&config, Arc::new(RealCgroupFs::new()), Arc::new(kek))
-        .expect("the host bundle opens the stores");
+    let adapters =
+        NodeAdapters::host(&config, Arc::new(RealCgroupFs::new()), Arc::new(kek), 1_048_576)
+            .expect("the host bundle opens the stores");
     let handle = run_server(config, adapters).await.expect("start the production server");
     let api = PublicApi::from_trust_config(&config_dir.join(".overdrive/config"))
         .expect("load the server trust triple");

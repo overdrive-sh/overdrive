@@ -29,7 +29,9 @@ use std::time::Duration;
 
 use overdrive_control_plane::error::{ControlPlaneError, MtlsBootError, VmmBootError};
 use overdrive_control_plane::guest_network::GuestNetworkError;
-use overdrive_control_plane::{NodeAdapters, ServerConfig, VmCapability, run_server};
+use overdrive_control_plane::{
+    GuestFlowAdapter, NodeAdapters, ServerConfig, VmCapability, run_server,
+};
 use overdrive_core::guest_transport::GUEST_NODE_PREFIX;
 use overdrive_dataplane::allocators::VipRange;
 use overdrive_sim::adapters::{
@@ -117,6 +119,9 @@ struct Node {
     intercept: Arc<SimMtlsIntercept>,
     vmm: SimVmm,
     beacon: Arc<SimBeaconIo>,
+    /// The soft descriptor limit the host bundle's guest-flow seam reports;
+    /// `None` keeps the bundle's own value.
+    nofile_soft: Option<u64>,
 }
 
 impl Node {
@@ -128,7 +133,15 @@ impl Node {
             intercept: Arc::new(SimMtlsIntercept::new()),
             vmm,
             beacon,
+            nofile_soft: None,
         }
+    }
+
+    /// The same node whose host bundle is built with `nofile_soft` as the
+    /// injected soft descriptor limit.
+    const fn with_nofile_soft(mut self, nofile_soft: u64) -> Self {
+        self.nofile_soft = Some(nofile_soft);
+        self
     }
 
     fn config(&self) -> ServerConfig {
@@ -150,6 +163,9 @@ impl Node {
         adapters.vm.vmm = Arc::new(self.vmm.clone());
         adapters.vm.beacon = Arc::clone(&self.beacon) as _;
         adapters.vm.capability = VmCapability::Required;
+        if let Some(nofile_soft) = self.nofile_soft {
+            adapters.guest_flow = GuestFlowAdapter::host(nofile_soft);
+        }
         adapters
     }
 
@@ -234,35 +250,6 @@ impl Drop for DummyInterface {
     fn drop(&mut self) {
         let output = std::process::Command::new("ip").args(["link", "del", self.name]).output();
         eprintln!("[P4-S13] cleanup `ip link del {}`: {output:?}", self.name);
-    }
-}
-
-/// Restores the soft `RLIMIT_NOFILE` on drop.
-struct NofileGuard {
-    previous: libc::rlimit,
-}
-
-impl NofileGuard {
-    fn lower_soft_to(soft: u64) -> Self {
-        let mut previous = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
-        // SAFETY: `getrlimit` writes into the provided, properly aligned struct.
-        let read = unsafe { libc::getrlimit(libc::RLIMIT_NOFILE, &raw mut previous) };
-        assert_eq!(read, 0, "getrlimit(RLIMIT_NOFILE)");
-        let lowered = libc::rlimit { rlim_cur: soft, rlim_max: previous.rlim_max };
-        // SAFETY: `setrlimit` reads the provided struct; lowering the soft limit
-        // below the hard limit needs no privilege. `#[serial(rlimit)]` keeps
-        // every body that touches the process's limit exclusive.
-        let set = unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &raw const lowered) };
-        assert_eq!(set, 0, "setrlimit(RLIMIT_NOFILE)");
-        Self { previous }
-    }
-}
-
-impl Drop for NofileGuard {
-    fn drop(&mut self) {
-        // SAFETY: restores the struct `getrlimit` filled in.
-        let restored = unsafe { libc::setrlimit(libc::RLIMIT_NOFILE, &raw const self.previous) };
-        eprintln!("[P4-S13] restore RLIMIT_NOFILE -> {restored}");
     }
 }
 
@@ -387,10 +374,9 @@ async fn a_node_address_inside_the_guest_prefix_refuses_boot_naming_the_interfac
 /// CONTRACT_SHAPE: unbounded-preservation.
 #[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
-#[serial(cgroup, rlimit)]
+#[serial(cgroup)]
 async fn an_rlimit_nofile_below_the_owner_budget_refuses_boot() {
-    let node = Node::new();
-    let _limit = NofileGuard::lower_soft_to(1_024);
+    let node = Node::new().with_nofile_soft(1_024);
 
     let (refusal, events) = refused_boot(&node, node.config()).await;
 

@@ -353,10 +353,12 @@ impl VmCapability {
 pub struct GuestFlowAdapter(pub(crate) Arc<dyn GuestFlowIo>);
 
 impl GuestFlowAdapter {
-    /// `HostGuestFlowIo::new()`. Infallible; touches no kernel state.
+    /// `HostGuestFlowIo::new(nofile_soft)`: `nofile_soft` is the process soft
+    /// descriptor limit read back at the binary entry (ADR-0363). Infallible;
+    /// touches no kernel state.
     #[must_use]
-    pub fn host() -> Self {
-        Self(Arc::new(crate::guest_network::flow_io::HostGuestFlowIo::new()))
+    pub fn host(nofile_soft: u64) -> Self {
+        Self(Arc::new(crate::guest_network::flow_io::HostGuestFlowIo::new(nofile_soft)))
     }
 }
 
@@ -367,7 +369,7 @@ impl NodeAdapters {
     /// passed in: `cgroup_fs` (the handle its ADR-0054 probe already
     /// accepted) and `kek` (`SystemdCredsKeyring` in `serve`). Every other
     /// field is the host adapter named in its docstring, `capability` is
-    /// `VmCapability::Optional` and `guest_flow` is `GuestFlowAdapter::host()`.
+    /// `VmCapability::Optional` and `guest_flow` is `GuestFlowAdapter::host(nofile_soft)`.
     /// Order (STORES-IN): the infallible adapters, then
     /// `StoreAdapters::open(config)`, then the observation store; `ca` is
     /// `CaAdapters::host()` (the boot builds the CA over `boot.entropy`).
@@ -383,6 +385,7 @@ impl NodeAdapters {
         config: &ServerConfig,
         cgroup_fs: Arc<dyn CgroupFs>,
         kek: Arc<dyn Kek>,
+        nofile_soft: u64,
     ) -> Result<Self, ControlPlaneError> {
         let clock: Arc<dyn Clock> = Arc::new(overdrive_host::SystemClock);
         let entropy: Arc<dyn Entropy> = Arc::new(overdrive_host::OsEntropy);
@@ -438,7 +441,7 @@ impl NodeAdapters {
             cgroup_fs,
             probers,
             vm,
-            guest_flow: GuestFlowAdapter::host(),
+            guest_flow: GuestFlowAdapter::host(nofile_soft),
         })
     }
 }

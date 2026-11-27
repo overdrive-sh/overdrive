@@ -583,10 +583,14 @@ mod tests {
         };
         // NO-OVERRIDE-SEAMS / STORES-IN (ADR-0219): the host bundle's boot
         // group over this data_dir, its simulated edges replaced by name.
-        let mut boot =
-            NodeAdapters::host(&config, Arc::new(SimCgroupFs::new()), Arc::new(SimKek::for_boot()))
-                .expect("host bundle over the seed's data_dir")
-                .boot;
+        let mut boot = NodeAdapters::host(
+            &config,
+            Arc::new(SimCgroupFs::new()),
+            Arc::new(SimKek::for_boot()),
+            1_048_576,
+        )
+        .expect("host bundle over the seed's data_dir")
+        .boot;
         boot.observation = Arc::new(SimObservationStore::single_peer(
             NodeId::new("nd295-s13-node").expect("node id"),
             0,

@@ -300,10 +300,14 @@ fn sim_boot(
     clock: &Arc<SimClock>,
     obs: Arc<SimObservationStore>,
 ) -> BootAdapters {
-    let mut boot =
-        NodeAdapters::host(config, Arc::new(SimCgroupFs::new()), Arc::new(SimKek::for_boot()))
-            .expect("the host bundle opens its stores under the fixture's data_dir")
-            .boot;
+    let mut boot = NodeAdapters::host(
+        config,
+        Arc::new(SimCgroupFs::new()),
+        Arc::new(SimKek::for_boot()),
+        1_048_576,
+    )
+    .expect("the host bundle opens its stores under the fixture's data_dir")
+    .boot;
     boot.clock = clock.clone();
     boot.observation = obs;
     boot.vm_host_state = Arc::new(overdrive_sim::adapters::vm_host_state::SimVmHostState::new());

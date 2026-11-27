@@ -107,7 +107,8 @@ async fn spawn_server() -> (ServeHandle, TempDir) {
         },
         Arc::new(RealCgroupFs::new()),
         |config, fs| {
-            let mut adapters = NodeAdapters::host(config, fs, Arc::new(SimKek::for_boot()))?;
+            let mut adapters =
+                NodeAdapters::host(config, fs, Arc::new(SimKek::for_boot()), 1_048_576)?;
             adapters.boot.dataplane = Arc::new(SimDataplaneComposer::new(
                 Arc::new(SimDataplane::new()),
                 std::net::Ipv4Addr::LOCALHOST,

@@ -44,6 +44,7 @@ pub(crate) struct HostGuestFlowIo {
 
 struct HostShared {
     seam: u64,
+    nofile_soft: u64,
     state: Mutex<HostState>,
     stream_changed: Notify,
     forwarder_changed: Notify,
@@ -110,12 +111,15 @@ enum StreamResolution {
 
 impl HostGuestFlowIo {
     /// Creates an empty handle table without touching kernel state.
-    pub(crate) fn new() -> Self {
+    /// `nofile_soft` is the process soft descriptor limit the binary entry
+    /// read back; `host_facts` reports it as `GuestHostFacts.nofile_limit`.
+    pub(crate) fn new(nofile_soft: u64) -> Self {
         let seam = NEXT_SEAM.fetch_add(1, Ordering::Relaxed);
         assert_ne!(seam, 0, "host guest-flow seam id exhausted");
         Self {
             inner: Arc::new(HostShared {
                 seam,
+                nofile_soft,
                 state: Mutex::new(HostState {
                     next_handle: 1,
                     last_generation: None,
@@ -195,12 +199,6 @@ impl HostGuestFlowIo {
         state.netlink = Some(Arc::clone(&client));
         drop(state);
         Ok(client)
-    }
-}
-
-impl Default for HostGuestFlowIo {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -331,10 +329,7 @@ impl GuestFlowIo for HostGuestFlowIo {
                 operation_io(GuestNetworkOperation::StartupProbe, io::Error::other(error))
             })?
             .map_err(|source| operation_io(GuestNetworkOperation::StartupProbe, source))?;
-        let nofile_limit = rustix::process::getrlimit(rustix::process::Resource::Nofile)
-            .current
-            .unwrap_or(u64::MAX);
-        Ok(GuestHostFacts { interfaces, nofile_limit })
+        Ok(GuestHostFacts { interfaces, nofile_limit: self.inner.nofile_soft })
     }
 
     async fn probe_forwarder(&self) -> Result<(), ForwarderError> {

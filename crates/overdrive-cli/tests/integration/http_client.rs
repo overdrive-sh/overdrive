@@ -72,9 +72,13 @@ async fn spawn_server() -> (ServerHandle, SocketAddr, TempDir, std::path::PathBu
     // CAP_BPF, architecture.md § 4.7). The boot runs the real phase-1
     // forwarder probe, so the lane prerequisite is checked first.
     overdrive_testing::forwarder_module::expect_forwarder_module();
-    let mut adapters =
-        NodeAdapters::host(&config, Arc::new(RealCgroupFs::new()), Arc::new(SimKek::for_boot()))
-            .expect("open the host bundle under data_dir");
+    let mut adapters = NodeAdapters::host(
+        &config,
+        Arc::new(RealCgroupFs::new()),
+        Arc::new(SimKek::for_boot()),
+        1_048_576,
+    )
+    .expect("open the host bundle under data_dir");
     adapters.boot.dataplane =
         Arc::new(SimDataplaneComposer::new(Arc::new(SimDataplane::new()), Ipv4Addr::LOCALHOST));
     adapters.boot.mtls.intercept = Arc::new(SimMtlsIntercept::new());

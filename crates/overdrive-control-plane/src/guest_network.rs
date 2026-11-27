@@ -928,16 +928,9 @@ async fn wait_for_drained_refusal_readers(
 }
 
 impl HostSharedGuestNetworkOwner {
-    /// Production: `with_flow_io(ports, HostGuestFlowIo)`. Infallible;
-    /// touches no kernel state (the effects start at `probe_startup`).
-    #[must_use]
-    pub fn new(ports: GuestFlowOwnerPorts) -> Self {
-        Self::with_flow_io(ports, Arc::new(flow_io::HostGuestFlowIo::new()))
-    }
-
-    /// The same owner over `io`. Compiled in every build (D-UP-16): `new`
-    /// and the in-crate composition call it; in-crate tests and conformance
-    /// drivers pass `SimGuestFlowIo`.
+    /// The owner over `io`. Compiled in every build (D-UP-16): the in-crate
+    /// composition calls it with the production seam; in-crate tests and
+    /// conformance drivers pass `SimGuestFlowIo`.
     pub(crate) fn with_flow_io(
         ports: GuestFlowOwnerPorts,
         io: Arc<dyn flow_io::GuestFlowIo>,

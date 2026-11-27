@@ -635,10 +635,14 @@ mod service_vm_boot_redrive {
         // seeding block above closed), with every simulated edge replaced by
         // name: the clock, the observation store, the VM host state, the
         // dataplane, the intercept and the guest DNS.
-        let mut boot =
-            NodeAdapters::host(&config, Arc::new(SimCgroupFs::new()), Arc::new(SimKek::for_boot()))
-                .map_err(|error| format!("seed={seed}: host bundle: {error}"))?
-                .boot;
+        let mut boot = NodeAdapters::host(
+            &config,
+            Arc::new(SimCgroupFs::new()),
+            Arc::new(SimKek::for_boot()),
+            1_048_576,
+        )
+        .map_err(|error| format!("seed={seed}: host bundle: {error}"))?
+        .boot;
         boot.clock = clock.clone();
         boot.observation = Arc::clone(&observations) as Arc<dyn ObservationStore>;
         boot.vm_host_state = vm_host.clone() as Arc<dyn VmHostState>;

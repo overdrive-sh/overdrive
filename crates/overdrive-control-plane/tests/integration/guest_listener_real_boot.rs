@@ -165,6 +165,7 @@ impl Node {
             &config,
             Arc::new(RealCgroupFs::new()),
             Arc::new(SimKek::for_boot()),
+            1_048_576,
         )
         .expect("the host bundle opens its stores under the node's data_dir");
         let handle = run_server(config, adapters).await.expect("serve boots on metal");

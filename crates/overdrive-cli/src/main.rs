@@ -41,6 +41,24 @@ fn main() -> Result<()> {
     runtime.block_on(run(cli))
 }
 
+/// Raises the soft `RLIMIT_NOFILE` to the hard limit and returns the soft limit
+/// read back (ADR-0363). A refused raise logs a warning and the read-back value
+/// stands; a failed read-back ends `serve` with the error.
+fn raise_nofile_soft_to_hard() -> Result<u64> {
+    use nix::sys::resource::{Resource, getrlimit, setrlimit};
+
+    let (soft, hard) = getrlimit(Resource::RLIMIT_NOFILE)
+        .map_err(|e| color_eyre::eyre::eyre!("read RLIMIT_NOFILE: {e}"))?;
+    if soft < hard
+        && let Err(e) = setrlimit(Resource::RLIMIT_NOFILE, hard, hard)
+    {
+        tracing::warn!(soft, hard, error = %e, "raising the soft RLIMIT_NOFILE to the hard limit was refused");
+    }
+    let (soft, _hard) = getrlimit(Resource::RLIMIT_NOFILE)
+        .map_err(|e| color_eyre::eyre::eyre!("read back RLIMIT_NOFILE: {e}"))?;
+    Ok(soft)
+}
+
 // The `run` function is a clap-style dispatch table: one match arm per
 // subcommand, each arm dispatching to a library handler and rendering
 // its typed output. The arms are intentionally inlined rather than
@@ -197,7 +215,8 @@ async fn run(cli: Cli) -> Result<()> {
                 gateway_certificate_chain,
                 gateway_private_key,
             };
-            let handle = overdrive_cli::commands::serve::run(args).await?;
+            let nofile_soft = raise_nofile_soft_to_hard()?;
+            let handle = overdrive_cli::commands::serve::run(args, nofile_soft).await?;
             tracing::info!(endpoint = %handle.endpoint(), "control plane listening");
 
             // The process-lifetime owner lives in the library

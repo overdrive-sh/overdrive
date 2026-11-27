@@ -176,6 +176,9 @@ impl ServeHandle {
 /// (`NodeAdapters::host` with the production `SystemdCredsKeyring` KEK,
 /// ADR-0063). A call of [`run_with_adapters`].
 ///
+/// `nofile_soft` is the soft descriptor limit the binary entry read back after
+/// raising it (ADR-0363).
+///
 /// # Errors
 ///
 /// As [`run_with_adapters`].
@@ -183,9 +186,14 @@ impl ServeHandle {
     clippy::result_large_err,
     reason = "the bundle builder returns the boot's typed `ControlPlaneError` unboxed, as `run_server` does"
 )]
-pub async fn run(args: ServeArgs) -> Result<ServeHandle, CliError> {
+pub async fn run(args: ServeArgs, nofile_soft: u64) -> Result<ServeHandle, CliError> {
     run_with_adapters(args, Arc::new(RealCgroupFs::new()), |config, fs| {
-        NodeAdapters::host(config, fs, Arc::new(overdrive_host::ca::SystemdCredsKeyring::new()))
+        NodeAdapters::host(
+            config,
+            fs,
+            Arc::new(overdrive_host::ca::SystemdCredsKeyring::new()),
+            nofile_soft,
+        )
     })
     .await
 }

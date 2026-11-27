@@ -131,8 +131,13 @@ pub fn boot_adapters(config: &ServerConfig) -> BootAdapters {
 }
 
 fn host_bundle(config: &ServerConfig) -> NodeAdapters {
-    NodeAdapters::host(config, Arc::new(RealCgroupFs::new()), Arc::new(SimKek::for_boot()))
-        .expect("the host bundle opens its stores under the fixture's data_dir")
+    NodeAdapters::host(
+        config,
+        Arc::new(RealCgroupFs::new()),
+        Arc::new(SimKek::for_boot()),
+        1_048_576,
+    )
+    .expect("the host bundle opens its stores under the fixture's data_dir")
 }
 
 fn simulate_boot_edges(boot: &mut BootAdapters) {

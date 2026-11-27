@@ -323,7 +323,7 @@ async fn spawn_gateway_enabled_server(octet: u8) -> EnabledNode {
     let slot = Arc::new(std::sync::Mutex::new(None));
     let slot_in = Arc::clone(&slot);
     let handle = run_with_adapters(args, Arc::new(RealCgroupFs::new()), move |config, fs| {
-        let mut adapters = NodeAdapters::host(config, fs, Arc::new(SimKek::for_boot()))?;
+        let mut adapters = NodeAdapters::host(config, fs, Arc::new(SimKek::for_boot()), 1_048_576)?;
         adapters.boot.dataplane =
             Arc::new(SimDataplaneComposer::new(Arc::new(SimDataplane::new()), Ipv4Addr::LOCALHOST));
         let sim = SimGatewayAdapters::new(Arc::clone(&adapters.boot.clock));
@@ -759,7 +759,7 @@ async fn spawn_node(root: &Path, gateway_octet: Option<u8>, audit_fault: bool) -
     let slot = Arc::new(std::sync::Mutex::new(None));
     let slot_in = Arc::clone(&slot);
     let handle = run_with_adapters(args, Arc::new(RealCgroupFs::new()), move |config, fs| {
-        let mut adapters = NodeAdapters::host(config, fs, Arc::new(SimKek::for_boot()))?;
+        let mut adapters = NodeAdapters::host(config, fs, Arc::new(SimKek::for_boot()), 1_048_576)?;
         adapters.boot.dataplane =
             Arc::new(SimDataplaneComposer::new(Arc::new(SimDataplane::new()), Ipv4Addr::LOCALHOST));
         let sim = SimGatewayAdapters::new(Arc::clone(&adapters.boot.clock));

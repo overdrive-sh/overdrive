@@ -139,7 +139,7 @@ pub async fn serve_with_volume_pool(
 ) -> Result<ServeHandle, CliError> {
     overdrive_testing::forwarder_module::expect_forwarder_module();
     run_with_adapters(args, Arc::new(RealCgroupFs::new()), move |config, fs| {
-        let mut adapters = NodeAdapters::host(config, fs, Arc::new(SimKek::for_boot()))?;
+        let mut adapters = NodeAdapters::host(config, fs, Arc::new(SimKek::for_boot()), 1_048_576)?;
         adapters.boot.dataplane =
             Arc::new(SimDataplaneComposer::new(Arc::new(SimDataplane::new()), Ipv4Addr::LOCALHOST));
         adapters.vm.volume_pool = volume_pool;
@@ -167,7 +167,7 @@ pub async fn serve_with_vm_and_volume_pool(
 ) -> Result<ServeHandle, CliError> {
     overdrive_testing::forwarder_module::expect_forwarder_module();
     run_with_adapters(args, Arc::new(RealCgroupFs::new()), move |config, fs| {
-        let mut adapters = NodeAdapters::host(config, fs, Arc::new(SimKek::for_boot()))?;
+        let mut adapters = NodeAdapters::host(config, fs, Arc::new(SimKek::for_boot()), 1_048_576)?;
         adapters.boot.dataplane =
             Arc::new(SimDataplaneComposer::new(Arc::new(SimDataplane::new()), Ipv4Addr::LOCALHOST));
         adapters.vm.vmm = vm.vmm;
@@ -190,7 +190,7 @@ async fn serve_composed(
 ) -> Result<ServeHandle, CliError> {
     overdrive_testing::forwarder_module::expect_forwarder_module();
     run_with_adapters(args, Arc::new(RealCgroupFs::new()), move |config, fs| {
-        let mut adapters = NodeAdapters::host(config, fs, Arc::new(SimKek::for_boot()))?;
+        let mut adapters = NodeAdapters::host(config, fs, Arc::new(SimKek::for_boot()), 1_048_576)?;
         if dataplane == DataplaneChoice::Sim {
             adapters.boot.dataplane = Arc::new(SimDataplaneComposer::new(
                 Arc::new(SimDataplane::new()),

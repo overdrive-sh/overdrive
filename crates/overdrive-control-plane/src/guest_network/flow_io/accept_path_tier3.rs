@@ -215,7 +215,7 @@ async fn the_flow_listeners_accept_path_matches_the_sim_per_connection() {
         kit.boot_scripted(&image, cid, &work.path().join("run")).expect("the scripted guest");
 
     // The real adapter, its two listeners bound as boot binds them.
-    let real = HostGuestFlowIo::new();
+    let real = HostGuestFlowIo::new(1_048_576);
     let real_bound = Bound::bind(&real).await;
     for (n, case) in CASES.iter().enumerate() {
         let handle = format!("c{n}");
@@ -295,7 +295,7 @@ async fn a_repair_of_a_held_listener_keeps_its_socket_and_its_port() {
     let mut guest =
         kit.boot_scripted(&image, cid, &work.path().join("run")).expect("the scripted guest");
 
-    let real = HostGuestFlowIo::new();
+    let real = HostGuestFlowIo::new(1_048_576);
     let first = real
         .bind_listener(FlowListener::Stream, VsockListenPort::KernelAssigned)
         .await

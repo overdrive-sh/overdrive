@@ -87,6 +87,10 @@ overdrive-gateway.path             = "../overdrive-gateway"
 overdrive-worker.path              = "../overdrive-worker"
 eyre.workspace                     = true
 color-eyre.workspace               = true
+# `nix` — `serve`'s binary entry raises the soft `RLIMIT_NOFILE` to the hard
+# limit and reads it back (ADR-0363); the value is injected into the
+# guest-flow host seam. The binary is the only place the limit changes.
+nix                                = { workspace = true, features = ["resource"] }
 clap.workspace                     = true
 tokio.workspace                    = true
 tracing.workspace                  = true
