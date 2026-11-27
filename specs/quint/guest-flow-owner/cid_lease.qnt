@@ -319,6 +319,8 @@ module cid_lease {
   def devAt(o: int): int = if (OFFS.contains(o)) dev.get(o) else 0
   // the VM scope of offset `o` is absent: the lease gate of ADR-0156 (decision 12) reads this, not the device (K-C7)
   def scopeAbsent(o: int): bool = not(OFFS.contains(o) and scope.get(o))
+  // the late holder `a` of offset `o` is released by the dispatch's teardown: `a` holds it and its scope is gone
+  def freedBy(o: int, a: int): bool = late.get(o) == a and scopeAbsent(o)
   // ADR-0353: `Assign` records the guest address on the allocation's `Pending` row before any VMM can exist.
   // launchBeforeRecord: the record is written only after the VMM exists (never, in the model)
   def recordAt(o: int, a: int): int -> int = if (BUG_LAUNCH_BEFORE_RECORD) recorded else recorded.set(o, a)
@@ -435,13 +437,17 @@ module cid_lease {
       dev' = dev, al' = al.set(a, failedA(a)),
       g' = { ...g, clash: true, lastEnd: endAs(a, "crash"), pendingGen: g.pendingGen.set(a, "") },
     },
-    // ADR-0350: the start action's dispatch also runs the same tick's `ReclaimAllocationNetwork(old)` for the workload's
-    // predecessor (`WorkloadLifecycle::append_reclaim_actions`); it re-reads the host scope and, if the scope is already
-    // gone, releases that workload's boot reservation through `teardown_guest_network`. So a reservation held by `a`
-    // whose scope is absent is released inside `Launch`; one whose scope is present stays (the attempt is a no-op)
-    lease' = OFFS.mapBy(o => if (late.get(o) == a and scopeAbsent(o)) 0 else lease.get(o)),
-    late' = OFFS.mapBy(o => if (late.get(o) == a and scopeAbsent(o)) 0 else late.get(o)),
-    recorded' = OFFS.mapBy(o => if (late.get(o) == a and scopeAbsent(o)) 0 else recorded.get(o)),
+    // ADR-0350: for a restart, the dispatch runs the predecessor cleanup after the successor's start, on both the success
+    // and the failure branch (`finish_restart` -> `cleanup_restart_predecessor` -> `teardown_for_dispatch` ->
+    // `teardown_guest_network`, action_shim/mod.rs:1529-1566). The predecessor is the current allocation
+    // (`pending_restart_owner`), so the reclaim pass skips it (`reclaimable_allocations`, workload_lifecycle.rs:~511)
+    // unless the node is at its cap; the release comes from this restart dispatch, not from `ReclaimAllocationNetwork`.
+    // The teardown re-reads the host scope and, if it is gone, releases the workload's own predecessor holder: `late`
+    // covers both the stopped-unreaped lease and the boot reservation. So a holder `a` whose scope is absent is released
+    // inside `Launch`; one whose scope is present stays (the teardown is a no-op)
+    lease' = OFFS.mapBy(o => if (freedBy(o, a)) 0 else lease.get(o)),
+    late' = OFFS.mapBy(o => if (freedBy(o, a)) 0 else late.get(o)),
+    recorded' = OFFS.mapBy(o => if (freedBy(o, a)) 0 else recorded.get(o)),
     att' = att, cursor' = cursor, up' = up, reclaimed' = reclaimed, bootLeft' = bootLeft,
     scope' = scope,
     conf_step' = if (REC) variant("Launch", { a: a }) else conf_step,

@@ -6,18 +6,18 @@
 
   1) lease_conf_ok::cid_lease::CrashIsEnabledInThe325WindowWithoutTheGuard:
        Error [QNT508]: Cannot continue to "expect"
-        at /home/ubuntu/overdrive-worktrees/9d340a8ca57d5ca89b626cece0d62d03770aa9cd213856dc63ec27e31d3a81cc/specs/quint/guest-flow-owner/cid_lease.qnt:996:53
-        996:   run CrashIsEnabledInThe325WindowWithoutTheGuard = init
-                                                                 ^^^^
-        997:     .then(Assign(1)).then(Launch(1)).then(Stop(1)).then(Release(1)).expect(Safety and st(1) == "done")
-             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        998:     .then(Redeploy(1)).then(Assign(1))
-             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        999:     .expect(Safety and st(1) == "leased" and g.pendingGen.get(1) != "" and up and bootLeft != 0 and inGenWindow(1))
-             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-        1000:     .then(Crash).expect(Safety and not(up) and st(1) == "wait")
+        at /home/ubuntu/overdrive-worktrees/9d340a8ca57d5ca89b626cece0d62d03770aa9cd213856dc63ec27e31d3a81cc/specs/quint/guest-flow-owner/cid_lease.qnt:1002:53
+        1002:   run CrashIsEnabledInThe325WindowWithoutTheGuard = init
+                                                                  ^^^^
+        1003:     .then(Assign(1)).then(Launch(1)).then(Stop(1)).then(Release(1)).expect(Safety and st(1) == "done")
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        1004:     .then(Redeploy(1)).then(Assign(1))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        1005:     .expect(Safety and st(1) == "leased" and g.pendingGen.get(1) != "" and up and bootLeft != 0 and inGenWindow(1))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        1006:     .then(Crash).expect(Safety and not(up) and st(1) == "wait")
               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    Use --seed=0xd7c95855c50e7eb3 --match=lease_conf_ok::cid_lease::CrashIsEnabledInThe325WindowWithoutTheGuard to repeat.
+    Use --seed=0x94427001136cb5d7 --match=lease_conf_ok::cid_lease::CrashIsEnabledInThe325WindowWithoutTheGuard to repeat.
 
 
   Use --verbosity=3 to show executions.

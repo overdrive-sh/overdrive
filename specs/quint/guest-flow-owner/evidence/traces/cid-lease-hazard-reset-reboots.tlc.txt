@@ -34,7 +34,7 @@ State 1: <Initial predicate>
      pred |-> -1,
      pst |-> "none" ] >>
 
-State 2: <lease_bugResetReboots_cid_lease_Assign line 1517, col 3 to line 1601, col 53 of module lease_bugResetReboots>
+State 2: <lease_bugResetReboots_cid_lease_Assign line 1525, col 3 to line 1609, col 53 of module lease_bugResetReboots>
 /\ lease_bugResetReboots_cid_lease_g = [ clash |-> FALSE,
   rebooted |-> FALSE,
   reclaimed |-> FALSE,
@@ -70,7 +70,7 @@ State 2: <lease_bugResetReboots_cid_lease_Assign line 1517, col 3 to line 1601, 
      pred |-> -1,
      pst |-> "none" ] >>
 
-State 3: <lease_bugResetReboots_cid_lease_Launch line 1668, col 3 to line 1805, col 53 of module lease_bugResetReboots>
+State 3: <lease_bugResetReboots_cid_lease_Launch line 1676, col 3 to line 1804, col 53 of module lease_bugResetReboots>
 /\ lease_bugResetReboots_cid_lease_g = [ clash |-> FALSE,
   rebooted |-> FALSE,
   reclaimed |-> FALSE,
@@ -106,7 +106,7 @@ State 3: <lease_bugResetReboots_cid_lease_Launch line 1668, col 3 to line 1805, 
      pred |-> -1,
      pst |-> "none" ] >>
 
-State 4: <lease_bugResetReboots_cid_lease_GuestReset line 1828, col 3 to line 1864, col 53 of module lease_bugResetReboots>
+State 4: <lease_bugResetReboots_cid_lease_GuestReset line 1827, col 3 to line 1863, col 53 of module lease_bugResetReboots>
 /\ lease_bugResetReboots_cid_lease_g = [ clash |-> FALSE,
   rebooted |-> TRUE,
   reclaimed |-> FALSE,
