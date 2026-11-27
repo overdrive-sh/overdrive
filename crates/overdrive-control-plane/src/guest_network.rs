@@ -946,13 +946,11 @@ impl HostSharedGuestNetworkOwner {
 /// The guest-flow owner's descriptor requirement: the one expression
 /// `probe_guest_flow_startup` checks `nofile_limit` against, and the first term of
 /// the DNS forwarder's descriptor reserve (ADR-0362).
-///
-/// DISTILL scaffold: DELIVER moves the expression at the `FdBudget` check here and
-/// has the probe call it.
 #[must_use]
-#[allow(clippy::todo, reason = "DISTILL scaffold: DELIVER implements it (ADR-0362)")]
 pub fn guest_flow_fd_requirement() -> u64 {
-    todo!("guest_flow_fd_requirement: SCAFFOLD, DELIVER moves the probe's FdBudget expression here")
+    // ADMISSIONREFUSAL1 retains the accepted four-place-per-attachment node
+    // baseline and adds one descriptor for each bounded refusal reader.
+    u64::from(GUEST_FLOW_MAX_PAIRS) * 4 + u64::from(GUEST_FLOW_MAX_PAIRS) + 16_384 + 1 + 32_767
 }
 
 /// Fixed descriptor headroom for every other descriptor `serve` holds (stores,
@@ -994,10 +992,7 @@ pub(crate) async fn probe_guest_flow_startup(
         }
     }
 
-    // ADMISSIONREFUSAL1 retains the accepted four-place-per-attachment node
-    // baseline and adds one descriptor for each bounded refusal reader.
-    let required =
-        u64::from(GUEST_FLOW_MAX_PAIRS) * 4 + u64::from(GUEST_FLOW_MAX_PAIRS) + 16_384 + 1 + 32_767;
+    let required = guest_flow_fd_requirement();
     if facts.nofile_limit < required {
         return Err(GuestNetworkError::FdBudget { required, available: facts.nofile_limit });
     }

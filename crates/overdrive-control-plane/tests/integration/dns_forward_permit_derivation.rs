@@ -97,7 +97,6 @@ fn field_u64(row: &EventRow, field: &str) -> u64 {
 /// limit, and whose `permits` is `(nofile_soft - reserve) / FDS_PER_PERMIT`.
 #[overdrive_test(guest = "cgroup-default")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[should_panic(expected = "serve emits exactly one dns.forward.permits event per boot")]
 async fn boot_derives_the_forward_permit_bound_from_the_descriptor_limit() {
     // GIVEN a node whose composition is told its soft descriptor limit.
     let collector = EventCollector::default();

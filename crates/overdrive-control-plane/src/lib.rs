@@ -3436,6 +3436,11 @@ pub async fn run_server(
     Ok(handle)
 }
 
+/// Soft descriptor limit a supplied owner's boot assumes: the number the sim
+/// guest-flow seam reports (`flow_io/sim.rs`). A supplied owner is an owner-level
+/// double with no host-facts seam to read.
+const SUPPLIED_OWNER_NOFILE_SOFT: u64 = 1_048_576;
+
 /// Where a boot's guest-flow owner comes from.
 enum GuestNetworkSource {
     /// The caller's owner ([`run_server_with_obs_and_drivers`]): the owner's
@@ -4367,6 +4372,17 @@ async fn boot_server(
     // write happens.
     let mtls_resolve_after_frontend_rebuild;
     let mtls_resolve_owner;
+    // ADR-0362: the DNS forwarder's in-flight bound, derived once from the soft
+    // descriptor limit the guest-flow seam reports. A supplied owner has no host
+    // seam (owner-level doubles), so it takes the sim seam's value.
+    let nofile_soft = match &guest_network {
+        GuestNetworkSource::Composed { io, .. } => io.host_facts().await?.nofile_limit,
+        GuestNetworkSource::Supplied(_) => SUPPLIED_OWNER_NOFILE_SOFT,
+    };
+    let forward_reserve =
+        guest_network::guest_flow_fd_requirement() + guest_network::NODE_FD_RESERVE;
+    let forward_permits =
+        crate::dns_responder::forwarder::forward_permits(nofile_soft, forward_reserve);
     let (mtls_worker, shared_guest_network, guest_flow_owner) = {
         // (1) the root's enforcement factory builds the enforcement port over
         // the held identity, the F7 limits, the guest prefix and the boot's
@@ -4711,6 +4727,13 @@ async fn boot_server(
             }));
         }
 
+        tracing::info!(
+            name: "dns.forward.permits",
+            permits = forward_permits,
+            nofile_soft = nofile_soft,
+            reserve = forward_reserve,
+        );
+
         // Dial-by-name `DnsResponder` — construct + probe + spawn (DDN-6,
         // dial-by-name-responder step 02-01, ADR-0072). Built AFTER the
         // converge-on-boot frontend rebuild (so its internal `NameIndex` reads a
@@ -4748,7 +4771,7 @@ async fn boot_server(
             owned_ranges: crate::dns_responder::owned_ranges::OwnedAddressRanges::platform(
                 &config.vip_range,
             ),
-            forward_permits: 0, // SCAFFOLD: DELIVER derives it from host_facts().nofile_limit
+            forward_permits,
         });
         if let Err(source) = responder.probe().await {
             // Per-variant refusal reason — the enum owns its own vocabulary
@@ -4935,7 +4958,7 @@ async fn boot_server(
         owned_ranges: crate::dns_responder::owned_ranges::OwnedAddressRanges::platform(
             &config.vip_range,
         ),
-        forward_permits: 0, // SCAFFOLD: DELIVER derives it from host_facts().nofile_limit
+        forward_permits,
     };
     let supervisor_ports = SharedNetworkSupervisorPorts {
         shared_guest_network: Arc::clone(&shared_guest_network),
