@@ -68,13 +68,16 @@ use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::observation_store::ObservationStore;
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use tokio_util::sync::CancellationToken;
 
 use overdrive_core::id::NameAnswer;
 
 use super::QueryOutcome;
 use super::answer::answer_for;
+use super::forwarder::{ForwardOutcome, ForwardPermit, ForwardRequest, Forwarder};
 use super::frontend_addr_allocator::FrontendAddrAllocator;
 use super::name_index::NameIndex;
+use super::upstream::DnsTransport;
 use super::wire;
 
 /// The well-known DNS port the responder binds.
@@ -214,6 +217,60 @@ pub struct DnsResponder {
     stop: Arc<AtomicBool>,
     /// Receives the outcome and service time of every datagram (DDD-12).
     observer: Arc<dyn super::QueryObserver>,
+    /// The forwarder for gateway-addressed public names. `None` is a
+    /// mesh-only responder: every non-mesh query is dropped.
+    forwarder: Option<Arc<Forwarder>>,
+    /// Cancelled by [`Self::stop`]; every forward task observes it.
+    cancel: CancellationToken,
+}
+
+/// What the serve loop does with one datagram.
+enum Disposition {
+    /// Send this reply and report this outcome.
+    Reply(Vec<u8>, QueryOutcome),
+    /// Hand the datagram to the forwarder.
+    Forward,
+    /// Send nothing.
+    Drop,
+}
+
+/// Where one reply goes: the receive socket, the peer, and the gateway
+/// address the query was addressed to (the reply's pinned source).
+struct ReplyPath {
+    fd: Arc<OwnedFd>,
+    peer: SockaddrIn,
+    spec_dst: Option<Ipv4Addr>,
+}
+
+impl ReplyPath {
+    /// `sendmsg` the reply source-pinned to `ipi_spec_dst`. A UDP `sendmsg` is
+    /// safe from any thread.
+    fn send(&self, reply: &[u8]) {
+        let pktinfo = self.spec_dst.map(|ip| libc::in_pktinfo {
+            ipi_ifindex: 0,
+            ipi_spec_dst: libc::in_addr { s_addr: u32::from(ip).to_be() },
+            ipi_addr: libc::in_addr { s_addr: 0 },
+        });
+        let send_iov = [std::io::IoSlice::new(reply)];
+        let cmsgs: Vec<ControlMessage> =
+            pktinfo.as_ref().map(|pi| vec![ControlMessage::Ipv4PacketInfo(pi)]).unwrap_or_default();
+        let sent =
+            sendmsg(self.fd.as_raw_fd(), &send_iov, &cmsgs, MsgFlags::empty(), Some(&self.peer));
+        if let Err(errno) = sent {
+            tracing::warn!(
+                name: "dns.responder.sendmsg_failed",
+                %errno,
+                "DNS responder reply sendmsg failed"
+            );
+        }
+    }
+}
+
+/// One datagram handed to a forward task.
+struct ForwardJob {
+    datagram: Vec<u8>,
+    reply_path: ReplyPath,
+    received_at: Instant,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -251,7 +308,23 @@ impl DnsResponder {
             socket_identities: Mutex::new(Vec::new()),
             stop: Arc::new(AtomicBool::new(false)),
             observer,
+            forwarder: None,
+            cancel: CancellationToken::new(),
         }
+    }
+
+    /// A responder that also forwards gateway-addressed public names through
+    /// `forwarder` (the production composition, built by the factory).
+    #[must_use]
+    pub(super) fn forwarding(
+        store: Arc<dyn ObservationStore>,
+        clock: Arc<dyn Clock>,
+        gateway: Ipv4Addr,
+        frontend: FrontendAddrAllocator,
+        observer: Arc<dyn super::QueryObserver>,
+        forwarder: Arc<Forwarder>,
+    ) -> Self {
+        Self { forwarder: Some(forwarder), ..Self::new(store, clock, gateway, frontend, observer) }
     }
 
     /// Signal the serve loop to stop. The `SO_RCVTIMEO`-bounded `recvmsg` wakes
@@ -260,6 +333,7 @@ impl DnsResponder {
     /// not leak an uncancellable syscall and hang runtime teardown.
     pub fn stop(&self) {
         self.stop.store(true, Ordering::SeqCst);
+        self.cancel.cancel();
     }
 
     /// Bind UDP `:53` (wildcard-first, shared-gateway fallback) and List-seed
@@ -356,10 +430,14 @@ impl DnsResponder {
         // blocking recv/answer/send task per socket — `recvmsg` parks the
         // thread, so each socket runs on its own `spawn_blocking` worker.
         let sockets = std::mem::take(&mut *self.sockets.lock());
+        let runtime = tokio::runtime::Handle::current();
         let mut handles = Vec::with_capacity(sockets.len());
         for fd in sockets {
             let responder = Arc::clone(&self);
-            handles.push(tokio::task::spawn_blocking(move || responder.serve_one_socket(&fd)));
+            let runtime = runtime.clone();
+            handles.push(tokio::task::spawn_blocking(move || {
+                responder.serve_one_socket(&Arc::new(fd), &runtime);
+            }));
         }
         for handle in handles {
             // A socket loop only ends on an unrecoverable error; awaiting keeps
@@ -376,7 +454,7 @@ impl DnsResponder {
     /// was addressed to) via a `ControlMessage::Ipv4PacketInfo` on `sendmsg` —
     /// the DDN-5 source-pin the `getent` litmus requires on the multi-homed
     /// wildcard socket.
-    fn serve_one_socket(&self, fd: &OwnedFd) {
+    fn serve_one_socket(self: &Arc<Self>, fd: &Arc<OwnedFd>, runtime: &tokio::runtime::Handle) {
         let mut buf = [0u8; RECV_BUF_LEN];
         let mut cmsg_space = nix::cmsg_space!(libc::in_pktinfo);
         loop {
@@ -428,46 +506,69 @@ impl DnsResponder {
             };
             let Some((datagram, peer, spec_dst, received_at)) = received else { continue };
             let to_gateway = spec_dst == Some(self.gateway);
-            let Some((reply, outcome)) = self.answer_datagram(&datagram, to_gateway) else {
-                self.observer
-                    .observe(QueryOutcome::Dropped, self.clock.now().duration_since(received_at));
-                continue;
-            };
-            // Source-pin the reply to the queried gateway via ipi_spec_dst.
-            let pktinfo = spec_dst.map(|ip| libc::in_pktinfo {
-                ipi_ifindex: 0,
-                ipi_spec_dst: libc::in_addr { s_addr: u32::from(ip).to_be() },
-                ipi_addr: libc::in_addr { s_addr: 0 },
-            });
-            let send_iov = [std::io::IoSlice::new(&reply)];
-            let cmsgs: Vec<ControlMessage> = pktinfo
-                .as_ref()
-                .map(|pi| vec![ControlMessage::Ipv4PacketInfo(pi)])
-                .unwrap_or_default();
-            let sent = sendmsg(fd.as_raw_fd(), &send_iov, &cmsgs, MsgFlags::empty(), Some(&peer));
-            if let Err(errno) = sent {
-                tracing::warn!(
-                    name: "dns.responder.sendmsg_failed",
-                    %errno,
-                    "DNS responder reply sendmsg failed"
-                );
+            let reply_path = ReplyPath { fd: Arc::clone(fd), peer, spec_dst };
+            match self.dispose(&datagram, to_gateway) {
+                Disposition::Drop => {
+                    self.observer.observe(
+                        QueryOutcome::Dropped,
+                        self.clock.now().duration_since(received_at),
+                    );
+                }
+                Disposition::Reply(reply, outcome) => {
+                    reply_path.send(&reply);
+                    self.observer.observe(outcome, self.clock.now().duration_since(received_at));
+                }
+                Disposition::Forward => {
+                    self.forward_or_shed(ForwardJob { datagram, reply_path, received_at }, runtime);
+                }
             }
-            self.observer.observe(outcome, self.clock.now().duration_since(received_at));
         }
     }
 
+    /// Take a permit and hand the query to a task on the serve runtime; with no
+    /// permit free, answer SERVFAIL from the datagram at once. The receive loop
+    /// never waits on an upstream.
+    fn forward_or_shed(self: &Arc<Self>, job: ForwardJob, runtime: &tokio::runtime::Handle) {
+        let Some(forwarder) = self.forwarder.as_ref().map(Arc::clone) else { return };
+        let Some(permit) = forwarder.try_acquire() else {
+            job.reply_path.send(&wire::servfail_reply(&job.datagram));
+            self.observer
+                .observe(QueryOutcome::Shed, self.clock.now().duration_since(job.received_at));
+            return;
+        };
+        let responder = Arc::clone(self);
+        runtime.spawn(async move { responder.run_forward(&forwarder, job, permit).await });
+    }
+
+    /// One forward under `permit`, ended early only by shutdown. The permit is
+    /// held until the reply is sent.
+    async fn run_forward(&self, forwarder: &Forwarder, job: ForwardJob, permit: ForwardPermit) {
+        let request = ForwardRequest { wire: &job.datagram, transport: DnsTransport::Udp };
+        let outcome = tokio::select! {
+            biased;
+            () = self.cancel.cancelled() => return,
+            outcome = forwarder.forward(&request, &permit) => outcome,
+        };
+        let (reply, outcome) = match outcome {
+            ForwardOutcome::Relayed(reply) => (reply, QueryOutcome::Forwarded),
+            ForwardOutcome::OwnedRangeBlocked { reply, .. } => {
+                (reply, QueryOutcome::OwnedRangeBlocked)
+            }
+            ForwardOutcome::Failed { reply, .. } => (reply, QueryOutcome::ForwardFailed),
+        };
+        job.reply_path.send(&reply);
+        self.observer.observe(outcome, self.clock.now().duration_since(job.received_at));
+        drop(permit);
+    }
+
     /// Decode → classify → answer → encode one inbound datagram, returning the
-    /// reply bytes (or `None` when the datagram is dropped). A mesh name is
-    /// answered whichever address the datagram was sent to; an unknown
-    /// platform-zone name is answered NXDOMAIN only when the datagram was
-    /// addressed to the gateway; everything else is dropped. The SOA SERIAL is
-    /// read from the injected clock (`unix_now`).
-    fn answer_datagram(
-        &self,
-        datagram: &[u8],
-        to_gateway: bool,
-    ) -> Option<(Vec<u8>, QueryOutcome)> {
-        let query = wire::decode(datagram).ok()?;
+    /// disposition. A mesh name is answered whichever address the datagram was
+    /// sent to; an unknown platform-zone name is answered NXDOMAIN, and any
+    /// other name forwarded, only when the datagram was addressed to the
+    /// gateway; everything else is dropped. The SOA SERIAL is read from the
+    /// injected clock (`unix_now`).
+    fn dispose(&self, datagram: &[u8], to_gateway: bool) -> Disposition {
+        let Ok(query) = wire::decode(datagram) else { return Disposition::Drop };
         match query.class {
             wire::QueryClass::Mesh(name) => {
                 let answer = answer_for(&name, query.qtype, &self.name_index);
@@ -478,7 +579,7 @@ impl DnsResponder {
                 };
                 let reply =
                     wire::encode(query.id, &name, query.qtype, &answer, self.clock.unix_now());
-                Some((reply, outcome))
+                Disposition::Reply(reply, outcome)
             }
             wire::QueryClass::PlatformUnknown if to_gateway => {
                 let reply = wire::encode_platform_nxdomain(
@@ -487,9 +588,12 @@ impl DnsResponder {
                     query.qtype,
                     self.clock.unix_now(),
                 );
-                Some((reply, QueryOutcome::NameError))
+                Disposition::Reply(reply, QueryOutcome::NameError)
             }
-            wire::QueryClass::PlatformUnknown | wire::QueryClass::Forwardable => None,
+            wire::QueryClass::Forwardable if to_gateway && self.forwarder.is_some() => {
+                Disposition::Forward
+            }
+            wire::QueryClass::PlatformUnknown | wire::QueryClass::Forwardable => Disposition::Drop,
         }
     }
 }

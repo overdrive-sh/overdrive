@@ -54,8 +54,11 @@ use std::sync::Arc;
 use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::observation_store::ObservationStore;
 
+use self::forwarder::Forwarder;
 use self::frontend_addr_allocator::FrontendAddrAllocator;
 use self::responder::{DnsResponder, Result};
+use self::upstream::{UpstreamExchange, UpstreamResolvers};
+use self::upstream_host::{HostUpstreamExchange, RESOLV_CONF_PATH, ResolvConfUpstreams};
 
 /// The shared-gateway DNS owner port (D-295-R16): one responder the serve
 /// task owner probes, serves, audits, and stops.
@@ -101,26 +104,43 @@ pub trait GuestDnsFactory: Send + Sync {
     fn responder(&self, deps: GuestDnsDeps) -> Arc<dyn GuestDns>;
 }
 
-/// The production [`GuestDnsFactory`]: builds a [`DnsResponder`].
+/// The production [`GuestDnsFactory`]: builds a [`DnsResponder`] that forwards
+/// public names through the host's resolver file and sockets.
 #[doc(hidden)]
-pub struct HostGuestDnsFactory;
+pub struct HostGuestDnsFactory {
+    resolvers: Arc<dyn UpstreamResolvers>,
+    exchange: Arc<dyn UpstreamExchange>,
+}
 
 impl HostGuestDnsFactory {
-    /// The production factory.
+    /// The production factory: upstreams come from `/etc/resolv.conf` and are
+    /// queried over real UDP and TCP sockets.
     #[must_use]
-    pub const fn host() -> Self {
-        Self
+    pub fn host() -> Self {
+        Self {
+            resolvers: Arc::new(ResolvConfUpstreams::from_path(RESOLV_CONF_PATH)),
+            exchange: Arc::new(HostUpstreamExchange),
+        }
     }
 }
 
 impl GuestDnsFactory for HostGuestDnsFactory {
     fn responder(&self, deps: GuestDnsDeps) -> Arc<dyn GuestDns> {
-        Arc::new(DnsResponder::new(
+        let forwarder = Forwarder::new(
+            Arc::clone(&self.resolvers),
+            Arc::clone(&self.exchange),
+            Arc::clone(&deps.clock),
+            deps.owned_ranges,
+            deps.gateway,
+            deps.forward_permits,
+        );
+        Arc::new(DnsResponder::forwarding(
             deps.store,
             deps.clock,
             deps.gateway,
             deps.frontend,
             Arc::new(NoQueryObserver),
+            Arc::new(forwarder),
         ))
     }
 }
@@ -164,6 +184,17 @@ pub enum QueryOutcome {
     NameError,
     /// The datagram was not answered.
     Dropped,
+    /// A public name was forwarded and the upstream's reply relayed.
+    Forwarded,
+    /// A public name was forwarded and no upstream answered; the guest got a
+    /// SERVFAIL.
+    ForwardFailed,
+    /// The upstream's reply carried an Overdrive-owned address; the guest got
+    /// the blocked reply.
+    OwnedRangeBlocked,
+    /// No forward permit was free; the guest got a SERVFAIL at once. Answered,
+    /// unlike [`Self::Dropped`].
+    Shed,
 }
 
 /// The production observer: an empty body. Behaviour with it is byte-identical

@@ -412,7 +412,7 @@ impl NodeAdapters {
             enforcement: Arc::new(overdrive_dataplane::mtls::HostMtlsEnforcementFactory::new()),
         };
         let guest_dns: Arc<dyn GuestDnsFactory> =
-            Arc::new(crate::dns_responder::HostGuestDnsFactory);
+            Arc::new(crate::dns_responder::HostGuestDnsFactory::host());
         let vm_host_state: Arc<dyn VmHostState> = Arc::new(overdrive_host::RealVmHostState::new(
             PathBuf::from(cgroup_preflight::DEFAULT_CGROUP_ROOT),
             PathBuf::from("/run/overdrive/vm"),

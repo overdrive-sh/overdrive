@@ -291,7 +291,6 @@ macro_rules! guest_test {
 // ===========================================================================
 
 guest_test! {
-    #[should_panic(expected = "a gateway-addressed public lookup must be answered")]
     async fn a_gateway_addressed_public_lookup_is_forwarded_and_answered() {
         let node = Node::boot(64).await;
         node.upstream().script("github.com", Behaviour::Answer(vec![Ipv4Addr::new(140, 82, 121, 4)]));
@@ -305,7 +304,6 @@ guest_test! {
 }
 
 guest_test! {
-    #[should_panic(expected = "a nonexistent public name must get a definite answer")]
     async fn a_nonexistent_public_name_gets_nxdomain_promptly() {
         let node = Node::boot(64).await;
         let (reply, elapsed) =
@@ -412,7 +410,6 @@ guest_test! {
 }
 
 guest_test! {
-    #[should_panic(expected = "a name that only resembles the platform zone is an ordinary public name")]
     async fn a_name_that_only_resembles_the_platform_zone_is_forwarded() {
         let node = Node::boot(64).await;
         node.upstream().script("evil-overdrive.local", Behaviour::Answer(vec![Ipv4Addr::new(5, 6, 7, 8)]));
@@ -456,7 +453,6 @@ guest_test! {
 // ===========================================================================
 
 guest_test! {
-    #[should_panic(expected = "an owned-range answer must still get a definite reply")]
     async fn an_upstream_answer_in_the_mesh_frontend_range_never_reaches_the_guest() {
         let node = Node::boot(64).await;
         node.upstream().script("build-cache.corp.example", Behaviour::Answer(vec![Ipv4Addr::new(10, 98, 0, 7)]));
@@ -483,7 +479,6 @@ guest_test! {
 // ===========================================================================
 
 guest_test! {
-    #[should_panic(expected = "with no upstream answering the guest must get a SERVFAIL")]
     async fn with_the_upstream_down_the_guest_gets_a_servfail_before_its_timeout_and_recovers() {
         let events = install_capture();
         let mut node = Node::boot(64).await;
@@ -513,7 +508,6 @@ guest_test! {
 }
 
 guest_test! {
-    #[should_panic(expected = "an absent resolver file is a SERVFAIL, never silence")]
     async fn an_absent_resolver_file_is_a_servfail_not_a_boot_refusal_and_recovers_when_restored() {
         let node = Node::boot(64).await;
         node.upstream().script("crates.io", Behaviour::Answer(vec![Ipv4Addr::new(52, 85, 1, 1)]));
@@ -530,7 +524,6 @@ guest_test! {
 }
 
 guest_test! {
-    #[should_panic(expected = "a resolver list naming only the gateway must be a SERVFAIL")]
     async fn a_resolver_file_naming_only_the_gateway_never_loops_the_forward_to_the_node() {
         let node = Node::boot(64).await;
         node.resolv.write(&format!("nameserver {GATEWAY}\n"));

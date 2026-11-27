@@ -17,13 +17,16 @@ use super::upstream::{
 };
 use super::wire::reply_matches;
 
+/// The host resolver file production reads the upstream nameservers from.
+pub const RESOLV_CONF_PATH: &str = "/etc/resolv.conf";
+
 /// Reads nameserver candidates from a resolver file on every call.
 pub struct ResolvConfUpstreams {
     path: PathBuf,
 }
 
 impl ResolvConfUpstreams {
-    /// A reader over `path` (tests; production reads `/etc/resolv.conf`).
+    /// A reader over `path` (tests; production reads [`RESOLV_CONF_PATH`]).
     #[must_use]
     pub fn from_path(path: impl Into<PathBuf>) -> Self {
         Self { path: path.into() }
