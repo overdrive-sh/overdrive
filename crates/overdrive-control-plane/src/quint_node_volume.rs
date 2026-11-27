@@ -604,6 +604,8 @@ struct HeldTick {
 }
 
 struct NodeVolumeDriver {
+    /// Whether `from_driver` reads the running launches' restart counts (see `RunningCounts`).
+    checks_counts: bool,
     /// The restart authority of the current `serve` process (`WorkloadLifecycle`
     /// registered in its runtime). While no process is up it is a placeholder
     /// over its own view store, so the node's view store is free for the next
@@ -629,6 +631,12 @@ struct NodeVolumeDriver {
 }
 
 impl NodeVolumeDriver {
+    /// A driver that also compares the restart count each running launch carries with the model's
+    /// (`cnt`, read through `attempt_index_for_alloc - 1`).
+    fn checking_counts() -> Self {
+        Self { checks_counts: true, ..Self::new() }
+    }
+
     fn new() -> Self {
         let placeholder = TempDir::new().expect("tmpdir");
         let reconcilers = Arc::new(
@@ -646,6 +654,7 @@ impl NodeVolumeDriver {
             alloc_of: BTreeMap::new(),
             next_beacon_port: BEACON_PORT_BASE,
             step_no: 0,
+            checks_counts: false,
         }
     }
 
@@ -1593,7 +1602,37 @@ struct NodeVolumeState {
     exhausted: bool,
     /// The allocations whose launch is booting (`ph == LP_BOOT`) and alive.
     booting: BTreeSet<i64>,
+    /// Model `cnt[a]` of every allocation whose launch is running: the restart count it carries,
+    /// the spec's `restart_counts` entry at issue. Production reads it as
+    /// `attempt_index_for_alloc - 1`. A relaunch over a launch that never ran carries the count
+    /// of the newest launch that ran, so the charge is 0 after the relaunch (RB-13).
+    running_counts: RunningCounts,
 }
+
+/// The restart counts of the running launches, compared only by a run whose driver observes them
+/// (`NodeVolumeDriver::checking_counts`): the spec side always carries the counts, the driver side
+/// carries them only when it is asked to, and a side that does not carry them equals anything.
+#[derive(Debug)]
+struct RunningCounts(Option<BTreeMap<i64, i64>>);
+
+impl PartialEq for RunningCounts {
+    fn eq(&self, other: &Self) -> bool {
+        match (&self.0, &other.0) {
+            (Some(spec), Some(driver)) => {
+                // The comparison names the contract it checks, so a divergence reads as the
+                // count assertion and not as a generic state mismatch.
+                assert!(
+                    spec == driver,
+                    "a relaunch over a launch that never ran must charge the count of the launch that ran (the crash the operator's restart replaced is forgiven): model counts {spec:?}, production counts {driver:?}"
+                );
+                true
+            }
+            _ => true,
+        }
+    }
+}
+
+impl Eq for RunningCounts {}
 
 impl NodeVolumeState {
     /// The spec side: the qualified variable `vol_conf::node_volume::st`.
@@ -1608,6 +1647,13 @@ impl NodeVolumeState {
             .filter(|(a, ph)| **ph == LP_BOOT && alive.get(*a).copied().unwrap_or(false))
             .map(|(a, _)| *a)
             .collect();
+        let cnt = quint_itf::int_map(quint_itf::field(st, "cnt")?, quint_itf::int)?;
+        let running_counts = alloc
+            .iter()
+            .filter(|(_, state)| **state == 2)
+            .map(|(a, _)| (*a, cnt.get(a).copied().unwrap_or(0)))
+            .collect();
+        let running_counts = RunningCounts(Some(running_counts));
         Ok(Self {
             active: quint_itf::boolean(quint_itf::field(st, "lv")?)?
                 && quint_itf::boolean(quint_itf::field(st, "active")?)?,
@@ -1617,6 +1663,7 @@ impl NodeVolumeState {
             // budget rule (`restart_budget.qnt`) over the current row's count; the driver applies no rule.
             exhausted: quint_itf::boolean(quint_itf::field(st, "exh")?)?,
             booting,
+            running_counts,
         })
     }
 }
@@ -1695,10 +1742,23 @@ impl State<NodeVolumeDriver> for NodeVolumeState {
                 return Err(DriverError::Production(format!("claim_state: {error}")).into());
             }
         };
+        let serve = driver.serve("project")?;
+        let running_counts = RunningCounts(driver.checks_counts.then(|| {
+            alloc
+                .iter()
+                .filter(|(_, state)| **state == 2)
+                .filter_map(|(a, _)| driver.alloc_id(*a).map(|id| (*a, id)))
+                .map(|(a, id)| {
+                    let attempt = serve.state.runtime.attempt_index_for_alloc(&target(), &id);
+                    (a, i64::from(attempt) - 1)
+                })
+                .collect()
+        }));
         Ok(Self {
             active,
             claimed,
             alloc,
+            running_counts,
             exhausted: rows.iter().any(|row| {
                 matches!(row.terminal, Some(TerminalCondition::BackoffExhausted { .. }))
             }),
@@ -1806,6 +1866,8 @@ fn quint_vol_store_absent_fails_typed_and_never_attaches() -> impl Driver {
 }
 
 /// Named run `superseded_launch_result_discarded`.
+/// PENDING (09-08, RB-13): after the relaunch the model's `charged` is 0 (the crash of the first launch is forgiven by the operator's
+/// restart, the abandoned launch is not counted); production carries the abandoned launch's count until the count basis lands.
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/node-local-volume/node_volume.qnt",
@@ -1813,8 +1875,11 @@ fn quint_vol_store_absent_fails_typed_and_never_attaches() -> impl Driver {
     test = "superseded_launch_result_discarded",
     max_samples = 1
 )]
+#[should_panic(
+    expected = "a relaunch over a launch that never ran must charge the count of the launch that ran"
+)]
 fn quint_vol_superseded_launch_result_discarded() -> impl Driver {
-    NodeVolumeDriver::new()
+    NodeVolumeDriver::checking_counts()
 }
 
 /// Named run `stop_during_boot_wait_terminates_vmm_and_keeps_volume`.

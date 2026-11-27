@@ -61,12 +61,13 @@
 //! | `stopped` | `WorkloadLifecycle::hydrate_desired(..).desired_to_stop` |
 //! | `minted[a]`, `ig[a]` | `ReconcilerRuntime::issued_generation_for_alloc` |
 //! | `cnt[a]` | `ReconcilerRuntime::attempt_index_for_alloc - 1` |
+//! | `basisA` (the count basis, RB-13) | the newest row that is not `is_launch_abandoned`, derived from `alloc_status_rows` by the projection |
 //! | `hasRow(a)`, the row's state | `ObservationStore::alloc_status_rows` |
 //! | `exhausted` | `alloc_status_rows`: the current row carries `BackoffExhausted` |
 //! | `why == W_PREFAIL` | a `Failed` row with an identity-issue or driver-internal reason |
 //! | `why == W_REFUSED` | no row, not live in the driver, the dispatch's own `Err(AdmissionCapReached)` |
-//! | `as == ABANDONED` (`why == W_LOST`) | a `Terminated` row with `terminal == None` and reason `LaunchSuperseded` or `LaunchLostWithControlPlane` (ADR-0355), not live in the driver, the held tick over (completed `Ok`, or dropped by a rebuild). PENDING OWNER API: neither the row nor the reasons exist yet; the projection fails naming them |
-//! | `as == PENDING` | issued, the `Pending` row of the allocation (ADR-0353), the held tick future has not completed. PENDING OWNER API: no `Pending` row is written yet; the projection fails naming it |
+//! | `as == ABANDONED` (`why == W_LOST`) | a `Terminated` row with `terminal == None` and reason `LaunchSuperseded` or `LaunchLostWithControlPlane` (ADR-0355), not live in the driver, the held tick over (completed `Ok`, or dropped by a rebuild). The row is written by the shim and read through `alloc_status_rows()`; a launch that ended with no such row fails the projection |
+//! | `as == PENDING` | issued, the `Pending` row of the allocation (ADR-0353), the held tick future has not completed. The shim writes the row after admission, so the held launch (parked before admission) has none yet: the projection awaits a hold after that write |
 //! | `jobTerm(a)` | a `kind == Job` row with a `terminal` |
 //!
 //! `faults`, `declared`, `idFault`, `capFull`, `conf_step`, `og` and `gl` are model-only.
@@ -74,10 +75,10 @@
 //! **Status: pending.** The driver is compiled. A run whose trace reaches behaviour DELIVER has
 //! not built carries `#[should_panic(expected = ...)]` naming its own divergence; a run that
 //! passes against production today is a GUARD and carries none. See each test's doc. Every
-//! `rg_conf` / `rg_conf_job` run reaches a `PENDING` allocation, whose `Pending` row (ADR-0353) no
-//! owner writes yet, so every pin carries `#[should_panic(expected = "awaits owner API")]` until
-//! the crafter lands the row (then the abandoned row of ADR-0355) and reads both through
-//! `alloc_status_rows()`.
+//! `rg_conf` / `rg_conf_job` run reaches a `PENDING` allocation, which the hold parks before the shim's
+//! admission, while the `Pending` row (ADR-0353) is written after it, so every pin carries
+//! `#[should_panic(expected = "awaits owner API")]` until a hold after that write exists. The derived
+//! `charged` and `exhausted` read the count basis (RB-13), and an abandoned row projects as state 5.
 //!
 //! Lane: `integration-tests` (it spawns the `quint` CLI through quint-connect).
 
@@ -137,7 +138,7 @@ use overdrive_core::traits::observation_store::{
     ObservationStore, ObservationStoreError, ObservationWrite, ServiceBackendRow, TransitionSource,
     WorkloadSvidIssueStatusRowV1,
 };
-use overdrive_core::transition_reason::{TerminalCondition, TransitionReason};
+use overdrive_core::transition_reason::{TerminalCondition, TransitionReason, is_launch_abandoned};
 use overdrive_core::workflow::{SignalKey, SignalValue, WorkflowStatus};
 use overdrive_reconcilers::AnyState;
 use overdrive_sim::adapters::ca::SimCa;
@@ -197,7 +198,7 @@ enum RgError {
     Step { step: u64, action: &'static str, why: String },
     #[error("restart-generation divergence at step {step} projection: {why}")]
     Projection { step: u64, why: String },
-    /// The owner has no port or row for what the model now says (ADR-0353, ADR-0355): the step names it.
+    /// The driver has no seam for what the model now says: the step names it.
     #[error(
         "restart-generation step {step} awaits owner API that does not exist yet (ADR-0353, ADR-0355): {awaits}"
     )]
@@ -1289,14 +1290,14 @@ impl RgState {
         // A PENDING allocation has its `Pending` row (ADR-0353), an abandoned launch (state 5) its terminal row
         // (ADR-0355); only a refused launch (`W_REFUSED`) has none.
         let has_row = |a: i64| matches!(as_.get(&a), Some(1..=5)) && why_.get(&a) != Some(&10);
-        let cur_a = (1..=NA).filter(|a| has_row(*a)).max().unwrap_or(0);
-        let charged = if cur_a == 0 {
+        // RB-13 (ADR-0355): the count basis is the newest row that ran, `last_ran_alloc`: the newest row that is not abandoned.
+        let basis_a = (1..=NA).filter(|a| has_row(*a) && as_.get(a) != Some(&5)).max().unwrap_or(0);
+        let charged = if basis_a == 0 {
             0
         } else {
-            cnt.get(&cur_a).copied().unwrap_or(0) + i64::from(as_.get(&cur_a) == Some(&3))
+            cnt.get(&basis_a).copied().unwrap_or(0) + i64::from(as_.get(&basis_a) == Some(&3))
         };
         let non_terminal = as_.values().any(|state| *state == 1 || *state == 2);
-        let abandoned_cur = cur_a != 0 && as_.get(&cur_a) == Some(&5);
         let mut allocs = BTreeMap::new();
         for a in 1..=NA {
             let state = as_.get(&a).copied().unwrap_or(0);
@@ -1320,7 +1321,7 @@ impl RgState {
             dg: quint_itf::int(quint_itf::field(st, "dg")?)?,
             stopped: quint_itf::boolean(quint_itf::field(st, "stopped")?)?,
             allocs,
-            exhausted: charged >= LIMIT && !non_terminal && !abandoned_cur,
+            exhausted: charged >= LIMIT && !non_terminal,
         })
     }
 
@@ -1374,6 +1375,9 @@ impl RgState {
                 let state = match row.state {
                     AllocState::Running => 2,
                     AllocState::Failed => 3,
+                    // An abandoned launch is a `Terminated` row with `terminal == None` and reason
+                    // `LaunchSuperseded` or `LaunchLostWithControlPlane` (ADR-0355).
+                    AllocState::Terminated if is_launch_abandoned(row) => 5,
                     AllocState::Terminated => 4,
                     AllocState::Pending => 1,
                     other => {
@@ -1390,14 +1394,23 @@ impl RgState {
                         Some(TransitionReason::DriverInternalError { .. }) => true,
                         _ => false,
                     };
-                (state, if prefail { WhyClass::PreFail } else { WhyClass::Other })
+                let why = if prefail {
+                    WhyClass::PreFail
+                } else if state == 5 {
+                    WhyClass::Lost
+                } else {
+                    WhyClass::Other
+                };
+                (state, why)
             } else {
                 let held = serve.ticks.get(&a).is_some_and(|(tick, _)| !tick.is_finished());
                 if held {
-                    // PENDING is the allocation's `Pending` row (ADR-0353); production writes none yet.
+                    // The hold parks the launch at the point read of its prior row, before the shim's
+                    // admission; the `Pending` row (ADR-0353) is written after admission, once the pool
+                    // has handed the lease out. No test-owned seam holds the launch after that write.
                     return Err(RgError::OwnerApiPending {
                         step,
-                        awaits: "the `Pending` row written before the VMM exists, read through alloc_status_rows() (ADR-0353)",
+                        awaits: "a hold of the launch after its `Pending` row is written: the hold parks before admission, which precedes the row (ADR-0353)",
                     });
                 }
                 if live.contains(alloc) {
@@ -1408,12 +1421,9 @@ impl RgState {
                 match core.ends.get(&a) {
                     Some(TickEnd::Refused) => (3, WhyClass::Refused),
                     Some(TickEnd::Done | TickEnd::Lost) => {
-                        // ABANDONED is a `Terminated` row with `LaunchSuperseded` or `LaunchLostWithControlPlane`
-                        // (ADR-0355); production writes none yet.
-                        return Err(RgError::OwnerApiPending {
-                            step,
-                            awaits: "the abandoned `Terminated` row (`LaunchSuperseded`, `LaunchLostWithControlPlane`) written by the shim and by converge's first step, read through alloc_status_rows() (ADR-0355)",
-                        });
+                        return Err(fail(format!(
+                            "the launch of allocation {a} ended before running and left no abandoned row (ADR-0355)"
+                        )));
                     }
                     Some(TickEnd::Failed(error)) => {
                         return Err(fail(format!(
