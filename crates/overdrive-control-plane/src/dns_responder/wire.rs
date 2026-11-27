@@ -9,9 +9,8 @@
 //!
 //! Two halves:
 //!
-//! - [`decode`] — parse an inbound DNS query datagram into its
-//!   `(MeshServiceName, RecordType)` question (the responder reads the name +
-//!   qtype to dispatch to `answer_for`).
+//! - [`decode`] — parse an inbound datagram into its single IN-class question
+//!   (id, name, qtype) and classify the name once ([`classify`]).
 //! - [`encode`] — render a [`NameAnswer`] (plus the originating query name +
 //!   qtype) into a DNS response datagram: an A-record answer for `Records`, a
 //!   NOERROR/NODATA + SOA reply for `NoData`, and an NXDOMAIN + SOA reply for
@@ -38,7 +37,7 @@ use hickory_proto::op::{Edns, Message, MessageType, OpCode, ResponseCode};
 use hickory_proto::rr::rdata::opt::EdnsOption;
 use hickory_proto::rr::rdata::svcb::{SVCB, SvcParamValue};
 use hickory_proto::rr::rdata::{A, SOA};
-use hickory_proto::rr::{Name, RData, Record, RecordType};
+use hickory_proto::rr::{DNSClass, Name, RData, Record, RecordType};
 use overdrive_core::id::{MeshServiceName, NameAnswer};
 use thiserror::Error;
 
@@ -59,12 +58,86 @@ const SOA_REFRESH_SECS: i32 = 1;
 const SOA_RETRY_SECS: i32 = 1;
 const SOA_EXPIRE_SECS: i32 = 1;
 
-/// The decoded question of an inbound dial-by-name query: the dialed
-/// [`MeshServiceName`] and the queried [`RecordType`] (`A` / `AAAA` in v1).
+/// The decoded question name of an inbound query: its labels, ASCII-case-folded,
+/// the root label implicit. Hickory-free (DDN-4); classification compares these
+/// labels, never a rendered string, so a label that itself contains a `.`
+/// (`a\.svc.overdrive.local`) cannot pass for two labels.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QueryName {
+    labels: Vec<Vec<u8>>,
+}
+
+impl QueryName {
+    fn from_hickory(name: &Name) -> Self {
+        Self { labels: name.iter().map(<[u8]>::to_ascii_lowercase).collect() }
+    }
+
+    fn to_hickory(&self) -> Name {
+        Name::from_labels(self.labels.iter().map(Vec::as_slice))
+            .unwrap_or_else(|err| unreachable!("labels decoded from a Name re-encode: {err}"))
+    }
+
+    /// Whether the trailing labels equal `suffix` (labels, not text).
+    fn ends_with_labels(&self, suffix: &[&str]) -> bool {
+        self.labels.len() >= suffix.len()
+            && self
+                .labels
+                .iter()
+                .rev()
+                .zip(suffix.iter().rev())
+                .all(|(label, expected)| label.as_slice() == expected.as_bytes())
+    }
+}
+
+/// How the node treats a query name (ADR-0357).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum QueryClass {
+    /// A `<workload>.svc.overdrive.local` mesh service name, answered locally.
+    Mesh(MeshServiceName),
+    /// In the `overdrive.local` zone (apex included) but not a mesh name:
+    /// NXDOMAIN, never forwarded.
+    PlatformUnknown,
+    /// Outside the platform zone: eligible for forwarding.
+    Forwardable,
+}
+
+/// The ONE name classifier. Compares the trailing labels (`overdrive`,
+/// `local`), case-insensitively; in zone a name is `Mesh` iff it is exactly one
+/// single-label workload under `svc.overdrive.local` that `MeshServiceName`
+/// accepts, otherwise `PlatformUnknown`; out of zone it is `Forwardable`.
+#[must_use]
+pub fn classify(name: &QueryName) -> QueryClass {
+    let zone_labels = zone_labels();
+    if !name.ends_with_labels(&zone_labels) {
+        return QueryClass::Forwardable;
+    }
+    mesh_service_name(name).map_or(QueryClass::PlatformUnknown, QueryClass::Mesh)
+}
+
+fn zone_labels() -> Vec<&'static str> {
+    MeshServiceName::PLATFORM_ZONE.split('.').collect()
+}
+
+/// The mesh name of an in-zone `name`, when it is `<workload>.svc.<zone>` with a
+/// single, dot-free workload label the grammar accepts.
+fn mesh_service_name(name: &QueryName) -> Option<MeshServiceName> {
+    let mut expected = vec!["svc"];
+    expected.extend(zone_labels());
+    if name.labels.len() != expected.len() + 1 || !name.ends_with_labels(&expected) {
+        return None;
+    }
+    let workload = std::str::from_utf8(name.labels.first()?).ok()?;
+    if workload.contains('.') {
+        return None;
+    }
+    MeshServiceName::new(&format!("{workload}.{}", MeshServiceName::SUFFIX)).ok()
+}
+
+/// The decoded question of an inbound query: the id, the question name, the
+/// queried [`RecordType`] and the name's [`QueryClass`].
 ///
 /// `RecordType` is the one `hickory_proto` type that crosses the ACL boundary
-/// into `answer_for` (DDN-4); `MeshServiceName` is the hickory-free domain
-/// name the responder matches against its index.
+/// into `answer_for` (DDN-4).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DecodedQuery {
     /// The DNS message ID, echoed verbatim into the response per RFC 1035
@@ -72,55 +145,83 @@ pub struct DecodedQuery {
     /// its outstanding query by this ID and discard a mismatched one, so the
     /// responder MUST echo it back through [`encode`].
     pub id: u16,
-    /// The dialed mesh service name (parsed from the query's first question).
-    pub name: MeshServiceName,
-    /// The queried record type (`A` / `AAAA`).
+    /// The question name.
+    pub name: QueryName,
+    /// The queried record type.
     pub qtype: RecordType,
+    /// How the node treats the name.
+    pub class: QueryClass,
 }
 
-/// Typed decode errors. A malformed datagram, a question whose name is not a
-/// valid `<workload>.svc.overdrive.local`, or an empty question section each map to
-/// a distinct variant (never a catch-all `Internal(String)`).
+/// A datagram that is not one IN-class QUERY with one question. It carries no
+/// reply: the responder drops it.
 #[derive(Debug, Error)]
-pub enum WireError {
+pub enum WireReject {
     /// The datagram is not a parseable DNS message.
     #[error("malformed DNS datagram: {source}")]
-    Malformed {
+    Undecodable {
         /// The underlying hickory-proto decode error.
         source: hickory_proto::serialize::binary::DecodeError,
     },
-    /// The message carried no question section.
-    #[error("DNS query carried no question")]
-    NoQuestion,
-    /// The question name is not a valid `<workload>.svc.overdrive.local`.
-    #[error("query name is not a valid mesh service name: {name}")]
-    NotMeshName {
-        /// The offending name as decoded from the wire.
-        name: String,
+    /// The QR bit is set: a response, not a query.
+    #[error("DNS datagram is a response")]
+    NotAQuery,
+    /// The opcode is not QUERY.
+    #[error("DNS datagram opcode is not QUERY")]
+    UnsupportedOpcode,
+    /// The question count is not exactly one.
+    #[error("DNS query carries {count} questions, not one")]
+    QuestionCount {
+        /// The number of questions the message carried.
+        count: usize,
     },
+    /// The question class is not IN.
+    #[error("DNS question class is not IN")]
+    NotInClass,
 }
 
-/// Decode an inbound DNS query datagram into its `(MeshServiceName,
-/// RecordType)` question.
+/// Decode an inbound datagram into its single IN-class question.
 ///
-/// Reads the FIRST question of the message: its name (which must parse as a
-/// `<workload>.svc.overdrive.local` via [`MeshServiceName::new`]) and its record
-/// type. An empty question section, an unparseable datagram, or a non-mesh
-/// name each return the matching [`WireError`] variant.
-pub fn decode(datagram: &[u8]) -> Result<DecodedQuery, WireError> {
-    let message = Message::from_vec(datagram).map_err(|source| WireError::Malformed { source })?;
-    let question = message.queries.first().ok_or(WireError::NoQuestion)?;
-    let wire_name = question.name().to_string();
-    // `Name::to_string()` renders the FQDN with a trailing dot
-    // (`server.svc.overdrive.local.`); strip it before handing to the
-    // `MeshServiceName` grammar, which expects the dot-less suffix form.
-    let canonical = wire_name.strip_suffix('.').unwrap_or(&wire_name);
-    let name =
-        MeshServiceName::new(canonical).map_err(|_| WireError::NotMeshName { name: wire_name })?;
-    // The ID lives on `message.metadata` (same field-access idiom this module
-    // uses for `metadata.response_code`); avoids pulling the `UpdateMessage`
-    // trait into scope just for the `.id()` accessor.
-    Ok(DecodedQuery { id: message.metadata.id, name, qtype: question.query_type() })
+/// # Errors
+///
+/// A [`WireReject`] for every datagram that is not one IN-class QUERY with one
+/// question.
+pub fn decode(datagram: &[u8]) -> Result<DecodedQuery, WireReject> {
+    let message =
+        Message::from_vec(datagram).map_err(|source| WireReject::Undecodable { source })?;
+    if message.metadata.message_type != MessageType::Query {
+        return Err(WireReject::NotAQuery);
+    }
+    if message.metadata.op_code != OpCode::Query {
+        return Err(WireReject::UnsupportedOpcode);
+    }
+    let [question] = message.queries.as_slice() else {
+        return Err(WireReject::QuestionCount { count: message.queries.len() });
+    };
+    if question.query_class() != DNSClass::IN {
+        return Err(WireReject::NotInClass);
+    }
+    let name = QueryName::from_hickory(question.name());
+    let class = classify(&name);
+    Ok(DecodedQuery { id: message.metadata.id, name, qtype: question.query_type(), class })
+}
+
+/// The NXDOMAIN reply for an unknown platform-zone name: question echoed, the
+/// zone SOA in AUTHORITY with `MINIMUM == 1`.
+pub(super) fn encode_platform_nxdomain(
+    id: u16,
+    name: &QueryName,
+    qtype: RecordType,
+    serial_reading: Duration,
+) -> Vec<u8> {
+    let owner = name.to_hickory();
+    let mut message = Message::new(id, MessageType::Response, OpCode::Query);
+    message.add_query(hickory_proto::op::Query::query(owner.clone(), qtype));
+    message.metadata.response_code = ResponseCode::NXDomain;
+    message.add_authority(build_soa_record(&owner, serial_reading));
+    message
+        .to_vec()
+        .unwrap_or_else(|err| unreachable!("self-constructed DNS Message must encode: {err}"))
 }
 
 /// Encode a [`NameAnswer`] into a DNS response datagram for the query

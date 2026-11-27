@@ -879,6 +879,28 @@ use std::fmt::Write as _;
 #[serde(try_from = "String", into = "String")]
 pub struct MeshServiceName(String);
 
+/// Whether `MeshServiceName::SUFFIX` is `"svc." + MeshServiceName::PLATFORM_ZONE`.
+const fn suffix_is_svc_under_platform_zone() -> bool {
+    let suffix = MeshServiceName::SUFFIX.as_bytes();
+    let zone = MeshServiceName::PLATFORM_ZONE.as_bytes();
+    let prefix = b"svc.";
+    if suffix.len() != prefix.len() + zone.len() {
+        return false;
+    }
+    let mut index = 0;
+    while index < suffix.len() {
+        let expected =
+            if index < prefix.len() { prefix[index] } else { zone[index - prefix.len()] };
+        if suffix[index] != expected {
+            return false;
+        }
+        index += 1;
+    }
+    true
+}
+
+const _: () = assert!(suffix_is_svc_under_platform_zone());
+
 impl MeshServiceName {
     /// The fixed mesh-DNS suffix — note NO leading dot; the separator is the
     /// `.` between the `<workload>` label and this suffix.

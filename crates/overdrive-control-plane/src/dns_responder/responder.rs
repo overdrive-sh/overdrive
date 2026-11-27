@@ -427,7 +427,8 @@ impl DnsResponder {
                 }
             };
             let Some((datagram, peer, spec_dst, received_at)) = received else { continue };
-            let Some((reply, outcome)) = self.answer_datagram(&datagram) else {
+            let to_gateway = spec_dst == Some(self.gateway);
+            let Some((reply, outcome)) = self.answer_datagram(&datagram, to_gateway) else {
                 self.observer
                     .observe(QueryOutcome::Dropped, self.clock.now().duration_since(received_at));
                 continue;
@@ -455,21 +456,41 @@ impl DnsResponder {
         }
     }
 
-    /// Decode → answer → encode one inbound datagram, returning the reply bytes
-    /// (or `None` when the datagram is not a decodable mesh query — a malformed
-    /// or non-mesh query is silently dropped, never answered with a fabricated
-    /// addr). The SOA SERIAL is read from the injected clock (`unix_now`).
-    fn answer_datagram(&self, datagram: &[u8]) -> Option<(Vec<u8>, QueryOutcome)> {
+    /// Decode → classify → answer → encode one inbound datagram, returning the
+    /// reply bytes (or `None` when the datagram is dropped). A mesh name is
+    /// answered whichever address the datagram was sent to; an unknown
+    /// platform-zone name is answered NXDOMAIN only when the datagram was
+    /// addressed to the gateway; everything else is dropped. The SOA SERIAL is
+    /// read from the injected clock (`unix_now`).
+    fn answer_datagram(
+        &self,
+        datagram: &[u8],
+        to_gateway: bool,
+    ) -> Option<(Vec<u8>, QueryOutcome)> {
         let query = wire::decode(datagram).ok()?;
-        let answer = answer_for(&query.name, query.qtype, &self.name_index);
-        let outcome = match answer {
-            NameAnswer::Records(_) => QueryOutcome::Answered,
-            NameAnswer::NoData => QueryOutcome::NoData,
-            NameAnswer::NxDomain => QueryOutcome::NameError,
-        };
-        let reply =
-            wire::encode(query.id, &query.name, query.qtype, &answer, self.clock.unix_now());
-        Some((reply, outcome))
+        match query.class {
+            wire::QueryClass::Mesh(name) => {
+                let answer = answer_for(&name, query.qtype, &self.name_index);
+                let outcome = match answer {
+                    NameAnswer::Records(_) => QueryOutcome::Answered,
+                    NameAnswer::NoData => QueryOutcome::NoData,
+                    NameAnswer::NxDomain => QueryOutcome::NameError,
+                };
+                let reply =
+                    wire::encode(query.id, &name, query.qtype, &answer, self.clock.unix_now());
+                Some((reply, outcome))
+            }
+            wire::QueryClass::PlatformUnknown if to_gateway => {
+                let reply = wire::encode_platform_nxdomain(
+                    query.id,
+                    &query.name,
+                    query.qtype,
+                    self.clock.unix_now(),
+                );
+                Some((reply, QueryOutcome::NameError))
+            }
+            wire::QueryClass::PlatformUnknown | wire::QueryClass::Forwardable => None,
+        }
     }
 }
 

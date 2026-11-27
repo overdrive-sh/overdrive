@@ -391,7 +391,6 @@ guest_test! {
 // ===========================================================================
 
 guest_test! {
-    #[should_panic(expected = "a platform-zone name that is not a mesh name must get NXDOMAIN")]
     async fn a_platform_zone_name_that_is_not_a_mesh_name_is_nxdomain_and_never_forwarded() {
         let node = Node::boot(64).await;
         node.upstream().script_default(Behaviour::Answer(vec![Ipv4Addr::new(1, 2, 3, 4)]));
