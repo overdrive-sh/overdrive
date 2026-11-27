@@ -1101,7 +1101,6 @@ fn the_designs_worked_permit_examples_hold() {
 /// Contract shape: bounded-change. ADR-0362: exactly `permits` forwards are in
 /// flight; the next is shed with no wait, and a released permit is reusable.
 #[test]
-#[should_panic(expected = "the 4th concurrent forward must be shed")]
 fn forwards_beyond_the_permit_count_are_shed_and_a_released_permit_is_reusable() {
     let w = world_with(vec![UP1], vec![], 3);
     let held: Vec<_> =
@@ -1114,7 +1113,6 @@ fn forwards_beyond_the_permit_count_are_shed_and_a_released_permit_is_reusable()
 /// Contract shape: bounded-change. Boundary scenario 4: a shed opens no
 /// upstream socket and reads no upstream configuration.
 #[test]
-#[should_panic(expected = "the shed attempt must be refused")]
 fn a_shed_query_touches_neither_the_upstream_nor_the_resolver_file() {
     let w = world_with(vec![UP1], vec![], 1);
     let _held = w.forwarder.try_acquire().expect("one permit");
@@ -1130,7 +1128,6 @@ fn a_shed_query_touches_neither_the_upstream_nor_the_resolver_file() {
 /// clears nothing; the clear comes only when a permit is acquired with at most
 /// half of the permits held by others; a second saturation is a new episode.
 #[test]
-#[should_panic(expected = "the 5th concurrent forward must be shed")]
 fn a_shed_episode_warns_once_and_clears_only_when_the_load_has_drained_to_half() {
     let (events, _guard) = capture();
     let w = world_with(vec![UP1], vec![], 4);
@@ -1177,7 +1174,6 @@ fn a_shed_episode_warns_once_and_clears_only_when_the_load_has_drained_to_half()
 /// with one permit the held count before the acquire is 0, so a single-permit
 /// bound still clears.
 #[test]
-#[should_panic(expected = "the second concurrent forward must be shed")]
 fn a_single_permit_bound_still_clears_its_shed_episode() {
     let (events, _guard) = capture();
     let w = world_with(vec![UP1], vec![], 1);
@@ -1192,7 +1188,6 @@ fn a_single_permit_bound_still_clears_its_shed_episode() {
 /// Contract shape: bounded-change. Ruling G: shedding warns twice per episode
 /// and never once per shed query.
 #[test]
-#[should_panic(expected = "a shed run must warn exactly once")]
 fn shedding_a_thousand_queries_warns_once() {
     let (events, _guard) = capture();
     let w = world_with(vec![UP1], vec![], 2);
@@ -1211,7 +1206,6 @@ fn shedding_a_thousand_queries_warns_once() {
 /// once every thread is done every permit is back: exactly three can be taken
 /// and the fourth is shed. Default lane: real threads, no socket, no clock read.
 #[test]
-#[should_panic(expected = "permit bound violated")]
 fn racing_acquirers_never_hold_more_permits_than_the_bound_and_every_permit_is_released() {
     const BOUND: usize = 3;
     const THREADS: usize = 8;

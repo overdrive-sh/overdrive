@@ -19,7 +19,7 @@
 use std::io;
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use overdrive_core::traits::clock::Clock;
@@ -54,12 +54,20 @@ pub struct Forwarder {
     owned: OwnedAddressRanges,
     gateway: Ipv4Addr,
     permits: usize,
+    held: Arc<AtomicUsize>,
+    shed_open: AtomicBool,
     episode: FailureEpisode,
 }
 
 /// RAII in-flight permit. Not `Clone`. Released on drop.
 pub struct ForwardPermit {
-    _private: (),
+    held: Arc<AtomicUsize>,
+}
+
+impl Drop for ForwardPermit {
+    fn drop(&mut self) {
+        self.held.fetch_sub(1, Ordering::AcqRel);
+    }
 }
 
 /// One query to forward.
@@ -148,16 +156,59 @@ impl Forwarder {
         gateway: Ipv4Addr,
         permits: usize,
     ) -> Self {
-        Self { resolvers, exchange, clock, owned, gateway, permits, episode: FailureEpisode::default() }
+        Self {
+            resolvers,
+            exchange,
+            clock,
+            owned,
+            gateway,
+            permits,
+            held: Arc::new(AtomicUsize::new(0)),
+            shed_open: AtomicBool::new(false),
+            episode: FailureEpisode::default(),
+        }
     }
 
     /// Takes one permit without waiting; `None` when all are held.
     #[must_use]
     pub fn try_acquire(&self) -> Option<ForwardPermit> {
-        // SCAFFOLD: always grants a permit, so the permit bound, the shed and the
-        // shed-episode warn are absent until DELIVER lands them (ADR-0362).
-        let _ = self.permits;
-        Some(ForwardPermit { _private: () })
+        let mut held = self.held.load(Ordering::Acquire);
+        loop {
+            if held >= self.permits {
+                self.shed();
+                return None;
+            }
+            match self.held.compare_exchange_weak(
+                held,
+                held + 1,
+                Ordering::AcqRel,
+                Ordering::Acquire,
+            ) {
+                Ok(before) => {
+                    self.acquired(before);
+                    return Some(ForwardPermit { held: Arc::clone(&self.held) });
+                }
+                Err(current) => held = current,
+            }
+        }
+    }
+
+    /// A query found no permit: the swap's return decides the episode start.
+    fn shed(&self) {
+        if !self.shed_open.swap(true, Ordering::AcqRel) {
+            tracing::warn!(name: "dns.forward.shed_started", permits = self.permits);
+        }
+    }
+
+    /// A permit was acquired with `held` permits held before it; the episode
+    /// clears only once the load has drained to half.
+    fn acquired(&self, held: usize) {
+        if !self.shed_open.load(Ordering::Acquire) || held.saturating_mul(2) > self.permits {
+            return;
+        }
+        if self.shed_open.swap(false, Ordering::AcqRel) {
+            tracing::warn!(name: "dns.forward.shed_cleared", permits = self.permits, held = held);
+        }
     }
 
     /// Runs one forward under a permit the caller already holds.
