@@ -38,7 +38,6 @@ proptest! {
     /// defining const names; the ranges are read from `WORKLOAD_FRONTEND_BASE`
     /// and `GUEST_NODE_PREFIX` themselves, so changing a const changes the guard.
     #[test]
-    #[should_panic(expected = "owned-range guard: classify an address")]
     fn every_address_in_an_owned_range_is_owned_and_names_its_range(
         a in any::<u32>(), b in any::<u32>(), c in any::<u32>(),
     ) {
@@ -54,7 +53,6 @@ proptest! {
     /// Contract shape: pure-function. AC-7: an address in no owned range,
     /// including the rest of the private space and `10.99.0.0/16`, is not owned.
     #[test]
-    #[should_panic(expected = "owned-range guard: classify an address")]
     fn an_address_outside_every_owned_range_is_not_owned(raw in any::<u32>()) {
         let address = Ipv4Addr::from(raw);
         let in_owned = WORKLOAD_FRONTEND_BASE.contains(&address)
@@ -76,7 +74,6 @@ fn pick(net: Ipv4Net, entropy: u32) -> Ipv4Addr {
 /// address just outside each is not (AC-6, AC-7); `10.99.0.0/16` is not owned
 /// because no production path steers a guest connection to it as mesh traffic.
 #[test]
-#[should_panic(expected = "owned-range guard: classify an address")]
 fn the_edges_of_each_owned_range_are_owned_and_the_next_address_is_not() {
     let list = owned();
     for (inside, kind) in [
@@ -216,7 +213,6 @@ fn platform_construction(workspace: &Path) -> String {
 /// record. The VIP pool, which is configuration and not a constant, is required
 /// to arrive through `platform`'s `VipRange` parameter and to be used there.
 #[test]
-#[should_panic(expected = "owned range missing from OwnedAddressRanges::platform")]
 fn every_address_range_constant_is_in_the_owned_list_or_excluded_on_the_record() {
     let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let platform = platform_construction(&workspace);
