@@ -19,9 +19,11 @@
 use std::io;
 use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use overdrive_core::traits::clock::Clock;
+use parking_lot::Mutex;
 
 use super::owned_ranges::{OwnedAddressRanges, OwnedRangeKind};
 use super::upstream::{
@@ -52,6 +54,7 @@ pub struct Forwarder {
     owned: OwnedAddressRanges,
     gateway: Ipv4Addr,
     permits: usize,
+    episode: FailureEpisode,
 }
 
 /// RAII in-flight permit. Not `Clone`. Released on drop.
@@ -145,7 +148,7 @@ impl Forwarder {
         gateway: Ipv4Addr,
         permits: usize,
     ) -> Self {
-        Self { resolvers, exchange, clock, owned, gateway, permits }
+        Self { resolvers, exchange, clock, owned, gateway, permits, episode: FailureEpisode::default() }
     }
 
     /// Takes one permit without waiting; `None` when all are held.
@@ -167,11 +170,14 @@ impl Forwarder {
         let deadline = self.clock.now() + FORWARD_BUDGET;
         let upstreams = match self.upstreams().await {
             Ok(upstreams) => upstreams,
-            Err(cause) => return Self::failed(request, cause),
+            Err(cause) => return self.failed(request, cause),
         };
         match self.first_accepted_reply(&upstreams, request, deadline).await {
-            Ok(reply) => self.deliver(reply, request),
-            Err(cause) => Self::failed(request, cause),
+            Ok(reply) => {
+                self.episode.accepted_reply(self.clock.now());
+                self.deliver(reply, request)
+            }
+            Err(cause) => self.failed(request, cause),
         }
     }
 
@@ -256,8 +262,47 @@ impl Forwarder {
         }
     }
 
-    fn failed(request: &ForwardRequest<'_>, cause: ForwardFailure) -> ForwardOutcome {
+    fn failed(&self, request: &ForwardRequest<'_>, cause: ForwardFailure) -> ForwardOutcome {
+        if self.episode.failed(self.clock.now()) {
+            tracing::warn!(
+                name: "dns.forward.failed",
+                qname = %question_name(request.wire),
+                cause = cause.as_str(),
+                detail = %cause.detail(),
+            );
+        }
         ForwardOutcome::Failed { reply: servfail_reply(request.wire), cause }
+    }
+}
+
+/// The forward-failure episode: one flag and the instant of the last failure.
+/// Every warn line is decided by the return of one atomic swap of the flag.
+#[derive(Default)]
+struct FailureEpisode {
+    open: AtomicBool,
+    last_failed: Mutex<Option<Instant>>,
+}
+
+impl FailureEpisode {
+    /// Records a failure at `now`; true when it started the episode.
+    fn failed(&self, now: Instant) -> bool {
+        *self.last_failed.lock() = Some(now);
+        !self.open.swap(true, Ordering::AcqRel)
+    }
+
+    /// An accepted reply at `now`; logs the clear when this reply is the one
+    /// that clears an open episode. An early reply leaves the flag untouched.
+    fn accepted_reply(&self, now: Instant) {
+        if !self.open.load(Ordering::Acquire) {
+            return;
+        }
+        let settled = self
+            .last_failed
+            .lock()
+            .is_some_and(|last| now.saturating_duration_since(last) >= FORWARD_BUDGET);
+        if settled && self.open.swap(false, Ordering::AcqRel) {
+            tracing::event!(name: "dns.forward.recovered", tracing::Level::WARN, {});
+        }
     }
 }
 
@@ -290,6 +335,22 @@ impl ForwardFailure {
             Self::NoUsableUpstream => "no_usable_upstream",
             Self::Attempts { budget_exhausted: true, .. } => "budget_exhausted",
             Self::Attempts { budget_exhausted: false, .. } => "all_upstreams_failed",
+        }
+    }
+}
+
+impl ForwardFailure {
+    /// The cause's detail for the episode-start warn.
+    fn detail(&self) -> String {
+        match self {
+            Self::ConfigUnreadable { kind } => format!("{kind:?}"),
+            Self::Attempts { last: Some(last), .. } => match last {
+                AttemptFailure::Unreachable { kind } | AttemptFailure::Io { kind } => {
+                    format!("{}: {kind:?}", last.as_str())
+                }
+                other => other.as_str().to_owned(),
+            },
+            other => other.as_str().to_owned(),
         }
     }
 }

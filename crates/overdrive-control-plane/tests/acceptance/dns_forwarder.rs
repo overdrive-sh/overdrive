@@ -999,7 +999,6 @@ fn flapping_world() -> World {
 /// reply arrives at least `FORWARD_BUDGET` after the last failure; a later
 /// failure starts a new episode.
 #[test]
-#[should_panic(expected = "one start for three failed queries")]
 fn a_failure_episode_warns_once_at_its_start_and_once_when_it_clears() {
     run(async {
         let (events, _guard) = capture();
@@ -1039,7 +1038,6 @@ fn a_failure_episode_warns_once_at_its_start_and_once_when_it_clears() {
 /// EARLIER than `FORWARD_BUDGET` after the last failure neither clears nor
 /// changes the flag, so a failure right after it is still the one episode.
 #[test]
-#[should_panic(expected = "still one episode: no second start")]
 fn an_early_accepted_reply_leaves_the_failure_episode_open() {
     run(async {
         let (events, _guard) = capture();
@@ -1056,7 +1054,6 @@ fn an_early_accepted_reply_leaves_the_failure_episode_open() {
 /// Contract shape: bounded-change. Boundary scenario 3 (resolver file absent):
 /// a missing source starts the same episode, with no boot involvement.
 #[test]
-#[should_panic(expected = "left: 0\n right: 1")]
 fn an_absent_resolver_file_starts_the_same_failure_episode() {
     run(async {
         let (events, _guard) = capture();
