@@ -330,6 +330,293 @@
       "s": "EXECUTED",
       "d": "PASS",
       "t": "2026-11-22T19:42:01Z"
+    },
+    {
+      "sid": "05-02",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-22T21:16:41Z"
+    },
+    {
+      "sid": "05-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-11-22T22:16:37Z"
+    },
+    {
+      "sid": "05-02",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: five target tests fail on acceptance-designer-owned test or driver defects (hydrated-restart marker text, second-restart stopped() assertion, quint_vol stop-during-ensure / shutdown-abandons / randomized driver projection); production lane table is implemented and uncommitted",
+      "t": "2026-11-22T22:16:53Z"
+    },
+    {
+      "sid": "05-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-23T11:17:23Z"
+    },
+    {
+      "sid": "05-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-23T11:17:58Z"
+    },
+    {
+      "sid": "09-01",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: API-only step; the acceptance designer authors the blocked tests after it compiles",
+      "t": "2026-11-24T14:38:53Z"
+    },
+    {
+      "sid": "09-01",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: sim test-support names (SimVmm unreapable scripting and scripted reap, SimVmHostState hold/release and scripted observe failure) are not pinned; lease_observation reporting of a reserve_leftover reservation is a design gap. Unblocked API is in the working tree and passes check, clippy, nextest, dst-lint, placement-lint",
+      "t": "2026-11-24T14:38:53Z"
+    },
+    {
+      "sid": "09-01",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: step incomplete until the unpinned sim names are supplied; nothing committed",
+      "t": "2026-11-24T14:38:53Z"
+    },
+    {
+      "sid": "09-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-24T15:53:06Z"
+    },
+    {
+      "sid": "09-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-24T15:53:34Z"
+    },
+    {
+      "sid": "09-02",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-24T19:53:25Z"
+    },
+    {
+      "sid": "09-02",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: 19 worker acceptance tests (vm_driver_stop_totality, vm_driver_start_failure_contract, launch_supersession, vm_driver_stop_unreaped) assert scope removal via SimCgroupFs, contradicting ADR-0351; acceptance-designer must rewrite them",
+      "t": "2026-11-24T19:53:43Z"
+    },
+    {
+      "sid": "09-02",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: 19 worker acceptance tests (vm_driver_stop_totality, vm_driver_start_failure_contract, launch_supersession, vm_driver_stop_unreaped) assert scope removal via SimCgroupFs, contradicting ADR-0351; acceptance-designer must rewrite them",
+      "t": "2026-11-24T19:53:43Z"
+    },
+    {
+      "sid": "09-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-24T21:33:51Z"
+    },
+    {
+      "sid": "09-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-24T21:34:24Z"
+    },
+    {
+      "sid": "09-03",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: markers removed together with the implementation; RED proven by the pre-authored should_panic messages",
+      "t": "2026-11-25T00:07:28Z"
+    },
+    {
+      "sid": "09-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-11-25T01:16:05Z"
+    },
+    {
+      "sid": "09-03",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: S-VOL-T3-12 should_panic marker (volume_survives.rs:770) does not panic as expected now the bounded reap is in; acceptance designer must retarget or lift it before commit",
+      "t": "2026-11-25T01:16:05Z"
+    },
+    {
+      "sid": "09-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-25T01:53:41Z"
+    },
+    {
+      "sid": "09-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-25T01:54:03Z"
+    },
+    {
+      "sid": "09-04",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-25T02:58:55Z"
+    },
+    {
+      "sid": "09-04",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-11-25T03:17:39Z"
+    },
+    {
+      "sid": "09-04",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: GREEN failed; quint_cid_lease_lease_conf_ok random run diverges, needs acceptance-designer or orchestrator ruling",
+      "t": "2026-11-25T03:17:39Z"
+    },
+    {
+      "sid": "09-04",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-25T04:55:14Z"
+    },
+    {
+      "sid": "09-04",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-25T04:55:35Z"
+    },
+    {
+      "sid": "09-05",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: implementation written and clippy-clean, 962/976 tests pass; 13 fixtures lack scope creation, 1 acceptance test (+pids) has a wrong premise, and the Metal box disk is full; awaiting acceptance-designer fixes, no commit made",
+      "t": "2026-11-25T05:43:40Z"
+    },
+    {
+      "sid": "09-05",
+      "p": "GREEN",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: implementation written and clippy-clean, 962/976 tests pass; 13 fixtures lack scope creation, 1 acceptance test (+pids) has a wrong premise, and the Metal box disk is full; awaiting acceptance-designer fixes, no commit made",
+      "t": "2026-11-25T05:43:40Z"
+    },
+    {
+      "sid": "09-05",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: implementation written and clippy-clean, 962/976 tests pass; 13 fixtures lack scope creation, 1 acceptance test (+pids) has a wrong premise, and the Metal box disk is full; awaiting acceptance-designer fixes, no commit made",
+      "t": "2026-11-25T05:43:40Z"
+    },
+    {
+      "sid": "09-05",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-25T08:23:43Z"
+    },
+    {
+      "sid": "09-05",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-25T08:24:10Z"
+    },
+    {
+      "sid": "09-06",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-25T09:57:37Z"
+    },
+    {
+      "sid": "09-06",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-11-25T10:48:37Z"
+    },
+    {
+      "sid": "09-06",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: 29 gate failures are stale pre-step tests and RB-13/quint pins; acceptance designer must re-pin before commit",
+      "t": "2026-11-25T10:48:37Z"
+    },
+    {
+      "sid": "09-06",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-26T01:05:53Z"
+    },
+    {
+      "sid": "09-06",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-26T01:06:21Z"
+    },
+    {
+      "sid": "09-07",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: markers removed together with the implementation; the pending tests were proven RED by their should_panic markers on every earlier run, no separate RED run was made",
+      "t": "2026-11-26T04:14:53Z"
+    },
+    {
+      "sid": "09-07",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "FAIL",
+      "t": "2026-11-26T04:14:53Z"
+    },
+    {
+      "sid": "09-07",
+      "p": "COMMIT",
+      "s": "SKIPPED",
+      "d": "BLOCKED_BY_DEPENDENCY: two quint conformance tests fail on the cid_lease driver dev projection of a Reserved lease (acceptance-designer territory), and volume_survives.rs carries uncommitted acceptance-designer edits",
+      "t": "2026-11-26T04:14:54Z"
+    },
+    {
+      "sid": "09-07",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-26T08:52:13Z"
+    },
+    {
+      "sid": "09-07",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-26T08:52:13Z"
+    },
+    {
+      "sid": "09-07",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-26T08:52:36Z"
     }
   ]
 }
