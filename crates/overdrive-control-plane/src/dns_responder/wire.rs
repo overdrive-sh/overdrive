@@ -308,11 +308,13 @@ pub(super) fn inspect_reply(reply: &[u8]) -> Result<ReplyFacts, UndecodableReply
 }
 
 fn hint_addresses(svcb: &SVCB) -> impl Iterator<Item = Ipv4Addr> + '_ {
-    svcb.svc_params.iter().filter_map(|(_, value)| match value {
-        SvcParamValue::Ipv4Hint(hint) => Some(hint.0.iter().map(|a| a.0)),
-        _ => None,
-    })
-    .flatten()
+    svcb.svc_params
+        .iter()
+        .filter_map(|(_, value)| match value {
+            SvcParamValue::Ipv4Hint(hint) => Some(hint.0.iter().map(|a| a.0)),
+            _ => None,
+        })
+        .flatten()
 }
 
 /// Derive the SOA `SERIAL` from the injected clock reading at 1-second

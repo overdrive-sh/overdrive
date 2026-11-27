@@ -275,11 +275,10 @@ impl Forwarder {
     /// section is emptied whole and marked Blocked; any other reply is relayed
     /// byte for byte.
     fn deliver(&self, reply: AcceptedReply, request: &ForwardRequest<'_>) -> ForwardOutcome {
-        let owned = reply
-            .facts
-            .answer_addresses
-            .iter()
-            .find_map(|address| self.owned.owning_range(*address).map(|range| (*address, range)));
+        let owned =
+            reply.facts.answer_addresses.iter().find_map(|address| {
+                self.owned.owning_range(*address).map(|range| (*address, range))
+            });
         let Some((address, range)) = owned else {
             return ForwardOutcome::Relayed(reply.bytes);
         };

@@ -89,10 +89,8 @@ impl UpstreamSet {
     /// Pure selection: drop only the gateway (IPv4 and IPv4-mapped IPv6 form),
     /// keep order and count.
     pub fn select(candidates: Vec<IpAddr>, gateway: Ipv4Addr) -> Result<Self, NoUsableUpstream> {
-        let servers: Vec<IpAddr> = candidates
-            .into_iter()
-            .filter(|candidate| !is_gateway(*candidate, gateway))
-            .collect();
+        let servers: Vec<IpAddr> =
+            candidates.into_iter().filter(|candidate| !is_gateway(*candidate, gateway)).collect();
         if servers.is_empty() {
             return Err(NoUsableUpstream);
         }
