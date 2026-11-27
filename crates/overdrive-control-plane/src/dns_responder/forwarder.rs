@@ -36,10 +36,8 @@ pub const FDS_PER_PERMIT: u64 = 2;
 /// Pure: the in-flight permit count for a soft descriptor limit and a reserve.
 #[must_use]
 pub fn forward_permits(nofile_soft: u64, reserve: u64) -> usize {
-    let _ = (nofile_soft, reserve);
-    todo!(
-        "permit arithmetic: (nofile_soft - reserve) / FDS_PER_PERMIT, saturating, clamped to usize"
-    )
+    let budget = nofile_soft.saturating_sub(reserve) / FDS_PER_PERMIT;
+    usize::try_from(budget).unwrap_or(usize::MAX)
 }
 
 /// The forwarder: one verbatim exchange per query.

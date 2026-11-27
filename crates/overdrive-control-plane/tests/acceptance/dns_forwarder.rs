@@ -1103,7 +1103,6 @@ proptest! {
     /// `(soft - reserve) / FDS_PER_PERMIT`, saturating at zero, for every
     /// limit and reserve.
     #[test]
-    #[should_panic(expected = "permit arithmetic")]
     fn the_permit_count_is_the_descriptor_budget_over_the_cost_of_one_forward(
         soft in 0u64..=4_000_000, reserve in 0u64..=4_000_000,
     ) {
@@ -1116,7 +1115,6 @@ proptest! {
 /// 380 928 gives 333 824 permits at a 1 048 576 limit and 71 680 at 524 288;
 /// a limit at or below the reserve gives none.
 #[test]
-#[should_panic(expected = "permit arithmetic")]
 fn the_designs_worked_permit_examples_hold() {
     assert_eq!(forward_permits(1_048_576, 380_928), 333_824);
     assert_eq!(forward_permits(524_288, 380_928), 71_680);

@@ -101,10 +101,21 @@ impl UpstreamSet {
     /// Pure selection: drop only the gateway (IPv4 and IPv4-mapped IPv6 form),
     /// keep order and count.
     pub fn select(candidates: Vec<IpAddr>, gateway: Ipv4Addr) -> Result<Self, NoUsableUpstream> {
-        let _ = (&candidates, gateway);
-        let _ = Self { servers: Vec::new() };
-        todo!(
-            "upstream selection: drop only the gateway, in IPv4 and IPv4-mapped IPv6 form, keep order"
-        )
+        let servers: Vec<IpAddr> = candidates
+            .into_iter()
+            .filter(|candidate| !is_gateway(*candidate, gateway))
+            .collect();
+        if servers.is_empty() {
+            return Err(NoUsableUpstream);
+        }
+        Ok(Self { servers })
+    }
+}
+
+/// The gateway in its IPv4 form or its IPv4-mapped IPv6 form.
+fn is_gateway(candidate: IpAddr, gateway: Ipv4Addr) -> bool {
+    match candidate {
+        IpAddr::V4(v4) => v4 == gateway,
+        IpAddr::V6(v6) => v6.to_ipv4_mapped() == Some(gateway),
     }
 }
