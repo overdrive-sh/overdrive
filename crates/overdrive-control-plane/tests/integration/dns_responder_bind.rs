@@ -70,6 +70,7 @@ use hickory_proto::op::{Message, MessageType, OpCode, Query};
 use hickory_proto::rr::{Name, RecordType};
 use hickory_proto::serialize::binary::BinEncodable;
 use overdrive_control_plane::dns_responder::frontend_addr_allocator::FrontendAddrAllocator;
+use overdrive_control_plane::dns_responder::owned_ranges::OwnedAddressRanges;
 use overdrive_control_plane::dns_responder::responder::{DnsResponder, DnsResponderError};
 use overdrive_control_plane::dns_responder::{
     GuestDns, GuestDnsDeps, GuestDnsFactory, HostGuestDnsFactory,
@@ -86,6 +87,7 @@ use overdrive_core::traits::observation_store::{
     AllocLifecycleOccurrenceRow, AllocStatusRow, LogicalTimestamp, ObservationStore,
     ObservationWrite, ServiceBackendRow, TransitionSource,
 };
+use overdrive_dataplane::allocators::VipRange;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::driver::SimDriver;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
@@ -659,11 +661,13 @@ async fn the_responder_audit_reads_back_its_socket_and_fails_after_loss() {
         )))
         .await
         .expect("write backend row");
-    let dns: Arc<dyn GuestDns> = HostGuestDnsFactory.responder(GuestDnsDeps {
+    let dns: Arc<dyn GuestDns> = HostGuestDnsFactory::host().responder(GuestDnsDeps {
         store: Arc::clone(&store) as Arc<dyn ObservationStore>,
         clock: Arc::new(SimClock::new()),
         gateway: Ipv4Addr::new(100, 95, 0, 1),
         frontend,
+        owned_ranges: OwnedAddressRanges::platform(&VipRange::default()),
+        forward_permits: 0,
     });
     assert!(our_udp53_sockets().is_empty(), "precondition: this process holds no :53 socket");
     dns.probe().await.expect("probe binds :53 and List-seeds");

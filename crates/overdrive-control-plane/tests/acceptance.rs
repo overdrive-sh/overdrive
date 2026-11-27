@@ -178,8 +178,12 @@ mod acceptance {
     // single-owner WRITER feeding the SAME instance the `name_index` reads.
     // Default unit lane (in-process: LocalIntentStore + Sim* + the pure
     // allocator — no kernel/netns/socket).
+    /// guest-public-dns-resolution (GH #382): the forwarder contract and the owned-range
+    /// list, default lane, scripted ports.
+    mod dns_forwarder;
     mod dns_frontend_assigner;
     mod dns_name_index;
+    mod dns_owned_ranges;
     // dial-by-name-responder step 02-00 (ADR-0072 REV-2, GH #243) — the re-keyed
     // `MtlsResolve`/`BackendIndex` proptests. S-DBN-REKEY-01..04: frontend ->
     // first-by-Ord live-backend translation, frontend-hit-zero-healthy ->

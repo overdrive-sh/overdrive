@@ -950,6 +950,23 @@ impl HostSharedGuestNetworkOwner {
     }
 }
 
+/// The guest-flow owner's descriptor requirement: the one expression
+/// `probe_guest_flow_startup` checks `nofile_limit` against, and the first term of
+/// the DNS forwarder's descriptor reserve (ADR-0362).
+///
+/// DISTILL scaffold: DELIVER moves the expression at the `FdBudget` check here and
+/// has the probe call it.
+#[must_use]
+#[allow(clippy::todo, reason = "DISTILL scaffold: DELIVER implements it (ADR-0362)")]
+pub fn guest_flow_fd_requirement() -> u64 {
+    todo!("guest_flow_fd_requirement: SCAFFOLD, DELIVER moves the probe's FdBudget expression here")
+}
+
+/// Fixed descriptor headroom for every other descriptor `serve` holds (stores,
+/// control-plane listeners, VMM children, the responder's receive sockets): the
+/// second term of the DNS forwarder's reserve (ADR-0362).
+pub const NODE_FD_RESERVE: u64 = 4096;
+
 /// Phase 1 of the host guest-flow owner's two-phase boot (D-8, § *Composition*
 /// step 1): every `probe_startup` check over one `io.host_facts()` snapshot —
 /// `GuestPrefixOverlapsVipRange` first, then `GuestPrefixOverlapsNodeAddress`,

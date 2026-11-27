@@ -72,6 +72,20 @@ pub mod subcommand {
     pub const UDP_CHURN: &str = "udp-churn";
     /// `idle`: sleeps forever (a VM that only needs to be running).
     pub const IDLE: &str = "idle";
+    /// `resolve <name>...`: prints the guest's configured nameserver, then
+    /// looks each name up through the guest's own resolver (`getaddrinfo`,
+    /// IPv4) and prints one [`super::RESOLVE_LINE_PREFIX`] line per name with
+    /// the address or the resolver's error code and the elapsed milliseconds.
+    /// Exits [`super::exit::OK`] once every name was tried, whatever each
+    /// lookup returned (the lookups are the observation).
+    pub const RESOLVE: &str = "resolve";
+    /// `resolve-connect <name> <tcp-port> <tag>`: prints the guest's
+    /// nameserver, resolves `name` through `getaddrinfo`, and does the
+    /// [`super::tcp_request`] / [`super::tcp_response`] exchange with the
+    /// resolved address on `tcp-port`. Exits [`super::exit::OK`] when the
+    /// reply came back byte-exact, [`super::exit::RESOLVE`] when the name did
+    /// not resolve.
+    pub const RESOLVE_CONNECT: &str = "resolve-connect";
     /// `listen <port> <tag>`: the server side of a Service VM (U-D17-DIAL).
     /// Listens on TCP `0.0.0.0:<port>` and accepts connections until killed.
     /// Each connection is served on its own thread: when its first line is a
@@ -141,6 +155,8 @@ pub mod exit {
     pub const CHURN_SEND: i32 = 30;
     /// A benchmark program could not drive its flow.
     pub const FLOW_DRIVE: i32 = 40;
+    /// The name did not resolve through the guest's resolver.
+    pub const RESOLVE: i32 = 50;
     /// The arguments did not parse.
     pub const USAGE: i32 = 64;
     /// A module failed to load.
@@ -148,6 +164,14 @@ pub mod exit {
     /// The launched program could not be executed.
     pub const EXEC: i32 = 66;
 }
+
+/// Prefix of the lines `resolve` and `resolve-connect` print, followed by
+/// `nameserver=<ip>` once, then `<name> addr=<ip> ms=<n>` or
+/// `<name> error=<EAI_*> ms=<n>` per lookup.
+pub const RESOLVE_LINE_PREFIX: &str = "resolve: ";
+/// Printed by `resolve-connect` when the exchange with the resolved address
+/// came back byte-exact.
+pub const RESOLVE_CONNECT_OK_LINE: &str = "resolve-connect: tcp ok";
 
 /// How long the guest waits for a UDP reply.
 pub const UDP_REPLY_TIMEOUT_MS: u64 = 5_000;

@@ -41,5 +41,6 @@ namespace boundary).
 
 ## Dependencies
 
-Shipped responder, gateway resolver and guest egress. DESIGN answers questions
-1, 2 and the P2 items this slice needs (record types, TCP/UDP) first.
+Shipped responder, gateway resolver and guest egress. DESIGN questions
+1, 2 and the P2 items this slice needs (record types, TCP/UDP) are answered:
+ADR-0356, ADR-0357, ADR-0358, ADR-0360 and ADR-0361.

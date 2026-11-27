@@ -39,9 +39,13 @@
 
 pub mod answer;
 pub mod boot_rebuild;
+pub mod forwarder;
 pub mod frontend_addr_allocator;
 pub mod name_index;
+pub mod owned_ranges;
 pub mod responder;
+pub mod upstream;
+pub mod upstream_host;
 pub mod wire;
 
 use std::net::Ipv4Addr;
@@ -83,6 +87,10 @@ pub struct GuestDnsDeps {
     pub gateway: Ipv4Addr,
     /// The one shared frontend-address allocator.
     pub frontend: FrontendAddrAllocator,
+    /// The Overdrive-owned address ranges the forwarded-answer guard checks.
+    pub owned_ranges: owned_ranges::OwnedAddressRanges,
+    /// The in-flight forward permit count (derived from the descriptor limit).
+    pub forward_permits: usize,
 }
 
 /// Builds the [`GuestDns`] responders the serve task owner runs: one at boot,
@@ -96,6 +104,14 @@ pub trait GuestDnsFactory: Send + Sync {
 /// The production [`GuestDnsFactory`]: builds a [`DnsResponder`].
 #[doc(hidden)]
 pub struct HostGuestDnsFactory;
+
+impl HostGuestDnsFactory {
+    /// The production factory.
+    #[must_use]
+    pub const fn host() -> Self {
+        Self
+    }
+}
 
 impl GuestDnsFactory for HostGuestDnsFactory {
     fn responder(&self, deps: GuestDnsDeps) -> Arc<dyn GuestDns> {

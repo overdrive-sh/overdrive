@@ -41,4 +41,4 @@ AC-6 to AC-9 of US-GPD-2.
 ## Dependencies
 
 Slice 01 (forwarding exists). DESIGN question 4 (mechanism, on-hit result,
-range membership).
+range membership) is answered: ADR-0359.

@@ -187,6 +187,7 @@ mod integration {
     // fault matrix (P6-S14, 14-02) and the density / fail-closed cells
     // (P6-S15, 14-05). Each file carries its own
     // `#![cfg(all(feature = "integration-tests", feature = "kvm-tests"))]`.
+    mod guest_public_dns;
     mod vsock_density;
     mod vsock_fault_matrix;
     mod vsock_support;

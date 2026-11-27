@@ -130,6 +130,8 @@ mod integration {
 
     mod concurrent_submit_toctou;
     mod describe_round_trip;
+    mod dns_forward_permit_derivation;
+    mod dns_forwarding_real_wire;
     /// native-benchmark-program (ADR-0307): the per-datagram `QueryObserver` the DNS
     /// responder reports service time to, and the byte-identical reply contract with
     /// `NoQueryObserver`. Guest `cgroup-default` (binds `:53`).
@@ -143,6 +145,7 @@ mod integration {
     /// source-pin litmus (NEVER `dig` alone, DDN-5). Root + Lima; SKIP
     /// otherwise. No Tier-2 backstop (DDN-4) — irreducibly real-kernel.
     mod dns_responder_bind;
+    mod dns_upstream_host;
     /// GH #295 S-ND295-05A — a killed restart's second
     /// `run_server_with_obs_and_driver` starts with an empty per-server
     /// guest-attachment pool.

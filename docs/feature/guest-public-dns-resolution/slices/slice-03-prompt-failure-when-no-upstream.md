@@ -25,7 +25,7 @@ lookup succeeds.
 ## Behaviour
 
 - Unreachable upstream: definite reply, guest-observed time under 5000 ms (approved by the user 2026-11-25).
-- Mesh names unaffected.
+- Mesh names over UDP unaffected; a TCP connection of any class is closed at saturation.
 - Recovery needs no restart of the node, the responder or the guest.
 
 ## Carpaccio taste tests
@@ -40,4 +40,4 @@ AC-10 to AC-12 of US-GPD-3.
 
 ## Dependencies
 
-Slice 01. DESIGN question 3 (reply code, timeout budget).
+Slice 01. DESIGN question 3 (reply code, timeout budget) is answered: ADR-0356, ADR-0358, ADR-0360 and ADR-0362.

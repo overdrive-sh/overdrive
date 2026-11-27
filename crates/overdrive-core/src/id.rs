@@ -884,6 +884,10 @@ impl MeshServiceName {
     /// `.` between the `<workload>` label and this suffix.
     pub const SUFFIX: &'static str = "svc.overdrive.local";
 
+    /// The platform zone the node answers itself and never forwards
+    /// (ADR-0357). [`SUFFIX`](Self::SUFFIX) is `"svc." + PLATFORM_ZONE`.
+    pub const PLATFORM_ZONE: &'static str = "overdrive.local";
+
     /// Construct from a full `<workload>.svc.overdrive.local` name, validating the
     /// suffix grammar and canonicalising the `<workload>` label to lowercase.
     ///

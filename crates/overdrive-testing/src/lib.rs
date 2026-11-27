@@ -33,6 +33,9 @@
 
 #[cfg(target_os = "linux")]
 pub mod cidr_lease;
+/// A scripted upstream DNS resolver for real-wire tests (GH #382).
+#[cfg(target_os = "linux")]
+pub mod dns_upstream;
 /// FWD-PREREQ: the forwarder-module lane prerequisite every `serve` test
 /// fixture checks before it boots (GH #295).
 pub mod forwarder_module;

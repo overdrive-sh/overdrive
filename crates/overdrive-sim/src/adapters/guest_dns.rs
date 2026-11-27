@@ -196,6 +196,11 @@ mod tests {
             clock: Arc::new(SimClock::new()),
             gateway: Ipv4Addr::new(10, 99, 0, 1),
             frontend: FrontendAddrAllocator::new(),
+            owned_ranges:
+                overdrive_control_plane::dns_responder::owned_ranges::OwnedAddressRanges::platform(
+                    &overdrive_dataplane::allocators::VipRange::default(),
+                ),
+            forward_permits: 0,
         }
     }
 

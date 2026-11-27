@@ -1231,6 +1231,8 @@ fn clone_guest_dns_deps(deps: &dns_responder::GuestDnsDeps) -> dns_responder::Gu
         clock: Arc::clone(&deps.clock),
         gateway: deps.gateway,
         frontend: deps.frontend.clone(),
+        owned_ranges: deps.owned_ranges.clone(),
+        forward_permits: deps.forward_permits,
     }
 }
 
@@ -2343,6 +2345,10 @@ mod shared_network_task_owner_acceptance {
             clock: Arc::clone(clock) as Arc<dyn Clock>,
             gateway: Ipv4Addr::new(100, 95, 0, 1),
             frontend: crate::dns_responder::frontend_addr_allocator::FrontendAddrAllocator::new(),
+            owned_ranges: crate::dns_responder::owned_ranges::OwnedAddressRanges::platform(
+                &VipRange::default(),
+            ),
+            forward_permits: 0,
         }
     }
 
@@ -4739,6 +4745,10 @@ async fn boot_server(
             clock: Arc::clone(&dns_responder_deps.1),
             gateway: dns_responder_deps.2,
             frontend: dns_responder_deps.3.clone(),
+            owned_ranges: crate::dns_responder::owned_ranges::OwnedAddressRanges::platform(
+                &config.vip_range,
+            ),
+            forward_permits: 0, // SCAFFOLD: DELIVER derives it from host_facts().nofile_limit
         });
         if let Err(source) = responder.probe().await {
             // Per-variant refusal reason — the enum owns its own vocabulary
@@ -4922,6 +4932,10 @@ async fn boot_server(
         clock: Arc::clone(&dns_responder_deps.1),
         gateway: dns_responder_deps.2,
         frontend: dns_responder_deps.3.clone(),
+        owned_ranges: crate::dns_responder::owned_ranges::OwnedAddressRanges::platform(
+            &config.vip_range,
+        ),
+        forward_permits: 0, // SCAFFOLD: DELIVER derives it from host_facts().nofile_limit
     };
     let supervisor_ports = SharedNetworkSupervisorPorts {
         shared_guest_network: Arc::clone(&shared_guest_network),

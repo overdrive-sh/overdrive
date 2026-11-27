@@ -50,7 +50,7 @@ situation is scoped to `<workload>.svc.overdrive.local`.
 | D-1 | The existing node DNS responder forwards non-mesh queries to the host's upstream resolvers. There is no second resolver. | User, 2026-11-25 |
 | D-2 | The guest's resolver configuration is unchanged: one nameserver, the guest gateway (ADR-0154: no guest resolver stub). | User; ADR-0154 |
 | D-3 | Forwarding is the non-mesh arm only and is independent of #303 D4. D4 changes only the mesh arm (where mesh-name resolution and load balancing live under the in-guest mTLS model). A future move of naming off the gateway responder must carry the forwarder. | User |
-| D-4 | A forwarded answer that lands in an Overdrive-owned address range must not reach the guest as an ordinary answer. The guard is keyed on **one SSOT of owned ranges**. Today that SSOT would name the frontend subnet `10.98.0.0/16` (`WORKLOAD_FRONTEND_BASE`); the workload subnet `10.99.0.0/16` matters if D4 lands on DNS time. Recorded as a requirement; the mechanism and the on-hit result are DESIGN's. | User |
+| D-4 | A forwarded answer that lands in an Overdrive-owned address range must not reach the guest as an ordinary answer. The guard is keyed on **one SSOT of owned ranges**. Today that SSOT would name the frontend subnet `10.98.0.0/16` (`WORKLOAD_FRONTEND_BASE`); the workload subnet `10.99.0.0/16` matters if D4 lands on DNS time. Recorded as a requirement; the mechanism and the on-hit result are DESIGN's (superseded: see DESIGN Changed Assumptions — guarded set is 10.98.0.0/16, the VIP pool and 100.95.0.0/16). | User |
 | D-5 | Any cache for forwarded answers is separate from the mesh negative TTL (ADR-0072 DDN-8). The mesh answer contract is unchanged. Whether to cache at all is DESIGN's. | User |
 | D-6 | Mesh names stay authoritative and local. A mesh name with no healthy backend still returns NXDOMAIN and is never sent to an upstream resolver. | Issue AC 2; ADR-0072 |
 | D-7 | Stories describe observable behaviour only. Driving ports are `overdrive serve`, `overdrive deploy <SPEC>` and the guest's own resolver (`getaddrinfo`, UDP/TCP 53 to the gateway). No new API surface is named here. | CLAUDE.md |
@@ -180,7 +180,7 @@ Scenario: One owned-range address in a mixed answer set is not delivered
 - [ ] AC-6: No forwarded answer containing an address in an Overdrive-owned range reaches the guest as an address. (D-4)
 - [ ] AC-7: A forwarded answer outside Overdrive-owned ranges, including other private ranges, is delivered unchanged. (narrowness; D-4)
 - [ ] AC-8: The set of owned ranges has one source of truth shared with the code that allocates those ranges; adding a range there extends the guard with no second edit. (D-4)
-- [ ] AC-9: The guest never receives silence for a guarded answer; it gets a definite result (which result is DESIGN's).
+- [ ] AC-9: The guest never receives silence for a guarded answer; it gets a definite result: the whole reply's sections are emptied, the upstream rcode is kept, and EDE Blocked is added when the query carried EDNS (ADR-0359).
 
 **Technical Notes:** grounded in production: forwarding to the host's
 resolver (dhcpcd-generated on the metal box) passes whatever that resolver
@@ -202,7 +202,7 @@ findings, 7). Adding a range is one line in the owned list.
 **Problem:** a forwarder adds a dependency the node did not have. If the
 upstream is slow or down, the experience must not degrade to the same
 5 s silent timeout that motivated this feature, and it must not take mesh
-naming down with it.
+naming down with it. Under saturation (every in-flight forward slot held) a UDP query gets an immediate SERVFAIL and a TCP connection is closed unread; this behaviour is DESIGN-owned (ADR-0362).
 
 **Domain Examples:**
 1. **Upstream down:** Ana's host has lost its network; the guest's lookup of `crates.io` fails in under 5 s with a definite error.
@@ -232,7 +232,7 @@ Scenario: Lookups recover when the upstream returns, with no restart
 ```
 
 **Acceptance Criteria:**
-- [ ] AC-10: With every upstream unreachable, a guest lookup of a public name returns a definite DNS reply before the guest's 5 s resolver timeout. (**Requirement not in the issue; approved by the user 2026-11-25.** The 5 s figure is the measured baseline, 5005 ms.)
+- [ ] AC-10: With no usable upstream (every upstream unreachable, or the host resolver file absent, unreadable or empty), a guest lookup of a public name returns a definite DNS reply before the guest's 5 s resolver timeout. (**Requirement not in the issue; approved by the user 2026-11-25.** The 5 s figure is the measured baseline, 5005 ms.)
 - [ ] AC-11: Mesh answers are unaffected by the state of the upstream. (DESIGN qualification: this holds for mesh answers over UDP. Under saturation a TCP connection, mesh or not, is closed at accept because its query class is not yet known; ADR-0362, ADR-0360.)
 - [ ] AC-12: Recovery needs no restart of the node, the responder or the guest.
 
@@ -293,7 +293,7 @@ North star: K-GPD-1. Guardrail: K-GPD-3.
 - Operator docs state the new behaviour and every scope limitation with its tracking issue (see [REF] Scope limitations).
 - The EDD expectation in [REF] Verification expectations is captured on metal and reviewed by a different agent.
 
-## Wave: DISCUSS / [REF] DoR validation (9 items)
+## Wave: DISCUSS / [REF] DoR validation (9 items plus J and E)
 
 | # | Item | Status | Evidence |
 |---|---|---|---|
@@ -324,7 +324,10 @@ User rulings 2026-11-25: the numeric thresholds in K-GPD-1/2/5 and AC-10
 
 User rulings 2026-11-25.
 
-- **One node-wide upstream set, no per-workload resolver override — not a limitation.** A guest that wants a different resolver can already query it by IP over its ordinary egress (ADR-0162). No issue.
+- **No per-workload resolver override — not a limitation.** A guest that wants a different resolver can already query it by IP over its ordinary egress (ADR-0162). The node-level source of the upstream set is a separate matter: see L-3 below ([#384](https://github.com/overdrive-sh/overdrive/issues/384)).
+- **L-2 — No per-guest fairness.** One guest can use the whole in-flight bound and starve other guests' public lookups. Tracked by [#385](https://github.com/overdrive-sh/overdrive/issues/385).
+- **L-3 — Upstreams come only from the host resolver file.** A stand-in until upstreams can be set in the worker node configuration. Tracked by [#384](https://github.com/overdrive-sh/overdrive/issues/384) (depends on [#327](https://github.com/overdrive-sh/overdrive/issues/327); Quad9 is noted there).
+- **Operator health condition for upstream failure.** Follow-up tracked by [#386](https://github.com/overdrive-sh/overdrive/issues/386).
 - **No allowlist or policy on non-mesh lookups.** Every non-mesh name a guest asks for is forwarded. Tracked by [#383](https://github.com/overdrive-sh/overdrive/issues/383); DESIGN Question 9 decides only whether this feature applies any existing control.
 - **AAAA for non-mesh names: no limitation.** DESIGN chose pass-through for every non-mesh record type (GPD-6, ADR-0361, approved by the user 2026-11-25), so no IPv4-only stand-in is needed and [#308](https://github.com/overdrive-sh/overdrive/issues/308) is not cited by this feature.
 
@@ -456,7 +459,7 @@ All under `crates/overdrive-control-plane/src/dns_responder/` unless stated. No 
 | `guest_network.rs` | EXTEND | The guest-flow descriptor requirement becomes one function used by `probe_guest_flow_startup` and by the forwarder's reserve. `HostSharedGuestNetworkOwner::new` (`guest_network.rs:941`) is deleted: it has no caller (the boot uses `with_flow_io` over the bundle's `GuestFlowAdapter`) and it builds a `HostGuestFlowIo` with no injected value. |
 | `node_adapters.rs` | EXTEND | `GuestFlowAdapter::host(nofile_soft)` and `NodeAdapters::host(config, cgroup_fs, kek, nofile_soft)` (below); `HostGuestDnsFactory::host()` replaces the unit-struct literal. |
 | `overdrive-core/src/id.rs` | EXTEND | One const naming the platform zone beside `MeshServiceName::SUFFIX`. |
-| `overdrive-sim/src/adapters/` | CREATE NEW | `SimUpstreamResolvers`, `SimUpstreamExchange` (scripted); `SimGuestDns` unchanged. |
+| `overdrive-sim/src/adapters/` | UNCHANGED | `SimGuestDns` unchanged. No sim adapter is added for the upstream ports; tests drive them with test-local scripted implementations (test-support surface is DISTILL's to shape). |
 
 ## Wave: DESIGN / [REF] Driving ports
 
@@ -466,8 +469,8 @@ Unchanged from DISCUSS: `overdrive serve`, `overdrive deploy <SPEC>`, and the gu
 
 | Port | Owner crate | Host adapter | Sim adapter | Probe |
 |---|---|---|---|---|
-| `UpstreamResolvers` (new) | control-plane | `ResolvConfUpstreams` | `SimUpstreamResolvers` | **None at boot** (ruling B). The file is read on every forwarded query; absent, unreadable, empty or no usable upstream is SERVFAIL with a distinct cause. Per-query fault scenarios for DISTILL: file absent, empty, unreadable (EACCES), replaced between reads, and recovery when restored. |
-| `UpstreamExchange` (new) | control-plane | `HostUpstreamExchange` | `SimUpstreamExchange` | None at boot. Reachability and socket creation are per-attempt runtime outcomes (`Unreachable`, `Io`); the world may legitimately have no network at boot. |
+| `UpstreamResolvers` (new) | control-plane | `ResolvConfUpstreams` | test-local scripted implementation | **None at boot** (ruling B). The file is read on every forwarded query; absent, unreadable, empty or no usable upstream is SERVFAIL with a distinct cause. Per-query fault scenarios for DISTILL: file absent, empty, unreadable (EACCES), replaced between reads, and recovery when restored. |
+| `UpstreamExchange` (new) | control-plane | `HostUpstreamExchange` | test-local scripted implementation | None at boot. Reachability and socket creation are per-attempt runtime outcomes (`Unreachable`, `Io`); the world may legitimately have no network at boot. |
 | `GuestDns` (existing) | control-plane | `DnsResponder` | `SimGuestDns` | `probe` also binds the TCP listener (bind failure is the existing `Bind` variant). `audit` is unchanged. |
 
 Earned Trust: the boot refusal of ADR-0116 (bind plus name-index List-seed) is extended by the TCP bind only. A source that is read per use and can legitimately arrive late (DHCP) is not a boot fact; the per-use family of forwarders does not refuse at start (`docs/research/dataplane/dns-forwarder-upstream-config-failure-surfacing-research.md`, synthesis 1), and whether `serve`'s startup checks are needed at all on the appliance OS is [#376](https://github.com/overdrive-sh/overdrive/issues/376). The probe-contract enforcement is the repository's existing probe discipline; no new layer is added here.
@@ -601,7 +604,16 @@ Why these numbers (tuning, not shape). In-flight forwards equal the query rate t
 - **Arithmetic.** `reserve = 376,832 + 4,096 = 380,928`. At a hard limit of 1,048,576: `permits = (1,048,576 - 380,928) / 2 = 333,824`. At 524,288: `(524,288 - 380,928) / 2 = 71,680`. `permits = 0` (a limit between the guest-flow requirement and the reserve) sheds every forward; the guest-flow check already refuses a limit below its own requirement.
 - **Shed.** A UDP query that cannot get a permit is answered SERVFAIL at once from the datagram. A TCP connection that cannot get a permit at accept is closed unread (cheaper than reading a framed query under the read deadline and writing a reply on a connection already refused a permit; the guest's resolver sees the connection end, as it does with no listener). A TCP connection takes a permit whatever the query class turns out to be, because the class is not known at accept; under saturation a mesh name asked over TCP is closed too, mesh over UDP is unaffected.
 - **Memory budget (design.md cost budgets).** Per waiting permit: one socket (UDP: the upstream socket; TCP: accepted plus upstream), one task, and a copy of the query (at most `RECV_BUF_LEN` = 1,500 bytes; a TCP frame longer than that closes the connection, the same limit as UDP). **A UDP forward holds no receive buffer while waiting.** The upstream reply is received only after the socket is readable: one non-blocking receive into a scratch buffer of `MAX_GUEST_DATAGRAM_PAYLOAD + 1` = 59,001 bytes owned by the runtime worker thread and used inside one synchronous section with no `.await`, after which the reply is copied out at its exact length. UDP receive-buffer memory is therefore (worker threads x 59,001 bytes), not per forward; a held UDP reply costs its exact length (59,000 bytes at most) and only for the span between receive and send. **A TCP forward does hold a body buffer while waiting.** The reply's size is the two-byte length prefix (RFC 1035 section 4.2.2), up to 65,535 bytes, and the body is read across `.await` points, so the buffer the body is read into lives for the span between the prefix and the end of the body, per permit, not per worker thread. **The TCP reply buffer grows only as bytes arrive and is never pre-allocated to the prefix's advertised size (ruling 2026-11-26, see the TCP upstream exchange contract); held memory per TCP permit is proportional to the reply bytes actually received, capped by the prefix (65,535).** The read loop's internals are the crafter's. Estimates, **all unmeasured**: about 4 KiB per waiting UDP permit (kernel socket, task, query copy); about 8 KiB base per waiting TCP permit (accepted and upstream sockets, task, query copy), plus the reply bytes that permit has actually received and holds. Method: per-permit base cost times permits, plus received reply bytes; no measurement is planned (memory per permit is benchmark-shaped, `.claude/rules/testing.md`). Worst case at the example of 333,824 permits all waiting: about 1.3 GiB UDP-only (333,824 x 4 KiB), and about 2.6 GiB TCP-only (333,824 x 8 KiB) plus the reply bytes actually received and held. The earlier "every upstream stalls after a maximal length prefix, about 23 GiB" case no longer applies, because an upstream that sends a prefix and stalls costs no body memory. Both are reached by a total outage at about 83,000 queries per second for the 4 s budget. At 1,000 queries per second in an outage (about 4,000 permits) it is about 16 MiB UDP-only and about 31 MiB TCP-only (no body is received in an outage). The bound is the descriptor limit by ruling A; the memory it implies at a very high hard limit is the cost of that ruling and is stated here, not capped. **Accepted by the user 2026-11-26 (ruling F): no second memory bound.** The ruling itself is unchanged. **Ruling 2026-11-26 (reply buffer):** the TCP upstream reply buffer grows only as bytes arrive and is never pre-allocated to the length prefix's advertised size; this replaces the earlier maximal-prefix worst case. Flooding is [#385](https://github.com/overdrive-sh/overdrive/issues/385)'s concern.
-- **Boot log.** `run_server` logs one info line at boot carrying the permit count and the soft limit it was derived from.
+- **Pinned shapes for the reserve (user's 2026-11-27 ruling approving the permit-derivation acceptance test; pinning its observable, not a new decision).** Both live in `overdrive-control-plane`'s existing `pub mod guest_network` (`guest_network.rs`), `pub` so the out-of-crate acceptance test (`tests/acceptance`) recomputes the expectation from the same items `serve` uses; `forward_permits` and `FDS_PER_PERMIT` are already `pub` in `dns_responder::forwarder`:
+
+  ```rust
+  // overdrive-control-plane, guest_network.rs
+  /// The guest-flow owner's descriptor requirement; the one expression `probe_guest_flow_startup` also uses.
+  pub fn guest_flow_fd_requirement() -> u64;
+  /// Fixed headroom for every other descriptor `serve` holds.
+  pub const NODE_FD_RESERVE: u64 = 4096;
+  ```
+- **Boot log (pinned).** After deriving the bound and before building the forwarder, the composition (`run_server`) emits exactly once per boot: `tracing::info!(name: "dns.forward.permits", permits = <usize>, nofile_soft = <u64>, reserve = <u64>)`. `permits` is the value passed to `GuestDnsDeps.forward_permits`; `nofile_soft` is `host_facts().nofile_limit`; `reserve` is `guest_flow_fd_requirement() + NODE_FD_RESERVE`. The acceptance test asserts `permits == (nofile_soft - reserve) / FDS_PER_PERMIT` (saturating) over the event's own fields, and `reserve` against the two pinned items.
 
 ### Owned ranges (`owned_ranges.rs`)
 
@@ -633,9 +645,10 @@ Id and question echoed, QR set, RD copied from the query, RA set. SERVFAIL (from
 ### Observer and events (GPD-7)
 
 `QueryOutcome` gains `Forwarded`, `ForwardFailed`, `OwnedRangeBlocked`, `Shed`. `Shed` is an answered SERVFAIL and is distinct from the existing `Dropped` (unanswered). A `PlatformUnknown` NXDOMAIN reports the existing `NameError`. The `overdrive-bench-families` DNS family and any exhaustive match on `QueryOutcome` update in the same change. Tracing events:
+- Event field names are pinned (each emitted as `tracing::<level>!(name: "<event>", ...)`; `qname` is used because `name` is tracing's reserved metadata key). `dns.forward.failed` fields: `qname = %<query name>`, `cause = <&'static str label>`, `detail = %<detail>`. `dns.forward.recovered` fields: none. `dns.forward.owned_range_blocked` fields: `qname`, `address = %<Ipv4Addr>`, `range = <OwnedRangeKind::as_str>`, `upstream = %<server>`. `dns.forward.shed_started` fields: `permits = <usize>` only; `dns.forward.shed_cleared` fields: `permits = <usize>`, `held = <usize>` (the held count measured before the acquire). The forwarder knows only `permits`; the soft limit is carried by the boot event `dns.forward.permits`, not the shed events.
 - `dns.forward.failed` (warn, **once per failure episode start**: name, cause label, and the cause's detail: the last attempt's failure and, for an unreadable resolver file, the `io::ErrorKind`) and `dns.forward.recovered` (warn, once when the episode clears: an accepted reply at least `FORWARD_BUDGET` after the last failure), per forwarder step 8; individual failed queries are counted through `QueryOutcome::ForwardFailed`, not logged. This is the dnsmasq pattern (`dns-forwarder-upstream-config-failure-surfacing-research.md`, Finding 4).
 - `dns.forward.owned_range_blocked` (debug, per blocked query: name, address, range kind, upstream). There is no per-query warn.
-- `dns.forward.shed_started` (warn, once when shedding starts: permit count, soft limit) and `dns.forward.shed_cleared` (warn, once when a permit is acquired with at most half of the permits held by others), per forwarder step 9; individual shed queries are counted through `QueryOutcome::Shed`, not logged.
+- `dns.forward.shed_started` (warn, once when shedding starts: permit count) and `dns.forward.shed_cleared` (warn, once when a permit is acquired with at most half of the permits held by others), per forwarder step 9; individual shed queries are counted through `QueryOutcome::Shed`, not logged.
 - No event for `Forwarded` or an individual `Shed`.
 - **The outcome counts are test and benchmark observability, not an operator signal.** The production observer is `NoQueryObserver` (`dns_responder/mod.rs:107`, `:153-159`); `QueryObserver` counts reach only tests and benches. Operator visibility today is the failure-episode warn and the shed-episode warn; a CLI-readable condition waits on #386.
 - A node health condition readable through the CLI is tracked by [#386](https://github.com/overdrive-sh/overdrive/issues/386); this feature designs none.
@@ -661,14 +674,14 @@ None added. The resolver file is `/etc/resolv.conf`, a const in the host adapter
 | hickory-proto, tokio, tokio-util | REUSE | No new dependency. |
 | `SimGuestDns` | REUSE unchanged | Socket-free supervisor double; forwarding is tested through `Forwarder` with the new sim ports. |
 | `Forwarder`, `UpstreamResolvers`/`UpstreamExchange` + adapters, `OwnedAddressRanges` | CREATE NEW | No existing alternative: nothing in the tree exchanges DNS with an upstream or holds the owned-range list. Ports exist so the Tier-1 tests drive the real forwarding logic with a scripted upstream. |
-| `SimUpstreamResolvers`, `SimUpstreamExchange` | CREATE NEW | DISCUSS accepts a `Sim*` upstream at the port boundary; needed for AC-6, AC-9, AC-10 as deterministic tests. |
+| Upstream-port test doubles | NO NEW SIM ADAPTER | The upstream ports are driven in tests by test-local scripted implementations; test-support surface is DISTILL's to shape. |
 | TCP listener in `responder.rs` | CREATE NEW (in an extended file) | GPD-5; none exists. |
 
 ## Wave: DESIGN / [REF] Decisions index and external integration
 
 ADRs: 0356 forwarding, 0357 namespace classifier, 0358 upstream source, 0359 owned-range guard, 0360 TCP/53, 0361 non-mesh record types pass through, 0362 in-flight bound and shed, 0363 descriptor-limit raise and injection. ADR-0072 receives an explicit amendment (the responder contract is operative). ADR-0116, ADR-0154 and ADR-0167 are confirmed unchanged: ADR-0116 and ADR-0154 contain no wording that the responder drops or never forwards non-mesh queries, and ADR-0167's "non-mesh" wording concerns guest flows, not DNS names.
 
-External integration: the host's upstream DNS resolvers (standard RFC 1035 wire). Consumer-driven contract testing (Pact) does not fit DNS; the boundary is covered by the scripted `SimUpstreamExchange` plus the real-wire Tier-3 run against a controlled upstream. Recorded for platform-architect as: no contract-test tooling recommended for the resolver boundary.
+External integration: the host's upstream DNS resolvers (standard RFC 1035 wire). Consumer-driven contract testing (Pact) does not fit DNS; the boundary is covered by a test-local scripted `UpstreamExchange` plus the real-wire Tier-3 run against a controlled upstream. Recorded for platform-architect as: no contract-test tooling recommended for the resolver boundary.
 
 ## Wave: DESIGN / [REF] Lifecycle Gate Ownership
 
@@ -698,7 +711,7 @@ No-obligation ruling (late upstream reply): an upstream reply arriving after the
 
 ## Wave: DESIGN / [REF] Formal protocol model
 
-**Not applicable.** Evidence: each forward is an independent, single-owner, linear sequence (select, attempt 1..n, accept, guard, reply) with no shared mutable state; it uses a fresh socket and the guest's id, so there is no id table, no multiplexing and no ordering between queries. The shared objects are the in-flight permit set (an atomic acquire-or-shed) and two episode flags, the failure-episode flag (with the instant of the last failure) and the shed-episode flag. Each flag is flipped by one atomic swap whose return value alone decides whether a log line is emitted, and the hysteresis (forwarder steps 8 and 9) adds only a comparison read before that swap: a clock difference for the failure episode, a held count for the shed episode. Neither flag gates any query, reply, permit or state another owner reads. The worst a race can do is a misordered or one extra start-and-clear log pair (a read that is stale by a concurrent acquire or failure moves a line by one event). No safety or progress property depends on a flag, so no model is needed with the hysteresis either. There is no cache, no session, no lease and no crash-sensitive step (a lost forward is a retransmitted query). Timing and failover are covered by seeded unit tests over `SimClock` and `SimUpstreamExchange` (DISTILL), not a model. **If the user chooses to add a forwarded-answer cache, this changes: shared state and TTL ordering would require a Quint spec through the `quint-modeler` dispatch.** No dispatch is listed.
+**Not applicable.** Evidence: each forward is an independent, single-owner, linear sequence (select, attempt 1..n, accept, guard, reply) with no shared mutable state; it uses a fresh socket and the guest's id, so there is no id table, no multiplexing and no ordering between queries. The shared objects are the in-flight permit set (an atomic acquire-or-shed) and two episode flags, the failure-episode flag (with the instant of the last failure) and the shed-episode flag. Each flag is flipped by one atomic swap whose return value alone decides whether a log line is emitted, and the hysteresis (forwarder steps 8 and 9) adds only a comparison read before that swap: a clock difference for the failure episode, a held count for the shed episode. Neither flag gates any query, reply, permit or state another owner reads. The worst a race can do is a misordered or one extra start-and-clear log pair (a read that is stale by a concurrent acquire or failure moves a line by one event). No safety or progress property depends on a flag, so no model is needed with the hysteresis either. There is no cache, no session, no lease and no crash-sensitive step (a lost forward is a retransmitted query). Timing and failover are covered by seeded unit tests over `SimClock` and test-local scripted upstream ports (DISTILL), not a model. **If the user chooses to add a forwarded-answer cache, this changes: shared state and TTL ordering would require a Quint spec through the `quint-modeler` dispatch.** No dispatch is listed.
 
 ## Wave: DESIGN / [REF] Validation items
 
@@ -736,3 +749,169 @@ No-obligation ruling (late upstream reply): an upstream reply arriving after the
 ## Wave: DESIGN / [REF] Quality attribute notes
 
 Security: open-resolver gate, owned-range guard, loop exclusion, no upstream capability beyond ADR-0162. Reliability: definite reply within the budget, under saturation an immediate SERVFAIL on UDP and a close on TCP, no state to recover, the mesh path over UDP independent of the forwarder (a TCP connection of any class is closed at saturation because its class is unknown at accept). Performance: no cache; one extra upstream round trip per lookup, bounded by `FORWARD_BUDGET`; in-flight bound scales with the descriptor limit. Maintainability: one classifier, one owned list, one hickory boundary, ports for the two effects. Testability: `Forwarder`, classifier, guard and selection are testable with no socket; saturation is reachable through the `permits` constructor parameter.
+
+---
+
+# DISTILL
+
+> Quinn, 2026-11-27. Executable specification: `distill/test-scenarios.md`
+> (GIVEN/WHEN/THEN, contract shape, owner path, fault, oracle, tier, placement,
+> test path, pending or active, per scenario). No `.feature` files
+> (`.claude/rules/testing.md`). Reconciliation passed: 0 contradictions across
+> DISCUSS and DESIGN (no DEVOPS wave; default environment). Verified on metal
+> under Linux 7.0.0-38.
+
+## Wave: DISTILL / [REF] Inherited commitments
+
+| Origin | Commitment | DDR | Impact |
+|--------|------------|-----|--------|
+| DESIGN#GPD-1..GPD-8 | The forwarder, classifier, upstream source, owned-range guard, TCP/53, pass-through types, outcomes and permits are the contract the scenarios assert | n/a | Every pinned behaviour has at least one scenario; the bodies are authored so DELIVER only removes markers and implements |
+| DESIGN boundary scenarios 1-7 | The seven boundary scenarios are executable obligations | n/a | All six that exist are covered (scenario 5 does not exist by design); mapping in `distill/test-scenarios.md` |
+| DISCUSS#K-GPD-1..5 | Pass/fail thresholds from single recorded runs, no cohort | n/a | K-GPD-1/2/5 are asserted by the guest-level scenarios; K-GPD-3/4 by the wire and tier-1 scenarios |
+| DISCUSS#Verification expectations | One EDD expectation, point-in-time, captured at DELIVER | n/a | E17 is authored and `pending`; it is not a test |
+
+## Wave: DISTILL / [REF] Scenario list with tags
+
+65 new tests (61 pending, 4 active: W-3, W-6, W-14, G-4); 49 (75%) are error,
+fault, edge or guard scenarios. Full table with test paths in `distill/test-scenarios.md`.
+
+| Group | Count | Tags | Tier / lane |
+|---|---|---|---|
+| Guest through `serve` + `deploy` (G-1..G-4) | 4 | `@walking_skeleton` (G-1), `@driving_port`, `@real-io`, `@kpi` (K-GPD-1, 2, 4, 5) | Tier 3, `integration-tests,kvm-tests`, guest `cgroup-default`/`nested` |
+| Responder on real UDP/TCP 53 (W-1..W-15) | 15 | `@driving_port`, `@real-io @adapter-integration`, `@error` (W-2, 4, 7..15), `@infrastructure-failure` (W-8..W-10, W-13) | Tier 3, `integration-tests`, guest `cgroup-default` |
+| Driven adapters (U-1..U-8) | 8 | `@real-io @adapter-integration` | Tier 3, `integration-tests` |
+| `Forwarder` contract (F-1..F-34, F-19 removed) | 33 | `@in-memory`, `@property` (F-12, F-26, F-33), `@error`, `@infrastructure-failure` | Tier 1, default lane |
+| Owned-range list (O-1..O-4) | 4 | `@in-memory`, `@property` (O-1, O-2); O-4 is a source scan | Tier 1, default lane |
+| `serve` boot permit derivation (P-1) | 1 | `@driving_port`, `@real-io` | Tier 3, `integration-tests`, guest `cgroup-default` |
+
+Contract shape per scenario is recorded in the test docs
+(`bounded-change` or `pure-function`); none is `unbounded-preservation`.
+
+## Wave: DISTILL / [REF] WS strategy (Architecture of Reference)
+
+One walking skeleton: G-1, a VM guest deployed through `serve` + `deploy`
+resolves `github.com` through its default resolver and connects. Driving ports
+and the host resolver file are real; the only non-production piece is the
+scripted upstream resolver at the port boundary (the node's upstream is a
+driven external port, faked with output capture) and a route-disjoint remote
+peer that gives the connect something to reach. Nothing is installed in the
+guest; nothing hand-installs a missing production effect. **Status: authored in
+full, pending, RED proven on metal** (`f0db8cd7505ada0a31fcbbff`:
+`resolve: nameserver=100.95.0.1`, `resolve: github.com error=EAI_AGAIN
+ms=5006`, Job `Failed` where `Terminated` is asserted). It cannot be GREEN
+before DELIVER: the capability is the feature.
+
+## Wave: DISTILL / [REF] Adapter coverage table
+
+| Driven adapter / boundary | Real-I/O scenario | Notes |
+|---|---|---|
+| Host resolver file (`ResolvConfUpstreams`, `/etc/resolv.conf`) | U-1..U-4 (real file, tempdir); W-9, W-10 (the guest's real `/etc/resolv.conf` rewritten in a guest group) | Absent, unreadable, empty, replaced, restored |
+| Upstream exchange over UDP (`HostUpstreamExchange`) | U-5, U-6, U-7 (loopback sockets); W-1, W-2, W-7, W-8 (scripted upstream on the wire); G-1..G-4 | Wrong id, wrong question, timeout, refusal, oversize |
+| Upstream exchange over TCP | U-8; W-11 | One query per connection; framing mismatch |
+| Gateway TCP listener (`GuestDns::probe`, accept loop) | W-11, W-12, W-13 | Bind refusal, one query per connection, closed unread at saturation |
+| Descriptor-limit seam (`host_facts().nofile_limit` to the permit count) | No new real-I/O scenario. The arithmetic is pure (F-26, F-27) and the bound is reachable through the `permits` constructor parameter (F-28..F-32, W-13). G-1 fails under a miswired `permits = 0` at boot (everything would be shed). The `RLIMIT_NOFILE` raise in `main.rs` has a DESIGN no-obligation ruling. Re-pointing `shared_guest_network_startup.rs:391` at the injected value is a DELIVER change named in the DESIGN | Proposal below |
+| Guest resolver path (`getaddrinfo`, UDP/TCP 53 to `100.95.0.1`) | G-1..G-4 | Real guest, real egress |
+| `Clock` | Faked (`SimClock`) in tier 1; real in tier 3 | Budget timing is deterministic in tier 1 |
+
+## Wave: DISTILL / [REF] Scaffolds
+
+Created so every test compiles and fails by assertion (`MISSING_FUNCTIONALITY`),
+never by import. Each matches the pinned contract; bodies are `todo!` with a
+file-level `#![allow]` carrying a reason.
+
+| File | Items | Contract line it matches |
+|---|---|---|
+| `crates/overdrive-control-plane/src/dns_responder/forwarder.rs` | `UPSTREAM_ATTEMPT_TIMEOUT`, `FORWARD_BUDGET`, `FDS_PER_PERMIT`, `forward_permits`, `Forwarder::{new, try_acquire, forward}`, `ForwardPermit`, `ForwardRequest`, `ForwardOutcome`, `ForwardFailure`, `AttemptFailure` | Interface contracts, Forwarder block. `try_acquire` always grants until DELIVER lands the bound; `forward_permits` and `forward` are `todo!` |
+| `.../dns_responder/upstream.rs` | `UpstreamResolvers`, `UpstreamExchange`, `DnsTransport`, `UpstreamConfigError`, `ExchangeError`, `UpstreamSet::select`, `NoUsableUpstream` | Interface contracts, Upstream ports block. `select` is `todo!` |
+| `.../dns_responder/upstream_host.rs` | `ResolvConfUpstreams::from_path`, `HostUpstreamExchange` (unit struct) | "a `from_path` constructor for tests" (Config surface). The port bodies are `todo!` |
+| `.../dns_responder/owned_ranges.rs` | `OwnedRangeKind` (+ `as_str`), `OwnedAddressRanges::{platform, owning_range}` | Interface contracts, Owned ranges block. `owning_range` is `todo!` |
+| `.../dns_responder/mod.rs` | `GuestDnsDeps.owned_ranges`, `GuestDnsDeps.forward_permits`, `HostGuestDnsFactory::host()` | Component decomposition, `mod.rs` row; `NodeAdapters` row (`host()` replaces the unit-struct literal) |
+| `crates/overdrive-control-plane/src/lib.rs` | the two new deps at the three `GuestDnsDeps` sites (`forward_permits: 0` marked SCAFFOLD) | `lib.rs` row: DELIVER derives the count from `host_facts().nofile_limit` |
+| `crates/overdrive-core/src/id.rs` | `MeshServiceName::PLATFORM_ZONE` | Zone and classification block |
+| `crates/overdrive-sim/src/adapters/guest_dns.rs` | test fixture gains the two deps | compile only |
+
+`HostUpstreamExchange` is used in the tests as a unit-struct value, a
+test-support use of the pinned type. DESIGN pins `ResolvConfUpstreams::from_path`
+and the `UpstreamExchange` port, not how `HostUpstreamExchange` is constructed;
+note for DELIVER: if it needs state, the construction change routes back to the
+architect rather than to an improvised constructor.
+
+Test support, DISTILL's to shape (`overdrive-testing`): `dns_upstream`
+(`ScriptedDnsUpstream`, `HostResolverFile`, `Behaviour`, `Transport`; Linux
+only), the guest program subcommands `resolve` and `resolve-connect` with
+`exit::RESOLVE` and the console line contract, and the `guest_peer` handler for
+them.
+
+Not scaffolded because no test observes them through a port: `QueryClass`,
+`QueryName`, `classify`, the `wire.rs` extensions, `QueryOutcome` +4 variants,
+the responder's TCP listener and forward tasks. (No sim upstream adapters exist: DESIGN drives the upstream ports in tests with test-local scripted implementations.)
+
+## Wave: DISTILL / [REF] Test placement
+
+Directory choice follows the existing layout: default-lane tests in
+`crates/overdrive-control-plane/tests/acceptance/` (precedent
+`dns_name_index.rs`, `dns_frontend_assigner.rs`); integration tests under
+`tests/integration/` (precedent `dns_responder_bind.rs`); the guest-level tests
+in `crates/overdrive-cli/tests/integration/` (precedent
+`vsock_walking_skeleton.rs`).
+
+| File | Placement |
+|---|---|
+| `acceptance/dns_forwarder.rs`, `acceptance/dns_owned_ranges.rs` | `placement!(host_pure)`: in-process, scripted ports, `SimClock`, no socket and no kernel state |
+| `integration/dns_upstream_host.rs` file tests | `#[overdrive_test(host_pure)]`: a tempdir file, no node-global effect |
+| `integration/dns_upstream_host.rs` exchange tests | `guest = "cgroup-default", profile = "normal-gate"` (binds sockets) |
+| `integration/dns_forwarding_real_wire.rs` | `guest = "cgroup-default", profile = "normal-gate"` (binds `:53`, rewrites the guest's `/etc/resolv.conf`) |
+| `guest_public_dns.rs` | `guest = "cgroup-default", profile = "nested"` (boots `serve` and launches a VM) |
+
+Nothing product-facing is `native_launcher`; nothing that mutates kernel state
+is `host_pure`. `cargo xtask placement-lint` is clean. No lane, nextest group,
+feature or xtask command was added.
+
+## Wave: DISTILL / [REF] Driving-adapter coverage
+
+| Driving port | Scenario |
+|---|---|
+| `overdrive serve` (composition root) | G-1..G-4 boot it in-process through the production composition; W-1..W-13 build the responder through `HostGuestDnsFactory::host()`, the factory `serve` uses |
+| `overdrive deploy <SPEC>` | G-1..G-4 deploy a VM Service and read its end state; tests never spawn the binary (`testing.md`) |
+| Guest resolver, UDP 53 to the gateway | G-1..G-4 (real `getaddrinfo`); W-1..W-10, W-13 (real datagrams) |
+| Guest resolver, TCP 53 to the gateway | W-11, W-12, W-13; F-5 and U-8 for the forwarder and exchange |
+| `GuestDns::{probe, serve, stop}` | W-12 and every W test |
+
+## Wave: DISTILL / [REF] Pre-requisites
+
+- A Linux 7.0 native-metal host with KVM and the guest kit prepared (`cargo xtask guest-kit-prepare`, `kmod-load`), for tiers with `guest =` placement.
+- The host's resolver file is not read by the tests: they write their own inside a guest, or a tempdir file. E17 reads the metal host's real one.
+- DESIGN driving ports as listed; no DEVOPS wave.
+
+## Wave: DISTILL / [REF] RED classification
+
+All 61 pending tests are `MISSING_FUNCTIONALITY`; the 4 active tests (W-3,
+W-6, W-14, G-4) pass against today's responder. Every long pending body was
+walked to its GREEN end against the pinned contract; one defect (F-30's extra
+permit at saturation) was fixed. Per group (review-fix run): default lane (35),
+run `fb50c37a0613b080f2629e85`, 35 passed, plus the two later additions F-34 and
+O-4, run `6287f4a5d7989b21f12d127f`, 2 passed; P-1 (`serve` boot permit derivation), run `f2416a8f35e1d7effe93f718`, 1 passed; integration (30, including the
+existing `dns_responder_bind` regression set), run `e3ce508b20c17e855d135326`,
+30 passed; Tier 3 guest (4), run `3569a6d3cc1eef699cfd9586`, 4 passed; real RED
+evidence for G-1 in `f0db8cd7505ada0a31fcbbff`. `cargo clippy -D warnings`
+over the workspace with `integration-tests` (`02681b1eb276f2fc43175eba`) and
+over `overdrive-cli` and `overdrive-control-plane` with
+`integration-tests,kvm-tests` (`c564866300091c9e9cefd6c1`) is clean;
+`placement-lint` is clean (`305db135d470664902e16f02`). Detail and the semantic
+RED of each group: `distill/test-scenarios.md` § "RED classification".
+
+## Wave: DISTILL / [REF] Verification expectation
+
+E17 (`verification/expectations/E17-vm-guest-resolves-public-names-through-its-default-resolver/`,
+indexed in `verification/expectations/INDEX.md`): authored, `pending`, anchored
+to AC-1, AC-3, AC-4, K-GPD-1/2, V-4 and ADR-0356. A point-in-time capture on
+metal at DELIVER by a different reviewer; not a test, not a cohort.
+
+## Wave: DISTILL / [REF] Wave decisions
+
+- Pending tests are `should_panic(expected = ...)` over complete bodies, not placeholders. Tier-1 and `dns_upstream_host` REDs name the scaffold's `todo!` message, which proves the body reached the production call; the shed and wire scenarios name an assertion.
+- Tests key tracing events on `meta.name()`: production tracing macros MUST set `name:` explicitly for the `dns.forward.*` events (`failed`, `recovered`, `shed_started`, `shed_cleared`, `owned_range_blocked`); `owned_range_blocked` is emitted by the forwarder, which alone knows the upstream the event names.
+- G-4 asserts a definite error result only, with no `ms < 5000` bound, and is active: the guest-observed time depends on the guest resolver library's SERVFAIL handling (musl does not accept a SERVFAIL as an answer and resends a bounded number of times; glibc retries once), which DESIGN V-4 measures at DELIVER. The reply-level AC-10 oracle is W-8 and F-8.
+- Mandate-12 (Python-pilot types module, step-reuse ratio) does not apply to Rust tests; the equivalent is one fixture per tier (`World`, `Node`) and no business logic in test bodies beyond the oracle.
+- The one pin DESIGN left to DISTILL (a source scan that each owned-range const appears in `OwnedAddressRanges::platform`) is added as O-4 by user ruling 2026-11-27, with the concurrency test for the permit bound (F-34). The user's third approved test, the permit derivation at boot, is added as P-1 once DESIGN pinned its observable (`dns.forward.permits`, `guest_flow_fd_requirement`, `NODE_FD_RESERVE`); the two pinned items are scaffolded in `guest_network.rs` (`guest_flow_fd_requirement` is a `todo!` scaffold, `NODE_FD_RESERVE` is final).
+- Open proposals (not added): `ForwardFailure::as_str` and `AttemptFailure::as_str` are pinned but no test reads the label, so they are DELIVER's with no pending test.

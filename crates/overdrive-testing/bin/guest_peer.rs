@@ -117,7 +117,8 @@ mod linux {
             tcp_request, tcp_response,
         };
         use overdrive_testing::guest_app::{
-            FORWARDING_BENCH_METRIC, GuestReading, print_program_return,
+            FORWARDING_BENCH_METRIC, GuestReading, RESOLVE_CONNECT_OK_LINE, RESOLVE_LINE_PREFIX,
+            print_program_return,
         };
         use overdrive_testing::vsock::{VMADDR_CID_LOCAL, VsockStream};
 
@@ -131,6 +132,7 @@ mod linux {
         }
 
         /// Runs the subcommand `args[0]`; the process exit code.
+        #[allow(clippy::too_many_lines, reason = "one dispatch arm per guest subcommand")]
         pub(crate) fn run(args: &[String]) -> i32 {
             let words: Vec<&str> = args.iter().map(String::as_str).collect();
             match words.as_slice() {
@@ -225,13 +227,125 @@ mod linux {
                         ),
                     }
                 }
+                [cmd, names @ ..] if *cmd == subcommand::RESOLVE && !names.is_empty() => {
+                    resolve_names(names)
+                }
+                [cmd, name, port, tag] if *cmd == subcommand::RESOLVE_CONNECT => {
+                    match (port.parse::<u16>(), tag_is_valid(tag)) {
+                        (Ok(port), true) => resolve_connect(name, port, tag),
+                        _ => usage("resolve-connect <name> <tcp-port> <tag>"),
+                    }
+                }
                 [cmd, rest @ ..] if *cmd == subcommand::RUN_WITH_MODULES => run_with_modules(rest),
                 [cmd, rest @ ..] if *cmd == subcommand::FORWARDING_BENCH => {
                     forwarding_bench_command(rest)
                 }
                 _ => usage(
-                    "<round-trip|hold|flood|udp-churn|idle|bind|listen|listen-ignoring-stop|run-with-modules|forwarding-bench> …",
+                    "<round-trip|hold|flood|udp-churn|idle|resolve|resolve-connect|bind|listen|listen-ignoring-stop|run-with-modules|forwarding-bench> …",
                 ),
+            }
+        }
+
+        /// The guest's configured nameserver, as the first `nameserver` line of
+        /// its resolver file.
+        fn print_nameserver() {
+            let resolv = std::fs::read_to_string("/etc/resolv.conf").unwrap_or_default();
+            let nameserver =
+                resolv.lines().find_map(|line| line.strip_prefix("nameserver ")).unwrap_or("");
+            println!("{RESOLVE_LINE_PREFIX}nameserver={nameserver}");
+        }
+
+        /// One IPv4 lookup through the guest's own resolver (`getaddrinfo`);
+        /// the error is the resolver's `EAI_*` code name.
+        fn lookup_v4(name: &str) -> Result<Ipv4Addr, &'static str> {
+            let host = std::ffi::CString::new(name).map_err(|_| "EAI_BADNAME")?;
+            // SAFETY: an all-zero `addrinfo` is a valid "no hints" value; the
+            // fields set below are plain integers.
+            let mut hints: libc::addrinfo = unsafe { std::mem::zeroed() };
+            hints.ai_family = libc::AF_INET;
+            hints.ai_socktype = libc::SOCK_STREAM;
+            let mut res: *mut libc::addrinfo = std::ptr::null_mut();
+            // SAFETY: `host` is a valid C string, `hints` and `res` are live
+            // for the call; on success `res` is freed below.
+            let rc = unsafe {
+                libc::getaddrinfo(host.as_ptr(), std::ptr::null(), &raw const hints, &raw mut res)
+            };
+            if rc != 0 {
+                return Err(match rc {
+                    libc::EAI_NONAME => "EAI_NONAME",
+                    libc::EAI_AGAIN => "EAI_AGAIN",
+                    libc::EAI_FAIL => "EAI_FAIL",
+                    _ => "EAI_OTHER",
+                });
+            }
+            let mut found = None;
+            let mut cursor = res;
+            while !cursor.is_null() {
+                // SAFETY: `cursor` walks the list `getaddrinfo` returned.
+                let info = unsafe { &*cursor };
+                if info.ai_family == libc::AF_INET && !info.ai_addr.is_null() {
+                    // SAFETY: an AF_INET entry's `ai_addr` is a `sockaddr_in`: a
+                    // 2-byte family, a 2-byte port, then the 4 address bytes.
+                    let octets: [u8; 4] = unsafe {
+                        std::slice::from_raw_parts(info.ai_addr.cast::<u8>().add(4), 4)
+                            .try_into()
+                            .unwrap_or([0; 4])
+                    };
+                    found = Some(Ipv4Addr::from(octets));
+                    break;
+                }
+                cursor = info.ai_next;
+            }
+            // SAFETY: `res` came from a successful `getaddrinfo`.
+            unsafe { libc::freeaddrinfo(res) };
+            found.ok_or("EAI_NODATA")
+        }
+
+        /// `resolve <name>...`.
+        fn resolve_names(names: &[&str]) -> i32 {
+            print_nameserver();
+            for name in names {
+                let started = Instant::now();
+                let outcome = lookup_v4(name);
+                let ms = started.elapsed().as_millis();
+                match outcome {
+                    Ok(addr) => println!("{RESOLVE_LINE_PREFIX}{name} addr={addr} ms={ms}"),
+                    Err(code) => println!("{RESOLVE_LINE_PREFIX}{name} error={code} ms={ms}"),
+                }
+            }
+            exit::OK
+        }
+
+        /// `resolve-connect <name> <tcp-port> <tag>`.
+        fn resolve_connect(name: &str, port: u16, tag: &str) -> i32 {
+            print_nameserver();
+            let started = Instant::now();
+            let addr = match lookup_v4(name) {
+                Ok(addr) => {
+                    println!(
+                        "{RESOLVE_LINE_PREFIX}{name} addr={addr} ms={}",
+                        started.elapsed().as_millis()
+                    );
+                    addr
+                }
+                Err(code) => {
+                    println!(
+                        "{RESOLVE_LINE_PREFIX}{name} error={code} ms={}",
+                        started.elapsed().as_millis()
+                    );
+                    return exit::RESOLVE;
+                }
+            };
+            match tcp_exchange(SocketAddrV4::new(addr, port), &tcp_request(tag), &tcp_response(tag))
+            {
+                Ok(()) => {
+                    println!("{RESOLVE_CONNECT_OK_LINE}");
+                    exit::OK
+                }
+                Err(e) => {
+                    eprintln!("resolve-connect: tcp to {addr}:{port}: {e}");
+                    exit::TCP_IO
+                }
             }
         }
 
