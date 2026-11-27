@@ -222,7 +222,7 @@ pub async fn execute_reclaim_allocation(
     runtime: &ReconcilerRuntime,
 ) -> Result<(), ReclamationError> {
     let submission = EvaluationSubmission::Runtime(runtime);
-    reclaim_allocation(
+    execute_reclaim_allocation_with_submission(
         alloc_id,
         drivers,
         host,
@@ -254,7 +254,7 @@ pub(crate) async fn execute_reclaim_allocation_at_boot(
     runtime: &ReconcilerRuntime,
 ) -> Result<(), ReclamationError> {
     let submission = EvaluationSubmission::Runtime(runtime);
-    reclaim_allocation(
+    execute_reclaim_allocation_with_submission(
         alloc_id,
         drivers,
         host,
@@ -269,37 +269,18 @@ pub(crate) async fn execute_reclaim_allocation_at_boot(
 
 /// What the reclaim executor does when `kill_scope` answers busy.
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum ScopeBusy {
+pub(super) enum ScopeBusy {
     /// The steady-state tick: no row, no discard; the next pass retries.
     LeavesRowUnwritten,
     /// The boot step: the row is ended, the artifacts are kept.
     EndsRow,
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the executor's pinned surface (ports, writer, submission) plus the busy policy"
+)]
 pub(super) async fn execute_reclaim_allocation_with_submission(
-    alloc_id: &AllocationId,
-    drivers: &DriverRegistry,
-    host: &dyn VmHostState,
-    obs: &dyn ObservationStore,
-    clock: &dyn Clock,
-    writer_node: &NodeId,
-    submission: &EvaluationSubmission<'_>,
-) -> Result<(), ReclamationError> {
-    reclaim_allocation(
-        alloc_id,
-        drivers,
-        host,
-        obs,
-        clock,
-        writer_node,
-        submission,
-        ScopeBusy::LeavesRowUnwritten,
-    )
-    .await
-}
-
-#[allow(clippy::too_many_arguments)]
-async fn reclaim_allocation(
     alloc_id: &AllocationId,
     drivers: &DriverRegistry,
     host: &dyn VmHostState,
@@ -309,7 +290,6 @@ async fn reclaim_allocation(
     submission: &EvaluationSubmission<'_>,
     on_busy: ScopeBusy,
 ) -> Result<(), ReclamationError> {
-
     let Some(_lease) = ReclamationLease::try_acquire(drivers, alloc_id) else {
         tracing::info!(
             name: "vm.reclamation.refused",
@@ -647,6 +627,7 @@ mod tests {
             &clock,
             &n,
             &submission,
+            ScopeBusy::LeavesRowUnwritten,
         )
         .await
         .expect("authorised reclaim succeeds");
@@ -809,6 +790,7 @@ mod tests {
             &clock,
             &n,
             &submission,
+            ScopeBusy::LeavesRowUnwritten,
         )
         .await
         .expect("a refusal is Ok(()), never an error");
@@ -880,6 +862,7 @@ mod tests {
             &clock,
             &n,
             &submission,
+            ScopeBusy::LeavesRowUnwritten,
         )
         .await
         .expect("a refusal is Ok(()), never an error");
@@ -943,6 +926,7 @@ mod tests {
             &clock,
             &n,
             &running_submission,
+            ScopeBusy::LeavesRowUnwritten,
         )
         .await
         .expect("ok");
@@ -980,6 +964,7 @@ mod tests {
             &clock,
             &n,
             &terminal_submission,
+            ScopeBusy::LeavesRowUnwritten,
         )
         .await
         .expect("ok");

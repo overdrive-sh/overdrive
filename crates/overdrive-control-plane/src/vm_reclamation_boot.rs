@@ -143,22 +143,32 @@ pub async fn converge(state: &AppState) -> Result<(), ConvergeError> {
     }))
     .await;
 
-    // Every busy scope's offset is reserved before the first error is
-    // returned: one scope's failure never drops another's reservation.
-    let mut first_error: Option<ReclamationError> = None;
+    // Every busy scope's offset is reserved before any error is returned: one
+    // scope's failure never drops another's reservation. The boot refuses with
+    // the first non-busy executor error in action order, else with the first
+    // reservation failure.
+    let mut first_executor_error: Option<ReclamationError> = None;
+    let mut first_reservation_error: Option<ReclamationError> = None;
     for (alloc_id, result) in outcomes {
-        let outcome = match result {
-            Ok(()) => Ok(()),
+        match result {
+            Ok(()) => {}
+            // Both executors can meet a busy scope: the discard executor kills a
+            // scope with no row too, and a busy scope never refuses the boot.
             Err(ReclamationError::Host(error)) if error.kind() == ErrorKind::ResourceBusy => {
-                reserve_busy_scope(state, &alloc_id).await
+                if let (Err(error), None) =
+                    (reserve_busy_scope(state, &alloc_id).await, &first_reservation_error)
+                {
+                    first_reservation_error = Some(error);
+                }
             }
-            Err(other) => Err(other),
-        };
-        if let (Err(error), None) = (outcome, &first_error) {
-            first_error = Some(error);
+            Err(other) => {
+                first_executor_error.get_or_insert(other);
+            }
         }
     }
-    first_error.map_or(Ok(()), |error| Err(ConvergeError::Reclamation(error)))
+    first_executor_error
+        .or(first_reservation_error)
+        .map_or(Ok(()), |error| Err(ConvergeError::Reclamation(error)))
 }
 
 /// One reclamation executor the planner asked for.

@@ -3334,6 +3334,7 @@ async fn dispatch_single(
                 clock,
                 writer_node,
                 broker,
+                reclamation::ScopeBusy::LeavesRowUnwritten,
             )
             .await
             .map_err(ShimError::from)
