@@ -795,7 +795,6 @@ async fn blocked(
 /// definite reply (rcode kept, no addresses), never silence and never the
 /// owned address. EDNS query: one OPT, payload 1232, DO copied, one EDE 15.
 #[test]
-#[should_panic(expected = "forwarder: exchange the query verbatim")]
 fn an_upstream_answer_inside_the_mesh_frontend_range_is_emptied_and_marked_blocked() {
     run(async {
         for dnssec_ok in [true, false] {
@@ -834,7 +833,6 @@ fn an_upstream_answer_inside_the_mesh_frontend_range_is_emptied_and_marked_block
 /// Contract shape: bounded-change. ADR-0359: a query without EDNS gets a
 /// blocked reply with no OPT record at all.
 #[test]
-#[should_panic(expected = "forwarder: exchange the query verbatim")]
 fn a_blocked_reply_to_a_query_without_edns_carries_no_opt_record() {
     run(async {
         let (outcome, _) =
@@ -853,7 +851,6 @@ fn a_blocked_reply_to_a_query_without_edns_carries_no_opt_record() {
 /// named by the scenarios above; edges and random addresses by the owned-range
 /// scenarios and the property below.
 #[test]
-#[should_panic(expected = "forwarder: exchange the query verbatim")]
 fn an_answer_on_a_reserved_vip_or_in_the_guest_prefix_is_blocked_with_its_range() {
     run(async {
         for (addr, kind) in [
@@ -919,7 +916,6 @@ fn aaaa_and_additional_section_addresses_are_outside_the_guard_by_design() {
 /// Contract shape: bounded-change. ADR-0359: an HTTPS/SVCB record whose
 /// `ipv4hint` carries an owned address blocks the reply like an A record.
 #[test]
-#[should_panic(expected = "forwarder: exchange the query verbatim")]
 fn an_https_record_whose_ipv4_hint_is_owned_is_blocked() {
     use hickory_proto::rr::rdata::HTTPS;
     use hickory_proto::rr::rdata::svcb::{IpHint, SVCB, SvcParamKey, SvcParamValue};
@@ -938,7 +934,6 @@ fn an_https_record_whose_ipv4_hint_is_owned_is_blocked() {
 /// one owner that knows the upstream the event names), never a warn: many
 /// blocked lookups raise no warn at all.
 #[test]
-#[should_panic(expected = "forwarder: exchange the query verbatim")]
 fn blocked_answers_never_raise_a_warn() {
     run(async {
         let (events, _guard) = capture();
@@ -1284,7 +1279,6 @@ proptest! {
     /// public address beside an owned one (US-GPD-2 scenario 3) is one of the
     /// generated sets: the whole reply is emptied.
     #[test]
-    #[should_panic(expected = "forwarder: exchange the query verbatim")]
     fn a_reply_is_blocked_whole_iff_any_answer_address_is_owned(
         raw in proptest::collection::vec(
             prop_oneof![

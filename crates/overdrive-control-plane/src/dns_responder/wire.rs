@@ -34,7 +34,8 @@ use std::net::Ipv4Addr;
 use std::str::FromStr;
 use std::time::Duration;
 
-use hickory_proto::op::{Message, MessageType, OpCode, ResponseCode};
+use hickory_proto::op::{Edns, Message, MessageType, OpCode, ResponseCode};
+use hickory_proto::rr::rdata::opt::EdnsOption;
 use hickory_proto::rr::rdata::svcb::{SVCB, SvcParamValue};
 use hickory_proto::rr::rdata::{A, SOA};
 use hickory_proto::rr::{Name, RData, Record, RecordType};
@@ -209,6 +210,53 @@ pub(super) fn servfail_reply(query: &[u8]) -> Vec<u8> {
     reply
         .to_vec()
         .unwrap_or_else(|err| unreachable!("self-constructed SERVFAIL must encode: {err}"))
+}
+
+/// The UDP payload size a blocked reply's OPT advertises (the DNS Flag Day
+/// 2020 value).
+const BLOCKED_REPLY_UDP_PAYLOAD: u16 = 1232;
+
+/// Extended DNS Error INFO-CODE 15, "Blocked" (RFC 8914), with empty EXTRA-TEXT.
+const EDE_BLOCKED: [u8; 2] = [0, 15];
+
+/// The first question's name of `message` bytes, for logging; empty when the
+/// bytes do not decode or carry no question.
+pub(super) fn question_name(message: &[u8]) -> String {
+    Message::from_vec(message)
+        .ok()
+        .and_then(|decoded| decoded.queries.first().map(|q| q.name().to_string()))
+        .unwrap_or_default()
+}
+
+/// The blocked reply for an upstream reply that carried an owned address:
+/// answer, authority and additional sections emptied, the upstream's id,
+/// rcode and question kept, AD and TC cleared. Only when `query` carried an
+/// OPT record does the reply carry one (payload 1232, version 0, DO copied
+/// from the query, one Extended DNS Error option, code 15 "Blocked").
+pub(super) fn blocked_reply(upstream_reply: &[u8], query: &[u8]) -> Vec<u8> {
+    let mut message = Message::from_vec(upstream_reply)
+        .unwrap_or_else(|err| unreachable!("the reply was inspected before it was blocked: {err}"));
+    message.answers.clear();
+    message.authorities.clear();
+    message.additionals.clear();
+    message.metadata.authentic_data = false;
+    message.metadata.truncation = false;
+    message.edns = Message::from_vec(query)
+        .ok()
+        .and_then(|decoded| decoded.edns)
+        .map(|query_edns| blocked_opt(query_edns.flags().dnssec_ok));
+    message
+        .to_vec()
+        .unwrap_or_else(|err| unreachable!("self-constructed blocked reply must encode: {err}"))
+}
+
+fn blocked_opt(dnssec_ok: bool) -> Edns {
+    let mut edns = Edns::new();
+    edns.set_max_payload(BLOCKED_REPLY_UDP_PAYLOAD);
+    edns.set_version(0);
+    edns.set_dnssec_ok(dnssec_ok);
+    edns.options_mut().insert(EdnsOption::Unknown(15, EDE_BLOCKED.to_vec()));
+    edns
 }
 
 /// What the forwarder needs to know about an upstream reply, with no

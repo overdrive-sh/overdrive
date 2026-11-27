@@ -28,7 +28,7 @@ use super::upstream::{
     DnsTransport, ExchangeError, NoUsableUpstream, UpstreamConfigError, UpstreamExchange,
     UpstreamResolvers, UpstreamSet,
 };
-use super::wire::{ReplyFacts, inspect_reply, servfail_reply};
+use super::wire::{ReplyFacts, blocked_reply, inspect_reply, question_name, servfail_reply};
 
 /// One upstream attempt budget.
 pub const UPSTREAM_ATTEMPT_TIMEOUT: Duration = Duration::from_millis(1500);
@@ -170,7 +170,7 @@ impl Forwarder {
             Err(cause) => return Self::failed(request, cause),
         };
         match self.first_accepted_reply(&upstreams, request, deadline).await {
-            Ok(reply) => self.deliver(reply),
+            Ok(reply) => self.deliver(reply, request),
             Err(cause) => Self::failed(request, cause),
         }
     }
@@ -227,32 +227,43 @@ impl Forwarder {
             .await
             .map_err(AttemptFailure::from)?;
         let facts = inspect_reply(&bytes).map_err(|_| AttemptFailure::UndecodableReply)?;
-        Ok(AcceptedReply { bytes, facts })
+        Ok(AcceptedReply { server, bytes, facts })
     }
 
-    /// The owned-range guard lands in a later step; until then an owned
-    /// address is not yet handled.
-    fn deliver(&self, reply: AcceptedReply) -> ForwardOutcome {
-        let owned =
-            reply.facts.answer_addresses.iter().any(|a| self.owned.owning_range(*a).is_some());
-        if owned {
-            Self::guard_scaffold()
+    /// The owned-range guard: a reply with an owned address in its answer
+    /// section is emptied whole and marked Blocked; any other reply is relayed
+    /// byte for byte.
+    fn deliver(&self, reply: AcceptedReply, request: &ForwardRequest<'_>) -> ForwardOutcome {
+        let owned = reply
+            .facts
+            .answer_addresses
+            .iter()
+            .find_map(|address| self.owned.owning_range(*address).map(|range| (*address, range)));
+        let Some((address, range)) = owned else {
+            return ForwardOutcome::Relayed(reply.bytes);
+        };
+        tracing::debug!(
+            name: "dns.forward.owned_range_blocked",
+            qname = %question_name(request.wire),
+            address = %address,
+            range = range.as_str(),
+            upstream = %reply.server,
+        );
+        ForwardOutcome::OwnedRangeBlocked {
+            reply: blocked_reply(&reply.bytes, request.wire),
+            address,
+            range,
         }
-        ForwardOutcome::Relayed(reply.bytes)
     }
 
     fn failed(request: &ForwardRequest<'_>, cause: ForwardFailure) -> ForwardOutcome {
         ForwardOutcome::Failed { reply: servfail_reply(request.wire), cause }
     }
-
-    /// The owned-range guard lands in a later step.
-    fn guard_scaffold() -> ! {
-        todo!("forwarder: exchange the query verbatim (the owned-range guard is not yet built)")
-    }
 }
 
 /// A reply an upstream gave and whose addresses could be inspected.
 struct AcceptedReply {
+    server: IpAddr,
     bytes: Vec<u8>,
     facts: ReplyFacts,
 }
