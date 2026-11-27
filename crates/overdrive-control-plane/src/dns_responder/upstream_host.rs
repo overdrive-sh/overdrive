@@ -2,15 +2,14 @@
 //!
 //! The resolver-file reader and the exchange run on real files and sockets.
 
-use std::io;
-use std::os::fd::AsFd as _;
+use std::io::{self, Read as _};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::PathBuf;
 use std::time::Duration;
 
 use overdrive_core::guest_transport::wire::MAX_GUEST_DATAGRAM_PAYLOAD;
-use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
-use tokio::io::Interest;
+use socket2::SockRef;
+use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _, Interest};
 use tokio::net::{TcpStream, UdpSocket};
 
 use super::upstream::{
@@ -106,43 +105,29 @@ async fn udp_exchange(target: SocketAddr, query: &[u8]) -> Result<Vec<u8>, Excha
     let socket = UdpSocket::bind(local).await.map_err(classify)?;
     socket.connect(target).await.map_err(classify)?;
     socket.send(query).await.map_err(classify)?;
-    // A second handle on the same open socket (same non-blocking file
-    // description). The receive goes through it so that tokio's own readiness
-    // gate, which would skip the call on an error-only wake, does not hide the
-    // pending ICMP error.
-    let raw = std::net::UdpSocket::from(socket.as_fd().try_clone_to_owned().map_err(classify)?);
+    // The receive goes through a borrowed `socket2` view of the same descriptor,
+    // so tokio's own readiness gate, which would skip the call on an error-only
+    // wake, does not hide the pending ICMP error. No descriptor is duplicated.
+    let view = SockRef::from(&socket);
+    // One buffer per exchange, reused across wakes.
+    let mut buffer = vec![0u8; UDP_RECEIVE_BUFFER];
     loop {
         // `async_io` over READABLE | ERROR: a pending ICMP error wakes the wait
         // (plain readability does not) and a would-block clears both readiness
         // bits, so the loop never spins.
         let received = socket
-            .async_io(Interest::READABLE | Interest::ERROR, || receive_datagram(&raw))
+            .async_io(Interest::READABLE | Interest::ERROR, || (&*view).read(&mut buffer))
             .await
             .map_err(classify)?;
-        match received {
-            Received::Datagram(reply) if reply_matches(query, &reply) => return Ok(reply),
-            Received::Datagram(_) => {}
-            Received::TooLarge => return Err(ExchangeError::ReplyTooLarge),
+        // A datagram that fills the buffer may have been truncated.
+        let Some(datagram) = buffer.get(..received).filter(|_| received < UDP_RECEIVE_BUFFER)
+        else {
+            return Err(ExchangeError::ReplyTooLarge);
+        };
+        if reply_matches(query, datagram) {
+            return Ok(datagram.to_vec());
         }
     }
-}
-
-/// One datagram off the socket.
-enum Received {
-    Datagram(Vec<u8>),
-    /// The datagram filled the receive buffer.
-    TooLarge,
-}
-
-/// One synchronous, non-blocking receive. The buffer never lives across an
-/// `.await`; the datagram is copied out at its exact length.
-fn receive_datagram(socket: &std::net::UdpSocket) -> io::Result<Received> {
-    let mut buffer = vec![0u8; UDP_RECEIVE_BUFFER];
-    let received = socket.recv(&mut buffer)?;
-    if received >= UDP_RECEIVE_BUFFER {
-        return Ok(Received::TooLarge);
-    }
-    Ok(Received::Datagram(buffer.get(..received).unwrap_or_default().to_vec()))
 }
 
 async fn tcp_exchange(target: SocketAddr, query: &[u8]) -> Result<Vec<u8>, ExchangeError> {
@@ -156,11 +141,12 @@ async fn tcp_exchange(target: SocketAddr, query: &[u8]) -> Result<Vec<u8>, Excha
     stream.write_all(&frame).await.map_err(classify)?;
     let mut prefix = [0u8; 2];
     stream.read_exact(&mut prefix).await.map_err(classify)?;
-    let advertised = u64::from(u16::from_be_bytes(prefix));
+    let advertised = u16::from_be_bytes(prefix);
     // The buffer grows only as bytes arrive; it is never sized from the prefix.
     let mut reply = Vec::new();
-    let read = stream.take(advertised).read_to_end(&mut reply).await.map_err(classify)?;
-    if (read as u64) < advertised {
+    let read =
+        stream.take(u64::from(advertised)).read_to_end(&mut reply).await.map_err(classify)?;
+    if read < usize::from(advertised) {
         return Err(ExchangeError::Io {
             source: io::Error::new(io::ErrorKind::UnexpectedEof, "upstream reply was truncated"),
         });

@@ -8,9 +8,7 @@
 //! Layer 3: example-only, one named test per failure mode (Mandate 11).
 //!
 //! The file tests touch only a temporary directory (host-pure); the exchange
-//! tests bind `127.0.0.2:53`, so each runs in its own guest. Every test is a
-//! pending scenario: complete body, `should_panic(expected = ...)` naming the
-//! scaffold's semantic RED; DELIVER removes the marker one scenario at a time.
+//! tests bind `127.0.0.2:53`, so each runs in its own guest.
 
 #![allow(
     clippy::expect_used,
@@ -136,8 +134,6 @@ fn udp_server() -> UdpSocket {
     socket
 }
 
-const PENDING: &str = "upstream exchange: one fresh socket per exchange";
-
 #[overdrive_test(guest = "cgroup-default", profile = "normal-gate")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_udp_exchange_returns_the_matching_reply_and_ignores_a_wrong_id_and_a_wrong_question() {
@@ -160,7 +156,6 @@ async fn a_udp_exchange_returns_the_matching_reply_and_ignores_a_wrong_id_and_a_
         .await
         .expect("the matching reply is returned");
     assert_eq!(reply, thread.join().unwrap(), "only the matching reply is returned");
-    let _ = PENDING;
 }
 
 #[overdrive_test(guest = "cgroup-default", profile = "normal-gate")]
