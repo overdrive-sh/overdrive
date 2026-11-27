@@ -131,6 +131,7 @@ use overdrive_core::vm::config::{
     Gid, HostArch, KERNEL_MAGIC_WINDOW, VmConfig, VmConfinement, VmmIdentity, VolumeAttachment,
     VsockPort,
 };
+use overdrive_reconcilers::workload_lifecycle::last_ran_alloc;
 use overdrive_reconcilers::{AnyState, current_alloc};
 use overdrive_sim::adapters::beacon_io::SimBeaconIo;
 use overdrive_sim::adapters::ca::SimCa;
@@ -980,6 +981,7 @@ impl NodeVolumeDriver {
             return Ok(());
         }
         let current = current.clone();
+        let ran = last_ran_alloc(&refs).cloned();
         let serve = self.serve("WlStart")?;
         let reconciler = serve.state.runtime.get(&reconciler_name()).ok_or_else(|| {
             DriverError::Production("workload-lifecycle is not registered".to_owned())
@@ -998,6 +1000,7 @@ impl NodeVolumeDriver {
             WorkloadKind::Service,
             !desired.desired_to_stop,
             &current,
+            ran.as_ref(),
             desired.generation,
         );
         if will_restart {

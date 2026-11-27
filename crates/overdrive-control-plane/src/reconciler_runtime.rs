@@ -573,12 +573,15 @@ impl ReconcilerRuntime {
     /// `failed` is the workload's current allocation's latest observed row
     /// (selected with [`overdrive_reconcilers::current_alloc`]);
     /// `desired_generation` is the value at `workloads/<id>/generation`
-    /// (absent → 0). With the `WorkloadLifecycle` view of `target` (the
-    /// default view when none is held) and `attempts =
-    /// view.restart_counts[failed.alloc_id]` (0 when absent): `.0 =
-    /// attempts.saturating_add(1)`; `.1 = restart_after_failure(kind,
-    /// run_desired, failed, attempts, max(view.issued_generation) <
-    /// desired_generation)` — the reconciler's own decision.
+    /// (absent → 0); `ran` is the count basis (RB-13), the caller's
+    /// [`overdrive_reconcilers::last_ran_alloc`] over the workload's observed
+    /// rows (`Some(failed)` when `failed` is not abandoned). With the
+    /// `WorkloadLifecycle` view of `target` (the default view when none is
+    /// held) and `attempts = view.restart_counts[ran.alloc_id]` (0 with `ran`
+    /// `None`): `.0 = attempts.saturating_add(1)`; `.1 =
+    /// restart_after_failure(kind, run_desired, failed, ran, attempts,
+    /// max(view.issued_generation) < desired_generation)` — the reconciler's
+    /// own decision.
     #[must_use]
     pub fn restart_status_for_alloc(
         &self,
@@ -586,16 +589,19 @@ impl ReconcilerRuntime {
         kind: WorkloadKind,
         run_desired: bool,
         failed: &AllocStatusRow,
+        ran: Option<&AllocStatusRow>,
         desired_generation: u64,
     ) -> (u32, bool) {
         let view = self.view_for_workload_lifecycle(target);
-        let attempts = view.restart_counts.get(&failed.alloc_id).copied().unwrap_or(0);
+        let attempts =
+            ran.and_then(|row| view.restart_counts.get(&row.alloc_id)).copied().unwrap_or(0);
         (
             attempts.saturating_add(1),
             restart_after_failure(
                 kind,
                 run_desired,
                 failed,
+                ran,
                 attempts,
                 // Compat copy of the stamp-on-emit rule (the body of
                 // `overdrive_reconcilers::workload_lifecycle::restart_pending_until_successor_observed`):
@@ -2000,7 +2006,14 @@ mod tests {
         let tmp = tempfile::TempDir::new().expect("tempdir");
         let (runtime, target) = runtime_with_attempts(&tmp, RESTART_BACKOFF_CEILING - 1, 0).await;
         assert_eq!(
-            runtime.restart_status_for_alloc(&target, WorkloadKind::Service, true, &row, 0),
+            runtime.restart_status_for_alloc(
+                &target,
+                WorkloadKind::Service,
+                true,
+                &row,
+                Some(&row),
+                0
+            ),
             (RESTART_BACKOFF_CEILING, true),
             "one below the ceiling the reconciler restarts (GH #324)"
         );
@@ -2012,7 +2025,14 @@ mod tests {
         let tmp = tempfile::TempDir::new().expect("tempdir");
         let (runtime, target) = runtime_with_attempts(&tmp, RESTART_BACKOFF_CEILING, 0).await;
         assert_eq!(
-            runtime.restart_status_for_alloc(&target, WorkloadKind::Service, true, &row, 0),
+            runtime.restart_status_for_alloc(
+                &target,
+                WorkloadKind::Service,
+                true,
+                &row,
+                Some(&row),
+                0
+            ),
             (RESTART_BACKOFF_CEILING + 1, false),
             "at the ceiling the budget is spent and the reconciler finalizes"
         );
@@ -2037,7 +2057,16 @@ mod tests {
             let tmp = tempfile::TempDir::new().expect("tempdir");
             let (runtime, target) = runtime_with_attempts(&tmp, attempts, 0).await;
             assert!(
-                runtime.restart_status_for_alloc(&target, WorkloadKind::Service, true, &row, 0).1,
+                runtime
+                    .restart_status_for_alloc(
+                        &target,
+                        WorkloadKind::Service,
+                        true,
+                        &row,
+                        Some(&row),
+                        0
+                    )
+                    .1,
                 "a reclaimed row at {attempts} attempts is placed again (ADR-0083)"
             );
         }
@@ -2056,11 +2085,15 @@ mod tests {
         let tmp = tempfile::TempDir::new().expect("tempdir");
         let (runtime, target) = runtime_with_attempts(&tmp, RESTART_BACKOFF_CEILING, 3).await;
         assert!(
-            runtime.restart_status_for_alloc(&target, WorkloadKind::Service, true, &row, 4).1,
+            runtime
+                .restart_status_for_alloc(&target, WorkloadKind::Service, true, &row, Some(&row), 4)
+                .1,
             "a pending generation replaces the lineage (ADR-0073)"
         );
         assert!(
-            !runtime.restart_status_for_alloc(&target, WorkloadKind::Service, true, &row, 3).1,
+            !runtime
+                .restart_status_for_alloc(&target, WorkloadKind::Service, true, &row, Some(&row), 3)
+                .1,
             "no pending generation: the budget is spent"
         );
     }

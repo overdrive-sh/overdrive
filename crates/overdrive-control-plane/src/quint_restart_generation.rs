@@ -822,6 +822,7 @@ impl RgCore {
             return Ok(());
         }
         let current = current.clone();
+        let ran = overdrive_reconcilers::workload_lifecycle::last_ran_alloc(&refs).cloned();
         let (kind, run_desired, generation) = {
             let (job, stopped, generation, kind) = self.desired()?;
             (kind, job && !stopped, generation)
@@ -832,6 +833,7 @@ impl RgCore {
             kind,
             run_desired,
             &current,
+            ran.as_ref(),
             generation,
         );
         if will_restart {

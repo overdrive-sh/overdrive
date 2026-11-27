@@ -529,6 +529,8 @@ fn attempt_failed_event(
         WorkloadKind::Job,
         run_desired,
         failed,
+        // A `Failed` row is never abandoned: it is its own count basis.
+        Some(failed),
         desired_generation,
     );
     let next_attempt_delay = will_restart

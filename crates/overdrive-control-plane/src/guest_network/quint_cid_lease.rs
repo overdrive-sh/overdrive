@@ -190,6 +190,7 @@ use overdrive_core::vm::beacon::{BeaconConnKey, BeaconIo};
 use overdrive_core::vm::config::{
     Gid, HostArch, KERNEL_MAGIC_WINDOW, VmConfinement, VmmIdentity, VsockPort,
 };
+use overdrive_reconcilers::workload_lifecycle::last_ran_alloc;
 use overdrive_reconcilers::{AnyState, WorkloadLifecycleState, current_alloc};
 use overdrive_sim::adapters::beacon_io::SimBeaconIo;
 use overdrive_sim::adapters::ca::SimCa;
@@ -725,6 +726,12 @@ impl Reading {
         current_alloc(&rows)
     }
 
+    /// The count basis (RB-13): the newest row that ran, by the reconciler's own rule.
+    fn ran(&self) -> Option<&AllocStatusRow> {
+        let rows: Vec<&AllocStatusRow> = self.actual.allocations.values().collect();
+        last_ran_alloc(&rows)
+    }
+
     fn row(&self, alloc: &AllocationId) -> Option<&AllocStatusRow> {
         self.actual.allocations.get(alloc)
     }
@@ -911,6 +918,7 @@ impl CidLeaseDriver {
                 WorkloadKind::Service,
                 reading.run(),
                 row,
+                reading.ran(),
                 reading.desired.generation,
             )
             .1
