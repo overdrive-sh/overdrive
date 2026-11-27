@@ -258,6 +258,23 @@ fn blocked_opt(dnssec_ok: bool) -> Edns {
     edns
 }
 
+/// Whether `reply` answers `query`: a response (QR set) with the same id and
+/// the same questions (name compared case-insensitively, type and class equal).
+/// Bytes that do not decode never match.
+pub(super) fn reply_matches(query: &[u8], reply: &[u8]) -> bool {
+    let (Ok(query), Ok(reply)) = (Message::from_vec(query), Message::from_vec(reply)) else {
+        return false;
+    };
+    reply.metadata.message_type == MessageType::Response
+        && reply.metadata.id == query.metadata.id
+        && reply.queries.len() == query.queries.len()
+        && reply.queries.iter().zip(&query.queries).all(|(got, sent)| {
+            got.query_type() == sent.query_type()
+                && got.query_class() == sent.query_class()
+                && got.name().to_string().eq_ignore_ascii_case(&sent.name().to_string())
+        })
+}
+
 /// What the forwarder needs to know about an upstream reply, with no
 /// `hickory_proto` type in sight (DDN-4).
 #[derive(Debug, Clone, PartialEq, Eq)]

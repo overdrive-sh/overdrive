@@ -1,0 +1,14 @@
+review:
+  artifact: docs/feature/guest-public-dns-resolution/deliver/roadmap.json
+  date: 2026-11-27
+  reviewer: nw-acceptance-designer-reviewer
+  verdict: CHANGES_REQUESTED
+  mapping: "All 61 pending scenarios map to exactly one step; no orphans, no double mapping."
+  findings:
+    - {id: 1, severity: BLOCKER, step: "03-01", title: "ip/nft strace check is an unrequested validation item", resolution: "rejected: the user requested this check on 2026-11-27"}
+    - {id: 2, severity: HIGH, step: "03-01", title: "crafter re-points an existing test body", resolution: "applied: test edits limited to compile-forced argument and the injected below-budget value, assertion unchanged"}
+    - {id: 3, severity: MEDIUM, step: "01-03", title: "01-03 could reach todo! owning_range", resolution: "applied: 01-03 implements relay only; 01-05 adds the guard"}
+    - {id: 4, severity: MEDIUM, step: "03-01, 04-02", title: "files_to_modify incomplete", resolution: "applied: compiler is the list for call sites; bench file named when touched"}
+    - {id: 5, severity: LOW, step: "03-01", title: "regression-only step", resolution: "applied: marked regression-only"}
+    - {id: 6, severity: LOW, step: "04-02/04-03", title: "UDP shed observed only in 04-03", resolution: "note added"}
+  outcome: approved after orchestrator applied 2-6

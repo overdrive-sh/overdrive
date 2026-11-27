@@ -1,0 +1,188 @@
+{
+  "schema_version": "3.0",
+  "feature_id": "guest-public-dns-resolution",
+  "events": [
+    {
+      "sid": "01-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-27T20:05:08Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-27T20:11:17Z"
+    },
+    {
+      "sid": "01-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-27T20:12:05Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-27T20:20:33Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-27T20:20:33Z"
+    },
+    {
+      "sid": "01-02",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-27T20:20:42Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-27T20:22:36Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-27T20:39:07Z"
+    },
+    {
+      "sid": "01-03",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-27T20:39:33Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-27T20:42:47Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-27T20:54:27Z"
+    },
+    {
+      "sid": "01-04",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-27T20:54:37Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-27T21:00:45Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-27T21:00:45Z"
+    },
+    {
+      "sid": "01-05",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-27T21:01:16Z"
+    },
+    {
+      "sid": "01-06",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-27T21:04:39Z"
+    },
+    {
+      "sid": "01-06",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-27T21:09:01Z"
+    },
+    {
+      "sid": "01-06",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-27T21:11:59Z"
+    },
+    {
+      "sid": "01-07",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: markers removed and implementation landed in one pass; separate RED run not executed",
+      "t": "2026-11-27T21:18:38Z"
+    },
+    {
+      "sid": "01-07",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-27T21:18:38Z"
+    },
+    {
+      "sid": "01-07",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-27T21:18:38Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "RED",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-27T21:39:05Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-27T21:39:05Z"
+    },
+    {
+      "sid": "02-01",
+      "p": "COMMIT",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-27T21:39:22Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "RED",
+      "s": "SKIPPED",
+      "d": "NOT_APPLICABLE: pending markers removed in the same edit as the implementation; semantic RED was not separately observed",
+      "t": "2026-11-27T22:03:02Z"
+    },
+    {
+      "sid": "02-02",
+      "p": "GREEN",
+      "s": "EXECUTED",
+      "d": "PASS",
+      "t": "2026-11-27T22:03:02Z"
+    }
+  ]
+}

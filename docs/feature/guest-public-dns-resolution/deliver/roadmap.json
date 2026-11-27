@@ -1,0 +1,435 @@
+{
+  "roadmap": {
+    "project_id": "guest-public-dns-resolution",
+    "created_at": "2026-11-27T00:00:00Z",
+    "total_steps": 15,
+    "goal": "GH #382: VM guests resolve public DNS names through their default resolver. The node DNS responder forwards gateway-addressed non-mesh queries to the host resolvers (ADR-0356..0363), guarded by one owned-range list, over UDP and TCP, bounded by descriptor-derived permits.",
+    "authoritative_inputs": [
+      "docs/feature/guest-public-dns-resolution/feature-delta.md (DESIGN: GPD-1..GPD-8, [REF] Component decomposition, [REF] Interface contracts (pinned))",
+      "docs/feature/guest-public-dns-resolution/distill/test-scenarios.md",
+      "docs/product/architecture/adr-0356..adr-0363 and the ADR-0072 amendment"
+    ],
+    "execution_note": "Every command runs on the metal box through `cargo xtask metal run -- ...` (.claude/rules/testing.md). Pending scenarios are pre-authored `#[should_panic(expected = ...)]` bodies from DISTILL (commit d03a6c7f7): a step removes ONLY the pending marker of its own scenarios, confirms the semantic RED named by `expected`, implements, and ends GREEN. The crafter never writes, weakens or completes a test body; a missing body, fixture or oracle routes back to the acceptance designer. Mutation testing is disabled for this project: no mutation criteria. The E17 verification expectation is captured after DELIVER and is not a roadmap step. Out of scope and not to be cited as deferred work in code: relocation of the forwarder to overdrive-worker (#387), cluster-consistent frontend addresses (#388); the forwarder stays in overdrive-control-plane next to the responder."
+  },
+  "phases": [
+    {
+      "id": "01",
+      "name": "Pure forwarding pieces: owned ranges, upstream selection, forwarder contract",
+      "steps": [
+        {
+          "id": "01-01",
+          "name": "Owned address range list and containment test",
+          "agent": "nw-software-crafter",
+          "criteria": [
+            "O-1 and O-2 (proptests): every address in an owned range is owned and names its range; every address in no owned range is not owned.",
+            "O-3: the edges of the mesh frontend range, the service VIP pool (reserved VIP addresses count as owned) and the guest prefix are owned and the next address is not; 10.99.0.0/16 is not owned.",
+            "O-4 source scan: every address-range const in production source is named in OwnedAddressRanges::platform or excluded on the record (only WORKLOAD_SUBNET_BASE); the VIP pool arrives through platform's &VipRange parameter and is used.",
+            "OwnedAddressRanges::platform and owning_range have no todo! left and no pending marker remains on O-1..O-4."
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/dns_owned_ranges.rs",
+          "scenario_name": "O-1 every_address_in_an_owned_range_is_owned_and_names_its_range; O-2 an_address_outside_every_owned_range_is_not_owned; O-3 the_edges_of_each_owned_range_are_owned_and_the_next_address_is_not; O-4 every_address_range_constant_is_in_the_owned_list_or_excluded_on_the_record",
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/dns_responder/owned_ranges.rs"
+          ],
+          "deps": [],
+          "dependencies": [],
+          "implementation_notes": "Pinned contract: feature-delta [REF] Interface contracts, 'Owned ranges' (ADR-0359). platform(&VipRange) reads WORKLOAD_FRONTEND_BASE (frontend_addr_allocator.rs) and GUEST_NODE_PREFIX (overdrive-core guest_transport) by reference to their defining consts, and the service VIP pool through VipRange::first_overlapping_range with a /32 (VipRange::contains excludes reserved addresses and is the wrong test). OwnedRangeKind::as_str already exists. WORKLOAD_SUBNET_BASE (10.99.0.0/16) is deliberately not guarded (Grounding findings 7; O-4 pins the exclusion). No new API beyond the pinned items. Test command (Tier 1, default lane through metal): cargo xtask metal run -- cargo nextest run -p overdrive-control-plane --features integration-tests -E 'binary(acceptance) & test(dns_owned_ranges)'. Also run: cargo xtask metal run -- cargo clippy -p overdrive-control-plane --all-targets --features integration-tests -- -D warnings."
+        },
+        {
+          "id": "01-02",
+          "name": "Upstream selection and permit arithmetic",
+          "agent": "nw-software-crafter",
+          "criteria": [
+            "F-12 (proptest): UpstreamSet::select drops only the gateway, in its IPv4 form and its IPv4-mapped IPv6 form, and keeps file order and every other address.",
+            "F-26 (proptest): forward_permits equals (nofile_soft - reserve) / FDS_PER_PERMIT, saturating at 0, clamped to usize.",
+            "F-27: the design's worked examples hold: 333,824 permits at 1,048,576, 71,680 at 524,288, 0 at or below the reserve.",
+            "select and forward_permits have no todo! left; F-12, F-26, F-27 carry no pending marker."
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/dns_forwarder.rs",
+          "scenario_name": "F-12 only_the_gateway_is_excluded_and_file_order_is_kept; F-26 the_permit_count_is_the_descriptor_budget_over_the_cost_of_one_forward; F-27 the_designs_worked_permit_examples_hold",
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/dns_responder/upstream.rs",
+            "crates/overdrive-control-plane/src/dns_responder/forwarder.rs"
+          ],
+          "deps": [],
+          "dependencies": [],
+          "implementation_notes": "Pinned contract: feature-delta 'Upstream ports' (UpstreamSet::select, no cap on count, empty result is NoUsableUpstream; ADR-0358) and 'The permits and the shed' (ADR-0362). Both functions are pure. Do not add the permit bound itself here (01-07). Test command: cargo xtask metal run -- cargo nextest run -p overdrive-control-plane --features integration-tests -E 'binary(acceptance) & test(dns_forwarder)' (the other F-* tests still pass as pending should_panic).\nDELIVER NOTE: F-12 drives Forwarder::forward, so its pending marker could not come off here (select landed in fa1862eb8); F-12 activation moved to 01-04."
+        },
+        {
+          "id": "01-03",
+          "name": "Forwarder relays accepted replies verbatim",
+          "agent": "nw-software-crafter",
+          "criteria": [
+            "F-1: a public lookup is sent upstream unchanged and the upstream reply is relayed byte for byte.",
+            "F-2: a reply of any rcode is final and never triggers failover.",
+            "F-3 and F-4: every non-mesh record type is relayed unchanged, and a DNSSEC-signed truncated reply keeps every bit (AD, RRSIG, TC).",
+            "F-5: a query that arrived over TCP is forwarded over TCP."
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/dns_forwarder.rs",
+          "scenario_name": "F-1 a_public_lookup_is_sent_upstream_unchanged_and_the_upstream_reply_is_relayed_byte_for_byte; F-2 an_upstream_reply_of_any_rcode_is_final_and_never_triggers_failover; F-3 every_non_mesh_record_type_is_relayed_unchanged; F-4 a_dnssec_signed_truncated_reply_is_relayed_with_every_bit_preserved; F-5 a_query_that_arrived_over_tcp_is_forwarded_over_tcp",
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/dns_responder/forwarder.rs",
+            "crates/overdrive-control-plane/src/dns_responder/wire.rs"
+          ],
+          "deps": [
+            "01-02"
+          ],
+          "dependencies": [
+            "01-02"
+          ],
+          "implementation_notes": "Pinned contract: Forwarder::forward steps 1-5 (feature-delta 'Forwarder', ADR-0356, ADR-0361). Land wire::inspect_reply projecting an upstream reply into hickory-free ReplyFacts; hickory types stay inside wire.rs (DDN-3/DDN-4). Query bytes go to exchange unchanged (id, RD, EDNS, DO, CD preserved); the forwarder does not re-check reply matching (the exchange does, 02-02). forward reads time only through the injected Clock. F-4: V-6 requires hickory-proto to decode the signed reply and HTTPS/SVCB records without error; if a legitimate reply fails to decode the feature-delta says an undecodable reply is a failed attempt (01-04), so surface a blocker rather than relaying undecoded bytes. Test command: cargo xtask metal run -- cargo nextest run -p overdrive-control-plane --features integration-tests -E 'binary(acceptance) & test(dns_forwarder)'.\nSCOPE (review finding 3): implement forward steps 1-4 plus the relay half of step 5 only. Do NOT call the owned-range guard (owning_range is a todo! until 01-01, and the guard itself lands in 01-05)."
+        },
+        {
+          "id": "01-04",
+          "name": "Forwarder failover and definite failure replies",
+          "agent": "nw-software-crafter",
+          "criteria": [
+            "F-12 (moved from 01-02): select is already implemented; activate F-12 once forward tries upstreams in order.",
+            "F-6, F-7, F-10, F-11: failover tries the next upstream after one attempt timeout (1500 ms), at once on a refusal, and on an undecodable or oversize reply.",
+            "F-8: with every upstream silent the guest gets a SERVFAIL within the 4000 ms budget and the cause reports budget_exhausted.",
+            "F-9 and F-13: every upstream refusing, or a list naming only the gateway, gives an immediate SERVFAIL naming the last failure; nothing is sent when no upstream is usable.",
+            "F-14: an absent, unreadable or empty resolver source gives a SERVFAIL with a distinct cause and recovers when the source is restored."
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/dns_forwarder.rs",
+          "scenario_name": "F-12 only_the_gateway_is_excluded_and_file_order_is_kept (moved from 01-02: needs forward + failover); F-6 a_silent_first_upstream_fails_over_to_the_second_after_one_attempt_timeout; F-7 a_refusing_upstream_costs_no_time_before_the_next_is_tried; F-8 with_every_upstream_silent_the_guest_gets_a_servfail_within_the_budget; F-9 with_every_upstream_refusing_the_servfail_is_immediate_and_names_the_last_failure; F-10 an_undecodable_reply_is_a_failed_attempt_and_the_next_upstream_is_tried; F-11 a_reply_too_large_for_the_buffer_is_a_failed_attempt_with_its_own_cause; F-13 a_resolver_list_naming_only_the_gateway_is_no_usable_upstream_and_nothing_is_sent; F-14 an_unusable_resolver_source_is_a_servfail_with_a_distinct_cause_and_recovers_when_restored",
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/dns_responder/forwarder.rs",
+            "crates/overdrive-control-plane/src/dns_responder/upstream.rs",
+            "crates/overdrive-control-plane/src/dns_responder/wire.rs"
+          ],
+          "deps": [
+            "01-03"
+          ],
+          "dependencies": [
+            "01-03"
+          ],
+          "implementation_notes": "Pinned contract: forward steps 2, 3, 4, 6, 7 and ForwardFailure / AttemptFailure (feature-delta 'Upstream ports', ADR-0356, ADR-0358). Eight scenarios, one cohesive component (the failure half of forward). Adds the wire SERVFAIL encoder (id and question echoed, QR set, RD copied, RA set, no records). Implement ForwardFailure::as_str and AttemptFailure::as_str as pinned even though no test reads them (for Attempts, budget_exhausted selects the label; io::ErrorKind is carried as a value). forward never returns later than FORWARD_BUDGET plus slack and reads time only through the injected Clock. An accepted reply of any rcode is final; Failed carries the SERVFAIL bytes and the cause. This step does not emit episode events (01-06). Test command: cargo xtask metal run -- cargo nextest run -p overdrive-control-plane --features integration-tests -E 'binary(acceptance) & test(dns_forwarder)'."
+        },
+        {
+          "id": "01-05",
+          "name": "Owned-range guard empties and marks forwarded replies",
+          "agent": "nw-software-crafter",
+          "criteria": [
+            "F-15 and F-16: a reply with an answer in the mesh frontend range is emptied whole, rcode kept, AD and TC cleared; OPT (payload 1232, DO copied, EDE 15 Blocked) is present only when the query carried EDNS.",
+            "F-17, F-18 and F-21: reserved VIP, guest-prefix and HTTPS ipv4hint addresses are blocked naming their range; private answers outside the owned ranges are delivered unchanged.",
+            "F-20: AAAA and additional-section addresses are outside the guard by design.",
+            "F-22: a blocked answer is OwnedRangeBlocked and emits one dns.forward.owned_range_blocked debug event per query, never a warn.",
+            "F-33 (proptest): a reply is blocked whole if and only if any answer address is owned; otherwise it is relayed byte for byte."
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/dns_forwarder.rs",
+          "scenario_name": "F-15 an_upstream_answer_inside_the_mesh_frontend_range_is_emptied_and_marked_blocked; F-16 a_blocked_reply_to_a_query_without_edns_carries_no_opt_record; F-17 an_answer_on_a_reserved_vip_or_in_the_guest_prefix_is_blocked_with_its_range; F-18 a_private_answer_outside_the_owned_ranges_is_delivered_unchanged; F-20 aaaa_and_additional_section_addresses_are_outside_the_guard_by_design; F-21 an_https_record_whose_ipv4_hint_is_owned_is_blocked; F-22 blocked_answers_never_raise_a_warn; F-33 a_reply_is_blocked_whole_iff_any_answer_address_is_owned",
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/dns_responder/forwarder.rs",
+            "crates/overdrive-control-plane/src/dns_responder/wire.rs"
+          ],
+          "deps": [
+            "01-01",
+            "01-03"
+          ],
+          "dependencies": [
+            "01-01",
+            "01-03"
+          ],
+          "implementation_notes": "Pinned contract: forward step 5, blocked-reply definition, 'Owned ranges' accepted non-coverage (ADR-0359). Guard inspects answer-section A rdata and SVCB/HTTPS ipv4hint only, through OwnedAddressRanges::owning_range. Add the wire blocked-reply encoder. The dns.forward.owned_range_blocked event is emitted by the forwarder (it alone knows the upstream) as tracing::debug!(name: \"dns.forward.owned_range_blocked\", qname = %.., address = %.., range = <as_str>, upstream = %..): tests key on meta.name(), so the explicit `name:` is mandatory. Eight scenarios, one cohesive component (the reply guard). Test command: cargo xtask metal run -- cargo nextest run -p overdrive-control-plane --features integration-tests -E 'binary(acceptance) & test(dns_forwarder)'.\nSCOPE (review finding 3): this step adds the owned-range guard to forward step 5.\nDELIVER NOTE: F-18 and F-20 markers were removed in 01-03 (d67016427): their bodies assert plain relay of unowned addresses and passed once relay landed. The guard must keep them green."
+        },
+        {
+          "id": "01-06",
+          "name": "Forward-failure episode warns",
+          "agent": "nw-software-crafter",
+          "criteria": [
+            "F-23: a failure episode warns dns.forward.failed once at its start and dns.forward.recovered once when it clears; a later failure is a new episode.",
+            "F-24: an accepted reply earlier than FORWARD_BUDGET after the last failure leaves the episode open and emits no second start.",
+            "F-25: an absent resolver file starts the same failure episode."
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/dns_forwarder.rs",
+          "scenario_name": "F-23 a_failure_episode_warns_once_at_its_start_and_once_when_it_clears; F-24 an_early_accepted_reply_leaves_the_failure_episode_open; F-25 an_absent_resolver_file_starts_the_same_failure_episode",
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/dns_responder/forwarder.rs"
+          ],
+          "deps": [
+            "01-04"
+          ],
+          "dependencies": [
+            "01-04"
+          ],
+          "implementation_notes": "Pinned contract: forward step 8 and 'Observer and events' (GPD-7). One atomic flag plus the instant of the last Failed read through the injected Clock; every line decided by the return value of one atomic swap; the clearing swap is conditional on at least FORWARD_BUDGET since the last Failed, otherwise the flag is untouched. Events: tracing::warn!(name: \"dns.forward.failed\", qname = %.., cause = <label>, detail = %..) and tracing::warn!(name: \"dns.forward.recovered\"), no fields on recovered. The explicit `name:` is mandatory (tests key on meta.name()). Individual failed queries are not logged. Test command: cargo xtask metal run -- cargo nextest run -p overdrive-control-plane --features integration-tests -E 'binary(acceptance) & test(dns_forwarder)'."
+        },
+        {
+          "id": "01-07",
+          "name": "In-flight permits, shedding and shed-episode warns",
+          "agent": "nw-software-crafter",
+          "criteria": [
+            "F-28 and F-29: forwards beyond the permit count are shed, a released permit is reusable, and a shed query touches neither the upstream nor the resolver file.",
+            "F-30 and F-31: a shed episode warns once, clears only once load has drained to half (held * 2 <= permits), a single-permit bound still clears, and re-saturation starts a new episode.",
+            "F-32: shedding a thousand queries warns once.",
+            "F-34: eight racing threads never hold more permits than the bound and every permit is released at the end."
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/acceptance/dns_forwarder.rs",
+          "scenario_name": "F-28 forwards_beyond_the_permit_count_are_shed_and_a_released_permit_is_reusable; F-29 a_shed_query_touches_neither_the_upstream_nor_the_resolver_file; F-30 a_shed_episode_warns_once_and_clears_only_when_the_load_has_drained_to_half; F-31 a_single_permit_bound_still_clears_its_shed_episode; F-32 shedding_a_thousand_queries_warns_once; F-34 racing_acquirers_never_hold_more_permits_than_the_bound_and_every_permit_is_released",
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/dns_responder/forwarder.rs"
+          ],
+          "deps": [
+            "01-02"
+          ],
+          "dependencies": [
+            "01-02"
+          ],
+          "implementation_notes": "Pinned contract: forward step 1, step 9 and 'The permits and the shed' (GPD-8, ADR-0362). try_acquire takes one permit without waiting (None when all held); ForwardPermit is RAII, not Clone, released on drop. Shed episode flag with the same swap discipline as 01-06; the acquire evaluates the half-load threshold before the clearing swap, measured before the acquire. Events: tracing::warn!(name: \"dns.forward.shed_started\", permits = ..) and tracing::warn!(name: \"dns.forward.shed_cleared\", permits = .., held = ..), explicit `name:` mandatory. The permit set must be race-free under F-34 (real threads): use an atomic counter acquire-or-shed, no lock held across anything. Remove the scaffold's always-grant body. Test command: cargo xtask metal run -- cargo nextest run -p overdrive-control-plane --features integration-tests -E 'binary(acceptance) & test(dns_forwarder)'."
+        }
+      ]
+    },
+    {
+      "id": "02",
+      "name": "Host adapters: resolver file and upstream exchange",
+      "steps": [
+        {
+          "id": "02-01",
+          "name": "Resolver file adapter re-reads on every call",
+          "agent": "nw-software-crafter",
+          "criteria": [
+            "U-1: nameserver lines are listed in file order; comments, options, scoped (fe80::1%eth0), malformed and empty tokens are skipped.",
+            "U-2: a readable file with no nameserver line is Ok(empty), not an error.",
+            "U-3: a missing file is Absent; an unreadable one (a directory in the file's place) is a distinct Unreadable.",
+            "U-4: the file is re-read on every call so a replaced file takes effect at once."
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/integration/dns_upstream_host.rs",
+          "scenario_name": "U-1 nameserver_lines_are_listed_in_file_order_and_everything_else_is_ignored; U-2 a_readable_file_with_no_nameserver_line_is_an_empty_list_not_an_error; U-3 a_missing_file_is_absent_and_an_unreadable_one_is_a_distinct_error; U-4 the_file_is_re_read_on_every_call_so_a_replaced_file_takes_effect_at_once",
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/dns_responder/upstream_host.rs"
+          ],
+          "deps": [],
+          "dependencies": [],
+          "implementation_notes": "Pinned contract: UpstreamResolvers behaviour contract (feature-delta 'Upstream ports', ADR-0358): no memo, port is always 53, only plain IPv4/IPv6 addresses accepted, order preserved, any read failure other than not-found is Unreadable carrying the io::Error. Do not absorb PermissionDenied or other kinds into Absent (rust.md 'Distinct failure modes'). The default path /etc/resolv.conf is a const in the adapter; ResolvConfUpstreams::from_path already exists for tests. File I/O inside an async fn uses tokio::fs or spawn_blocking (dst-lint async-fs rule). Test command: cargo xtask metal run -- cargo nextest run -p overdrive-control-plane --features integration-tests -E 'binary(integration) & test(dns_upstream_host) & test(/nameserver|readable_file|missing_file|re_read/)'."
+        },
+        {
+          "id": "02-02",
+          "name": "Upstream exchange over UDP and TCP",
+          "agent": "nw-software-crafter",
+          "criteria": [
+            "U-5: a UDP exchange returns the matching reply and ignores a wrong id and a wrong question.",
+            "U-6: a silent upstream is Timeout; a closed port is Unreachable, never Timeout.",
+            "U-7: a UDP reply that fills the 59,001-byte receive buffer is ReplyTooLarge.",
+            "U-8: a TCP exchange frames one query per connection and rejects a mismatched reply as Io of kind InvalidData."
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/integration/dns_upstream_host.rs",
+          "scenario_name": "U-5 a_udp_exchange_returns_the_matching_reply_and_ignores_a_wrong_id_and_a_wrong_question; U-6 a_silent_upstream_is_a_timeout_and_a_closed_port_is_unreachable_not_a_timeout; U-7 a_udp_reply_that_fills_the_receive_buffer_is_reply_too_large; U-8 a_tcp_exchange_frames_one_query_per_connection_and_rejects_a_mismatched_reply",
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/dns_responder/upstream_host.rs",
+            "crates/overdrive-control-plane/src/dns_responder/wire.rs"
+          ],
+          "deps": [],
+          "dependencies": [],
+          "implementation_notes": "Pinned contract: UpstreamExchange behaviour contract (feature-delta 'Upstream ports', ADR-0356, ADR-0360). Fresh socket per exchange (kernel-assigned source port); UDP socket CONNECTED to server:53; receive buffer MAX_GUEST_DATAGRAM_PAYLOAD + 1 (59,001) used inside one synchronous non-blocking receive with no .await and copied out at exact length; TCP uses RFC 1035 two-byte framing, one query per connection, and the reply buffer grows only as bytes arrive (never pre-allocated to the advertised prefix); timeout bounds connect plus exchange; refused connect or ICMP error is Unreachable. Add the wire reply-matching helper (QR set, equal id, equal question with case-insensitive name, type, class) used only by the exchange. KEEP HostUpstreamExchange a UNIT STRUCT (tests use it as a value); its construction is not pinned by DESIGN, so if it truly needs state surface a blocker to the architect instead of inventing a constructor. Cancellation is by dropping the future; no state to clean up. Guest-placed tests run through the same command; first run on a fresh box needs `cargo xtask metal run -- cargo xtask guest-kit-prepare` and (exclusive) kmod-load per testing.md. Test command: cargo xtask metal run -- cargo nextest run -p overdrive-control-plane --features integration-tests -E 'binary(integration) & test(dns_upstream_host)'."
+        }
+      ]
+    },
+    {
+      "id": "03",
+      "name": "Descriptor limit: raise, injection and permit derivation at boot",
+      "steps": [
+        {
+          "id": "03-01",
+          "name": "Raise the descriptor limit at the binary and inject it",
+          "agent": "nw-software-crafter",
+          "criteria": [
+            "overdrive serve's binary entry raises the soft RLIMIT_NOFILE to the hard limit, reads the soft limit back and passes it to serve::run(args, nofile_soft); a refused raise logs a warn and continues with the read-back value; a failed read-back ends serve with the error.",
+            "NodeAdapters::host and GuestFlowAdapter::host take nofile_soft and HostGuestFlowIo::new(nofile_soft) returns it as GuestHostFacts.nofile_limit instead of calling getrlimit; the probe and the permit count read the one value.",
+            "an_rlimit_nofile_below_the_owner_budget_refuses_boot passes 1,024 through the bundle and no longer lowers the process limit; every NodeAdapters::host call site passes a value (tests pass the sim value 1,048,576).",
+            "No getrlimit remains in the control-plane library; impl Default for HostGuestFlowIo and HostSharedGuestNetworkOwner::new are deleted."
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/integration/shared_guest_network_startup.rs",
+          "scenario_name": "Existing regression: an_rlimit_nofile_below_the_owner_budget_refuses_boot (re-pointed at the injected value), plus the existing guest-network boot and cli serve fixtures staying GREEN; no new pending scenario",
+          "files_to_modify": [
+            "crates/overdrive-cli/src/main.rs",
+            "crates/overdrive-cli/src/commands/serve.rs",
+            "crates/overdrive-control-plane/src/node_adapters.rs",
+            "crates/overdrive-control-plane/src/guest_network.rs",
+            "crates/overdrive-control-plane/src/guest_network/flow_io/host.rs",
+            "crates/overdrive-control-plane/src/guest_network/flow_io/accept_path_tier3.rs",
+            "crates/overdrive-control-plane/tests/common/node_adapters.rs",
+            "crates/overdrive-control-plane/tests/integration/shared_guest_network_startup.rs"
+          ],
+          "deps": [],
+          "dependencies": [],
+          "implementation_notes": "Pinned contract: feature-delta 'The descriptor limit (ADR-0363)': pinned signatures `serve::run(args: ServeArgs, nofile_soft: u64)`, `GuestFlowAdapter::host(nofile_soft: u64)`, `NodeAdapters::host(config, cgroup_fs, kek, nofile_soft: u64)`, crate-private `HostGuestFlowIo::new(nofile_soft: u64)`. ServeArgs and run_with_adapters do NOT change; no ServerConfig field; the raise lives only in overdrive-cli main.rs (no-obligation ruling: thin syscall wrapper, not reachable by in-process tests). Use a crate already in the workspace (rustix/nix/libc); no new third-party dependency, and surface a blocker if the cli crate needs a new dependency edge. Call sites that gain the fourth argument (the compiler is the final list; test compositions pass 1,048,576, the number SimGuestFlowIo reports at flow_io/sim.rs:641): cli commands/serve.rs:188 (production, from main.rs); overdrive-sim invariants/vm_reclamation.rs, invariants/netns_density_boot_order.rs, tests/vm_lifecycle_latency_283_spike.rs, tests/integration/convergence_admission_stop.rs; overdrive-bench-families families/vm_lifecycle.rs; overdrive-cli tests acceptance/service_kind_vm_workloads.rs and integration/http_client.rs, public_ingress_gateway.rs (two sites), serve_fixture.rs (three sites); control-plane src guest_listener_board_wiring_acceptance.rs, tests/common/node_adapters.rs (host_bundle: the fourth argument MUST be 1_048_576, P-1 asserts it), tests/acceptance/required_serve_ports_source_scan.rs (call gains the argument; allow-list entries and string fixture unchanged), tests/integration/guest_listener_real_boot.rs and guest_flow_through_serve.rs; tests/conformance src vm_lifecycle.rs, gateway.rs (two sites: :1914 and lib.rs:623). accept_path_tier3.rs's two HostGuestFlowIo::new calls never read host facts and pass the sim value. spike-scratch probes are separate builds and are not touched. Single-cut deletions in this step: HostGuestFlowIo's Default impl (host.rs) and HostSharedGuestNetworkOwner::new (guest_network.rs, no caller); delete any test that exists only to defend them in the same commit. VERIFICATION NOTE (ADR-0363 'no cap' assumption, ungrounded in the vendored tree): `ip` and `nft` are not vendored, so confirm on the metal box, with the soft limit raised to the hard limit, that they do not iterate descriptors up to the limit (for example strace -f -e trace=close,close_range around one `ip` and one `nft` invocation, count of close calls). Record the result in the step's commit message body in prose; if either does iterate, STOP and return a blocker (the design chose no cap on that assumption). The refused-raise and read-back branches have a design no-obligation ruling: do not add a test for them. Compile gate: cargo xtask metal run -- cargo check --workspace --all-targets --features integration-tests, and clippy -D warnings over the same. Test command: cargo xtask metal run -- cargo nextest run -p overdrive-control-plane --features integration-tests -E 'binary(integration) & test(shared_guest_network_startup)'; then the dns_responder_bind regression set: -E 'binary(integration) & test(dns_responder_bind)'; then cargo xtask metal run -- cargo nextest run -p overdrive-cli --features integration-tests -E 'binary(acceptance)'.\nORCHESTRATOR RULING (review finding 2): test edits in this step are limited to (a) adding the compile-forced fourth nofile_soft argument at every NodeAdapters::host / GuestFlowAdapter::host / HostGuestFlowIo::new call site, with host_bundle in tests/common/node_adapters.rs passing 1_048_576, and (b) re-pointing an_rlimit_nofile_below_the_owner_budget_refuses_boot to inject its below-budget value (1_024) through the host bundle instead of setting the process rlimit, keeping its assertion unchanged. No other test body is written or weakened. ip/nft descriptor check: user-requested (not an added validation item). Record the strace result in the commit body; if either iterates up to the soft limit, stop and return it as a blocker.\nfiles_to_modify (review finding 4): the compiler is the list for call sites of the changed constructors; the listed files are the design owners. Regression-only step: no pending scenario, no semantic RED expected."
+        },
+        {
+          "id": "03-02",
+          "name": "Derive the forward permit bound at boot and report it",
+          "agent": "nw-software-crafter",
+          "criteria": [
+            "P-1: serve boots with an injected soft limit of 1,048,576 and emits exactly one dns.forward.permits event whose reserve equals guest_flow_fd_requirement() + NODE_FD_RESERVE, whose nofile_soft equals the injected value and whose permits equals (nofile_soft - reserve) / FDS_PER_PERMIT, saturating.",
+            "guest_flow_fd_requirement() holds the descriptor-requirement expression moved out of probe_guest_flow_startup, and the probe calls it; the probe's boot-refusal behaviour is unchanged.",
+            "GuestDnsDeps.forward_permits carries the derived count at the production composition (the scaffold literal 0 is gone)."
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/integration/dns_forward_permit_derivation.rs",
+          "scenario_name": "P-1 boot_derives_the_forward_permit_bound_from_the_descriptor_limit",
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/guest_network.rs",
+            "crates/overdrive-control-plane/src/lib.rs"
+          ],
+          "deps": [
+            "01-02",
+            "03-01"
+          ],
+          "dependencies": [
+            "01-02",
+            "03-01"
+          ],
+          "implementation_notes": "Pinned contract: feature-delta 'The permits and the shed' pinned shapes and 'Boot log (pinned)'. `pub fn guest_flow_fd_requirement() -> u64` is a todo! scaffold in guest_network.rs: implement it by MOVING the existing expression out of probe_guest_flow_startup (5 x GUEST_FLOW_MAX_PAIRS + 16,384 + 1 + 32,767 = 376,832) and have the probe call it, so the probe and the reserve cannot drift; NODE_FD_RESERVE = 4096 is already final. In run_server, derive once: reserve = guest_flow_fd_requirement() + NODE_FD_RESERVE; permits = forward_permits(host_facts().nofile_limit, reserve); then emit exactly once per boot, after deriving and before building the forwarder: tracing::info!(name: \"dns.forward.permits\", permits = permits, nofile_soft = nofile_soft, reserve = reserve) (explicit `name:`; the test keys on meta.name()). Put the count in GuestDnsDeps.forward_permits at all three GuestDnsDeps sites (clone_guest_dns_deps included); run_server does not touch the process limit. The test relies on the common bundle injecting 1,048,576 (done in 03-01) and its own INJECTED_NOFILE_SOFT must stay equal. Test command: cargo xtask metal run -- cargo nextest run -p overdrive-control-plane --features integration-tests -E 'binary(integration) & test(dns_forward_permit_derivation)'; regression: -E 'binary(integration) & test(shared_guest_network_startup)'."
+        }
+      ]
+    },
+    {
+      "id": "04",
+      "name": "Responder serves the forwarder: classification, UDP forwarding, TCP/53",
+      "steps": [
+        {
+          "id": "04-01",
+          "name": "One name classifier and the gateway gate",
+          "agent": "nw-software-crafter",
+          "criteria": [
+            "W-4: a gateway-addressed a.b.svc.overdrive.local or overdrive.local apex query gets NXDOMAIN with the zone SOA and the upstream sees nothing.",
+            "W-3, W-6 and W-14 stay GREEN: a non-gateway-addressed datagram is dropped, mesh names resolve locally, and anything that is not one IN-class QUERY with one question is dropped.",
+            "The existing dns_wire, dns_answer_for and dns_responder_bind sets stay GREEN; WireError::NotMeshName is deleted."
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/integration/dns_forwarding_real_wire.rs",
+          "scenario_name": "W-4 a_platform_zone_name_that_is_not_a_mesh_name_is_nxdomain_and_never_forwarded (pending to GREEN); regression W-3 a_query_not_addressed_to_the_gateway_is_dropped_and_never_forwarded, W-6 mesh_names_still_resolve_locally_and_never_reach_the_upstream, W-14 a_gateway_addressed_datagram_that_is_not_one_in_class_query_is_dropped_and_never_forwarded",
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/dns_responder/wire.rs",
+            "crates/overdrive-control-plane/src/dns_responder/responder.rs",
+            "crates/overdrive-core/src/id.rs"
+          ],
+          "deps": [],
+          "dependencies": [],
+          "implementation_notes": "Pinned contract: feature-delta 'Zone and classification' (ADR-0357) and the inbound-datagram table. wire.rs: QueryName (hickory-free ASCII-case-folded labels), QueryClass { Mesh(MeshServiceName), PlatformUnknown, Forwardable }, the ONE classify(&QueryName) comparing TRAILING LABELS (overdrive, local), never a rendered string (so a\\.svc.overdrive.local, evil-overdrive.local and mixed case classify correctly); decode(&[u8]) -> Result<DecodedQuery, WireReject> with WireReject for every datagram that is not one IN-class QUERY with one question (dropped, no reply); encode generalised from MeshServiceName to the question name; platform-zone NXDOMAIN encoder (existing SOA, 1 s negative TTL); delete WireError::NotMeshName (single cut, delete any test defending only it). Responder: gate on the datagram's ipi_spec_dst == gateway (V-2 held). Gateway-addressed: Mesh answered exactly as today, PlatformUnknown gets NXDOMAIN (report QueryOutcome::NameError), Forwardable is still dropped as today until 04-02 (so W-5 stays pending). Datagram NOT addressed to the gateway: unchanged behaviour (Mesh answered, everything else dropped, no new reply ever). overdrive-core id.rs: MeshServiceName::PLATFORM_ZONE already exists as a scaffold; the design says a unit-level check keeps SUFFIX equal to \"svc.\" + PLATFORM_ZONE: implement that as a compile-time const assertion if SUFFIX allows it, else surface the question (no new test lane or test is to be invented). RECV_BUF_LEN stays 1500. Test command: cargo xtask metal run -- cargo nextest run -p overdrive-control-plane --features integration-tests -E 'binary(integration) & test(dns_forwarding_real_wire) | binary(integration) & test(dns_responder_bind) | binary(acceptance) & test(dns_wire)'."
+        },
+        {
+          "id": "04-02",
+          "name": "Responder forwards gateway-addressed queries over UDP",
+          "agent": "nw-software-crafter",
+          "criteria": [
+            "W-1, W-2 and W-5: a gateway-addressed public lookup is forwarded and answered, a nonexistent name gets the upstream NXDOMAIN promptly, and a name that only resembles the zone is forwarded.",
+            "W-7: an upstream answer in the mesh frontend range gets a definite reply with no address and the rcode kept.",
+            "W-8: with the upstream down three SERVFAILs arrive before the guest timeout with one dns.forward.failed, mesh keeps answering during the outage, and the next lookup after recovery is answered with no restart.",
+            "W-9 and W-10: an absent resolver file is a SERVFAIL not a boot refusal and recovers when restored; a file naming only the gateway never loops a forward to the node."
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/integration/dns_forwarding_real_wire.rs",
+          "scenario_name": "W-1 a_gateway_addressed_public_lookup_is_forwarded_and_answered; W-2 a_nonexistent_public_name_gets_nxdomain_promptly; W-5 a_name_that_only_resembles_the_platform_zone_is_forwarded; W-7 an_upstream_answer_in_the_mesh_frontend_range_never_reaches_the_guest; W-8 with_the_upstream_down_the_guest_gets_a_servfail_before_its_timeout_and_recovers; W-9 an_absent_resolver_file_is_a_servfail_not_a_boot_refusal_and_recovers_when_restored; W-10 a_resolver_file_naming_only_the_gateway_never_loops_the_forward_to_the_node",
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/dns_responder/responder.rs",
+            "crates/overdrive-control-plane/src/dns_responder/mod.rs",
+            "crates/overdrive-control-plane/src/dns_responder/wire.rs",
+            "crates/overdrive-control-plane/src/lib.rs",
+            "crates/overdrive-control-plane/src/node_adapters.rs",
+            "crates/overdrive-bench-families/src"
+          ],
+          "deps": [
+            "01-04",
+            "01-05",
+            "01-06",
+            "01-07",
+            "02-01",
+            "02-02",
+            "03-02",
+            "04-01"
+          ],
+          "dependencies": [
+            "01-04",
+            "01-05",
+            "01-06",
+            "01-07",
+            "02-01",
+            "02-02",
+            "03-02",
+            "04-01"
+          ],
+          "implementation_notes": "Pinned contract: feature-delta 'Responder lifecycle and load', 'Wire reply contract', 'Observer and events' (ADR-0356, ADR-0362). This step composes the whole UDP path into the production boot, so it is production-drivable the moment it lands. (1) A gateway-addressed Forwardable query calls Forwarder::try_acquire on the receive thread; None replies SERVFAIL from the datagram at once (QueryOutcome::Shed; wire encoder already exists from 01-04); Some hands the permit, (peer, spec_dst) and a shared handle to the socket to a task on the serve task's runtime that runs Forwarder::forward and sends the returned bytes through the existing source-pinned sendmsg (sendmsg on a UDP socket is safe from another thread); the permit is held until the reply is sent. The receive loop never awaits an upstream (AC-11). (2) ONE tokio_util CancellationToken, cancelled by stop(), observed with `biased;` by every forward task; no abort(), no task tracker, detached handles; the blocking UDP receive loop keeps its stop flag. (3) QueryOutcome gains Forwarded, ForwardFailed, OwnedRangeBlocked, Shed (Shed is an answered SERVFAIL, distinct from Dropped); update every exhaustive match in the same change including the overdrive-bench-families DNS family; the production observer stays NoQueryObserver. (4) GuestDnsDeps/HostGuestDnsFactory: HostGuestDnsFactory::host() stops being a const unit-struct literal and carries ResolvConfUpstreams on /etc/resolv.conf and HostUpstreamExchange; run_server builds OwnedAddressRanges::platform(&config.vip_range) once (the same VipRange the VIP allocator and ServiceBackendsResolve use) and puts it, the derived permits (03-02) and the adapters into the deps; Forwarder::new gets the injected Clock and the gateway. No new GuestDns trait method, no DnsResponderError variant, no new boot-refusal reason, no config surface. Ordering contract: the responder's probe MUST stay after converge_shared (lib.rs ~4623 before ~4743). dns.forward.* events are emitted by the forwarder (01-04..01-07), nothing new to log here. V-4 note: the guest-observed latencies under glibc and musl are measured at E17 capture, not here. Test command: cargo xtask metal run -- cargo nextest run -p overdrive-control-plane --features integration-tests -E 'binary(integration) & test(dns_forwarding_real_wire)'; regression: dns_responder_bind and dns_query_observer sets; compile gate: cargo xtask metal run -- cargo check --workspace --all-targets --features integration-tests.\nfiles_to_modify (review finding 4): name the single overdrive-bench-families file holding the exhaustive QueryOutcome match when you touch it. Note (finding 6): the UDP shed path lands here; it is first observed at Tier 3 in 04-03 (W-13); F-28..F-34 cover it at Tier 1.\nDELIVER NOTE: the /etc/resolv.conf default-path const for ResolvConfUpstreams was not added in 02-01 (it would be dead code); add it here where run_server / HostGuestDnsFactory::host() composes the production adapter."
+        },
+        {
+          "id": "04-03",
+          "name": "Responder serves TCP/53 on the gateway",
+          "agent": "nw-software-crafter",
+          "criteria": [
+            "W-11: a query over TCP is forwarded over TCP and answered once per connection with a framed reply, then the connection closes.",
+            "W-12: the probe refuses with the existing typed Bind error when the gateway TCP port 53 is already held.",
+            "W-13: with every permit held a further UDP query is SERVFAILed at once (under 500 ms), a TCP connection is closed unread, mesh over UDP still answers, and one dns.forward.shed_started warns.",
+            "W-15: a TCP connection with a zero-length frame or a frame over 1500 bytes is closed promptly without a reply and the upstream sees nothing."
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/integration/dns_forwarding_real_wire.rs",
+          "scenario_name": "W-11 a_query_over_tcp_is_forwarded_over_tcp_and_answered_once_per_connection; W-12 the_probe_refuses_when_the_gateway_tcp_port_is_held; W-13 with_every_permit_held_a_further_query_is_shed_at_once_and_mesh_still_answers; W-15 a_tcp_connection_with_malformed_framing_is_closed_without_a_reply",
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/dns_responder/responder.rs"
+          ],
+          "deps": [
+            "04-02"
+          ],
+          "dependencies": [
+            "04-02"
+          ],
+          "implementation_notes": "Pinned contract: feature-delta 'Responder lifecycle and load' TCP paragraph, gate G-1 (ADR-0360, ADR-0362). Listener bound to gateway:53 ONLY (never the wildcard), no IP_FREEBIND, bound inside GuestDns::probe after the UDP bind; a bind failure reuses the existing Bind variant (no new error variant). The accept loop takes a permit with Forwarder::try_acquire AT ACCEPT, before any read, for every connection whatever the query class; none available closes the accepted connection unread (QueryOutcome::Shed). One query per connection: read one two-byte-framed query under TCP_READ_DEADLINE = 5 s covering prefix and body, run the same classify/answer-or-forward path with DnsTransport::Tcp, write the framed reply, close. A zero length, a short read, a frame over RECV_BUF_LEN (1500) or an expired deadline closes without a reply (the deadline clause has no scenario by design: do not add one). Per-connection tasks hold child tokens of the 04-02 cancellation token; the accept loop observes the token with `biased;`. No connection cap of its own: the permits are the cap. Under saturation a mesh name asked over TCP is closed too (class unknown at accept); mesh over UDP is unaffected. Test command: cargo xtask metal run -- cargo nextest run -p overdrive-control-plane --features integration-tests -E 'binary(integration) & test(dns_forwarding_real_wire)'; regression: dns_responder_bind."
+        }
+      ]
+    },
+    {
+      "id": "05",
+      "name": "Guest walking skeleton through serve and deploy",
+      "steps": [
+        {
+          "id": "05-01",
+          "name": "A VM guest resolves public names through serve and deploy",
+          "agent": "nw-software-crafter",
+          "criteria": [
+            "G-1 (walking skeleton): a VM guest deployed through serve + deploy resolves github.com through its default resolver (single nameserver 100.95.0.1) in under 1000 ms and completes a byte-exact exchange; the Job ends Terminated; the peer and the upstream each served once.",
+            "G-2: the four usual public names resolve under 1000 ms and a nonexistent name fails with a definite name-does-not-resolve in under 1000 ms.",
+            "G-3: an upstream answer of 10.98.0.7 never reaches the guest and gives a definite result under 1000 ms, while a 10.20.4.7 answer is delivered.",
+            "G-4 stays GREEN: with the upstream unreachable the guest lookup ends with a definite error and a Terminated Job."
+          ],
+          "test_file": "crates/overdrive-cli/tests/integration/guest_public_dns.rs",
+          "scenario_name": "G-1 a_vm_guest_resolves_a_public_name_through_its_default_resolver_and_connects; G-2 the_dev_boxs_usual_names_resolve_and_a_nonexistent_name_fails_definitely_and_promptly; G-3 an_upstream_answer_in_the_mesh_frontend_range_never_reaches_the_guest; regression G-4 with_the_upstream_unreachable_the_guest_lookup_ends_with_a_definite_error",
+          "files_to_modify": [
+            "crates/overdrive-cli/tests/integration/guest_public_dns.rs"
+          ],
+          "deps": [
+            "04-02",
+            "04-03"
+          ],
+          "dependencies": [
+            "04-02",
+            "04-03"
+          ],
+          "implementation_notes": "Terminal vertical-slice gate (CLAUDE.md 'Build vertical slices through production entry points'): serve and deploy run in-process through the production composition, nothing is installed in the guest and no test hand-installs a resolver, route, rule or socket production omits. Expected to be marker removal plus verification: the production code is complete after 04-03; if G-1..G-3 fail for a reason the earlier steps' tests did not reveal, diagnose against the production path (debugging.md), fix the production code in the owning component, and do not edit the test bodies or the guest program support in overdrive-testing. G-4 asserts only a definite error and a terminated Job, no timing bound (musl SERVFAIL handling: decided by DISTILL); the node-side promptness oracle is W-8/F-8. Do not edit E17 or capture it here; it is captured after DELIVER by a different reviewer. Prerequisites on a fresh box: cargo xtask metal run -- env OVERDRIVE_BPF_NATIVE=1 cargo xtask bpf-build; cargo xtask metal run -- cargo xtask guest-kit-prepare; cargo xtask metal run --exclusive -- cargo xtask kmod-load. Test command: cargo xtask metal run -- cargo nextest run -p overdrive-cli --features integration-tests,kvm-tests -E 'binary(integration) & test(guest_public_dns)'. Final feature gates: cargo xtask metal run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings; cargo xtask metal run -- cargo xtask placement-lint; cargo xtask metal run -- cargo nextest run -p overdrive-control-plane --features integration-tests -E 'test(dns_)'."
+        }
+      ]
+    }
+  ],
+  "implementation_scope": {
+    "source_directories": [
+      "crates/overdrive-control-plane/src/dns_responder/",
+      "crates/overdrive-control-plane/src/",
+      "crates/overdrive-core/src/",
+      "crates/overdrive-cli/src/",
+      "crates/overdrive-bench-families/src/"
+    ],
+    "test_directories": [
+      "crates/overdrive-control-plane/tests/acceptance/",
+      "crates/overdrive-control-plane/tests/integration/",
+      "crates/overdrive-control-plane/tests/common/",
+      "crates/overdrive-cli/tests/integration/",
+      "crates/overdrive-sim/tests/",
+      "tests/conformance/src/"
+    ],
+    "excluded_patterns": [
+      "target/**",
+      "**/*.rs.bk",
+      "**/generated/**",
+      "spike-scratch/**"
+    ]
+  },
+  "validation": {
+    "status": "approved",
+    "note": "Awaiting independent roadmap review. Mutation testing is disabled for this project, so no step carries a mutation gate. Length warnings from des-roadmap validate (STEP_NAME_TOO_LONG, CRITERIA_TOO_LONG, TOO_MANY_CRITERIA) are cosmetic and non-blocking per CLAUDE.md 'Roadmap validator warnings'.",
+    "review": "roadmap-review.yaml: CHANGES_REQUESTED -> findings 2-6 applied by orchestrator; finding 1 rejected (ip/nft check was requested by the user, 2026-11-27)"
+  }
+}

@@ -140,7 +140,6 @@ const PENDING: &str = "upstream exchange: one fresh socket per exchange";
 
 #[overdrive_test(guest = "cgroup-default", profile = "normal-gate")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[should_panic(expected = "upstream exchange: one fresh socket per exchange")]
 async fn a_udp_exchange_returns_the_matching_reply_and_ignores_a_wrong_id_and_a_wrong_question() {
     let server = udp_server();
     let q = wire_query(0x1111, "github.com.");
@@ -166,7 +165,6 @@ async fn a_udp_exchange_returns_the_matching_reply_and_ignores_a_wrong_id_and_a_
 
 #[overdrive_test(guest = "cgroup-default", profile = "normal-gate")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[should_panic(expected = "upstream exchange: one fresh socket per exchange")]
 async fn a_silent_upstream_is_a_timeout_and_a_closed_port_is_unreachable_not_a_timeout() {
     let q = wire_query(7, "crates.io.");
     let exchange = HostUpstreamExchange;
@@ -192,7 +190,6 @@ async fn a_silent_upstream_is_a_timeout_and_a_closed_port_is_unreachable_not_a_t
 
 #[overdrive_test(guest = "cgroup-default", profile = "normal-gate")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[should_panic(expected = "upstream exchange: one fresh socket per exchange")]
 async fn a_udp_reply_that_fills_the_receive_buffer_is_reply_too_large() {
     let server = udp_server();
     let q = wire_query(9, "big.example.");
@@ -211,7 +208,6 @@ async fn a_udp_reply_that_fills_the_receive_buffer_is_reply_too_large() {
 
 #[overdrive_test(guest = "cgroup-default", profile = "normal-gate")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-#[should_panic(expected = "upstream exchange: one fresh socket per exchange")]
 async fn a_tcp_exchange_frames_one_query_per_connection_and_rejects_a_mismatched_reply() {
     let listener = TcpListener::bind(SocketAddrV4::new(SERVER, 53)).expect("bind TCP upstream");
     let q = wire_query(0x3333, "github.com.");
