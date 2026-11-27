@@ -523,7 +523,6 @@ fn a_query_that_arrived_over_tcp_is_forwarded_over_tcp() {
 /// timeout, then the second upstream answers: the guest gets its answer well
 /// inside its 5 s resolver timeout.
 #[test]
-#[should_panic(expected = "forwarder: exchange the query verbatim")]
 fn a_silent_first_upstream_fails_over_to_the_second_after_one_attempt_timeout() {
     run(async {
         let q = query(1, "crates.io.", RecordType::A, None);
@@ -549,7 +548,6 @@ fn a_silent_first_upstream_fails_over_to_the_second_after_one_attempt_timeout() 
 /// Contract shape: bounded-change. A refused connection is not a wait: the
 /// next upstream is tried at once.
 #[test]
-#[should_panic(expected = "forwarder: exchange the query verbatim")]
 fn a_refusing_upstream_costs_no_time_before_the_next_is_tried() {
     run(async {
         let q = query(2, "crates.io.", RecordType::A, None);
@@ -570,7 +568,6 @@ fn a_refusing_upstream_costs_no_time_before_the_next_is_tried() {
 /// attempt is trimmed to the time left and the guest gets a SERVFAIL (echoing
 /// its id and question, no records) no later than the budget.
 #[test]
-#[should_panic(expected = "forwarder: exchange the query verbatim")]
 fn with_every_upstream_silent_the_guest_gets_a_servfail_within_the_budget() {
     run(async {
         let q = query(0x0BAD, "crates.io.", RecordType::A, None);
@@ -611,7 +608,6 @@ fn with_every_upstream_silent_the_guest_gets_a_servfail_within_the_budget() {
 /// Contract shape: bounded-change. AC-10: when every upstream refuses, the
 /// guest gets a definite SERVFAIL at once, not after a wait.
 #[test]
-#[should_panic(expected = "forwarder: exchange the query verbatim")]
 fn with_every_upstream_refusing_the_servfail_is_immediate_and_names_the_last_failure() {
     run(async {
         let q = query(3, "crates.io.", RecordType::A, None);
@@ -634,7 +630,6 @@ fn with_every_upstream_refusing_the_servfail_is_immediate_and_names_the_last_fai
 /// decoded is a failed attempt and the next upstream is tried; an address that
 /// cannot be inspected is never relayed.
 #[test]
-#[should_panic(expected = "forwarder: exchange the query verbatim")]
 fn an_undecodable_reply_is_a_failed_attempt_and_the_next_upstream_is_tried() {
     run(async {
         let q = query(4, "crates.io.", RecordType::A, None);
@@ -664,7 +659,6 @@ fn an_undecodable_reply_is_a_failed_attempt_and_the_next_upstream_is_tried() {
 /// Contract shape: bounded-change. ADR-0356: an oversize UDP reply is a
 /// distinct failure mode and is treated like any failed attempt.
 #[test]
-#[should_panic(expected = "forwarder: exchange the query verbatim")]
 fn a_reply_too_large_for_the_buffer_is_a_failed_attempt_with_its_own_cause() {
     run(async {
         let q = query(6, "crates.io.", RecordType::A, None);
@@ -698,7 +692,6 @@ proptest! {
     /// the gateway, in its IPv4 and IPv4-mapped IPv6 forms, is the one address
     /// excluded from the candidates; every other candidate is tried, in file order.
     #[test]
-    #[should_panic(expected = "forwarder: exchange the query verbatim")]
     fn only_the_gateway_is_excluded_and_file_order_is_kept(
         others in proptest::collection::vec((1u8..=250, 1u8..=250, 1u8..=250), 0..5),
         gateway_slots in proptest::collection::vec((0usize..6, any::<bool>()), 0..4),
@@ -726,7 +719,6 @@ proptest! {
 /// only the gateway is `NoUsableUpstream`: nothing is exchanged, so the
 /// forwarder can never loop to itself.
 #[test]
-#[should_panic(expected = "forwarder: exchange the query verbatim")]
 fn a_resolver_list_naming_only_the_gateway_is_no_usable_upstream_and_nothing_is_sent() {
     run(async {
         let q = query(8, "github.com.", RecordType::A, None);
@@ -746,7 +738,6 @@ fn a_resolver_list_naming_only_the_gateway_is_no_usable_upstream_and_nothing_is_
 /// refusal; the file is re-read for every query, so restoring it recovers with
 /// no restart (AC-12).
 #[test]
-#[should_panic(expected = "forwarder: exchange the query verbatim")]
 fn an_unusable_resolver_source_is_a_servfail_with_a_distinct_cause_and_recovers_when_restored() {
     run(async {
         let q = query(12, "github.com.", RecordType::A, None);
@@ -1013,7 +1004,7 @@ fn flapping_world() -> World {
 /// reply arrives at least `FORWARD_BUDGET` after the last failure; a later
 /// failure starts a new episode.
 #[test]
-#[should_panic(expected = "forwarder: exchange the query verbatim")]
+#[should_panic(expected = "one start for three failed queries")]
 fn a_failure_episode_warns_once_at_its_start_and_once_when_it_clears() {
     run(async {
         let (events, _guard) = capture();
@@ -1053,7 +1044,7 @@ fn a_failure_episode_warns_once_at_its_start_and_once_when_it_clears() {
 /// EARLIER than `FORWARD_BUDGET` after the last failure neither clears nor
 /// changes the flag, so a failure right after it is still the one episode.
 #[test]
-#[should_panic(expected = "forwarder: exchange the query verbatim")]
+#[should_panic(expected = "still one episode: no second start")]
 fn an_early_accepted_reply_leaves_the_failure_episode_open() {
     run(async {
         let (events, _guard) = capture();
@@ -1070,7 +1061,7 @@ fn an_early_accepted_reply_leaves_the_failure_episode_open() {
 /// Contract shape: bounded-change. Boundary scenario 3 (resolver file absent):
 /// a missing source starts the same episode, with no boot involvement.
 #[test]
-#[should_panic(expected = "forwarder: exchange the query verbatim")]
+#[should_panic(expected = "left: 0\n right: 1")]
 fn an_absent_resolver_file_starts_the_same_failure_episode() {
     run(async {
         let (events, _guard) = capture();

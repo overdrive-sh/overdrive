@@ -35,7 +35,7 @@ use std::str::FromStr;
 use std::time::Duration;
 
 use hickory_proto::op::{Message, MessageType, OpCode, ResponseCode};
-use hickory_proto::rr::rdata::svcb::{SvcParamValue, SVCB};
+use hickory_proto::rr::rdata::svcb::{SVCB, SvcParamValue};
 use hickory_proto::rr::rdata::{A, SOA};
 use hickory_proto::rr::{Name, RData, Record, RecordType};
 use overdrive_core::id::{MeshServiceName, NameAnswer};
@@ -188,6 +188,29 @@ pub fn encode(
         .unwrap_or_else(|err| unreachable!("self-constructed DNS Message must encode: {err}"))
 }
 
+/// A SERVFAIL for `query`: id and question echoed, QR set, RD copied from the
+/// query, RA set, no records. A query that does not decode still gets a
+/// header-only SERVFAIL carrying the id from its first two bytes (0 if short).
+pub(super) fn servfail_reply(query: &[u8]) -> Vec<u8> {
+    let decoded = Message::from_vec(query).ok();
+    let id = decoded.as_ref().map_or_else(
+        || query.first_chunk::<2>().map_or(0, |bytes| u16::from_be_bytes(*bytes)),
+        |message| message.metadata.id,
+    );
+    let mut reply = Message::new(id, MessageType::Response, OpCode::Query);
+    reply.metadata.response_code = ResponseCode::ServFail;
+    reply.metadata.recursion_available = true;
+    if let Some(message) = decoded {
+        reply.metadata.recursion_desired = message.metadata.recursion_desired;
+        for question in message.queries {
+            reply.add_query(question);
+        }
+    }
+    reply
+        .to_vec()
+        .unwrap_or_else(|err| unreachable!("self-constructed SERVFAIL must encode: {err}"))
+}
+
 /// What the forwarder needs to know about an upstream reply, with no
 /// `hickory_proto` type in sight (DDN-4).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -208,11 +231,8 @@ pub struct UndecodableReply {
 /// is an error; the forwarder never relays bytes it could not inspect.
 pub fn inspect_reply(reply: &[u8]) -> Result<ReplyFacts, UndecodableReply> {
     let message = Message::from_vec(reply).map_err(|source| UndecodableReply { source })?;
-    let answer_addresses = message
-        .answers
-        .iter()
-        .flat_map(|record| record_addresses(&record.data))
-        .collect();
+    let answer_addresses =
+        message.answers.iter().flat_map(|record| record_addresses(&record.data)).collect();
     Ok(ReplyFacts { answer_addresses })
 }
 

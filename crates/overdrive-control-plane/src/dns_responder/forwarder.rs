@@ -17,15 +17,18 @@
 )]
 
 use std::io;
-use std::net::Ipv4Addr;
+use std::net::{IpAddr, Ipv4Addr};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use overdrive_core::traits::clock::Clock;
 
 use super::owned_ranges::{OwnedAddressRanges, OwnedRangeKind};
-use super::upstream::{DnsTransport, UpstreamExchange, UpstreamResolvers, UpstreamSet};
-use super::wire::inspect_reply;
+use super::upstream::{
+    DnsTransport, ExchangeError, NoUsableUpstream, UpstreamConfigError, UpstreamExchange,
+    UpstreamResolvers, UpstreamSet,
+};
+use super::wire::{ReplyFacts, inspect_reply, servfail_reply};
 
 /// One upstream attempt budget.
 pub const UPSTREAM_ATTEMPT_TIMEOUT: Duration = Duration::from_millis(1500);
@@ -162,28 +165,134 @@ impl Forwarder {
     ) -> ForwardOutcome {
         let _ = permit;
         let deadline = self.clock.now() + FORWARD_BUDGET;
-        let Ok(candidates) = self.resolvers.candidates().await else { Self::failure_scaffold() };
-        let Ok(upstreams) = UpstreamSet::select(candidates, self.gateway) else {
-            Self::failure_scaffold()
+        let upstreams = match self.upstreams().await {
+            Ok(upstreams) => upstreams,
+            Err(cause) => return Self::failed(request, cause),
         };
-        // Only the first upstream is tried until failover lands.
-        let Some(server) = upstreams.servers.into_iter().next() else { Self::failure_scaffold() };
-        let remaining = deadline.saturating_duration_since(self.clock.now());
-        let timeout = UPSTREAM_ATTEMPT_TIMEOUT.min(remaining);
-        let Ok(reply) =
-            self.exchange.exchange(server, request.transport, request.wire, timeout).await
-        else {
-            Self::failure_scaffold()
-        };
-        let Ok(facts) = inspect_reply(&reply) else { Self::failure_scaffold() };
-        if facts.answer_addresses.iter().any(|a| self.owned.owning_range(*a).is_some()) {
-            Self::failure_scaffold()
+        match self.first_accepted_reply(&upstreams, request, deadline).await {
+            Ok(reply) => self.deliver(reply),
+            Err(cause) => Self::failed(request, cause),
         }
-        ForwardOutcome::Relayed(reply)
     }
 
-    /// Failover, SERVFAIL replies and the owned-range guard land in later steps.
-    fn failure_scaffold() -> ! {
-        todo!("forwarder: exchange the query verbatim (failure and guard paths are not yet built)")
+    /// The upstreams to try, or why there are none.
+    async fn upstreams(&self) -> Result<UpstreamSet, ForwardFailure> {
+        let candidates = match self.resolvers.candidates().await {
+            Ok(candidates) => candidates,
+            Err(UpstreamConfigError::Absent) => return Err(ForwardFailure::ConfigAbsent),
+            Err(UpstreamConfigError::Unreadable { source }) => {
+                return Err(ForwardFailure::ConfigUnreadable { kind: source.kind() });
+            }
+        };
+        if candidates.is_empty() {
+            return Err(ForwardFailure::NoNameserverListed);
+        }
+        UpstreamSet::select(candidates, self.gateway)
+            .map_err(|NoUsableUpstream| ForwardFailure::NoUsableUpstream)
+    }
+
+    /// Tries each upstream in order while time remains; the first reply whose
+    /// addresses could be inspected wins, whatever its rcode.
+    async fn first_accepted_reply(
+        &self,
+        upstreams: &UpstreamSet,
+        request: &ForwardRequest<'_>,
+        deadline: Instant,
+    ) -> Result<AcceptedReply, ForwardFailure> {
+        let mut last = None;
+        for server in &upstreams.servers {
+            let remaining = deadline.saturating_duration_since(self.clock.now());
+            if remaining.is_zero() {
+                return Err(ForwardFailure::Attempts { last, budget_exhausted: true });
+            }
+            let timeout = UPSTREAM_ATTEMPT_TIMEOUT.min(remaining);
+            match self.attempt(*server, request, timeout).await {
+                Ok(reply) => return Ok(reply),
+                Err(failure) => last = Some(failure),
+            }
+        }
+        Err(ForwardFailure::Attempts { last, budget_exhausted: false })
+    }
+
+    /// One exchange with one upstream, its reply projected for inspection.
+    async fn attempt(
+        &self,
+        server: IpAddr,
+        request: &ForwardRequest<'_>,
+        timeout: Duration,
+    ) -> Result<AcceptedReply, AttemptFailure> {
+        let bytes = self
+            .exchange
+            .exchange(server, request.transport, request.wire, timeout)
+            .await
+            .map_err(AttemptFailure::from)?;
+        let facts = inspect_reply(&bytes).map_err(|_| AttemptFailure::UndecodableReply)?;
+        Ok(AcceptedReply { bytes, facts })
+    }
+
+    /// The owned-range guard lands in a later step; until then an owned
+    /// address is not yet handled.
+    fn deliver(&self, reply: AcceptedReply) -> ForwardOutcome {
+        let owned =
+            reply.facts.answer_addresses.iter().any(|a| self.owned.owning_range(*a).is_some());
+        if owned {
+            Self::guard_scaffold()
+        }
+        ForwardOutcome::Relayed(reply.bytes)
+    }
+
+    fn failed(request: &ForwardRequest<'_>, cause: ForwardFailure) -> ForwardOutcome {
+        ForwardOutcome::Failed { reply: servfail_reply(request.wire), cause }
+    }
+
+    /// The owned-range guard lands in a later step.
+    fn guard_scaffold() -> ! {
+        todo!("forwarder: exchange the query verbatim (the owned-range guard is not yet built)")
+    }
+}
+
+/// A reply an upstream gave and whose addresses could be inspected.
+struct AcceptedReply {
+    bytes: Vec<u8>,
+    facts: ReplyFacts,
+}
+
+impl From<ExchangeError> for AttemptFailure {
+    fn from(error: ExchangeError) -> Self {
+        match error {
+            ExchangeError::Timeout => Self::Timeout,
+            ExchangeError::Unreachable { source } => Self::Unreachable { kind: source.kind() },
+            ExchangeError::Io { source } => Self::Io { kind: source.kind() },
+            ExchangeError::ReplyTooLarge => Self::ReplyTooLarge,
+        }
+    }
+}
+
+impl ForwardFailure {
+    /// The canonical label; `budget_exhausted` selects the `Attempts` label.
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::ConfigAbsent => "config_absent",
+            Self::ConfigUnreadable { .. } => "config_unreadable",
+            Self::NoNameserverListed => "no_nameserver_listed",
+            Self::NoUsableUpstream => "no_usable_upstream",
+            Self::Attempts { budget_exhausted: true, .. } => "budget_exhausted",
+            Self::Attempts { budget_exhausted: false, .. } => "all_upstreams_failed",
+        }
+    }
+}
+
+impl AttemptFailure {
+    /// The canonical label.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Timeout => "timeout",
+            Self::Unreachable { .. } => "unreachable",
+            Self::Io { .. } => "io",
+            Self::ReplyTooLarge => "reply_too_large",
+            Self::UndecodableReply => "undecodable_reply",
+        }
     }
 }
