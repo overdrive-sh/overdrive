@@ -193,15 +193,15 @@ pub fn encode(
 /// query, RA set, no records. A query that does not decode still gets a
 /// header-only SERVFAIL carrying the id from its first two bytes (0 if short).
 pub(super) fn servfail_reply(query: &[u8]) -> Vec<u8> {
-    let decoded = Message::from_vec(query).ok();
+    let decoded = Message::from_vec(query);
     let id = decoded.as_ref().map_or_else(
-        || query.first_chunk::<2>().map_or(0, |bytes| u16::from_be_bytes(*bytes)),
+        |_| query.first_chunk::<2>().map_or(0, |bytes| u16::from_be_bytes(*bytes)),
         |message| message.metadata.id,
     );
     let mut reply = Message::new(id, MessageType::Response, OpCode::Query);
     reply.metadata.response_code = ResponseCode::ServFail;
     reply.metadata.recursion_available = true;
-    if let Some(message) = decoded {
+    if let Ok(message) = decoded {
         reply.metadata.recursion_desired = message.metadata.recursion_desired;
         for question in message.queries {
             reply.add_query(question);
@@ -231,7 +231,7 @@ pub(super) fn question_name(message: &[u8]) -> String {
 /// The blocked reply for an upstream reply that carried an owned address:
 /// answer, authority and additional sections emptied, the upstream's id,
 /// rcode and question kept, AD and TC cleared. Only when `query` carried an
-/// OPT record does the reply carry one (payload 1232, version 0, DO copied
+/// OPT record does the reply carry one (payload 1232, DO copied
 /// from the query, one Extended DNS Error option, code 15 "Blocked").
 pub(super) fn blocked_reply(upstream_reply: &[u8], query: &[u8]) -> Vec<u8> {
     let mut message = Message::from_vec(upstream_reply)
@@ -253,7 +253,6 @@ pub(super) fn blocked_reply(upstream_reply: &[u8], query: &[u8]) -> Vec<u8> {
 fn blocked_opt(dnssec_ok: bool) -> Edns {
     let mut edns = Edns::new();
     edns.set_max_payload(BLOCKED_REPLY_UDP_PAYLOAD);
-    edns.set_version(0);
     edns.set_dnssec_ok(dnssec_ok);
     edns.options_mut().insert(EdnsOption::Unknown(15, EDE_BLOCKED.to_vec()));
     edns
@@ -262,46 +261,41 @@ fn blocked_opt(dnssec_ok: bool) -> Edns {
 /// What the forwarder needs to know about an upstream reply, with no
 /// `hickory_proto` type in sight (DDN-4).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ReplyFacts {
+pub(super) struct ReplyFacts {
     /// Every IPv4 address in the answer section: A rdata and the `ipv4hint`
     /// of SVCB / HTTPS records, in wire order.
-    pub answer_addresses: Vec<Ipv4Addr>,
+    pub(super) answer_addresses: Vec<Ipv4Addr>,
 }
 
 /// The upstream reply bytes are not a decodable DNS message.
 #[derive(Debug, Error)]
 #[error("upstream reply is not a decodable DNS message: {source}")]
-pub struct UndecodableReply {
+pub(super) struct UndecodableReply {
     source: hickory_proto::serialize::binary::DecodeError,
 }
 
 /// Project an upstream reply into [`ReplyFacts`]. A reply that does not decode
 /// is an error; the forwarder never relays bytes it could not inspect.
-pub fn inspect_reply(reply: &[u8]) -> Result<ReplyFacts, UndecodableReply> {
+pub(super) fn inspect_reply(reply: &[u8]) -> Result<ReplyFacts, UndecodableReply> {
     let message = Message::from_vec(reply).map_err(|source| UndecodableReply { source })?;
-    let answer_addresses =
-        message.answers.iter().flat_map(|record| record_addresses(&record.data)).collect();
+    let mut answer_addresses = Vec::with_capacity(message.answers.len());
+    for record in &message.answers {
+        match &record.data {
+            RData::A(a) => answer_addresses.push(a.0),
+            RData::SVCB(svcb) => answer_addresses.extend(hint_addresses(svcb)),
+            RData::HTTPS(https) => answer_addresses.extend(hint_addresses(&https.0)),
+            _ => {}
+        }
+    }
     Ok(ReplyFacts { answer_addresses })
 }
 
-fn record_addresses(data: &RData) -> Vec<Ipv4Addr> {
-    match data {
-        RData::A(a) => vec![a.0],
-        RData::SVCB(svcb) => hint_addresses(svcb),
-        RData::HTTPS(https) => hint_addresses(&https.0),
-        _ => Vec::new(),
-    }
-}
-
-fn hint_addresses(svcb: &SVCB) -> Vec<Ipv4Addr> {
-    svcb.svc_params
-        .iter()
-        .filter_map(|(_, value)| match value {
-            SvcParamValue::Ipv4Hint(hint) => Some(hint.0.iter().map(|a| a.0)),
-            _ => None,
-        })
-        .flatten()
-        .collect()
+fn hint_addresses(svcb: &SVCB) -> impl Iterator<Item = Ipv4Addr> + '_ {
+    svcb.svc_params.iter().filter_map(|(_, value)| match value {
+        SvcParamValue::Ipv4Hint(hint) => Some(hint.0.iter().map(|a| a.0)),
+        _ => None,
+    })
+    .flatten()
 }
 
 /// Derive the SOA `SERIAL` from the injected clock reading at 1-second

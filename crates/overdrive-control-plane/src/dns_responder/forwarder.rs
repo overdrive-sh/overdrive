@@ -1,20 +1,5 @@
 //! `forwarder` — the per-query upstream exchange, failover, owned-range guard
 //! and in-flight permits (GPD-1, GPD-4, GPD-8; ADR-0356, ADR-0359, ADR-0362).
-//!
-//! DISTILL scaffold: shapes are the pinned contract; bodies are `todo!`.
-
-#![allow(
-    clippy::todo,
-    clippy::missing_const_for_fn,
-    clippy::unused_async,
-    clippy::needless_pass_by_value,
-    clippy::unused_self,
-    clippy::too_many_arguments,
-    clippy::unnecessary_wraps,
-    clippy::doc_markdown,
-    dead_code,
-    reason = "DISTILL scaffold: bodies are todo until DELIVER (ADR-0356, ADR-0362)"
-)]
 
 use std::io;
 use std::net::{IpAddr, Ipv4Addr};
@@ -215,9 +200,8 @@ impl Forwarder {
     pub async fn forward(
         &self,
         request: &ForwardRequest<'_>,
-        permit: &ForwardPermit,
+        _permit: &ForwardPermit,
     ) -> ForwardOutcome {
-        let _ = permit;
         let deadline = self.clock.now() + FORWARD_BUDGET;
         let upstreams = match self.upstreams().await {
             Ok(upstreams) => upstreams,
@@ -388,9 +372,7 @@ impl ForwardFailure {
             Self::Attempts { budget_exhausted: false, .. } => "all_upstreams_failed",
         }
     }
-}
 
-impl ForwardFailure {
     /// The cause's detail for the episode-start warn.
     fn detail(&self) -> String {
         match self {

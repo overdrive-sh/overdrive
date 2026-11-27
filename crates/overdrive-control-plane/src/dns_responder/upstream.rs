@@ -1,17 +1,5 @@
 //! `upstream` — the two driven ports of the forwarder and the pure upstream
 //! selection (GPD-1, GPD-3; ADR-0356, ADR-0358).
-//!
-//! DISTILL scaffold: shapes are the pinned contract; `select` is `todo!`.
-
-#![allow(
-    clippy::todo,
-    clippy::missing_const_for_fn,
-    clippy::needless_pass_by_value,
-    clippy::doc_markdown,
-    clippy::missing_errors_doc,
-    dead_code,
-    reason = "DISTILL scaffold: bodies are todo until DELIVER (ADR-0356, ADR-0358)"
-)]
 
 use std::io;
 use std::net::{IpAddr, Ipv4Addr};

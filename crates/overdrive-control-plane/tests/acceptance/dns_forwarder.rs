@@ -10,10 +10,10 @@
 //! the scripted exchange was asked (server, transport, timeout, query bytes),
 //! the elapsed `SimClock` time, and the warn events the forwarder emits.
 //!
-//! Every test below is a pending scenario: its body is complete and fails
-//! today against the DISTILL scaffold with the semantic RED named in its
-//! `should_panic(expected = ...)`. DELIVER removes the marker, one scenario at
-//! a time (`.claude/rules/testing.md` § "RED acceptance scaffolds").
+//! Scenarios that still carry a `should_panic(expected = ...)` marker are
+//! pending: their bodies are complete and fail with the semantic RED the
+//! marker names until the behaviour lands (`.claude/rules/testing.md`
+//! § "RED acceptance scaffolds").
 
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::too_many_lines)]
 #![allow(clippy::doc_markdown, clippy::items_after_statements, clippy::type_complexity)]
@@ -28,8 +28,8 @@
 )]
 #![allow(
     clippy::drop_non_drop,
-    reason = "`ForwardPermit` is RAII (released on drop) per the contract; the DISTILL scaffold has no Drop yet, \
-              and these drops are the scenario's release step"
+    reason = "`ForwardPermit` is RAII (released on drop) per the contract; these explicit drops are the \
+              scenario's release step"
 )]
 
 use std::collections::BTreeSet;

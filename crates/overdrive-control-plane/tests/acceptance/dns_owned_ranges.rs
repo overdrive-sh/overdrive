@@ -2,8 +2,9 @@
 //! AC-8; ADR-0359). Default lane, pure: `OwnedAddressRanges::platform` and
 //! `owning_range` are driven with no socket and no clock.
 //!
-//! Pending scenarios: complete bodies, RED against the DISTILL scaffold with
-//! the semantic RED named in `should_panic(expected = ...)`.
+//! A scenario that still carries a `should_panic(expected = ...)` marker is
+//! pending: its body is complete and fails with the semantic RED the marker
+//! names until the behaviour lands.
 
 #![allow(clippy::expect_used, clippy::unwrap_used, clippy::doc_markdown)]
 

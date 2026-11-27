@@ -59,7 +59,6 @@ impl OwnedAddressRanges {
         if let Some((_, kind)) = self.fixed.iter().find(|(net, _)| net.contains(&address)) {
             return Some(*kind);
         }
-        let host = Ipv4Net::new(address, 32).ok()?;
-        self.vip_range.first_overlapping_range(host).map(|_| OwnedRangeKind::ServiceVip)
+        self.vip_range.first_overlapping_range(Ipv4Net::from(address)).map(|_| OwnedRangeKind::ServiceVip)
     }
 }
