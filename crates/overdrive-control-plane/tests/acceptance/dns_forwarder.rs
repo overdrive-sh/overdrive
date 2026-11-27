@@ -369,7 +369,6 @@ fn run<F: std::future::Future>(future: F) -> F::Output {
 /// guest's query bytes reach the upstream unchanged, and the upstream's reply
 /// reaches the guest byte for byte.
 #[test]
-#[should_panic(expected = "forwarder: exchange the query verbatim")]
 fn a_public_lookup_is_sent_upstream_unchanged_and_the_upstream_reply_is_relayed_byte_for_byte() {
     run(async {
         let q = query(0x4242, "github.com.", RecordType::A, Some(true));
@@ -394,7 +393,6 @@ fn a_public_lookup_is_sent_upstream_unchanged_and_the_upstream_reply_is_relayed_
 /// NXDOMAIN), ADR-0356 step 5: an accepted reply of ANY rcode is final; there
 /// is no failover on an rcode.
 #[test]
-#[should_panic(expected = "forwarder: exchange the query verbatim")]
 fn an_upstream_reply_of_any_rcode_is_final_and_never_triggers_failover() {
     run(async {
         for rcode in [
@@ -427,7 +425,6 @@ fn an_upstream_reply_of_any_rcode_is_final_and_never_triggers_failover() {
 /// Contract shape: bounded-change. ADR-0361: every non-mesh record type
 /// passes through; AAAA, MX, TXT and HTTPS are relayed like A.
 #[test]
-#[should_panic(expected = "forwarder: exchange the query verbatim")]
 fn every_non_mesh_record_type_is_relayed_unchanged() {
     run(async {
         for qtype in [
@@ -455,7 +452,6 @@ fn every_non_mesh_record_type_is_relayed_unchanged() {
 /// DNSSEC-signed reply (AD bit, TC bit, an RRSIG record) is relayed with no
 /// byte changed, and is never mistaken for an undecodable reply.
 #[test]
-#[should_panic(expected = "forwarder: exchange the query verbatim")]
 fn a_dnssec_signed_truncated_reply_is_relayed_with_every_bit_preserved() {
     run(async {
         let q = query(0x0102, "example.com.", RecordType::A, Some(true));
@@ -510,7 +506,6 @@ fn signed_reply_bytes(query_bytes: &[u8]) -> Vec<u8> {
 /// Contract shape: bounded-change. ADR-0356 step 3: a TCP guest query is
 /// forwarded over TCP.
 #[test]
-#[should_panic(expected = "forwarder: exchange the query verbatim")]
 fn a_query_that_arrived_over_tcp_is_forwarded_over_tcp() {
     run(async {
         let q = query(5, "github.com.", RecordType::A, None);
@@ -889,7 +884,6 @@ fn an_answer_on_a_reserved_vip_or_in_the_guest_prefix_is_blocked_with_its_range(
 /// ranges is delivered unchanged, including the `10.99.0.0/16` workload range
 /// that is deliberately not owned. Range edges are the owned-range scenarios'.
 #[test]
-#[should_panic(expected = "forwarder: exchange the query verbatim")]
 fn a_private_answer_outside_the_owned_ranges_is_delivered_unchanged() {
     run(async {
         for addr in [[10, 20, 4, 7], [10, 99, 0, 9]] {
@@ -906,7 +900,6 @@ fn a_private_answer_outside_the_owned_ranges_is_delivered_unchanged() {
 /// ipv4hint only; AAAA and an owned address in the additional section are
 /// relayed (the revisit trigger is guest IPv6 transport, GH #308).
 #[test]
-#[should_panic(expected = "forwarder: exchange the query verbatim")]
 fn aaaa_and_additional_section_addresses_are_outside_the_guard_by_design() {
     run(async {
         let aaaa = Reply {

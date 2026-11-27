@@ -30,10 +30,12 @@
 //! keeps it deterministic + DST-replayable and lets the S-DBN-WIRE-04 proptest
 //! control `T` directly.
 
+use std::net::Ipv4Addr;
 use std::str::FromStr;
 use std::time::Duration;
 
 use hickory_proto::op::{Message, MessageType, OpCode, ResponseCode};
+use hickory_proto::rr::rdata::svcb::{SvcParamValue, SVCB};
 use hickory_proto::rr::rdata::{A, SOA};
 use hickory_proto::rr::{Name, RData, Record, RecordType};
 use overdrive_core::id::{MeshServiceName, NameAnswer};
@@ -184,6 +186,54 @@ pub fn encode(
     message
         .to_vec()
         .unwrap_or_else(|err| unreachable!("self-constructed DNS Message must encode: {err}"))
+}
+
+/// What the forwarder needs to know about an upstream reply, with no
+/// `hickory_proto` type in sight (DDN-4).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReplyFacts {
+    /// Every IPv4 address in the answer section: A rdata and the `ipv4hint`
+    /// of SVCB / HTTPS records, in wire order.
+    pub answer_addresses: Vec<Ipv4Addr>,
+}
+
+/// The upstream reply bytes are not a decodable DNS message.
+#[derive(Debug, Error)]
+#[error("upstream reply is not a decodable DNS message: {source}")]
+pub struct UndecodableReply {
+    source: hickory_proto::serialize::binary::DecodeError,
+}
+
+/// Project an upstream reply into [`ReplyFacts`]. A reply that does not decode
+/// is an error; the forwarder never relays bytes it could not inspect.
+pub fn inspect_reply(reply: &[u8]) -> Result<ReplyFacts, UndecodableReply> {
+    let message = Message::from_vec(reply).map_err(|source| UndecodableReply { source })?;
+    let answer_addresses = message
+        .answers
+        .iter()
+        .flat_map(|record| record_addresses(&record.data))
+        .collect();
+    Ok(ReplyFacts { answer_addresses })
+}
+
+fn record_addresses(data: &RData) -> Vec<Ipv4Addr> {
+    match data {
+        RData::A(a) => vec![a.0],
+        RData::SVCB(svcb) => hint_addresses(svcb),
+        RData::HTTPS(https) => hint_addresses(&https.0),
+        _ => Vec::new(),
+    }
+}
+
+fn hint_addresses(svcb: &SVCB) -> Vec<Ipv4Addr> {
+    svcb.svc_params
+        .iter()
+        .filter_map(|(_, value)| match value {
+            SvcParamValue::Ipv4Hint(hint) => Some(hint.0.iter().map(|a| a.0)),
+            _ => None,
+        })
+        .flatten()
+        .collect()
 }
 
 /// Derive the SOA `SERIAL` from the injected clock reading at 1-second

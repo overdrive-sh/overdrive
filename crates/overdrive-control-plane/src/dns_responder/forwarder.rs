@@ -24,7 +24,8 @@ use std::time::Duration;
 use overdrive_core::traits::clock::Clock;
 
 use super::owned_ranges::{OwnedAddressRanges, OwnedRangeKind};
-use super::upstream::{DnsTransport, UpstreamExchange, UpstreamResolvers};
+use super::upstream::{DnsTransport, UpstreamExchange, UpstreamResolvers, UpstreamSet};
+use super::wire::inspect_reply;
 
 /// One upstream attempt budget.
 pub const UPSTREAM_ATTEMPT_TIMEOUT: Duration = Duration::from_millis(1500);
@@ -159,9 +160,30 @@ impl Forwarder {
         request: &ForwardRequest<'_>,
         permit: &ForwardPermit,
     ) -> ForwardOutcome {
-        let _ = (request, permit);
-        todo!(
-            "forwarder: exchange the query verbatim with the first usable upstream inside the budget"
-        )
+        let _ = permit;
+        let deadline = self.clock.now() + FORWARD_BUDGET;
+        let Ok(candidates) = self.resolvers.candidates().await else { Self::failure_scaffold() };
+        let Ok(upstreams) = UpstreamSet::select(candidates, self.gateway) else {
+            Self::failure_scaffold()
+        };
+        // Only the first upstream is tried until failover lands.
+        let Some(server) = upstreams.servers.into_iter().next() else { Self::failure_scaffold() };
+        let remaining = deadline.saturating_duration_since(self.clock.now());
+        let timeout = UPSTREAM_ATTEMPT_TIMEOUT.min(remaining);
+        let Ok(reply) =
+            self.exchange.exchange(server, request.transport, request.wire, timeout).await
+        else {
+            Self::failure_scaffold()
+        };
+        let Ok(facts) = inspect_reply(&reply) else { Self::failure_scaffold() };
+        if facts.answer_addresses.iter().any(|a| self.owned.owning_range(*a).is_some()) {
+            Self::failure_scaffold()
+        }
+        ForwardOutcome::Relayed(reply)
+    }
+
+    /// Failover, SERVFAIL replies and the owned-range guard land in later steps.
+    fn failure_scaffold() -> ! {
+        todo!("forwarder: exchange the query verbatim (failure and guard paths are not yet built)")
     }
 }

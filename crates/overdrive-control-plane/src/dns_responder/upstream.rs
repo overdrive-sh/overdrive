@@ -89,7 +89,7 @@ pub enum ExchangeError {
 /// The candidates left after dropping the gateway.
 #[derive(Clone, Debug)]
 pub struct UpstreamSet {
-    servers: Vec<IpAddr>,
+    pub(super) servers: Vec<IpAddr>,
 }
 
 /// Every candidate was the gateway, or there were none.
