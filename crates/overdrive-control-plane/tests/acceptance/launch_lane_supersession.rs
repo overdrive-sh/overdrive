@@ -1025,7 +1025,6 @@ async fn a_driver_that_ignores_the_signal_is_unchanged() {
 /// evaluation under a fresh, unraised lane, so the scenario would never reach its own superseded start.
 /// Pending on the count rule (module header).
 #[tokio::test]
-#[should_panic(expected = "the superseded launch and its relaunch charge nothing")]
 async fn a_restart_the_evaluation_already_hydrated_sees_its_own_start_superseded_once() {
     let mut rig = Rig::new().await;
     rig.declare("lane-x").await;

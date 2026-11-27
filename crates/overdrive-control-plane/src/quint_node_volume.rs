@@ -1875,9 +1875,6 @@ fn quint_vol_store_absent_fails_typed_and_never_attaches() -> impl Driver {
     test = "superseded_launch_result_discarded",
     max_samples = 1
 )]
-#[should_panic(
-    expected = "a relaunch over a launch that never ran must charge the count of the launch that ran"
-)]
 fn quint_vol_superseded_launch_result_discarded() -> impl Driver {
     NodeVolumeDriver::checking_counts()
 }

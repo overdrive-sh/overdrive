@@ -53,6 +53,17 @@ pub const fn restart_decision(
     attempts < RESTART_BACKOFF_CEILING || platform_reclaimed || generation_replacement
 }
 
+/// The restart count of the count basis (`last_ran_alloc`), 0 when no row ran.
+fn basis_attempts(view: &WorkloadLifecycleView, basis: Option<&AllocStatusRow>) -> u32 {
+    basis.and_then(|row| view.restart_counts.get(&row.alloc_id)).copied().unwrap_or(0)
+}
+
+/// Whether the next launch is a generation replacement: the committed generation is pending, or
+/// the count basis is an operator stop, which is never crash-restarted.
+fn replaces_generation(restart_pending: bool, basis: Option<&AllocStatusRow>) -> bool {
+    restart_pending || basis.is_some_and(is_operator_stopped)
+}
+
 /// Backoff window between successive `RestartAllocation` emissions
 /// for the same alloc.
 ///
@@ -407,12 +418,14 @@ impl Reconciler for WorkloadLifecycle {
                 return None;
             }
 
-            let failed = current.filter(|row| is_restartable(row))?;
-            let attempts = view.restart_counts.get(&failed.alloc_id).copied().unwrap_or(0);
-            if !restart_decision(attempts, is_platform_reclaimed(failed), restart_pending) {
+            current.filter(|row| is_restartable(row))?;
+            let basis = last_ran_alloc(&allocs);
+            let attempts = basis_attempts(view, basis);
+            let replacement = replaces_generation(restart_pending, basis);
+            if !restart_decision(attempts, basis.is_some_and(is_platform_reclaimed), replacement) {
                 return None;
             }
-            let seen_at = view.last_failure_seen_at.get(&failed.alloc_id)?;
+            let seen_at = view.last_failure_seen_at.get(&basis?.alloc_id)?;
             let deadline = restart_retry_deadline(*seen_at, attempts);
             (tick.now_unix < deadline).then_some(deadline)
         })();
@@ -465,15 +478,20 @@ fn pending_restart_owner<'a>(
         return None;
     }
 
-    let attempts = view.restart_counts.get(&current.alloc_id).copied().unwrap_or(0);
-    if !restart_decision(attempts, is_platform_reclaimed(current), generation_replacement) {
+    let basis = last_ran_alloc(&allocations);
+    let attempts = basis_attempts(view, basis);
+    let generation_replacement = replaces_generation(generation_replacement, basis);
+    if !restart_decision(
+        attempts,
+        basis.is_some_and(is_platform_reclaimed),
+        generation_replacement,
+    ) {
         return None;
     }
 
     let restart_not_due = !generation_replacement
-        && view
-            .last_failure_seen_at
-            .get(&current.alloc_id)
+        && basis
+            .and_then(|row| view.last_failure_seen_at.get(&row.alloc_id))
             .is_some_and(|seen_at| tick.now_unix < restart_retry_deadline(*seen_at, attempts));
     if restart_not_due || !actual.guest_attachments.occupancy.at_cap() {
         return Some(&current.alloc_id);
@@ -1154,8 +1172,11 @@ impl WorkloadLifecycle {
                     // Backoff exhaustion check — emit no further
                     // RestartAllocation past the ceiling. Pure check
                     // against `view.restart_counts`.
-                    let attempts = view.restart_counts.get(&failed.alloc_id).copied().unwrap_or(0);
-                    // `&& !is_platform_reclaimed(failed)` (brief.md
+                    // RB-13 (ADR-0355): every count derivation below reads the count
+                    // basis, the newest row that ran, never an abandoned row.
+                    let basis = last_ran_alloc(&allocs_vec);
+                    let attempts = basis_attempts(view, basis);
+                    // `&& !is_platform_reclaimed(basis)` (brief.md
                     // §105a.10, S-VM-27) — a platform-reclaimed row's
                     // `terminal` is always `None` (§105a.5), so the
                     // idempotency guard just below does NOT short-circuit
@@ -1171,9 +1192,14 @@ impl WorkloadLifecycle {
                     // reached unconditionally past its backoff window,
                     // however high `attempts` has climbed from prior
                     // reclamations.
-                    let platform_reclaimed = is_platform_reclaimed(failed);
-                    let generation_replacement = restart_pending;
+                    let platform_reclaimed = basis.is_some_and(is_platform_reclaimed);
+                    let generation_replacement = replaces_generation(restart_pending, basis);
                     if !restart_decision(attempts, platform_reclaimed, generation_replacement) {
+                        // The spent budget is the count basis's: the finalisation names it,
+                        // never an abandoned row (RB-13).
+                        let failed = basis.unwrap_or_else(|| {
+                            unreachable!("a spent restart budget implies a count basis")
+                        });
                         // Idempotency guard: if the row already carries a
                         // finalised terminal claim the reconciler has
                         // already finalised this alloc on a prior tick —
@@ -1290,7 +1316,8 @@ impl WorkloadLifecycle {
                     // schema migration — every persisted row picks up
                     // the new policy on the next reconcile tick.
                     if !generation_replacement
-                        && let Some(seen_at) = view.last_failure_seen_at.get(&failed.alloc_id)
+                        && let Some(seen_at) =
+                            basis.and_then(|row| view.last_failure_seen_at.get(&row.alloc_id))
                         && tick.now_unix < restart_retry_deadline(*seen_at, attempts)
                     {
                         // Backoff window not yet elapsed.
@@ -1312,19 +1339,21 @@ impl WorkloadLifecycle {
                     next_view
                         .issued_generation
                         .insert(successor_alloc_id.clone(), desired.generation);
-                    let predecessor_attempts =
-                        view.restart_counts.get(&failed.alloc_id).copied().unwrap_or(0);
-                    let successor_attempts = if generation_replacement || platform_reclaimed {
-                        predecessor_attempts
-                    } else {
-                        predecessor_attempts.saturating_add(1)
+                    // RB-13: no row ran → a fresh placement carrying 0; otherwise the basis
+                    // row's count, plus one for a crash restart.
+                    let successor_attempts = match basis {
+                        None => 0,
+                        Some(_) if generation_replacement || platform_reclaimed => attempts,
+                        Some(_) => attempts.saturating_add(1),
                     };
                     next_view.restart_counts.insert(successor_alloc_id.clone(), successor_attempts);
-                    if generation_replacement || platform_reclaimed {
-                        if let Some(seen_at) = view.last_failure_seen_at.get(&failed.alloc_id) {
+                    if let Some(basis_row) = basis
+                        && (generation_replacement || platform_reclaimed)
+                    {
+                        if let Some(seen_at) = view.last_failure_seen_at.get(&basis_row.alloc_id) {
                             next_view.last_failure_seen_at.insert(successor_alloc_id, *seen_at);
                         }
-                    } else {
+                    } else if basis.is_some() {
                         // Persist-inputs write site (issue #141): record
                         // the wall-clock observation timestamp of this
                         // failure (`tick.now_unix`) — NOT the precomputed

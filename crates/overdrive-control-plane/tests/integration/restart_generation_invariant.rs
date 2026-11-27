@@ -1288,7 +1288,6 @@ async fn restart_of_a_running_workload_overridden_by_a_second_restart_places_exa
 /// generation once, uncharged. The launch ends its `Pending` row `LaunchSuperseded` (ADR-0355 W2).
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[should_panic(expected = "an abandoned replacement launch must charge nothing")]
 async fn restart_of_a_running_workload_abandoned_by_shutdown_is_relaunched_on_the_next_boot() {
     run_cell(Origin::RunningRestart, Interruption::Shutdown, Pre::None, "running-restart/shutdown")
         .await;
@@ -1300,7 +1299,6 @@ async fn restart_of_a_running_workload_abandoned_by_shutdown_is_relaunched_on_th
 /// (ADR-0355 W4) and the next evaluation relaunches.
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[should_panic(expected = "an abandoned replacement launch must charge nothing")]
 async fn restart_of_a_running_workload_lost_with_the_control_plane_is_relaunched_on_the_next_boot()
 {
     run_cell(Origin::RunningRestart, Interruption::Crash, Pre::None, "running-restart/crash").await;
@@ -1333,7 +1331,6 @@ async fn resume_of_a_stopped_workload_overridden_by_a_second_restart_places_exac
 /// (ADR-0355 W1).
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[should_panic(expected = "an abandoned replacement launch must charge nothing")]
 async fn resume_of_a_stopped_workload_abandoned_by_shutdown_is_relaunched_on_the_next_boot() {
     run_cell(Origin::StoppedResume, Interruption::Shutdown, Pre::None, "stopped-resume/shutdown")
         .await;
@@ -1344,7 +1341,6 @@ async fn resume_of_a_stopped_workload_abandoned_by_shutdown_is_relaunched_on_the
 /// and the workload is relaunched.
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[should_panic(expected = "an abandoned replacement launch must charge nothing")]
 async fn resume_of_a_stopped_workload_lost_with_the_control_plane_is_relaunched_on_the_next_boot() {
     run_cell(Origin::StoppedResume, Interruption::Crash, Pre::None, "stopped-resume/crash").await;
 }
@@ -1782,9 +1778,6 @@ async fn crash_restart_successor_abandoned(seed: u64, interruption: Interruption
 /// is relaunched with the same count (1, not 2).
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[should_panic(
-    expected = "a crash-restart relaunch must re-assign the count of the abandoned launch (1), not charge twice"
-)]
 async fn a_crash_restart_successor_lost_with_the_control_plane_is_relaunched_with_the_same_count() {
     for seed in SEEDS {
         crash_restart_successor_abandoned(seed, Interruption::Crash, "crash-restart/crash").await;
@@ -1795,9 +1788,6 @@ async fn a_crash_restart_successor_lost_with_the_control_plane_is_relaunched_wit
 /// (`LaunchSuperseded`).
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[should_panic(
-    expected = "a crash-restart relaunch must re-assign the count of the abandoned launch (1), not charge twice"
-)]
 async fn a_crash_restart_successor_abandoned_by_shutdown_is_relaunched_with_the_same_count() {
     for seed in SEEDS {
         crash_restart_successor_abandoned(seed, Interruption::Shutdown, "crash-restart/shutdown")
@@ -1875,7 +1865,6 @@ async fn job_first_launch_abandoned(seed: u64, interruption: Interruption, label
 /// `is_natural_exit` excludes the abandoned row.
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[should_panic(expected = "a launch abandoned before anything ran must charge nothing")]
 async fn a_job_whose_first_launch_is_lost_with_the_control_plane_is_relaunched_once_and_not_finalised()
  {
     for seed in SEEDS {
@@ -1887,7 +1876,6 @@ async fn a_job_whose_first_launch_is_lost_with_the_control_plane_is_relaunched_o
 /// node shutdown is relaunched once on the next boot and is not finalised.
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[should_panic(expected = "a launch abandoned before anything ran must charge nothing")]
 async fn a_job_whose_first_launch_is_abandoned_by_shutdown_is_relaunched_once_and_not_finalised() {
     for seed in SEEDS {
         job_first_launch_abandoned(seed, Interruption::Shutdown, "job/first-launch-shutdown").await;

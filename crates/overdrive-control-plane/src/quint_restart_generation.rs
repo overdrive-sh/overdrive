@@ -1574,7 +1574,6 @@ fn quint_rg_control_plane_crash_during_restart_launch_relaunches_once() -> impl 
     test = "second_restart_loses_launch_then_one_placement",
     max_samples = 1
 )]
-#[should_panic(expected = "State invariant failed")]
 fn quint_rg_second_restart_loses_launch_then_one_placement() -> impl QuintDriver {
     RgDriver::new()
 }

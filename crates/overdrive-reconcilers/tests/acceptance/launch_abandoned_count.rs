@@ -349,18 +349,12 @@ fn operator_restart_after_an_abandoned_crash_restart(why: Abandon) {
 /// RB-13 count test 1, `LaunchSuperseded`. Contract: the abandoned row is not the count basis.
 /// Fault: the crash restart's launch is superseded, then the operator restarts.
 #[test]
-#[should_panic(
-    expected = "an operator restart over a crash restart that never ran must carry the count of the launch that ran (0)"
-)]
 fn a_superseded_crash_restart_abandoned_by_an_operator_restart_forgives_the_crash() {
     operator_restart_after_an_abandoned_crash_restart(Abandon::Superseded);
 }
 
 /// RB-13 count test 1, `LaunchLostWithControlPlane`: the same, for a launch lost at boot.
 #[test]
-#[should_panic(
-    expected = "an operator restart over a crash restart that never ran must carry the count of the launch that ran (0)"
-)]
 fn a_crash_restart_lost_with_the_control_plane_then_restarted_by_the_operator_forgives_the_crash() {
     operator_restart_after_an_abandoned_crash_restart(Abandon::LostWithControlPlane);
 }
@@ -400,9 +394,6 @@ fn relaunch_after_consecutive_abandoned_launches(
 /// RB-13 count test 2: one abandoned row. The relaunch carries the basis count plus one (1),
 /// the charge the crash already carries, not 2.
 #[test]
-#[should_panic(
-    expected = "a lost launch with no operator action must charge the crash exactly once: the relaunch carries the crashed launch's count plus one (1)"
-)]
 fn a_lost_launch_with_no_operator_action_charges_the_crash_once() {
     let (evaluation, id) = relaunch_after_consecutive_abandoned_launches(1);
     assert_eq!(
@@ -415,9 +406,6 @@ fn a_lost_launch_with_no_operator_action_charges_the_crash_once() {
 
 /// RB-13 count test 2, two consecutive abandoned rows: count 1, not 2 and not 3.
 #[test]
-#[should_panic(
-    expected = "two consecutive abandoned launches must charge the crash exactly once: the relaunch carries the crashed launch's count plus one (1)"
-)]
 fn two_consecutive_abandoned_launches_charge_the_crash_once() {
     let (evaluation, id) = relaunch_after_consecutive_abandoned_launches(2);
     assert_eq!(
@@ -435,9 +423,6 @@ fn two_consecutive_abandoned_launches_charge_the_crash_once() {
 /// RB-13 count test 3, first part: the first launch of a workload is abandoned (a shutdown or a
 /// lost launch); no row ever ran, so the relaunch is a fresh placement carrying 0.
 #[test]
-#[should_panic(
-    expected = "a launch abandoned before anything ran must be relaunched as a fresh placement carrying count 0"
-)]
 fn a_launch_abandoned_before_anything_ran_is_relaunched_with_count_zero() {
     for why in Abandon::BOTH {
         let first = evaluate(WorkloadKind::Service, &[], &WorkloadLifecycleView::default(), 0, 100);
@@ -462,9 +447,6 @@ fn a_launch_abandoned_before_anything_ran_is_relaunched_with_count_zero() {
 /// abandoned by node shutdown. The workload relaunches as a generation replacement still
 /// pending against the stopped row, carrying the stopped row's count `c`, not `c + 1`.
 #[test]
-#[should_panic(
-    expected = "a shutdown-abandoned replacement must be relaunched as a generation replacement carrying the stopped row's count"
-)]
 fn a_shutdown_abandoned_replacement_is_relaunched_as_a_generation_replacement_with_the_stopped_rows_count()
  {
     for why in Abandon::BOTH {
@@ -749,9 +731,6 @@ proptest! {
     /// counts up to the ceiling) with abandoned launches of both reasons, in any order.
     /// The seed is printed on failure by proptest.
     #[test]
-    #[should_panic(
-        expected = "deleting the abandoned rows from a chain must not change the next launch's count, charge or exhaustion"
-    )]
     fn deleting_abandoned_rows_changes_no_later_launchs_count_charge_or_exhaustion(
         slots in prop::collection::vec(arb_slot(), 1..=6),
     ) {
