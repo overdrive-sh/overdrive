@@ -71,9 +71,9 @@
 //!
 //! `faults`, `declared`, `idFault`, `capFull`, `conf_step`, `og` and `gl` are model-only.
 //!
-//! A run whose trace reaches behaviour production has not built carries
+//! A run whose trace reaches behaviour production does not yet implement carries
 //! `#[should_panic(expected = ...)]`, naming the diverging variable; a run that passes against
-//! production today is a GUARD and carries none. See each test's doc. The derived `charged` and
+//! production carries none. See each test's doc. The derived `charged` and
 //! `exhausted` read the count basis (RB-13), and an abandoned row projects as state 5.
 //!
 //! Lane: `integration-tests` (it spawns the `quint` CLI through quint-connect).
@@ -1623,7 +1623,7 @@ impl<'de> Deserialize<'de> for RgState {
 // ----- named runs (critical scenarios, one per `rg_conf` / `rg_conf_job` run) ----------
 
 /// Named run `control_plane_crash_during_restart_launch_relaunches_once`.
-/// GUARD: passes against production (the crash leaves the `Pending` row, and boot reclamation of the node's own `Pending` rows ends it `Abandoned` with `LaunchLostWithControlPlane`, ADR-0355 RB-11).
+/// Passes against production: the crash leaves the `Pending` row, and boot reclamation of the node's own `Pending` rows ends it `Abandoned` with `LaunchLostWithControlPlane`, ADR-0355 RB-11.
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/restart-generation/restart_generation.qnt",
@@ -1636,7 +1636,7 @@ fn quint_rg_control_plane_crash_during_restart_launch_relaunches_once() -> impl 
 }
 
 /// Named run `second_restart_loses_launch_then_one_placement`.
-/// GUARD: passes against production (the count is read from the newest row that ran, RB-13, so the relaunch after two lost launches carries the count the model carries).
+/// Passes against production: the count is read from the newest row that ran, RB-13, so the relaunch after two lost launches carries the count the model carries.
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/restart-generation/restart_generation.qnt",
@@ -1649,7 +1649,7 @@ fn quint_rg_second_restart_loses_launch_then_one_placement() -> impl QuintDriver
 }
 
 /// Named run `resume_while_running_stops_and_replaces`.
-/// GUARD: passes against production (a restart with no lost launch); keeps passing once SD-6 lands.
+/// Passes against production: a restart with no lost launch.
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/restart-generation/restart_generation.qnt",
@@ -1718,7 +1718,7 @@ fn quint_rg_transient_prelaunch_failure_recovers() -> impl QuintDriver {
 }
 
 /// Named run `admission_refusal_leaves_no_row_and_waits_for_capacity`.
-/// GUARD: passes against production (the refusal writes no row and charges nothing, ADR-0338); keeps passing once the occupancy gate lands.
+/// Passes against production: the refusal writes no row and charges nothing (ADR-0338).
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/restart-generation/restart_generation.qnt",
@@ -1731,7 +1731,7 @@ fn quint_rg_admission_refusal_leaves_no_row_and_waits_for_capacity() -> impl Qui
 }
 
 /// Named run `restart_of_completed_job_does_nothing_and_issues_no_id`.
-/// GUARD: passes against production (a finished Job's row is final and a restart issues no id, ADR-0335 item 3).
+/// Passes against production: a finished Job's row is final and a restart issues no id (ADR-0335 item 3).
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/restart-generation/restart_generation.qnt",
@@ -1744,7 +1744,7 @@ fn quint_rg_restart_of_completed_job_does_nothing_and_issues_no_id() -> impl Qui
 }
 
 /// Named run `resume_of_stopped_job_does_nothing_and_issues_no_id`.
-/// PENDING (the generation helper): production gives a resumed operator-stopped Job a new allocation id (`OpResume`); the projection refuses an id no model allocation names.
+/// Passes against production: a resumed operator-stopped Job is a finished Job and is given no new allocation id (`OpResume`).
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_test(
     spec = "../../specs/quint/restart-generation/restart_generation.qnt",
@@ -1756,12 +1756,13 @@ fn quint_rg_resume_of_stopped_job_does_nothing_and_issues_no_id() -> impl QuintD
     RgJobDriver::new()
 }
 
-/// PENDING (ADR-0337): a trace that fails an identity issuance diverges as the pre-driver-failure pins above do. A seed whose
-/// traces never fail an identity issuance would pass and fail this marker.
+/// PENDING (ADR-0337): a trace that fails an identity issuance diverges as the pre-driver-failure pins above do, at whichever
+/// allocation the failure reaches first, so the pinned text leaves the allocation index out. A seed whose traces never fail an
+/// identity issuance would pass and fail this marker.
 /// Randomized `rg_conf` traces (seed printed on failure).
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_run(spec = "../../specs/quint/restart-generation/restart_generation.qnt", main = "rg_conf")]
-#[should_panic(expected = "allocation 1 state: spec failed (PreFail), production pending")]
+#[should_panic(expected = "state: spec failed (PreFail), production pending")]
 fn quint_rg_randomized() -> impl QuintDriver {
     RgDriver::new()
 }

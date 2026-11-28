@@ -14,10 +14,13 @@
 //!
 //! The load-bearing contract (ADR-0073 § 5, item 5):
 //!
-//! - `restart_pending = largest issued_generation < desired.generation`.
-//! - The veto is current-instance-scoped:
-//!   `!restart_pending && current_alloc(&allocs).is_some_and(is_operator_stopped)`
-//!   — NOT `allocs.iter().any(is_operator_stopped)`.
+//! - `restart_pending` is `generation_replacement_pending`: the
+//!   `issued_generation` entry of the newest row that ran (absent reads 0) is
+//!   below `desired.generation`. The entry is keyed by the allocation's own id,
+//!   so a fixture stamps the id of the row the rule reads.
+//! - The veto is current-instance-scoped: the newest row that ran is an
+//!   operator stop and no generation is pending — NOT
+//!   `allocs.iter().any(is_operator_stopped)`.
 //! - The placement tick records `issued_generation[fresh] = desired.generation`
 //!   (NOT `observed + 1`); the stop tick (R2) and the draining tick (R5)
 //!   leave `issued_generation` unchanged.
@@ -249,35 +252,28 @@ fn alloc_platform_reclaimed(alloc_id: &str, workload_id: &str, node_id: &str) ->
     }
 }
 
-/// A view whose largest `issued_generation` entry is `generation` (the
-/// generation an already-issued allocation serves); `0` seeds nothing.
-fn view_seeded(generation: u64) -> WorkloadLifecycleView {
+/// A view recording that allocation `alloc_id` was issued for `generation`.
+/// The stamp is keyed by the allocation's own id, as the reconciler writes it
+/// (`issued_generation[successor_alloc_id]` on every restart and
+/// `issued_generation[alloc_id]` on every placement), and the pending-generation
+/// rule reads the stamp of the newest row that ran: name that row here.
+fn view_issued(alloc_id: &str, generation: u64) -> WorkloadLifecycleView {
     let mut view = WorkloadLifecycleView::default();
-    if generation > 0 {
-        view.issued_generation.insert(aid("alloc-seeded"), generation);
-    }
+    view.issued_generation.insert(aid(alloc_id), generation);
     view
 }
 
-/// The largest generation any issued allocation serves (`0` when none).
-fn issued_max(view: &WorkloadLifecycleView) -> u64 {
-    view.issued_generation.values().copied().max().unwrap_or(0)
-}
-
-/// A `WorkloadLifecycleView` whose `restart_counts` for `alloc_id` is
-/// pre-set to `n`, with `issued_generation[alloc_id] = observed` so the
-/// generation is not pending and the crash-restart branch is reached.
-/// The stamp is keyed by the allocation's own id, as the reconciler writes
-/// it (`WorkloadLifecycle` stamps `issued_generation[successor_alloc_id]` on
-/// every restart and `issued_generation[alloc_id]` on every placement), and
-/// the pending-generation rule reads the stamp of the newest row that ran.
+/// `view_issued(alloc_id, observed)` with `restart_counts[alloc_id]` pre-set to
+/// `n`: the generation is not pending and the crash-restart branch is reached.
 fn view_with_restart_counts(observed: u64, alloc_id: &str, n: u32) -> WorkloadLifecycleView {
-    let mut view = WorkloadLifecycleView::default();
-    if observed > 0 {
-        view.issued_generation.insert(aid(alloc_id), observed);
-    }
+    let mut view = view_issued(alloc_id, observed);
     view.restart_counts.insert(aid(alloc_id), n);
     view
+}
+
+/// The `issued_generation` entry recorded for `alloc_id`.
+fn issued_for(view: &WorkloadLifecycleView, alloc_id: &str) -> Option<u64> {
+    view.issued_generation.get(&aid(alloc_id)).copied()
 }
 
 fn alloc_map(rows: Vec<AllocStatusRow>) -> BTreeMap<AllocationId, AllocStatusRow> {
@@ -335,10 +331,6 @@ fn states(
     (desired, actual)
 }
 
-fn view_with_observed(observed: u64) -> WorkloadLifecycleView {
-    view_seeded(observed)
-}
-
 fn run(
     desired: &WorkloadLifecycleState,
     actual: &WorkloadLifecycleState,
@@ -388,7 +380,7 @@ fn s_bir_restart_stopped_places_fresh_instance_and_stamps() {
         1,
         vec![alloc_operator_stopped("alloc-payments-0", "payments", "local")],
     );
-    let view = view_with_observed(0);
+    let view = WorkloadLifecycleView::default();
 
     let (actions, next) = run(&desired, &actual, &view);
 
@@ -402,9 +394,10 @@ fn s_bir_restart_stopped_places_fresh_instance_and_stamps() {
     assert_eq!(next.restart_counts.get(&aid("alloc-payments-1")), Some(&0));
     assert!(!next.last_failure_seen_at.contains_key(&aid("alloc-payments-1")));
     assert_eq!(
-        issued_max(&next),
-        1,
-        "the placement tick must record issued_generation = desired.generation (1)",
+        issued_for(&next, "alloc-payments-1"),
+        Some(1),
+        "the placement tick must record issued_generation = desired.generation (1) for the \
+         fresh instance",
     );
     // Intent-retained contract, pinned across EVERY withdrawal/teardown
     // shape (review-01-02 nitpick): a stopped-origin restart places the
@@ -441,7 +434,7 @@ fn s_bir_restart_stopped_places_fresh_instance_and_stamps() {
 fn s_bir_restart_running_stop_emits_one_stop_no_stamp() {
     let (desired, actual) =
         states("coinflip", 1, vec![alloc_running("alloc-coinflip-0", "coinflip", "local")]);
-    let view = view_with_observed(0);
+    let view = WorkloadLifecycleView::default();
 
     let (actions, next) = run(&desired, &actual, &view);
 
@@ -471,8 +464,7 @@ fn s_bir_restart_running_stop_emits_one_stop_no_stamp() {
         "R2 places nothing this tick — the fresh instance comes after the old one Terminates",
     );
     assert_eq!(
-        issued_max(&next),
-        0,
+        next.issued_generation, view.issued_generation,
         "issued_generation MUST be UNCHANGED on the stop tick (R2) — stamping here re-arms \
          the veto before the fresh instance exists, stranding the workload Terminated",
     );
@@ -492,7 +484,7 @@ fn s_bir_restart_running_place_places_fresh_and_stamps() {
         1,
         vec![alloc_operator_stopped("alloc-coinflip-0", "coinflip", "local")],
     );
-    let view = view_with_observed(0);
+    let view = WorkloadLifecycleView::default();
 
     let (actions, next) = run(&desired, &actual, &view);
 
@@ -502,8 +494,8 @@ fn s_bir_restart_running_place_places_fresh_and_stamps() {
     assert_eq!(next.restart_counts.get(&aid("alloc-coinflip-1")), Some(&0));
     assert!(!next.last_failure_seen_at.contains_key(&aid("alloc-coinflip-1")));
     assert_eq!(
-        issued_max(&next),
-        1,
+        issued_for(&next, "alloc-coinflip-1"),
+        Some(1),
         "the placement tick (R3) is the only tick that records issued_generation = desired",
     );
 }
@@ -518,7 +510,7 @@ fn s_bir_stop_once_no_duplicate_stop_while_draining() {
     // still restart_pending (observed 0 < desired 1).
     let (desired, actual) =
         states("coinflip", 1, vec![alloc_draining("alloc-coinflip-0", "coinflip", "local")]);
-    let view = view_with_observed(0);
+    let view = WorkloadLifecycleView::default();
 
     let (actions, next) = run(&desired, &actual, &view);
 
@@ -529,8 +521,7 @@ fn s_bir_stop_once_no_duplicate_stop_while_draining() {
          fights the teardown; got {actions:?}",
     );
     assert_eq!(
-        issued_max(&next),
-        0,
+        next.issued_generation, view.issued_generation,
         "issued_generation is still unstamped while the old instance drains",
     );
 }
@@ -550,7 +541,7 @@ fn s_bir_coalesce_place_one_instance_stamps_to_latest_generation() {
         2,
         vec![alloc_operator_stopped("alloc-payments-0", "payments", "local")],
     );
-    let view = view_with_observed(0);
+    let view = WorkloadLifecycleView::default();
 
     let (actions, next) = run(&desired, &actual, &view);
 
@@ -560,8 +551,8 @@ fn s_bir_coalesce_place_one_instance_stamps_to_latest_generation() {
     assert_eq!(next.restart_counts.get(&aid("alloc-payments-1")), Some(&0));
     assert!(!next.last_failure_seen_at.contains_key(&aid("alloc-payments-1")));
     assert_eq!(
-        issued_max(&next),
-        2,
+        issued_for(&next, "alloc-payments-1"),
+        Some(2),
         "stamp is observed = desired (= 2), NOT observed + 1 — the level-triggered coalesce",
     );
 }
@@ -577,18 +568,22 @@ fn s_bir_coalesce_no_replay_after_stamp() {
     // payments-1 placed (Running).
     let (desired, actual) =
         states("payments", 2, vec![alloc_running("alloc-payments-1", "payments", "local")]);
-    let view = view_with_observed(2);
+    let view = view_issued("alloc-payments-1", 2);
 
     let (actions, next) = run(&desired, &actual, &view);
 
+    // The generation is not pending (the newest row that ran, payments-1, was issued for 2), so
+    // the Running instance is left alone: nothing is stopped, replaced or started again.
     assert!(
-        start_allocations(&actions).is_empty(),
-        "restart_pending is false (observed == desired) — no further StartAllocation; got {actions:?}",
+        stop_allocations(&actions).is_empty()
+            && restart_allocations(&actions).is_empty()
+            && start_allocations(&actions).is_empty(),
+        "the generation is handled (payments-1 issued for 2) — no stop, no replacement, no \
+         further placement; got {actions:?}",
     );
     assert_eq!(
-        issued_max(&next),
-        2,
-        "the generation never goes backwards — issued_generation stays 2",
+        next.issued_generation, view.issued_generation,
+        "the generation never goes backwards — issued_generation stays as stamped",
     );
 }
 
@@ -603,7 +598,7 @@ fn s_bir_sequential_restart_reenters_cycle() {
     // observed=1; a second restart advanced desired to 2 (observed 1 < 2).
     let (desired, actual) =
         states("payments", 2, vec![alloc_running("alloc-payments-1", "payments", "local")]);
-    let view = view_with_observed(1);
+    let view = view_issued("alloc-payments-1", 1);
 
     let (actions, next) = run(&desired, &actual, &view);
 
@@ -624,8 +619,7 @@ fn s_bir_sequential_restart_reenters_cycle() {
         other => panic!("expected StopAllocation, got {other:?}"),
     }
     assert_eq!(
-        issued_max(&next),
-        1,
+        next.issued_generation, view.issued_generation,
         "no stamp on this re-entry stop tick (the fresh payments-2 has not been placed)",
     );
 }
@@ -639,8 +633,9 @@ fn s_bir_sequential_restart_reenters_cycle() {
 #[test]
 fn s_bir_regression_stopped_crash_restarts_not_wedged() {
     // Given: payments-1 CRASHED (Failed, crash reason), superseded
-    // payments-0 Terminated{Operator} retained, observed == desired
-    // (restart_pending false).
+    // payments-0 Terminated{Operator} retained, payments-1 issued for the
+    // committed generation (restart_pending false), two restarts already
+    // charged to payments-1.
     let (desired, actual) = states(
         "payments",
         1,
@@ -649,9 +644,9 @@ fn s_bir_regression_stopped_crash_restarts_not_wedged() {
             alloc_crashed("alloc-payments-1", "payments", "local"),
         ],
     );
-    let view = view_with_observed(1);
+    let view = view_with_restart_counts(1, "alloc-payments-1", 2);
 
-    let (actions, _next) = run(&desired, &actual, &view);
+    let (actions, next) = run(&desired, &actual, &view);
 
     assert!(
         !actions.is_empty(),
@@ -675,6 +670,12 @@ fn s_bir_regression_stopped_crash_restarts_not_wedged() {
         }
         other => panic!("expected RestartAllocation, got {other:?}"),
     }
+    assert_eq!(
+        next.restart_counts.get(&aid("alloc-payments-2")),
+        Some(&3),
+        "the crash-restart branch charges the successor attempts + 1 (2 -> 3); a generation \
+         replacement would carry the count unchanged",
+    );
 }
 
 // ===================================================================
@@ -687,7 +688,8 @@ fn s_bir_regression_stopped_crash_restarts_not_wedged() {
 fn s_bir_regression_numeric_crash_restarts_numeric_max_not_lexical() {
     // Given: crashed CURRENT payments-10 (numeric max) alongside a
     // lexically-later-but-numerically-earlier superseded payments-2
-    // Terminated{Operator}, observed == desired (restart_pending false).
+    // Terminated{Operator}, payments-10 issued for the committed generation
+    // (restart_pending false) with two restarts charged to it.
     //
     // LEXICALLY, "alloc-payments-2" > "alloc-payments-10" (BTreeMap order),
     // so a lexical-max current_alloc would pick payments-2/Operator, fire
@@ -701,9 +703,9 @@ fn s_bir_regression_numeric_crash_restarts_numeric_max_not_lexical() {
             alloc_crashed("alloc-payments-10", "payments", "local"),
         ],
     );
-    let view = view_with_observed(1);
+    let view = view_with_restart_counts(1, "alloc-payments-10", 2);
 
-    let (actions, _next) = run(&desired, &actual, &view);
+    let (actions, next) = run(&desired, &actual, &view);
 
     let restarts: Vec<&Action> =
         actions.iter().filter(|a| matches!(a, Action::RestartAllocation { .. })).collect();
@@ -723,6 +725,11 @@ fn s_bir_regression_numeric_crash_restarts_numeric_max_not_lexical() {
         }
         other => panic!("expected RestartAllocation for payments-10, got {other:?}"),
     }
+    assert_eq!(
+        next.restart_counts.get(&aid("alloc-payments-11")),
+        Some(&3),
+        "the crash-restart branch charges the successor attempts + 1 (2 -> 3)",
+    );
 }
 
 // ===================================================================
@@ -734,7 +741,8 @@ fn s_bir_regression_numeric_crash_restarts_numeric_max_not_lexical() {
 fn s_bir_regression_running_crash_restarts_not_wedged() {
     // Given: running-origin restart cycled coinflip-0 -> fresh coinflip-1
     // reached Running then CRASHED; superseded coinflip-0 Terminated{Operator}
-    // retained, restart_pending false.
+    // retained, coinflip-1 issued for the committed generation (restart_pending
+    // false) with two restarts charged to it.
     let (desired, actual) = states(
         "coinflip",
         1,
@@ -743,9 +751,9 @@ fn s_bir_regression_running_crash_restarts_not_wedged() {
             alloc_crashed("alloc-coinflip-1", "coinflip", "local"),
         ],
     );
-    let view = view_with_observed(1);
+    let view = view_with_restart_counts(1, "alloc-coinflip-1", 2);
 
-    let (actions, _next) = run(&desired, &actual, &view);
+    let (actions, next) = run(&desired, &actual, &view);
 
     let restarts: Vec<&Action> =
         actions.iter().filter(|a| matches!(a, Action::RestartAllocation { .. })).collect();
@@ -765,6 +773,11 @@ fn s_bir_regression_running_crash_restarts_not_wedged() {
         }
         other => panic!("expected RestartAllocation, got {other:?}"),
     }
+    assert_eq!(
+        next.restart_counts.get(&aid("alloc-coinflip-2")),
+        Some(&3),
+        "the crash-restart branch charges the successor attempts + 1 (2 -> 3)",
+    );
 }
 
 // ===================================================================
@@ -781,7 +794,7 @@ fn s_bir_bug3_preserved_same_spec_deploy_does_not_resurrect() {
         0,
         vec![alloc_operator_stopped("alloc-payments-0", "payments", "local")],
     );
-    let view = view_with_observed(0);
+    let view = WorkloadLifecycleView::default();
 
     let (actions, _next) = run(&desired, &actual, &view);
 
@@ -1025,7 +1038,7 @@ fn s_roh_a_04_liveness_consumes_budget_platform_reclaim_is_exempt() {
 /// port (the predicates are module-private).
 #[test]
 fn s_roh_a_05_intentional_stop_discriminator_unchanged() {
-    let view = view_with_observed(0);
+    let view = WorkloadLifecycleView::default();
 
     // Operator stop on the current instance, equal generations → veto
     // (never restarted).
@@ -1122,6 +1135,8 @@ proptest! {
         // A superseded operator-stopped suffix, single-digit (so it
         // sorts lexically AFTER the double-digit current suffix).
         superseded_suffix in 0_u32..=9,
+        // Restarts already charged to the current instance, below the ceiling.
+        attempts in 0_u32..RESTART_BACKOFF_CEILING,
     ) {
         let current = format!("alloc-payments-{current_suffix}");
         let superseded = format!("alloc-payments-{superseded_suffix}");
@@ -1133,9 +1148,9 @@ proptest! {
                 alloc_crashed(&current, "payments", "local"),
             ],
         );
-        let view = view_with_observed(1);
+        let view = view_with_restart_counts(1, &current, attempts);
 
-        let (actions, _next) = run(&desired, &actual, &view);
+        let (actions, next) = run(&desired, &actual, &view);
 
         let restarts: Vec<&Action> =
             actions.iter().filter(|a| matches!(a, Action::RestartAllocation { .. })).collect();
@@ -1153,5 +1168,11 @@ proptest! {
                 "current_alloc selects the NUMERIC max suffix, not the lexical max",
             );
         }
+        let successor = format!("alloc-payments-{}", current_suffix + 1);
+        prop_assert_eq!(
+            next.restart_counts.get(&aid(&successor)).copied(),
+            Some(attempts + 1),
+            "the crash-restart branch charges the successor attempts + 1",
+        );
     }
 }

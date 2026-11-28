@@ -17,13 +17,11 @@
 //! the dispatch would have written (an abandoned launch ends as one abandoned row). Oracle: the
 //! returned actions and the returned View. Tier: Tier 1, default lane (pure, no I/O).
 //!
-//! Classification. The count scenarios, the generation-replacement relaunch, the Job scenario,
-//! the `last_ran_alloc` units, the backend-membership guard and the deletion-equivalence
-//! property pass against the reconciler. The pending-generation agreement clause is a separate
-//! property and its stamp-on-emit example (an operator-stopped basis followed by an abandoned
-//! replacement issued under the committed generation) still PENDING (proven RED,
-//! `#[should_panic]` on the assertion in their own bodies): the function is a scaffold that
-//! panics until the generation rule is implemented.
+//! The deletion-equivalence property generates chains in which an operator-stopped basis is
+//! followed by an abandoned launch issued under the committed generation itself, so the reading
+//! of "is a replacement still pending against the stopped row" is exercised through the
+//! reconciler. The pure verdict of `generation_replacement_pending` is pinned in
+//! `generation_replacement_pending.rs`.
 //!
 //! Mutation targets (`workload_lifecycle.rs`): the `!is_launch_abandoned` filter of
 //! `last_ran_alloc` (`last_ran_skips_abandoned_rows...`), every read of the count basis at the
@@ -38,11 +36,9 @@
     clippy::cast_possible_truncation
 )]
 
-use std::any::Any;
 use std::collections::BTreeMap;
 use std::net::Ipv4Addr;
 use std::num::NonZeroU32;
-use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::time::{Duration, Instant};
 
 use overdrive_core::aggregate::{Job, Node, Vm, WorkloadDriver, WorkloadKind};
@@ -62,7 +58,7 @@ use overdrive_reconcilers::service_lifecycle::ServiceAllocPhase;
 use overdrive_reconcilers::workload_lifecycle::last_ran_alloc;
 use overdrive_reconcilers::{
     RESTART_BACKOFF_CEILING, WorkloadLifecycle, WorkloadLifecycleState, WorkloadLifecycleView,
-    current_alloc, generation_replacement_pending,
+    current_alloc,
 };
 use proptest::prelude::*;
 
@@ -539,14 +535,14 @@ fn a_job_whose_launch_never_ran_is_relaunched_and_not_finalised() {
 }
 
 // ---------------------------------------------------------------------------
-// last_ran_alloc units (GUARDs)
+// last_ran_alloc units
 // ---------------------------------------------------------------------------
 
 fn refs(rows: &[AllocStatusRow]) -> Vec<&AllocStatusRow> {
     rows.iter().collect()
 }
 
-/// GUARD: the newest row that ran is returned even when abandoned rows sit above it.
+/// the newest row that ran is returned even when abandoned rows sit above it.
 #[test]
 fn last_ran_skips_abandoned_rows_and_returns_the_newest_row_that_ran() {
     let rows = [
@@ -564,7 +560,7 @@ fn last_ran_skips_abandoned_rows_and_returns_the_newest_row_that_ran() {
     );
 }
 
-/// GUARD: with no row that ran (no rows, or every row abandoned) there is no basis.
+/// with no row that ran (no rows, or every row abandoned) there is no basis.
 #[test]
 fn last_ran_is_none_when_no_row_ran() {
     assert!(last_ran_alloc(&[]).is_none(), "no rows: no basis");
@@ -575,7 +571,7 @@ fn last_ran_is_none_when_no_row_ran() {
     assert!(last_ran_alloc(&refs(&rows)).is_none(), "every row abandoned: no basis");
 }
 
-/// GUARD: an abandoned row is skipped, a failed or reclaimed one is not, and the numeric
+/// an abandoned row is skipped, a failed or reclaimed one is not, and the numeric
 /// attempt suffix (not the lexical id order) picks the newest.
 #[test]
 fn last_ran_orders_by_numeric_attempt_suffix() {
@@ -607,7 +603,7 @@ fn slot_rows(slots: &[bool]) -> Vec<AllocStatusRow> {
 }
 
 proptest! {
-    /// GUARD: `last_ran_alloc` is `current_alloc` over the rows that are not abandoned, never
+    /// `last_ran_alloc` is `current_alloc` over the rows that are not abandoned, never
     /// an abandoned row, and `None` exactly when every row is abandoned.
     #[test]
     fn last_ran_is_current_alloc_over_the_rows_that_are_not_abandoned(
@@ -628,10 +624,10 @@ proptest! {
 }
 
 // ---------------------------------------------------------------------------
-// Backend membership (GUARD)
+// Backend membership
 // ---------------------------------------------------------------------------
 
-/// GUARD: a Service allocation whose row is `Pending` or an abandoned launch carries the
+/// a Service allocation whose row is `Pending` or an abandoned launch carries the
 /// address it was handed but is never a backend candidate: it projects `NotRunning`.
 #[test]
 fn a_service_allocation_that_never_ran_is_not_a_backend_candidate() {
@@ -740,16 +736,6 @@ fn arb_chain() -> impl Strategy<Value = Chain> {
                     after_operator_stop = false;
                 }
             }
-            // An operator-stopped basis followed by abandoned launches issued under the committed
-            // generation itself is the pending-generation agreement clause below (the read of
-            // "is a replacement still pending against the stopped row" is that clause's subject);
-            // here the operator restarts once more after the abandoned launch.
-            let basis = slots.iter().rposition(|slot| matches!(slot, Slot::Ran { .. }));
-            let stopped_then_abandoned = basis.is_some_and(|index| {
-                index < newest
-                    && matches!(slots[index], Slot::Ran { class: Class::OperatorStopped, .. })
-            });
-            let headroom = if stopped_then_abandoned { headroom.max(1) } else { headroom };
             Chain { kind, slots, generation: issued_for + headroom }
         },
     )
@@ -830,144 +816,5 @@ proptest! {
             generation,
             chain
         );
-    }
-}
-
-// ---------------------------------------------------------------------------
-// The generation_replacement_pending agreement clause (separate property)
-// ---------------------------------------------------------------------------
-
-/// The payload of the production scaffold's panic, matched exactly: only this panic is the
-/// pending state; any other panic is a real failure and propagates.
-const SCAFFOLD_PANIC: &str =
-    "RED scaffold: generation_replacement_pending is not implemented (ADR-0335)";
-
-fn panic_text(payload: &(dyn Any + Send)) -> Option<&str> {
-    payload
-        .downcast_ref::<&str>()
-        .copied()
-        .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
-}
-
-const AGREEMENT: &str = "generation_replacement_pending must read the generation from the newest \
-     row that ran: an abandoned row is invisible to it, so deleting abandoned rows from a chain \
-     changes no verdict";
-
-/// The function's answer; the scaffold's unwind (exactly its literal payload) is re-raised as
-/// this file's named assertion, any other panic is resumed unchanged.
-fn pending_verdict(
-    view: &WorkloadLifecycleView,
-    generation: u64,
-    ran: Option<&AllocStatusRow>,
-) -> bool {
-    match catch_unwind(AssertUnwindSafe(|| generation_replacement_pending(view, generation, ran))) {
-        Ok(answer) => answer,
-        Err(payload) => {
-            let is_scaffold = panic_text(&*payload) == Some(SCAFFOLD_PANIC);
-            assert!(!is_scaffold, "{AGREEMENT}");
-            resume_unwind(payload)
-        }
-    }
-}
-
-/// One launch of an agreement chain: `Some` is a launch that ran (kind and class), `None` an
-/// abandoned launch of the given reason; the last field is its `issued_generation` entry.
-type AgreementLaunch = (Option<(WorkloadKind, Class)>, Abandon, u64);
-
-fn arb_agreement_chain() -> impl Strategy<Value = Vec<AgreementLaunch>> {
-    // Each element is one launch: `Some` is a launch that ran (kind and class), `None` an
-    // abandoned launch of the given reason; the third field is its `issued_generation` entry.
-    prop::collection::vec(
-        (
-            prop::option::of((
-                prop_oneof![Just(WorkloadKind::Service), Just(WorkloadKind::Job)],
-                prop_oneof![
-                    Just(Class::Crashed),
-                    Just(Class::OperatorStopped),
-                    Just(Class::Completed),
-                    Just(Class::JobFailed),
-                    Just(Class::Running),
-                ],
-            )),
-            prop_oneof![Just(Abandon::Superseded), Just(Abandon::LostWithControlPlane)],
-            0_u64..=3,
-        ),
-        1..=6,
-    )
-}
-
-/// The stamp-on-emit case the main deletion-equivalence property keeps out of its chains: an
-/// operator-stopped basis followed by an abandoned replacement issued under the committed
-/// generation itself. The old rule stamps the abandoned launch's entry on emit and reads the
-/// generation as handled; the abandoned row ran nothing, so the stopped basis (issued under an
-/// earlier generation) is still the row the generation is read from and it is pending. The same
-/// holds when the chain has the abandoned row deleted.
-#[test]
-fn an_abandoned_replacement_issued_under_the_committed_generation_leaves_a_stopped_basis_pending() {
-    for why in Abandon::BOTH {
-        let full = [
-            ran(0, WorkloadKind::Service, Class::OperatorStopped),
-            abandoned(1, WorkloadKind::Service, why),
-        ];
-        let deleted = [full[0].clone()];
-        let mut view = WorkloadLifecycleView::default();
-        view.issued_generation.insert(aid(0), 1);
-        view.issued_generation.insert(aid(1), 2);
-        let over_full = pending_verdict(&view, 2, last_ran_alloc(&refs(&full)));
-        let over_deleted = pending_verdict(&view, 2, current_alloc(&refs(&deleted)));
-        assert!(
-            over_full && over_deleted,
-            "{AGREEMENT}: the stopped basis (entry 1) is below generation 2 although the abandoned \
-             replacement carries entry 2 ({why:?}); over the full chain {over_full}, over the chain \
-             without the abandoned row {over_deleted}"
-        );
-    }
-}
-
-proptest! {
-    // The test is PENDING and fails by design today: do not persist its seeds into the repo.
-    // Drop this setting together with the `should_panic` marker at the activation step.
-    #![proptest_config(ProptestConfig { failure_persistence: None, ..ProptestConfig::default() })]
-
-    /// Over any chain, any View entries (abandoned ids included) and any committed generation,
-    /// `generation_replacement_pending` read through `last_ran_alloc` over the full chain agrees
-    /// with the same function read through `current_alloc` over the chain with the abandoned
-    /// rows deleted, and with an independent restatement of the contract: true iff the newest
-    /// row that ran exists, is not a finished Job row, and its `issued_generation` entry
-    /// (absent reads 0) is below the generation. PENDING: the function is a scaffold today.
-    #[test]
-    fn the_pending_generation_verdict_agrees_over_a_chain_and_the_chain_without_abandoned_rows(
-        chain in arb_agreement_chain(),
-        generation in 0_u64..=4,
-    ) {
-        let mut view = WorkloadLifecycleView::default();
-        let full: Vec<AllocStatusRow> = chain
-            .iter()
-            .enumerate()
-            .map(|(index, (launch, why, issued))| {
-                let suffix = index as u32;
-                view.issued_generation.insert(aid(suffix), *issued);
-                launch.map_or_else(
-                    || abandoned(suffix, WorkloadKind::Service, *why),
-                    |(kind, class)| ran(suffix, kind, class),
-                )
-            })
-            .collect();
-        let deleted: Vec<AllocStatusRow> =
-            full.iter().filter(|row| !is_launch_abandoned(row)).cloned().collect();
-        let basis = last_ran_alloc(&refs(&full));
-        let basis_after_deletion = current_alloc(&refs(&deleted));
-        prop_assert_eq!(
-            basis.map(|row| row.alloc_id.clone()),
-            basis_after_deletion.map(|row| row.alloc_id.clone())
-        );
-        let expected = basis.is_some_and(|row| {
-            !(row.kind == WorkloadKind::Job && row.terminal.is_some())
-                && view.issued_generation.get(&row.alloc_id).copied().unwrap_or(0) < generation
-        });
-        let over_full = pending_verdict(&view, generation, basis);
-        let over_deleted = pending_verdict(&view, generation, basis_after_deletion);
-        prop_assert_eq!(over_full, over_deleted, "{}", AGREEMENT);
-        prop_assert_eq!(over_full, expected, "{}", AGREEMENT);
     }
 }

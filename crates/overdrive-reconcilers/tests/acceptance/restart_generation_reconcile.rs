@@ -2,8 +2,8 @@
 //! ADR-0338; node-local persistent volume, GH #348; scenario family
 //! S-BIR-GENERATION).
 //!
-//! A generation is handled once the allocation issued for it has an allocation
-//! row. The View records what was issued, never that a launch happened, so a
+//! A generation is handled once the allocation issued for it has a row that ran.
+//! The View records what was issued, never that a launch happened, so a
 //! launch that ends with no row (superseded, or lost with the control plane)
 //! is relaunched by the next evaluation, once, and a relaunch of a generation
 //! replacement charges nothing.
@@ -20,31 +20,25 @@
 //! all leave exactly that). Oracle: the returned actions and the returned View.
 //! Tier: Tier 1, default lane (pure, no I/O).
 //!
-//! Classification, stated honestly (what runs RED today and what already holds):
-//! - PENDING (proven RED, `#[should_panic]` on the test's own assertion): the
-//!   lost launch is relaunched once for the pending generation
+//! Scenarios:
+//! - a lost launch is relaunched once for the pending generation
 //!   (`a_lost_launch_is_relaunched_once_for_the_pending_generation`), and an
 //!   abandoned replacement is relaunched uncharged
-//!   (`an_abandoned_replacement_relaunch_charges_nothing`), and an
-//!   operator-stopped Job's restart issues nothing
-//!   (`a_restart_never_gives_an_operator_stopped_job_a_new_allocation`). Today
-//!   the first evaluation's issue marks the generation handled on emit (the
-//!   largest `issued_generation` entry decides), so the generation reads as handled
-//!   although no row exists.
-//! - GUARD (passes today because the behaviour already holds; no
-//!   `should_panic`): a row present for the issued id issues nothing
+//!   (`an_abandoned_replacement_relaunch_charges_nothing`);
+//! - a row present for the issued id issues nothing
 //!   (`an_evaluation_with_the_issued_ids_row_present_issues_nothing`); N bumps
 //!   before any placement coalesce into one placement and an evaluation after
 //!   the successor's row exists does not re-place
 //!   (`bumps_before_the_placement_coalesce_into_one_placement`,
-//!   `an_evaluation_after_the_successors_row_exists_does_not_replace`); a
-//!   crash-restart relaunch assigns the same count the abandoned issue assigned
-//!   (`a_relaunched_crash_restart_is_charged_once_not_twice`); a finished Job is
-//!   never given a new allocation
-//!   (`a_restart_never_gives_a_completed_or_failed_job_a_new_allocation`); a Job
-//!   row with only a reason is replaced as on `main`
-//!   (`a_job_row_with_only_a_reason_is_replaced_as_on_main`); a first placement
-//!   records the committed generation
+//!   `an_evaluation_after_the_successors_row_exists_does_not_replace`);
+//! - a crash-restart relaunch assigns the same count the abandoned issue assigned
+//!   (`a_relaunched_crash_restart_is_charged_once_not_twice`);
+//! - a finished Job is never given a new allocation, an operator-stopped Job
+//!   included (`a_restart_never_gives_a_completed_or_failed_job_a_new_allocation`,
+//!   `a_restart_never_gives_an_operator_stopped_job_a_new_allocation`); a Job row
+//!   with only a reason is replaced as on `main`
+//!   (`a_job_row_with_only_a_reason_is_replaced_as_on_main`);
+//! - a first placement records the committed generation
 //!   (`a_first_placement_records_the_committed_generation`).
 //!
 //! Mutation targets killed (`workload_lifecycle.rs`):
@@ -332,19 +326,13 @@ fn relaunch_after_a_lost_launch(
 }
 
 proptest! {
-    // PENDING cases fail by design today; do not persist their seeds into the repo. Drop this
-    // setting together with the `should_panic` markers at the activation step.
-    #![proptest_config(ProptestConfig { failure_persistence: None, ..ProptestConfig::default() })]
-
     /// With the issued id's row ABSENT (the View holds the first evaluation's
     /// issued entry, the rows show only the older predecessor) a second
     /// evaluation with the generation still pending issues exactly one new id,
     /// whose `issued_generation` entry is `desired.generation`; a generation
     /// replacement carries the predecessor's `restart_counts` and
     /// `last_failure_seen_at` unchanged, and the abandoned id's entries stay as
-    /// the reservation. PENDING: today the first evaluation stamps the
-    /// generation as handled, so the second issues nothing (operator-stopped
-    /// predecessor) or charges the restart (crashed predecessor).
+    /// the reservation.
     #[test]
     fn a_lost_launch_is_relaunched_once_for_the_pending_generation(
         class in prop_oneof![Just(Class::Crashed), Just(Class::OperatorStopped)],
@@ -374,7 +362,6 @@ proptest! {
     /// The carry itself, on a crashed predecessor with budget spent: the
     /// relaunch of an abandoned generation replacement charges nothing, whatever
     /// the count (the ceiling does not apply to a generation replacement).
-    /// PENDING: today the relaunch is charged as a crash restart (`count + 1`).
     #[test]
     fn an_abandoned_replacement_relaunch_charges_nothing(
         attempts in 1_u32..=RESTART_BACKOFF_CEILING,
@@ -398,12 +385,7 @@ proptest! {
 // ---------------------------------------------------------------------------
 
 proptest! {
-    // PENDING cases fail by design today; do not persist their seeds into the repo. Drop this
-    // setting together with the `should_panic` markers at the activation step.
-    #![proptest_config(ProptestConfig { failure_persistence: None, ..ProptestConfig::default() })]
-
-    /// GUARD (passes today: the stamp-on-emit rule also reads the generation as
-    /// handled). The issued id's row exists and serves the committed generation:
+    /// The issued id's row exists and serves the committed generation:
     /// the evaluation emits nothing and gains no View entry. Kills the helper's
     /// `<` (an `<=` mutant reads the equal entry as pending and stops the
     /// `Running` instance).
@@ -451,11 +433,7 @@ proptest! {
 // ---------------------------------------------------------------------------
 
 proptest! {
-    // PENDING cases fail by design today; do not persist their seeds into the repo. Drop this
-    // setting together with the `should_panic` markers at the activation step.
-    #![proptest_config(ProptestConfig { failure_persistence: None, ..ProptestConfig::default() })]
-
-    /// S-BIR-COALESCE-PLACE. GUARD (passes today). N operator `restart` commits
+    /// S-BIR-COALESCE-PLACE. N operator `restart` commits
     /// before any placement leave the generation N above the predecessor's
     /// entry; one evaluation places one successor, which serves the final
     /// generation, never one placement per bump.
@@ -481,7 +459,7 @@ proptest! {
         );
     }
 
-    /// S-BIR-COALESCE-NO-REPLAY. GUARD (passes today). An evaluation after the
+    /// S-BIR-COALESCE-NO-REPLAY. An evaluation after the
     /// successor's row exists does not place again for the same bumps.
     #[test]
     fn an_evaluation_after_the_successors_row_exists_does_not_replace(
@@ -514,11 +492,7 @@ proptest! {
 // ---------------------------------------------------------------------------
 
 proptest! {
-    // PENDING cases fail by design today; do not persist their seeds into the repo. Drop this
-    // setting together with the `should_panic` markers at the activation step.
-    #![proptest_config(ProptestConfig { failure_persistence: None, ..ProptestConfig::default() })]
-
-    /// GUARD (passes today). A crash-restart successor whose launch left no row is
+    /// A crash-restart successor whose launch left no row is
     /// relaunched by the next evaluation with the SAME restart count the
     /// abandoned issue assigned (the predecessor's plus one, computed from the
     /// still-current predecessor), so one crash is charged once, not twice. The
@@ -557,11 +531,7 @@ proptest! {
 // ---------------------------------------------------------------------------
 
 proptest! {
-    // PENDING cases fail by design today; do not persist their seeds into the repo. Drop this
-    // setting together with the `should_panic` markers at the activation step.
-    #![proptest_config(ProptestConfig { failure_persistence: None, ..ProptestConfig::default() })]
-
-    /// GUARD (passes today). A first placement (no row at all) records the
+    /// A first placement (no row at all) records the
     /// committed generation it serves, so the generation is not pending against
     /// its own successor. Kills the placement arm's `desired.generation` write.
     #[test]
@@ -623,12 +593,7 @@ const NO_NEW_ALLOCATION: JobTrajectory =
     JobTrajectory { issued: 0, gained_issued_entry: false, gained_count_entry: false };
 
 proptest! {
-    // PENDING cases fail by design today; do not persist their seeds into the repo. Drop this
-    // setting together with the `should_panic` markers at the activation step.
-    #![proptest_config(ProptestConfig { failure_persistence: None, ..ProptestConfig::default() })]
-
-    /// GUARD (passes today: the natural-exit idempotency guard already emits
-    /// nothing for a Job that completed or failed). Across many ticks, with the
+    /// Across many ticks, with the
     /// generation bumped, no allocation action is emitted, no id is issued, and
     /// `issued_generation` and `restart_counts` gain no entry. Kills the finished-
     /// Job exception of the helper once the reconciler decides with it.
@@ -648,12 +613,10 @@ proptest! {
         );
     }
 
-    /// PENDING. An operator-stopped Job whose row carries `Stopped { by: Operator }`
+    /// An operator-stopped Job whose row carries `Stopped { by: Operator }`
     /// as its terminal is a finished Job: `workload restart` bumps the generation
-    /// and the reconciler issues nothing. Today the restartable filter selects the
-    /// operator-stopped row while a generation is pending and a `RestartAllocation`
-    /// is emitted (the shim then returns at its fence with no successor, and the
-    /// stamp on emit hides that the generation is never handled).
+    /// and the reconciler issues nothing (the action shim would return at its
+    /// fence with no successor, leaving the generation never handled).
     #[test]
     fn a_restart_never_gives_an_operator_stopped_job_a_new_allocation(
         attempts in 0_u32..=RESTART_BACKOFF_CEILING,
@@ -669,7 +632,7 @@ proptest! {
         );
     }
 
-    /// GUARD (passes today and must keep passing). A Job row with only a `reason`
+    /// A Job row with only a `reason`
     /// and no terminal is not finished: it is replaced exactly as on `main`, one
     /// uncharged replacement serving the generation.
     #[test]

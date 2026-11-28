@@ -1631,9 +1631,8 @@ async fn running_job(seed: u64, label: &str) -> World {
     w
 }
 
-/// PENDING (ADR-0335 item 3, H1): a restart of a running Job ends it and issues nothing after.
-/// Today the stop of the running instance leaves the generation pending and the reconciler issues
-/// an id for it that the shim fences.
+/// A restart of a running Job ends it and issues nothing after (ADR-0335 item 3, H1): the
+/// stopped Job is a finished Job, so no generation is pending against it and no id is issued.
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]
 async fn a_restart_of_a_running_job_ends_it_and_issues_nothing_after() {

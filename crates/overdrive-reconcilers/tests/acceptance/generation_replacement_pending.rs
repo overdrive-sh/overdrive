@@ -14,25 +14,19 @@
 //! against the action shim's own fence, `allocation_attempt_transition(..) == Apply`, over the
 //! same generated rows (abandoned rows included). Tier: Tier 1, default lane (pure, no I/O).
 //!
-//! Status of every test in this file: PENDING (proven RED). The pinned
-//! production scaffold panics with "RED scaffold", so each body calls the
-//! function through `pending`, which catches that unwind and re-panics with
-//! this file's own named assertion; `#[should_panic(expected = ..)]` names that
-//! assertion, never the scaffold text. DELIVER removes the markers when it
-//! implements the function.
-//!
 //! Mutation targets killed (`workload_lifecycle.rs`, the helper):
-//! - the `<` (an `<=` or `>` mutant): the equal-generation and
-//!   below/above examples, and the property whose entries and generation
+//! - the `<` (an `<=`, `>` or `!=` mutant): the equal-generation, older and
+//!   newer-entry examples, and the property whose entries and generation
 //!   share a range so equality is generated;
 //! - the finished-Job exception (removed or widened to every kind): the Job
 //!   examples, the Service-with-terminal example and the shim-fence agreement
-//!   property.
+//!   property;
+//! - reading an abandoned row instead of the newest row that ran: the
+//!   abandoned-successor example and both properties, whose chains mix
+//!   abandoned launches with launches that ran.
 
 #![allow(clippy::doc_markdown, clippy::expect_used, clippy::missing_panics_doc)]
 
-use std::any::Any;
-use std::panic::{AssertUnwindSafe, catch_unwind, resume_unwind};
 use std::time::Duration;
 
 use overdrive_core::aggregate::WorkloadKind;
@@ -40,17 +34,16 @@ use overdrive_core::id::{AllocationId, NodeId, WorkloadId};
 use overdrive_core::traits::observation_store::{AllocState, AllocStatusRow, LogicalTimestamp};
 use overdrive_core::transition_reason::{StoppedBy, TerminalCondition, TransitionReason};
 use overdrive_core::wall_clock::UnixInstant;
-use overdrive_reconcilers::workload_lifecycle::last_ran_alloc;
 use overdrive_reconcilers::workload_lifecycle::{
     AllocationAttemptEvent, AllocationAttemptTransition, allocation_attempt_transition,
+    last_ran_alloc,
 };
 use overdrive_reconcilers::{WorkloadLifecycleView, generation_replacement_pending};
 use proptest::prelude::*;
 
 const WORKLOAD: &str = "payments";
 
-/// The assertion every test of this file names when the function does not yet
-/// return the contract's answer.
+/// The assertion the properties name when the function does not return the contract's answer.
 const CONTRACT: &str = "generation_replacement_pending must be true iff the newest row that ran exists, \
      is not a finished Job row, and its issued_generation entry (absent reads 0) is below the \
      desired generation";
@@ -121,33 +114,11 @@ fn view_with(entries: &[(&str, u64)]) -> WorkloadLifecycleView {
     view
 }
 
-/// The payload of the production scaffold's panic, matched exactly: only this
-/// panic is the pending state; any other panic is a real failure and propagates.
-const SCAFFOLD_PANIC: &str =
-    "RED scaffold: generation_replacement_pending is not implemented (ADR-0335)";
-
-fn panic_text(payload: &(dyn Any + Send)) -> Option<&str> {
-    payload
-        .downcast_ref::<&str>()
-        .copied()
-        .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
-}
-
-/// Call the function over `rows` the way the reconciler does: `ran` is
-/// `last_ran_alloc` over the observed rows (the newest row that ran). The scaffold's unwind (exactly its
-/// literal payload) is re-raised as this file's named assertion; any other
-/// panic is resumed unchanged.
+/// Call the function over `rows` the way the reconciler does: `ran` is `last_ran_alloc` over the
+/// observed rows (the newest row that ran).
 fn pending(rows: &[AllocStatusRow], view: &WorkloadLifecycleView, generation: u64) -> bool {
     let refs: Vec<&AllocStatusRow> = rows.iter().collect();
-    let ran = last_ran_alloc(&refs);
-    match catch_unwind(AssertUnwindSafe(|| generation_replacement_pending(view, generation, ran))) {
-        Ok(answer) => answer,
-        Err(payload) => {
-            let is_scaffold = panic_text(&*payload) == Some(SCAFFOLD_PANIC);
-            assert!(!is_scaffold, "{CONTRACT}");
-            resume_unwind(payload)
-        }
-    }
+    generation_replacement_pending(view, generation, last_ran_alloc(&refs))
 }
 
 // ---------------------------------------------------------------------------
@@ -161,20 +132,20 @@ fn no_row_means_no_generation_is_pending() {
     let view = view_with(&[("0", 0)]);
     assert!(
         !pending(&[], &view, 3),
-        "no current row: the generation is not pending, whatever the View holds"
+        "no row ran: the generation is not pending, whatever the View holds"
     );
 }
 
-/// The current row's entry is below the committed generation: pending.
+/// The newest row that ran has an entry below the committed generation: pending.
 #[test]
-fn a_current_row_issued_for_an_older_generation_is_pending() {
+fn the_newest_row_that_ran_issued_for_an_older_generation_is_pending() {
     let view = view_with(&[("0", 1)]);
     assert!(pending(&[failed_service("0")], &view, 2), "entry 1 < generation 2 is pending");
 }
 
 /// Mutation target: the `<`. An entry equal to the generation is handled.
 #[test]
-fn a_current_row_issued_for_the_committed_generation_is_handled() {
+fn the_newest_row_that_ran_issued_for_the_committed_generation_is_handled() {
     let view = view_with(&[("0", 2)]);
     assert!(!pending(&[failed_service("0")], &view, 2), "entry 2 == generation 2 is not pending");
 }
@@ -182,7 +153,7 @@ fn a_current_row_issued_for_the_committed_generation_is_handled() {
 /// An entry above the generation (the generation never moves backwards, but the
 /// comparison must not read as "not equal") is not pending.
 #[test]
-fn a_current_row_issued_for_a_newer_generation_is_not_pending() {
+fn the_newest_row_that_ran_issued_for_a_newer_generation_is_not_pending() {
     let view = view_with(&[("0", 5)]);
     assert!(!pending(&[failed_service("0")], &view, 2), "entry 5 > generation 2 is not pending");
 }
@@ -196,51 +167,30 @@ fn an_absent_entry_reads_zero() {
 }
 
 /// The issued id's row is absent: the View names a newer id the observation does
-/// not show, `current_alloc` is still the older row, so the generation is still
-/// pending (the relaunch after an abandoned launch).
+/// not show, the newest row that ran is still the older row, so the generation is
+/// still pending (the relaunch after a launch that left no row).
 #[test]
 fn an_issued_id_without_a_row_leaves_the_generation_pending() {
     let view = view_with(&[("0", 1), ("1", 2)]);
     assert!(
         pending(&[failed_service("0")], &view, 2),
-        "the issued successor has no row: the older row is current and still below the generation"
+        "the issued successor has no row: the older row is the newest that ran and is still below the generation"
     );
 }
 
-/// Once the issued id has a row, that row is current and its entry equals the
-/// generation: handled.
+/// Once the issued id has a row that ran, that row is the newest that ran and its
+/// entry equals the generation: handled.
 #[test]
 fn the_successors_row_ends_the_pending_generation() {
     let view = view_with(&[("0", 1), ("1", 2)]);
     let rows = [failed_service("0"), row("1", WorkloadKind::Service, AllocState::Running, None)];
-    assert!(!pending(&rows, &view, 2), "the successor's row is current and serves generation 2");
-}
-
-/// The current row is the numerically highest suffix (`-10` over `-2`, which a
-/// lexical maximum would get wrong).
-#[test]
-fn the_numeric_maximum_suffix_selects_the_current_row() {
-    let rows = [failed_service("2"), failed_service("10")];
-    // `-10` serves the generation, `-2` does not: numeric current => handled.
-    let handled = view_with(&[("2", 0), ("10", 3)]);
-    assert!(!pending(&rows, &handled, 3), "`-10` is current (numeric max) and serves generation 3");
-    // The converse: `-10` is stale, `-2` is fresh: numeric current => pending.
-    let stale = view_with(&[("2", 3), ("10", 0)]);
-    assert!(pending(&rows, &stale, 3), "`-10` is current (numeric max) and is below generation 3");
-}
-
-/// A row whose id has no parseable attempt suffix is never the current row.
-#[test]
-fn a_row_without_an_attempt_suffix_is_never_current() {
-    let rows = [failed_service("0"), failed_service("orphan")];
-    let view = view_with(&[("0", 3), ("orphan", 0)]);
     assert!(
-        !pending(&rows, &view, 3),
-        "`-orphan` has no attempt index: `-0` (generation 3) is current, nothing is pending"
+        !pending(&rows, &view, 2),
+        "the successor's row is the newest that ran and serves generation 2"
     );
 }
 
-/// H1, mutation target (the finished-Job exception): a Job whose current row
+/// H1, mutation target (the finished-Job exception): a Job whose newest row that ran
 /// completed is never given a replacement by a restart, even below the
 /// generation.
 #[test]
@@ -323,30 +273,6 @@ fn an_abandoned_successor_handles_nothing() {
              row that ran, so generation 2 is still pending"
         );
     }
-}
-
-/// An abandoned launch of either reason, then another of the other reason: the newest row that
-/// ran is still the one before them all, and the verdict follows its entry in both directions.
-#[test]
-fn consecutive_abandoned_rows_of_both_reasons_handle_nothing() {
-    let rows = [failed_service("0"), superseded("1"), lost_with_control_plane("2")];
-    let below = view_with(&[("0", 1), ("1", 2), ("2", 2)]);
-    assert!(pending(&rows, &below, 2), "`-0` (entry 1) ran last: generation 2 is pending");
-    let handled = view_with(&[("0", 2), ("1", 2), ("2", 2)]);
-    assert!(!pending(&rows, &handled, 2), "`-0` (entry 2) ran last: generation 2 is handled");
-}
-
-/// The abandoned rows sit between launches that ran: the newest of the launches that ran is
-/// selected by its numeric suffix, not by position, and not by being newer.
-#[test]
-fn the_newest_row_that_ran_is_selected_past_an_abandoned_row_with_a_higher_suffix() {
-    let rows = [failed_service("2"), lost_with_control_plane("10"), superseded("11")];
-    let view = view_with(&[("2", 3), ("10", 0), ("11", 0)]);
-    assert!(
-        !pending(&rows, &view, 3),
-        "`-2` is the newest row that ran and serves generation 3; the abandoned `-10` and `-11` \
-         entries (0) are not read"
-    );
 }
 
 /// No row ran (every row is an abandoned launch): nothing is pending, a first placement is not a
@@ -491,15 +417,11 @@ fn expected(generated: &[GeneratedRow], generation: u64) -> bool {
 }
 
 proptest! {
-    // PENDING cases fail by design today; do not persist their seeds into the repo. Drop this
-    // setting together with the `should_panic` markers at the activation step.
-    #![proptest_config(ProptestConfig { failure_persistence: None, ..ProptestConfig::default() })]
-
     /// For every generated `(rows, view, generation)` the function equals the
     /// contract. Kills: the `<`, the finished-Job exception, the absent-reads-0
     /// default, the selection of the newest row that ran (abandoned launches skipped).
     #[test]
-    fn pending_is_true_iff_the_current_row_is_below_the_generation_and_not_a_finished_job(
+    fn pending_is_true_iff_the_newest_row_that_ran_is_below_the_generation_and_not_a_finished_job(
         generated in rows_strategy(),
         generation in 0_u64..=4,
     ) {
