@@ -1,0 +1,20 @@
+[package]
+name = "guest-public-dns-tcp-pipelining"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[[bin]]
+name = "harness"
+path = "src/main.rs"
+
+[dependencies]
+overdrive-control-plane.path = "../../crates/overdrive-control-plane"
+overdrive-core.path = "../../crates/overdrive-core"
+overdrive-sim.path = "../../crates/overdrive-sim"
+overdrive-dataplane.path = "../../crates/overdrive-dataplane"
+overdrive-testing.path = "../../crates/overdrive-testing"
+tokio = { version = "1", features = ["full"] }
+socket2 = "0.5"

@@ -1,0 +1,32 @@
+2911322 1795878872.849316 poll([{fd=0, events=0}, {fd=1, events=0}, {fd=2, events=0}], 3, 0) = 0 (Timeout)
+2911322 1795878872.849783 read(3, "# Your system has configured 'ma"..., 1024) = 571
+2911322 1795878872.849827 read(3, "", 1024) = 0
+2911322 1795878872.849856 close(3)      = 0
+2911322 1795878872.849925 read(3, "nameserver 100.95.0.1\n", 248) = 22
+2911322 1795878872.849957 read(3, "", 248) = 0
+2911322 1795878872.849984 close(3)      = 0
+2911322 1795878872.850015 socket(AF_INET, SOCK_DGRAM|SOCK_CLOEXEC|SOCK_NONBLOCK, IPPROTO_IP) = 3
+2911322 1795878872.850056 bind(3, {sa_family=AF_INET, sin_port=htons(0), sin_addr=inet_addr("0.0.0.0")}, 16) = 0
+2911322 1795878872.850101 sendto(3, "N\210\1\0\0\1\0\0\0\0\0\0\tpipe-test\7example\3c"..., 39, MSG_NOSIGNAL, {sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr("100.95.0.1")}, 16) = 39
+2911322 1795878872.850232 sendto(3, "OZ\1\0\0\1\0\0\0\0\0\0\tpipe-test\7example\3c"..., 39, MSG_NOSIGNAL, {sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr("100.95.0.1")}, 16) = 39
+2911322 1795878872.850275 poll([{fd=-1}, {fd=-1}, {fd=3, events=POLLIN}], 3, 2500) = 1 ([{fd=3, revents=POLLIN}])
+2911322 1795878872.850837 recvmsg(3, {msg_name={sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr("100.95.0.1")}, msg_namelen=16, msg_iov=[{iov_base="N\210\203\200\0\1\0\0\0\0\0\0\tpipe-test\7example\3c"..., iov_len=4800}], msg_iovlen=1, msg_controllen=0, msg_flags=0}, 0) = 39
+2911322 1795878872.850888 socket(AF_INET, SOCK_STREAM|SOCK_CLOEXEC|SOCK_NONBLOCK, IPPROTO_IP) = 4
+2911322 1795878872.850927 setsockopt(4, SOL_TCP, TCP_FASTOPEN_CONNECT, [1], 4) = 0
+2911322 1795878872.850962 sendmsg(4, {msg_name={sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr("100.95.0.1")}, msg_namelen=16, msg_iov=[{iov_base="\0'", iov_len=2}, {iov_base="N\210\1\0\0\1\0\0\0\0\0\0\tpipe-test\7example\3c"..., iov_len=39}], msg_iovlen=2, msg_controllen=0, msg_flags=0}, MSG_NOSIGNAL|MSG_FASTOPEN) = -1 EINPROGRESS (Operation now in progress)
+2911322 1795878872.851050 recvmsg(3, {msg_name={sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr("100.95.0.1")}, msg_namelen=16, msg_iov=[{iov_base="OZ\203\200\0\1\0\0\0\0\0\0\tpipe-test\7example\3c"..., iov_len=4800}], msg_iovlen=1, msg_controllen=0, msg_flags=0}, 0) = 39
+2911322 1795878872.851097 socket(AF_INET, SOCK_STREAM|SOCK_CLOEXEC|SOCK_NONBLOCK, IPPROTO_IP) = 5
+2911322 1795878872.851134 setsockopt(5, SOL_TCP, TCP_FASTOPEN_CONNECT, [1], 4) = 0
+2911322 1795878872.851167 sendmsg(5, {msg_name={sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr("100.95.0.1")}, msg_namelen=16, msg_iov=[{iov_base="\0'", iov_len=2}, {iov_base="OZ\1\0\0\1\0\0\0\0\0\0\tpipe-test\7example\3c"..., iov_len=39}], msg_iovlen=2, msg_controllen=0, msg_flags=0}, MSG_NOSIGNAL|MSG_FASTOPEN) = -1 EINPROGRESS (Operation now in progress)
+2911322 1795878872.851233 poll([{fd=4, events=POLLOUT}, {fd=5, events=POLLOUT}, {fd=3, events=0}], 3, 2499) = 2 ([{fd=4, revents=POLLOUT}, {fd=5, revents=POLLOUT}])
+2911322 1795878872.851272 sendmsg(4, {msg_name=NULL, msg_namelen=0, msg_iov=[{iov_base="\0'", iov_len=2}, {iov_base="N\210\1\0\0\1\0\0\0\0\0\0\tpipe-test\7example\3c"..., iov_len=39}], msg_iovlen=2, msg_controllen=0, msg_flags=0}, MSG_NOSIGNAL) = 41
+2911322 1795878872.851342 sendmsg(5, {msg_name=NULL, msg_namelen=0, msg_iov=[{iov_base="\0'", iov_len=2}, {iov_base="OZ\1\0\0\1\0\0\0\0\0\0\tpipe-test\7example\3c"..., iov_len=39}], msg_iovlen=2, msg_controllen=0, msg_flags=0}, MSG_NOSIGNAL) = 41
+2911322 1795878872.851421 poll([{fd=4, events=POLLIN}, {fd=5, events=POLLIN}, {fd=3, events=0}], 3, 2498) = 1 ([{fd=4, revents=POLLIN}])
+2911322 1795878872.851887 recvmsg(4, {msg_name=NULL, msg_namelen=0, msg_iov=[{iov_base="\0007", iov_len=2}, {iov_base="N\210\201\200\0\1\0\1\0\0\0\0\tpipe-test\7example\3c"..., iov_len=4800}], msg_iovlen=2, msg_controllen=0, msg_flags=0}, 0) = 57
+2911322 1795878872.852019 close(4)      = 0
+2911322 1795878872.852094 poll([{fd=-1}, {fd=5, events=POLLIN}, {fd=3, events=0}], 3, 2498) = 1 ([{fd=5, revents=POLLIN}])
+2911322 1795878872.852156 recvmsg(5, {msg_name=NULL, msg_namelen=0, msg_iov=[{iov_base="\0'", iov_len=2}, {iov_base="OZ\201\200\0\1\0\0\0\0\0\0\tpipe-test\7example\3c"..., iov_len=4800}], msg_iovlen=2, msg_controllen=0, msg_flags=0}, 0) = 41
+2911322 1795878872.852226 close(5)      = 0
+2911322 1795878872.852273 close(3)      = 0
+2911322 1795878872.852351 write(1, "musl getaddrinfo(pipe-test.examp"..., 79) = 79
+2911322 1795878872.852591 +++ exited with 0 +++

@@ -1,0 +1,1333 @@
+== env
+Linux em-determined-roentgen 7.0.0-38-generic #38-Ubuntu SMP PREEMPT_DYNAMIC Fri Sep  4 09:10:14 UTC 2026 x86_64 GNU/Linux
+kernel: 7.0.0-38-generic
+ldd (Ubuntu GLIBC 2.43-2ubuntu2.7) 2.43
+Sat Nov 28 15:02:12 UTC 2026
+sha: 0192774e0a96d28af344badc9090821c3c85db7c
+A  spike-scratch/guest-public-dns-tcp-pipelining/Cargo.toml
+A  spike-scratch/guest-public-dns-tcp-pipelining/client/musl_lookup.rs
+A  spike-scratch/guest-public-dns-tcp-pipelining/inner.sh
+A  spike-scratch/guest-public-dns-tcp-pipelining/run.sh
+A  spike-scratch/guest-public-dns-tcp-pipelining/src/main.rs
+?? spike-scratch/guest-public-dns-tcp-pipelining/Cargo.lock
+tcpdump: /usr/bin/tcpdump
+strace: /usr/bin/strace
+getent: /usr/bin/getent
+unshare: /usr/bin/unshare
+ip: /usr/sbin/ip
+bc: /usr/bin/bc
+ss: /usr/bin/ss
+aarch64-unknown-linux-musl
+x86_64-unknown-linux-musl
+    Updating crates.io index
+ Downloading crates ...
+  Downloaded form_urlencoded v1.2.3
+  Downloaded constant_time_eq v0.6.2
+  Downloaded owo-colors v4.4.1
+  Downloaded clap_derive v4.6.9
+  Downloaded find-msvc-tools v0.1.16
+  Downloaded crc32fast v1.5.6
+  Downloaded url v2.5.9
+  Downloaded clap v4.6.10
+  Downloaded allocator-api2 v0.2.22
+  Downloaded arrayvec v0.7.9
+  Downloaded cc v1.12.0
+  Downloaded zerocopy-derive v0.8.66
+  Downloaded hyper v1.13.0
+  Downloaded h2 v0.4.21
+  Downloaded clap_builder v4.6.10
+  Downloaded blake3 v1.8.8
+  Downloaded hickory-proto v0.26.4
+  Downloaded zerocopy v0.8.66
+   Compiling pin-project-lite v0.2.18
+   Compiling smallvec v1.16.6
+   Compiling find-msvc-tools v0.1.16
+   Compiling hashbrown v0.17.2
+   Compiling regex-syntax v0.8.12
+   Compiling zerocopy v0.8.66
+   Compiling zerocopy-derive v0.8.66
+   Compiling bytes v1.12.2
+   Compiling constant_time_eq v0.6.2
+   Compiling zeroize v1.9.2
+   Compiling futures-util v0.3.34
+   Compiling tracing v0.1.44
+   Compiling arrayvec v0.7.9
+   Compiling uuid v1.29.3
+   Compiling crc32fast v1.5.6
+   Compiling allocator-api2 v0.2.22
+   Compiling cc v1.12.0
+   Compiling parking_lot_core v0.9.12
+   Compiling rustls-pki-types v1.16.0
+   Compiling form_urlencoded v1.2.3
+   Compiling icu_normalizer v2.4.0
+   Compiling owo-colors v4.4.1
+   Compiling sync_wrapper v1.0.2
+   Compiling parking_lot v0.12.5
+   Compiling hashbrown v0.15.5
+   Compiling clap_lex v1.1.2
+   Compiling clap_derive v4.6.9
+   Compiling indexmap v2.14.2
+   Compiling tokio v1.54.1
+   Compiling http v1.5.0
+   Compiling rkyv v0.8.18
+   Compiling idna_adapter v1.2.2
+   Compiling clap_builder v4.6.10
+   Compiling rustls-pemfile v2.2.0
+   Compiling overdrive-dataplane v0.0.0 (/home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/crates/overdrive-dataplane)
+   Compiling idna v1.1.0
+   Compiling serde_urlencoded v0.7.1
+   Compiling rand v0.10.4
+   Compiling async-stream v0.3.6
+   Compiling regex-automata v0.4.19
+   Compiling url v2.5.9
+   Compiling cmake v0.1.58
+   Compiling serde_norway v0.9.42
+   Compiling toml_edit v0.22.27
+   Compiling http-body v1.1.0
+   Compiling http-body-util v0.1.5
+   Compiling object v0.36.7
+   Compiling hickory-proto v0.26.4
+   Compiling ring v0.17.14
+   Compiling blake3 v1.8.8
+   Compiling aws-lc-sys v0.47.0
+   Compiling futures-executor v0.3.34
+   Compiling futures v0.3.34
+   Compiling clap v4.6.10
+   Compiling axum-core v0.4.5
+   Compiling matchers v0.2.0
+   Compiling tracing-subscriber v0.3.23
+   Compiling toml v0.8.23
+   Compiling regex v1.13.2
+   Compiling bindgen v0.66.1
+   Compiling tracing-error v0.2.1
+   Compiling color-spantrace v0.3.0
+   Compiling utoipa-gen v5.5.0
+   Compiling color-eyre v0.6.5
+   Compiling tokio-util v0.7.20
+   Compiling netlink-sys v0.8.8
+   Compiling netlink-sys v0.9.0
+   Compiling rcgen v0.14.10
+   Compiling netlink-proto v0.12.2
+   Compiling netlink-proto v0.13.0
+   Compiling tower v0.5.3
+   Compiling half v2.7.1
+   Compiling ppv-lite86 v0.2.21
+   Compiling genetlink v0.2.7
+   Compiling h2 v0.4.21
+   Compiling ciborium-ll v0.2.2
+   Compiling rand_chacha v0.3.1
+   Compiling netlink-packet-route v0.33.0
+   Compiling ciborium v0.2.2
+   Compiling rand v0.8.8
+   Compiling aya-obj v0.2.1
+   Compiling ethtool v0.2.9
+   Compiling tokio-stream v0.1.19
+   Compiling fs-err v3.3.2
+   Compiling hyper v1.13.0
+   Compiling aya v0.13.1
+   Compiling libsql-ffi v0.4.1
+   Compiling utoipa v5.5.0
+   Compiling hyper-util v0.1.21
+   Compiling axum v0.7.9
+   Compiling overdrive-core v0.0.0 (/home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/crates/overdrive-core)
+   Compiling aws-lc-rs v1.19.0
+   Compiling rustls v0.23.46
+   Compiling rtnetlink v0.23.0
+   Compiling utoipa-axum v0.1.3
+   Compiling rustls-webpki v0.103.17
+   Compiling libsql-sys v0.7.0
+   Compiling libsql v0.5.0
+   Compiling tokio-rustls v0.26.6
+   Compiling axum-server v0.7.3
+   Compiling overdrive-host v0.0.0 (/home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/crates/overdrive-host)
+   Compiling overdrive-fwd v0.0.0 (/home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/crates/overdrive-fwd)
+   Compiling overdrive-netlink v0.0.0 (/home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/crates/overdrive-netlink)
+   Compiling overdrive-reconcilers v0.0.0 (/home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/crates/overdrive-reconcilers)
+   Compiling overdrive-store-local v0.0.0 (/home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/crates/overdrive-store-local)
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::with_interest`: unsound due to lack of I/O safety; use `AsyncFd::register_with_interest` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/crates/overdrive-host/src/vm_host_state.rs:355:27
+    |
+355 |     let events = AsyncFd::with_interest(file, Interest::PRIORITY)?;
+    |                           ^^^^^^^^^^^^^
+    |
+    = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/crates/overdrive-host/src/beacon_io.rs:127:42
+    |
+127 |         let listener = Arc::new(AsyncFd::new(listener)?);
+    |                                          ^^^
+
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/crates/overdrive-host/src/beacon_io.rs:158:46
+    |
+158 | ...                   socket: AsyncFd::new(socket)?,
+    |                                        ^^^
+
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::try_with_interest`: unsound due to lack of I/O safety; use `AsyncFd::register_with_interest` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/crates/overdrive-host/src/vmm/launch_clone.rs:242:24
+    |
+242 |         match AsyncFd::try_with_interest(pidfd, Interest::READABLE) {
+    |                        ^^^^^^^^^^^^^^^^^
+
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::with_interest`: unsound due to lack of I/O safety; use `AsyncFd::register_with_interest` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/crates/overdrive-host/src/vmm/launch_clone.rs:266:49
+    |
+266 |                     if let Ok(ready) = AsyncFd::with_interest(pidfd, Interest::READABLE) {
+    |                                                 ^^^^^^^^^^^^^
+
+   Compiling overdrive-gateway v0.0.0 (/home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/crates/overdrive-gateway)
+   Compiling overdrive-testing v0.0.0 (/home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/crates/overdrive-testing)
+warning: `overdrive-host` (lib) generated 5 warnings
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+    --> /home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/crates/overdrive-dataplane/src/gateway_relay/mod.rs:1238:27
+     |
+1238 |         let fd = AsyncFd::new(connected).map_err(|_| GatewayClientMtlsError::Handshake)?;
+     |                           ^^^
+     |
+     = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+    --> /home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/crates/overdrive-dataplane/src/gateway_relay/mod.rs:1262:27
+     |
+1262 |         let fd = AsyncFd::new(accepted).map_err(|err| handshake_io(&err))?;
+     |                           ^^^
+
+   Compiling overdrive-worker v0.0.0 (/home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/crates/overdrive-worker)
+warning: `overdrive-dataplane` (lib) generated 2 warnings
+   Compiling overdrive-control-plane v0.0.0 (/home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/crates/overdrive-control-plane)
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/crates/overdrive-control-plane/src/guest_network/flow_io/host.rs:206:14
+    |
+206 |     AsyncFd::new(socket).map(Arc::new)
+    |              ^^^
+    |
+    = note: `#[warn(deprecated)]` on by default
+
+warning: use of deprecated associated function `tokio::io::unix::AsyncFd::<T>::new`: unsound due to lack of I/O safety; use `AsyncFd::register` instead (see https://github.com/tokio-rs/tokio/pull/8587)
+   --> /home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/crates/overdrive-control-plane/src/guest_network/flow_io/host.rs:346:34
+    |
+346 |         let readiness = AsyncFd::new(ForwarderReadiness(Arc::clone(&context)))
+    |                                  ^^^
+
+   Compiling overdrive-sim v0.0.0 (/home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/crates/overdrive-sim)
+warning: `overdrive-control-plane` (lib) generated 2 warnings
+   Compiling guest-public-dns-tcp-pipelining v0.0.0 (/home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/spike-scratch/guest-public-dns-tcp-pipelining)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 56.24s
+lo               UNKNOWN        127.0.0.1/8 100.95.0.1/32 ::1/128 
+server-side /etc/resolv.conf: nameserver 127.0.0.2
+== PHASE scripted: harness: responder up on 100.95.0.1:53, upstream mode=scripted
+    listen: udp   UNCONN 0      0          127.0.0.2:53        0.0.0.0:*    users:(("harness",pid=2890724,fd=11))
+    listen: udp   UNCONN 0      0            0.0.0.0:53        0.0.0.0:*    users:(("harness",pid=2890724,fd=9)) 
+    listen: tcp   LISTEN 0      128        127.0.0.2:53        0.0.0.0:*    users:(("harness",pid=2890724,fd=12))
+    listen: tcp   LISTEN 0      128       100.95.0.1:53        0.0.0.0:*    users:(("harness",pid=2890724,fd=10))
+######## rep 1
+--- CASE udp-ahosts-1: timed client /home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/spike-scratch/guest-public-dns-tcp-pipelining/out/r1/client.resolv.conf getent ahosts pipe-test.example.com
+93.184.216.34   STREAM pipe-test.example.com
+93.184.216.34   DGRAM  
+93.184.216.34   RAW    
+   [exit=0 wall=0.013s]
+--- wire (udp-ahosts-1), port 53 (client<->responder and responder<->upstream), -vv:
+    1795878190.384820 IP (tos 0x0, ttl 64, id 15647, offset 0, flags [DF], proto UDP (17), length 67)
+        100.95.0.1.38389 > 100.95.0.1.53: [bad udp cksum 0xc900 -> 0xc01e!] 20785+ A? pipe-test.example.com. (39)
+    1795878190.385589 IP (tos 0x0, ttl 64, id 42611, offset 0, flags [DF], proto UDP (17), length 67)
+        127.0.0.1.49737 > 127.0.0.2.53: [bad udp cksum 0xfe43 -> 0x5e87!] 20785+ A? pipe-test.example.com. (39)
+    1795878190.385699 IP (tos 0x0, ttl 64, id 61865, offset 0, flags [DF], proto UDP (17), length 83)
+        127.0.0.2.53 > 127.0.0.1.49737: [bad udp cksum 0xfe53 -> 0xb3ef!] 20785 q: A? pipe-test.example.com. 1/0/0 pipe-test.example.com. A 93.184.216.34 (55)
+    1795878190.385974 IP (tos 0x0, ttl 64, id 19696, offset 0, flags [DF], proto UDP (17), length 83)
+        100.95.0.1.53 > 100.95.0.1.38389: [bad udp cksum 0xc910 -> 0x1587!] 20785 q: A? pipe-test.example.com. 1/0/0 pipe-test.example.com. A 93.184.216.34 (55)
+--- CASE usevc-ahosts-1: timed client /home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/spike-scratch/guest-public-dns-tcp-pipelining/out/r1/client.resolv.conf env RES_OPTIONS=use-vc getent ahosts pipe-test.example.com
+93.184.216.34   STREAM pipe-test.example.com
+93.184.216.34   DGRAM  
+93.184.216.34   RAW    
+   [exit=0 wall=0.025s]
+--- wire (usevc-ahosts-1), port 53 (client<->responder and responder<->upstream), -vv:
+    1795878191.636286 IP (tos 0x0, ttl 64, id 24455, offset 0, flags [DF], proto TCP (6), length 60)
+        100.95.0.1.39094 > 100.95.0.1.53: Flags [S], cksum 0xc8ee (incorrect -> 0x1720), seq 4201908140, win 65495, options [mss 65495,sackOK,TS val 3530752161 ecr 0,nop,wscale 10], length 0
+    1795878191.636298 IP (tos 0x0, ttl 64, id 0, offset 0, flags [DF], proto TCP (6), length 60)
+        100.95.0.1.53 > 100.95.0.1.39094: Flags [S.], cksum 0xc8ee (incorrect -> 0x8dfd), seq 699231015, ack 4201908141, win 65483, options [mss 65495,sackOK,TS val 2467717426 ecr 3530752161,nop,wscale 10], length 0
+    1795878191.636310 IP (tos 0x0, ttl 64, id 24456, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.39094 > 100.95.0.1.53: Flags [.], cksum 0xc8e6 (incorrect -> 0xb67c), seq 1, ack 1, win 64, options [nop,nop,TS val 3530752161 ecr 2467717426], length 0
+    1795878191.636331 IP (tos 0x0, ttl 64, id 24457, offset 0, flags [DF], proto TCP (6), length 93)
+        100.95.0.1.39094 > 100.95.0.1.53: Flags [P.], cksum 0xc90f (incorrect -> 0x52bd), seq 1:42, ack 1, win 64, options [nop,nop,TS val 3530752161 ecr 2467717426], length 41 54289+ A? pipe-test.example.com. (39)
+    1795878191.636336 IP (tos 0x0, ttl 64, id 28369, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.39094: Flags [.], cksum 0xc8e6 (incorrect -> 0xb653), seq 1, ack 42, win 64, options [nop,nop,TS val 2467717426 ecr 3530752161], length 0
+    1795878191.636921 IP (tos 0x0, ttl 64, id 36808, offset 0, flags [DF], proto TCP (6), length 60)
+        127.0.0.1.33862 > 127.0.0.2.53: Flags [S], cksum 0xfe31 (incorrect -> 0xd2a9), seq 4151855281, win 65495, options [mss 65495,sackOK,TS val 2887388308 ecr 0,nop,wscale 10], length 0
+    1795878191.636937 IP (tos 0x0, ttl 64, id 0, offset 0, flags [DF], proto TCP (6), length 60)
+        127.0.0.2.53 > 127.0.0.1.33862: Flags [S.], cksum 0xfe31 (incorrect -> 0xa4c6), seq 3146665927, ack 4151855282, win 65483, options [mss 65495,sackOK,TS val 1004005040 ecr 2887388308,nop,wscale 10], length 0
+    1795878191.636953 IP (tos 0x0, ttl 64, id 36809, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.33862 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0xcd45), seq 1, ack 1, win 64, options [nop,nop,TS val 2887388308 ecr 1004005040], length 0
+    1795878191.637069 IP (tos 0x0, ttl 64, id 36810, offset 0, flags [DF], proto TCP (6), length 93)
+        127.0.0.1.33862 > 127.0.0.2.53: Flags [P.], cksum 0xfe52 (incorrect -> 0x6986), seq 1:42, ack 1, win 64, options [nop,nop,TS val 2887388308 ecr 1004005040], length 41 54289+ A? pipe-test.example.com. (39)
+    1795878191.637081 IP (tos 0x0, ttl 64, id 21971, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.2.53 > 127.0.0.1.33862: Flags [.], cksum 0xfe29 (incorrect -> 0xcd1c), seq 1, ack 42, win 64, options [nop,nop,TS val 1004005040 ecr 2887388308], length 0
+    1795878191.647120 IP (tos 0x0, ttl 64, id 21972, offset 0, flags [DF], proto TCP (6), length 54)
+        127.0.0.2.53 > 127.0.0.1.33862: Flags [P.], cksum 0xfe2b (incorrect -> 0xccd1), seq 1:3, ack 42, win 64, options [nop,nop,TS val 1004005050 ecr 2887388308], length 2 [prefix length(55) != length(0)] (invalid)
+    1795878191.647138 IP (tos 0x0, ttl 64, id 36811, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.33862 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0xcd06), seq 42, ack 3, win 64, options [nop,nop,TS val 2887388318 ecr 1004005050], length 0
+    1795878191.647150 IP (tos 0x0, ttl 64, id 21973, offset 0, flags [DF], proto TCP (6), length 107)
+        127.0.0.2.53 > 127.0.0.1.33862: Flags [P.], cksum 0xfe60 (incorrect -> 0xbee8), seq 3:58, ack 42, win 64, options [nop,nop,TS val 1004005050 ecr 2887388318], length 55 [prefix length(54289) != length(53)] (invalid)
+    1795878191.647155 IP (tos 0x0, ttl 64, id 36812, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.33862 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0xcccf), seq 42, ack 58, win 64, options [nop,nop,TS val 2887388318 ecr 1004005050], length 0
+    1795878191.647165 IP (tos 0x0, ttl 64, id 21974, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.2.53 > 127.0.0.1.33862: Flags [F.], cksum 0xfe29 (incorrect -> 0xccce), seq 58, ack 42, win 64, options [nop,nop,TS val 1004005050 ecr 2887388318], length 0
+    1795878191.647319 IP (tos 0x0, ttl 64, id 36813, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.33862 > 127.0.0.2.53: Flags [F.], cksum 0xfe29 (incorrect -> 0xcccd), seq 42, ack 59, win 64, options [nop,nop,TS val 2887388318 ecr 1004005050], length 0
+    1795878191.647351 IP (tos 0x0, ttl 64, id 21975, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.2.53 > 127.0.0.1.33862: Flags [.], cksum 0xfe29 (incorrect -> 0xcccd), seq 59, ack 43, win 64, options [nop,nop,TS val 1004005050 ecr 2887388318], length 0
+    1795878191.647564 IP (tos 0x0, ttl 64, id 28370, offset 0, flags [DF], proto TCP (6), length 109)
+        100.95.0.1.53 > 100.95.0.1.39094: Flags [P.], cksum 0xc91f (incorrect -> 0xa7f0), seq 1:58, ack 42, win 64, options [nop,nop,TS val 2467717438 ecr 3530752161], length 57 54289 q: A? pipe-test.example.com. 1/0/0 pipe-test.example.com. A 93.184.216.34 (55)
+    1795878191.647577 IP (tos 0x0, ttl 64, id 24458, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.39094 > 100.95.0.1.53: Flags [.], cksum 0xc8e6 (incorrect -> 0xb602), seq 42, ack 58, win 64, options [nop,nop,TS val 3530752173 ecr 2467717438], length 0
+    1795878191.647591 IP (tos 0x0, ttl 64, id 24459, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.39094 > 100.95.0.1.53: Flags [F.], cksum 0xc8e6 (incorrect -> 0xb601), seq 42, ack 58, win 64, options [nop,nop,TS val 3530752173 ecr 2467717438], length 0
+    1795878191.647596 IP (tos 0x0, ttl 64, id 28371, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.39094: Flags [F.], cksum 0xc8e6 (incorrect -> 0xb601), seq 58, ack 42, win 64, options [nop,nop,TS val 2467717438 ecr 3530752173], length 0
+    1795878191.647603 IP (tos 0x0, ttl 64, id 24460, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.39094 > 100.95.0.1.53: Flags [.], cksum 0xc8e6 (incorrect -> 0xb600), seq 43, ack 59, win 64, options [nop,nop,TS val 3530752173 ecr 2467717438], length 0
+    1795878191.647613 IP (tos 0x0, ttl 64, id 28372, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.39094: Flags [.], cksum 0xc8e6 (incorrect -> 0xb600), seq 59, ack 43, win 64, options [nop,nop,TS val 2467717438 ecr 3530752173], length 0
+--- CASE usevc-ahostsv4-1: timed client /home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/spike-scratch/guest-public-dns-tcp-pipelining/out/r1/client.resolv.conf env RES_OPTIONS=use-vc getent ahostsv4 pipe-test.example.com
+93.184.216.34   STREAM pipe-test.example.com
+93.184.216.34   DGRAM  
+93.184.216.34   RAW    
+   [exit=0 wall=0.035s]
+--- wire (usevc-ahostsv4-1), port 53 (client<->responder and responder<->upstream), -vv:
+    1795878192.896859 IP (tos 0x0, ttl 64, id 37093, offset 0, flags [DF], proto TCP (6), length 60)
+        100.95.0.1.58316 > 100.95.0.1.53: Flags [S], cksum 0xc8ee (incorrect -> 0x1f5b), seq 1857504569, win 65495, options [mss 65495,sackOK,TS val 916690768 ecr 0,nop,wscale 10], length 0
+    1795878192.896872 IP (tos 0x0, ttl 64, id 0, offset 0, flags [DF], proto TCP (6), length 60)
+        100.95.0.1.53 > 100.95.0.1.58316: Flags [S.], cksum 0xc8ee (incorrect -> 0xd20d), seq 2812411051, ack 1857504570, win 65483, options [mss 65495,sackOK,TS val 1845902068 ecr 916690768,nop,wscale 10], length 0
+    1795878192.896884 IP (tos 0x0, ttl 64, id 37094, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.58316 > 100.95.0.1.53: Flags [.], cksum 0xc8e6 (incorrect -> 0xfa8c), seq 1, ack 1, win 64, options [nop,nop,TS val 916690768 ecr 1845902068], length 0
+    1795878192.896907 IP (tos 0x0, ttl 64, id 37095, offset 0, flags [DF], proto TCP (6), length 93)
+        100.95.0.1.58316 > 100.95.0.1.53: Flags [P.], cksum 0xc90f (incorrect -> 0x2f32), seq 1:42, ack 1, win 64, options [nop,nop,TS val 916690768 ecr 1845902068], length 41 15277+ A? pipe-test.example.com. (39)
+    1795878192.896913 IP (tos 0x0, ttl 64, id 65261, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.58316: Flags [.], cksum 0xc8e6 (incorrect -> 0xfa63), seq 1, ack 42, win 64, options [nop,nop,TS val 1845902068 ecr 916690768], length 0
+    1795878192.897286 IP (tos 0x0, ttl 64, id 5740, offset 0, flags [DF], proto TCP (6), length 60)
+        127.0.0.1.34348 > 127.0.0.2.53: Flags [S], cksum 0xfe31 (incorrect -> 0xec4f), seq 1587534024, win 65495, options [mss 65495,sackOK,TS val 187931313 ecr 0,nop,wscale 10], length 0
+    1795878192.897295 IP (tos 0x0, ttl 64, id 0, offset 0, flags [DF], proto TCP (6), length 60)
+        127.0.0.2.53 > 127.0.0.1.34348: Flags [S.], cksum 0xfe31 (incorrect -> 0x62bd), seq 3364200345, ack 1587534025, win 65483, options [mss 65495,sackOK,TS val 908192588 ecr 187931313,nop,wscale 10], length 0
+    1795878192.897304 IP (tos 0x0, ttl 64, id 5741, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.34348 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x8b3c), seq 1, ack 1, win 64, options [nop,nop,TS val 187931313 ecr 908192588], length 0
+    1795878192.897412 IP (tos 0x0, ttl 64, id 5742, offset 0, flags [DF], proto TCP (6), length 93)
+        127.0.0.1.34348 > 127.0.0.2.53: Flags [P.], cksum 0xfe52 (incorrect -> 0xbfe0), seq 1:42, ack 1, win 64, options [nop,nop,TS val 187931314 ecr 908192588], length 41 15277+ A? pipe-test.example.com. (39)
+    1795878192.897425 IP (tos 0x0, ttl 64, id 16728, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.2.53 > 127.0.0.1.34348: Flags [.], cksum 0xfe29 (incorrect -> 0x8b11), seq 1, ack 42, win 64, options [nop,nop,TS val 908192589 ecr 187931314], length 0
+    1795878192.917270 IP (tos 0x0, ttl 64, id 16729, offset 0, flags [DF], proto TCP (6), length 54)
+        127.0.0.2.53 > 127.0.0.1.34348: Flags [P.], cksum 0xfe2b (incorrect -> 0x8abd), seq 1:3, ack 42, win 64, options [nop,nop,TS val 908192608 ecr 187931314], length 2 [prefix length(55) != length(0)] (invalid)
+    1795878192.917287 IP (tos 0x0, ttl 64, id 5743, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.34348 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x8ae9), seq 42, ack 3, win 64, options [nop,nop,TS val 187931333 ecr 908192608], length 0
+    1795878192.917298 IP (tos 0x0, ttl 64, id 16730, offset 0, flags [DF], proto TCP (6), length 107)
+        127.0.0.2.53 > 127.0.0.1.34348: Flags [P.], cksum 0xfe60 (incorrect -> 0x1530), seq 3:58, ack 42, win 64, options [nop,nop,TS val 908192608 ecr 187931333], length 55 [prefix length(15277) != length(53)] (invalid)
+    1795878192.917302 IP (tos 0x0, ttl 64, id 5744, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.34348 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x8ab2), seq 42, ack 58, win 64, options [nop,nop,TS val 187931333 ecr 908192608], length 0
+    1795878192.917312 IP (tos 0x0, ttl 64, id 16731, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.2.53 > 127.0.0.1.34348: Flags [F.], cksum 0xfe29 (incorrect -> 0x8ab1), seq 58, ack 42, win 64, options [nop,nop,TS val 908192608 ecr 187931333], length 0
+    1795878192.917489 IP (tos 0x0, ttl 64, id 5745, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.34348 > 127.0.0.2.53: Flags [F.], cksum 0xfe29 (incorrect -> 0x8aaf), seq 42, ack 59, win 64, options [nop,nop,TS val 187931334 ecr 908192608], length 0
+    1795878192.917518 IP (tos 0x0, ttl 64, id 16732, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.2.53 > 127.0.0.1.34348: Flags [.], cksum 0xfe29 (incorrect -> 0x8aae), seq 59, ack 43, win 64, options [nop,nop,TS val 908192609 ecr 187931334], length 0
+    1795878192.917699 IP (tos 0x0, ttl 64, id 65262, offset 0, flags [DF], proto TCP (6), length 109)
+        100.95.0.1.53 > 100.95.0.1.58316: Flags [P.], cksum 0xc91f (incorrect -> 0x845c), seq 1:58, ack 42, win 64, options [nop,nop,TS val 1845902089 ecr 916690768], length 57 15277 q: A? pipe-test.example.com. 1/0/0 pipe-test.example.com. A 93.184.216.34 (55)
+    1795878192.917710 IP (tos 0x0, ttl 64, id 37096, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.58316 > 100.95.0.1.53: Flags [.], cksum 0xc8e6 (incorrect -> 0xfa00), seq 42, ack 58, win 64, options [nop,nop,TS val 916690789 ecr 1845902089], length 0
+    1795878192.917723 IP (tos 0x0, ttl 64, id 37097, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.58316 > 100.95.0.1.53: Flags [F.], cksum 0xc8e6 (incorrect -> 0xf9ff), seq 42, ack 58, win 64, options [nop,nop,TS val 916690789 ecr 1845902089], length 0
+    1795878192.917729 IP (tos 0x0, ttl 64, id 65263, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.58316: Flags [F.], cksum 0xc8e6 (incorrect -> 0xf9ff), seq 58, ack 42, win 64, options [nop,nop,TS val 1845902089 ecr 916690789], length 0
+    1795878192.917736 IP (tos 0x0, ttl 64, id 37098, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.58316 > 100.95.0.1.53: Flags [.], cksum 0xc8e6 (incorrect -> 0xf9fe), seq 43, ack 59, win 64, options [nop,nop,TS val 916690789 ecr 1845902089], length 0
+    1795878192.917746 IP (tos 0x0, ttl 64, id 65264, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.58316: Flags [.], cksum 0xc8e6 (incorrect -> 0xf9fe), seq 59, ack 43, win 64, options [nop,nop,TS val 1845902089 ecr 916690789], length 0
+--- CASE usevc-ahostsv6-1: timed client /home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/spike-scratch/guest-public-dns-tcp-pipelining/out/r1/client.resolv.conf env RES_OPTIONS=use-vc getent ahostsv6 pipe-test.example.com
+   [exit=2 wall=0.013s]
+--- wire (usevc-ahostsv6-1), port 53 (client<->responder and responder<->upstream), -vv:
+######## rep 2
+--- CASE udp-ahosts-2: timed client /home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/spike-scratch/guest-public-dns-tcp-pipelining/out/r1/client.resolv.conf getent ahosts pipe-test.example.com
+93.184.216.34   STREAM pipe-test.example.com
+93.184.216.34   DGRAM  
+93.184.216.34   RAW    
+   [exit=0 wall=0.012s]
+--- wire (udp-ahosts-2), port 53 (client<->responder and responder<->upstream), -vv:
+    1795878195.417977 IP (tos 0x0, ttl 64, id 55788, offset 0, flags [DF], proto UDP (17), length 67)
+        100.95.0.1.54211 > 100.95.0.1.53: [bad udp cksum 0xc900 -> 0x714e!] 25139+ A? pipe-test.example.com. (39)
+    1795878195.418542 IP (tos 0x0, ttl 64, id 59944, offset 0, flags [DF], proto UDP (17), length 67)
+        127.0.0.1.39989 > 127.0.0.2.53: [bad udp cksum 0xfe43 -> 0x7399!] 25139+ A? pipe-test.example.com. (39)
+    1795878195.418602 IP (tos 0x0, ttl 64, id 64111, offset 0, flags [DF], proto UDP (17), length 83)
+        127.0.0.2.53 > 127.0.0.1.39989: [bad udp cksum 0xfe53 -> 0xc901!] 25139 q: A? pipe-test.example.com. 1/0/0 pipe-test.example.com. A 93.184.216.34 (55)
+    1795878195.418849 IP (tos 0x0, ttl 64, id 24686, offset 0, flags [DF], proto UDP (17), length 83)
+        100.95.0.1.53 > 100.95.0.1.54211: [bad udp cksum 0xc910 -> 0xc6b6!] 25139 q: A? pipe-test.example.com. 1/0/0 pipe-test.example.com. A 93.184.216.34 (55)
+--- CASE usevc-ahosts-2: timed client /home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/spike-scratch/guest-public-dns-tcp-pipelining/out/r1/client.resolv.conf env RES_OPTIONS=use-vc getent ahosts pipe-test.example.com
+93.184.216.34   STREAM pipe-test.example.com
+93.184.216.34   DGRAM  
+93.184.216.34   RAW    
+   [exit=0 wall=0.025s]
+--- wire (usevc-ahosts-2), port 53 (client<->responder and responder<->upstream), -vv:
+    1795878196.673405 IP (tos 0x0, ttl 64, id 1785, offset 0, flags [DF], proto TCP (6), length 60)
+        100.95.0.1.58328 > 100.95.0.1.53: Flags [S], cksum 0xc8ee (incorrect -> 0x45f9), seq 4151394961, win 65495, options [mss 65495,sackOK,TS val 44768908 ecr 0,nop,wscale 10], length 0
+    1795878196.673418 IP (tos 0x0, ttl 64, id 0, offset 0, flags [DF], proto TCP (6), length 60)
+        100.95.0.1.53 > 100.95.0.1.58328: Flags [S.], cksum 0xc8ee (incorrect -> 0x3e77), seq 2164776713, ack 4151394962, win 65483, options [mss 65495,sackOK,TS val 955346554 ecr 44768908,nop,wscale 10], length 0
+    1795878196.673430 IP (tos 0x0, ttl 64, id 1786, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.58328 > 100.95.0.1.53: Flags [.], cksum 0xc8e6 (incorrect -> 0x66f6), seq 1, ack 1, win 64, options [nop,nop,TS val 44768908 ecr 955346554], length 0
+    1795878196.673452 IP (tos 0x0, ttl 64, id 1787, offset 0, flags [DF], proto TCP (6), length 93)
+        100.95.0.1.58328 > 100.95.0.1.53: Flags [P.], cksum 0xc90f (incorrect -> 0x580d), seq 1:42, ack 1, win 64, options [nop,nop,TS val 44768908 ecr 955346554], length 41 32571+ A? pipe-test.example.com. (39)
+    1795878196.673457 IP (tos 0x0, ttl 64, id 44472, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.58328: Flags [.], cksum 0xc8e6 (incorrect -> 0x66cd), seq 1, ack 42, win 64, options [nop,nop,TS val 955346554 ecr 44768908], length 0
+    1795878196.673899 IP (tos 0x0, ttl 64, id 54552, offset 0, flags [DF], proto TCP (6), length 60)
+        127.0.0.1.34358 > 127.0.0.2.53: Flags [S], cksum 0xfe31 (incorrect -> 0xcf0d), seq 500830696, win 65495, options [mss 65495,sackOK,TS val 820419036 ecr 0,nop,wscale 10], length 0
+    1795878196.673916 IP (tos 0x0, ttl 64, id 0, offset 0, flags [DF], proto TCP (6), length 60)
+        127.0.0.2.53 > 127.0.0.1.34358: Flags [S.], cksum 0xfe31 (incorrect -> 0x131a), seq 4135049097, ack 500830697, win 65483, options [mss 65495,sackOK,TS val 717472553 ecr 820419036,nop,wscale 10], length 0
+    1795878196.673931 IP (tos 0x0, ttl 64, id 54553, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.34358 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x3b99), seq 1, ack 1, win 64, options [nop,nop,TS val 820419036 ecr 717472553], length 0
+    1795878196.674004 IP (tos 0x0, ttl 64, id 54554, offset 0, flags [DF], proto TCP (6), length 93)
+        127.0.0.1.34358 > 127.0.0.2.53: Flags [P.], cksum 0xfe52 (incorrect -> 0x2cb0), seq 1:42, ack 1, win 64, options [nop,nop,TS val 820419036 ecr 717472553], length 41 32571+ A? pipe-test.example.com. (39)
+    1795878196.674013 IP (tos 0x0, ttl 64, id 63618, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.2.53 > 127.0.0.1.34358: Flags [.], cksum 0xfe29 (incorrect -> 0x3b70), seq 1, ack 42, win 64, options [nop,nop,TS val 717472553 ecr 820419036], length 0
+    1795878196.683424 IP (tos 0x0, ttl 64, id 63619, offset 0, flags [DF], proto TCP (6), length 54)
+        127.0.0.2.53 > 127.0.0.1.34358: Flags [P.], cksum 0xfe2b (incorrect -> 0x3b25), seq 1:3, ack 42, win 64, options [nop,nop,TS val 717472563 ecr 820419036], length 2 [prefix length(55) != length(0)] (invalid)
+    1795878196.683433 IP (tos 0x0, ttl 64, id 54555, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.34358 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x3b5a), seq 42, ack 3, win 64, options [nop,nop,TS val 820419046 ecr 717472563], length 0
+    1795878196.683441 IP (tos 0x0, ttl 64, id 63620, offset 0, flags [DF], proto TCP (6), length 107)
+        127.0.0.2.53 > 127.0.0.1.34358: Flags [P.], cksum 0xfe60 (incorrect -> 0x8212), seq 3:58, ack 42, win 64, options [nop,nop,TS val 717472563 ecr 820419046], length 55 [prefix length(32571) != length(53)] (invalid)
+    1795878196.683446 IP (tos 0x0, ttl 64, id 54556, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.34358 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x3b23), seq 42, ack 58, win 64, options [nop,nop,TS val 820419046 ecr 717472563], length 0
+    1795878196.683455 IP (tos 0x0, ttl 64, id 63621, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.2.53 > 127.0.0.1.34358: Flags [F.], cksum 0xfe29 (incorrect -> 0x3b22), seq 58, ack 42, win 64, options [nop,nop,TS val 717472563 ecr 820419046], length 0
+    1795878196.683543 IP (tos 0x0, ttl 64, id 54557, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.34358 > 127.0.0.2.53: Flags [F.], cksum 0xfe29 (incorrect -> 0x3b21), seq 42, ack 59, win 64, options [nop,nop,TS val 820419046 ecr 717472563], length 0
+    1795878196.683572 IP (tos 0x0, ttl 64, id 63622, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.2.53 > 127.0.0.1.34358: Flags [.], cksum 0xfe29 (incorrect -> 0x3b21), seq 59, ack 43, win 64, options [nop,nop,TS val 717472563 ecr 820419046], length 0
+    1795878196.683715 IP (tos 0x0, ttl 64, id 44473, offset 0, flags [DF], proto TCP (6), length 109)
+        100.95.0.1.53 > 100.95.0.1.58328: Flags [P.], cksum 0xc91f (incorrect -> 0xad42), seq 1:58, ack 42, win 64, options [nop,nop,TS val 955346564 ecr 44768908], length 57 32571 q: A? pipe-test.example.com. 1/0/0 pipe-test.example.com. A 93.184.216.34 (55)
+    1795878196.683725 IP (tos 0x0, ttl 64, id 1788, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.58328 > 100.95.0.1.53: Flags [.], cksum 0xc8e6 (incorrect -> 0x6680), seq 42, ack 58, win 64, options [nop,nop,TS val 44768918 ecr 955346564], length 0
+    1795878196.683735 IP (tos 0x0, ttl 64, id 1789, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.58328 > 100.95.0.1.53: Flags [F.], cksum 0xc8e6 (incorrect -> 0x667f), seq 42, ack 58, win 64, options [nop,nop,TS val 44768918 ecr 955346564], length 0
+    1795878196.683743 IP (tos 0x0, ttl 64, id 44474, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.58328: Flags [F.], cksum 0xc8e6 (incorrect -> 0x667e), seq 58, ack 43, win 64, options [nop,nop,TS val 955346564 ecr 44768918], length 0
+    1795878196.683757 IP (tos 0x0, ttl 64, id 1790, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.58328 > 100.95.0.1.53: Flags [.], cksum 0xc8e6 (incorrect -> 0x667e), seq 43, ack 59, win 64, options [nop,nop,TS val 44768918 ecr 955346564], length 0
+--- CASE usevc-ahostsv4-2: timed client /home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/spike-scratch/guest-public-dns-tcp-pipelining/out/r1/client.resolv.conf env RES_OPTIONS=use-vc getent ahostsv4 pipe-test.example.com
+93.184.216.34   STREAM pipe-test.example.com
+93.184.216.34   DGRAM  
+93.184.216.34   RAW    
+   [exit=0 wall=0.016s]
+--- wire (usevc-ahostsv4-2), port 53 (client<->responder and responder<->upstream), -vv:
+    1795878197.931450 IP (tos 0x0, ttl 64, id 15306, offset 0, flags [DF], proto TCP (6), length 60)
+        100.95.0.1.58340 > 100.95.0.1.53: Flags [S], cksum 0xc8ee (incorrect -> 0x21fe), seq 335934271, win 65495, options [mss 65495,sackOK,TS val 1132606562 ecr 0,nop,wscale 10], length 0
+    1795878197.931462 IP (tos 0x0, ttl 64, id 0, offset 0, flags [DF], proto TCP (6), length 60)
+        100.95.0.1.53 > 100.95.0.1.58340: Flags [S.], cksum 0xc8ee (incorrect -> 0x535a), seq 115096402, ack 335934272, win 65483, options [mss 65495,sackOK,TS val 2651123307 ecr 1132606562,nop,wscale 10], length 0
+    1795878197.931474 IP (tos 0x0, ttl 64, id 15307, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.58340 > 100.95.0.1.53: Flags [.], cksum 0xc8e6 (incorrect -> 0x7bd9), seq 1, ack 1, win 64, options [nop,nop,TS val 1132606562 ecr 2651123307], length 0
+    1795878197.931496 IP (tos 0x0, ttl 64, id 15308, offset 0, flags [DF], proto TCP (6), length 93)
+        100.95.0.1.58340 > 100.95.0.1.53: Flags [P.], cksum 0xc90f (incorrect -> 0xd302), seq 1:42, ack 1, win 64, options [nop,nop,TS val 1132606562 ecr 2651123307], length 41 6441+ A? pipe-test.example.com. (39)
+    1795878197.931501 IP (tos 0x0, ttl 64, id 22691, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.58340: Flags [.], cksum 0xc8e6 (incorrect -> 0x7bb0), seq 1, ack 42, win 64, options [nop,nop,TS val 2651123307 ecr 1132606562], length 0
+    1795878197.932009 IP (tos 0x0, ttl 64, id 25285, offset 0, flags [DF], proto TCP (6), length 60)
+        127.0.0.1.34364 > 127.0.0.2.53: Flags [S], cksum 0xfe31 (incorrect -> 0x3022), seq 4090336408, win 65495, options [mss 65495,sackOK,TS val 4011598311 ecr 0,nop,wscale 10], length 0
+    1795878197.932026 IP (tos 0x0, ttl 64, id 0, offset 0, flags [DF], proto TCP (6), length 60)
+        127.0.0.2.53 > 127.0.0.1.34364: Flags [S.], cksum 0xfe31 (incorrect -> 0x1161), seq 1227816597, ack 4090336409, win 65483, options [mss 65495,sackOK,TS val 3002934266 ecr 4011598311,nop,wscale 10], length 0
+    1795878197.932042 IP (tos 0x0, ttl 64, id 25286, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.34364 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x39e0), seq 1, ack 1, win 64, options [nop,nop,TS val 4011598311 ecr 3002934266], length 0
+    1795878197.932145 IP (tos 0x0, ttl 64, id 25287, offset 0, flags [DF], proto TCP (6), length 93)
+        127.0.0.1.34364 > 127.0.0.2.53: Flags [P.], cksum 0xfe52 (incorrect -> 0x9109), seq 1:42, ack 1, win 64, options [nop,nop,TS val 4011598311 ecr 3002934266], length 41 6441+ A? pipe-test.example.com. (39)
+    1795878197.932157 IP (tos 0x0, ttl 64, id 33282, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.2.53 > 127.0.0.1.34364: Flags [.], cksum 0xfe29 (incorrect -> 0x39b7), seq 1, ack 42, win 64, options [nop,nop,TS val 3002934266 ecr 4011598311], length 0
+    1795878197.933426 IP (tos 0x0, ttl 64, id 33283, offset 0, flags [DF], proto TCP (6), length 54)
+        127.0.0.2.53 > 127.0.0.1.34364: Flags [P.], cksum 0xfe2b (incorrect -> 0x3974), seq 1:3, ack 42, win 64, options [nop,nop,TS val 3002934268 ecr 4011598311], length 2 [prefix length(55) != length(0)] (invalid)
+    1795878197.933439 IP (tos 0x0, ttl 64, id 25288, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.34364 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x39b1), seq 42, ack 3, win 64, options [nop,nop,TS val 4011598313 ecr 3002934268], length 0
+    1795878197.933454 IP (tos 0x0, ttl 64, id 33284, offset 0, flags [DF], proto TCP (6), length 107)
+        127.0.0.2.53 > 127.0.0.1.34364: Flags [P.], cksum 0xfe60 (incorrect -> 0xe67b), seq 3:58, ack 42, win 64, options [nop,nop,TS val 3002934268 ecr 4011598313], length 55 [prefix length(6441) != length(53)] (invalid)
+    1795878197.933462 IP (tos 0x0, ttl 64, id 25289, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.34364 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x397a), seq 42, ack 58, win 64, options [nop,nop,TS val 4011598313 ecr 3002934268], length 0
+    1795878197.933478 IP (tos 0x0, ttl 64, id 33285, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.2.53 > 127.0.0.1.34364: Flags [F.], cksum 0xfe29 (incorrect -> 0x3979), seq 58, ack 42, win 64, options [nop,nop,TS val 3002934268 ecr 4011598313], length 0
+    1795878197.933551 IP (tos 0x0, ttl 64, id 25290, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.34364 > 127.0.0.2.53: Flags [F.], cksum 0xfe29 (incorrect -> 0x3978), seq 42, ack 59, win 64, options [nop,nop,TS val 4011598313 ecr 3002934268], length 0
+    1795878197.933578 IP (tos 0x0, ttl 64, id 33286, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.2.53 > 127.0.0.1.34364: Flags [.], cksum 0xfe29 (incorrect -> 0x3978), seq 59, ack 43, win 64, options [nop,nop,TS val 3002934268 ecr 4011598313], length 0
+    1795878197.933714 IP (tos 0x0, ttl 64, id 22692, offset 0, flags [DF], proto TCP (6), length 109)
+        100.95.0.1.53 > 100.95.0.1.58340: Flags [P.], cksum 0xc91f (incorrect -> 0x2840), seq 1:58, ack 42, win 64, options [nop,nop,TS val 2651123309 ecr 1132606562], length 57 6441 q: A? pipe-test.example.com. 1/0/0 pipe-test.example.com. A 93.184.216.34 (55)
+    1795878197.933725 IP (tos 0x0, ttl 64, id 15309, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.58340 > 100.95.0.1.53: Flags [.], cksum 0xc8e6 (incorrect -> 0x7b73), seq 42, ack 58, win 64, options [nop,nop,TS val 1132606564 ecr 2651123309], length 0
+    1795878197.933732 IP (tos 0x0, ttl 64, id 15310, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.58340 > 100.95.0.1.53: Flags [F.], cksum 0xc8e6 (incorrect -> 0x7b72), seq 42, ack 58, win 64, options [nop,nop,TS val 1132606564 ecr 2651123309], length 0
+    1795878197.933742 IP (tos 0x0, ttl 64, id 22693, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.58340: Flags [F.], cksum 0xc8e6 (incorrect -> 0x7b71), seq 58, ack 43, win 64, options [nop,nop,TS val 2651123309 ecr 1132606564], length 0
+    1795878197.933756 IP (tos 0x0, ttl 64, id 15311, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.58340 > 100.95.0.1.53: Flags [.], cksum 0xc8e6 (incorrect -> 0x7b71), seq 43, ack 59, win 64, options [nop,nop,TS val 1132606564 ecr 2651123309], length 0
+--- CASE usevc-ahostsv6-2: timed client /home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/spike-scratch/guest-public-dns-tcp-pipelining/out/r1/client.resolv.conf env RES_OPTIONS=use-vc getent ahostsv6 pipe-test.example.com
+   [exit=2 wall=0.014s]
+--- wire (usevc-ahostsv6-2), port 53 (client<->responder and responder<->upstream), -vv:
+######## rep 3
+--- CASE udp-ahosts-3: timed client /home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/spike-scratch/guest-public-dns-tcp-pipelining/out/r1/client.resolv.conf getent ahosts pipe-test.example.com
+93.184.216.34   STREAM pipe-test.example.com
+93.184.216.34   DGRAM  
+93.184.216.34   RAW    
+   [exit=0 wall=0.013s]
+--- wire (udp-ahosts-3), port 53 (client<->responder and responder<->upstream), -vv:
+    1795878200.427700 IP (tos 0x0, ttl 64, id 64231, offset 0, flags [DF], proto UDP (17), length 67)
+        100.95.0.1.49871 > 100.95.0.1.53: [bad udp cksum 0xc900 -> 0x9b69!] 18700+ A? pipe-test.example.com. (39)
+    1795878200.428186 IP (tos 0x0, ttl 64, id 33943, offset 0, flags [DF], proto UDP (17), length 67)
+        127.0.0.1.51599 > 127.0.0.2.53: [bad udp cksum 0xfe43 -> 0x5f66!] 18700+ A? pipe-test.example.com. (39)
+    1795878200.428230 IP (tos 0x0, ttl 64, id 1541, offset 0, flags [DF], proto UDP (17), length 83)
+        127.0.0.2.53 > 127.0.0.1.51599: [bad udp cksum 0xfe53 -> 0xb4ce!] 18700 q: A? pipe-test.example.com. 1/0/0 pipe-test.example.com. A 93.184.216.34 (55)
+    1795878200.428411 IP (tos 0x0, ttl 64, id 25136, offset 0, flags [DF], proto UDP (17), length 83)
+        100.95.0.1.53 > 100.95.0.1.49871: [bad udp cksum 0xc910 -> 0xf0d1!] 18700 q: A? pipe-test.example.com. 1/0/0 pipe-test.example.com. A 93.184.216.34 (55)
+--- CASE usevc-ahosts-3: timed client /home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/spike-scratch/guest-public-dns-tcp-pipelining/out/r1/client.resolv.conf env RES_OPTIONS=use-vc getent ahosts pipe-test.example.com
+93.184.216.34   STREAM pipe-test.example.com
+93.184.216.34   DGRAM  
+93.184.216.34   RAW    
+   [exit=0 wall=0.015s]
+--- wire (usevc-ahosts-3), port 53 (client<->responder and responder<->upstream), -vv:
+    1795878201.679561 IP (tos 0x0, ttl 64, id 25890, offset 0, flags [DF], proto TCP (6), length 60)
+        100.95.0.1.58356 > 100.95.0.1.53: Flags [S], cksum 0xc8ee (incorrect -> 0x344f), seq 1771915437, win 65495, options [mss 65495,sackOK,TS val 3124953146 ecr 0,nop,wscale 10], length 0
+    1795878201.679573 IP (tos 0x0, ttl 64, id 0, offset 0, flags [DF], proto TCP (6), length 60)
+        100.95.0.1.53 > 100.95.0.1.58356: Flags [S.], cksum 0xc8ee (incorrect -> 0x4a7a), seq 872612606, ack 1771915438, win 65483, options [mss 65495,sackOK,TS val 3807825879 ecr 3124953146,nop,wscale 10], length 0
+    1795878201.679585 IP (tos 0x0, ttl 64, id 25891, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.58356 > 100.95.0.1.53: Flags [.], cksum 0xc8e6 (incorrect -> 0x72f9), seq 1, ack 1, win 64, options [nop,nop,TS val 3124953146 ecr 3807825879], length 0
+    1795878201.679606 IP (tos 0x0, ttl 64, id 25892, offset 0, flags [DF], proto TCP (6), length 93)
+        100.95.0.1.58356 > 100.95.0.1.53: Flags [P.], cksum 0xc90f (incorrect -> 0x79fe), seq 1:42, ack 1, win 64, options [nop,nop,TS val 3124953146 ecr 3807825879], length 41 26957+ A? pipe-test.example.com. (39)
+    1795878201.679612 IP (tos 0x0, ttl 64, id 62127, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.58356: Flags [.], cksum 0xc8e6 (incorrect -> 0x72d0), seq 1, ack 42, win 64, options [nop,nop,TS val 3807825879 ecr 3124953146], length 0
+    1795878201.680103 IP (tos 0x0, ttl 64, id 40019, offset 0, flags [DF], proto TCP (6), length 60)
+        127.0.0.1.34378 > 127.0.0.2.53: Flags [S], cksum 0xfe31 (incorrect -> 0x623c), seq 2571624127, win 65495, options [mss 65495,sackOK,TS val 3454411092 ecr 0,nop,wscale 10], length 0
+    1795878201.680119 IP (tos 0x0, ttl 64, id 0, offset 0, flags [DF], proto TCP (6), length 60)
+        127.0.0.2.53 > 127.0.0.1.34378: Flags [S.], cksum 0xfe31 (incorrect -> 0xef98), seq 4277705231, ack 2571624128, win 65483, options [mss 65495,sackOK,TS val 625783881 ecr 3454411092,nop,wscale 10], length 0
+    1795878201.680136 IP (tos 0x0, ttl 64, id 40020, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.34378 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x1818), seq 1, ack 1, win 64, options [nop,nop,TS val 3454411092 ecr 625783881], length 0
+    1795878201.680210 IP (tos 0x0, ttl 64, id 40021, offset 0, flags [DF], proto TCP (6), length 93)
+        127.0.0.1.34378 > 127.0.0.2.53: Flags [P.], cksum 0xfe52 (incorrect -> 0x1f1d), seq 1:42, ack 1, win 64, options [nop,nop,TS val 3454411092 ecr 625783881], length 41 26957+ A? pipe-test.example.com. (39)
+    1795878201.680219 IP (tos 0x0, ttl 64, id 62348, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.2.53 > 127.0.0.1.34378: Flags [.], cksum 0xfe29 (incorrect -> 0x17ef), seq 1, ack 42, win 64, options [nop,nop,TS val 625783881 ecr 3454411092], length 0
+    1795878201.682206 IP (tos 0x0, ttl 64, id 62349, offset 0, flags [DF], proto TCP (6), length 54)
+        127.0.0.2.53 > 127.0.0.1.34378: Flags [P.], cksum 0xfe2b (incorrect -> 0x17ac), seq 1:3, ack 42, win 64, options [nop,nop,TS val 625783883 ecr 3454411092], length 2 [prefix length(55) != length(0)] (invalid)
+    1795878201.682218 IP (tos 0x0, ttl 64, id 40022, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.34378 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x17e9), seq 42, ack 3, win 64, options [nop,nop,TS val 3454411094 ecr 625783883], length 0
+    1795878201.682233 IP (tos 0x0, ttl 64, id 62350, offset 0, flags [DF], proto TCP (6), length 107)
+        127.0.0.2.53 > 127.0.0.1.34378: Flags [P.], cksum 0xfe60 (incorrect -> 0x748f), seq 3:58, ack 42, win 64, options [nop,nop,TS val 625783883 ecr 3454411094], length 55 [prefix length(26957) != length(53)] (invalid)
+    1795878201.682241 IP (tos 0x0, ttl 64, id 40023, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.34378 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x17b2), seq 42, ack 58, win 64, options [nop,nop,TS val 3454411094 ecr 625783883], length 0
+    1795878201.682258 IP (tos 0x0, ttl 64, id 62351, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.2.53 > 127.0.0.1.34378: Flags [F.], cksum 0xfe29 (incorrect -> 0x17b1), seq 58, ack 42, win 64, options [nop,nop,TS val 625783883 ecr 3454411094], length 0
+    1795878201.682267 IP (tos 0x0, ttl 64, id 40024, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.34378 > 127.0.0.2.53: Flags [F.], cksum 0xfe29 (incorrect -> 0x17b1), seq 42, ack 58, win 64, options [nop,nop,TS val 3454411094 ecr 625783883], length 0
+    1795878201.682272 IP (tos 0x0, ttl 64, id 62352, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.2.53 > 127.0.0.1.34378: Flags [.], cksum 0xfe29 (incorrect -> 0x17b0), seq 59, ack 43, win 64, options [nop,nop,TS val 625783883 ecr 3454411094], length 0
+    1795878201.682278 IP (tos 0x0, ttl 64, id 40025, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.34378 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x17b0), seq 43, ack 59, win 64, options [nop,nop,TS val 3454411094 ecr 625783883], length 0
+    1795878201.682375 IP (tos 0x0, ttl 64, id 62128, offset 0, flags [DF], proto TCP (6), length 109)
+        100.95.0.1.53 > 100.95.0.1.58356: Flags [P.], cksum 0xc91f (incorrect -> 0xcf3a), seq 1:58, ack 42, win 64, options [nop,nop,TS val 3807825882 ecr 3124953146], length 57 26957 q: A? pipe-test.example.com. 1/0/0 pipe-test.example.com. A 93.184.216.34 (55)
+    1795878201.682382 IP (tos 0x0, ttl 64, id 25893, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.58356 > 100.95.0.1.53: Flags [.], cksum 0xc8e6 (incorrect -> 0x7291), seq 42, ack 58, win 64, options [nop,nop,TS val 3124953149 ecr 3807825882], length 0
+    1795878201.682393 IP (tos 0x0, ttl 64, id 62129, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.58356: Flags [F.], cksum 0xc8e6 (incorrect -> 0x7290), seq 58, ack 42, win 64, options [nop,nop,TS val 3807825882 ecr 3124953149], length 0
+    1795878201.682395 IP (tos 0x0, ttl 64, id 25894, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.58356 > 100.95.0.1.53: Flags [F.], cksum 0xc8e6 (incorrect -> 0x7290), seq 42, ack 58, win 64, options [nop,nop,TS val 3124953149 ecr 3807825882], length 0
+    1795878201.682400 IP (tos 0x0, ttl 64, id 62130, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.58356: Flags [.], cksum 0xc8e6 (incorrect -> 0x728f), seq 59, ack 43, win 64, options [nop,nop,TS val 3807825882 ecr 3124953149], length 0
+    1795878201.682405 IP (tos 0x0, ttl 64, id 25895, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.58356 > 100.95.0.1.53: Flags [.], cksum 0xc8e6 (incorrect -> 0x728f), seq 43, ack 59, win 64, options [nop,nop,TS val 3124953149 ecr 3807825882], length 0
+--- CASE usevc-ahostsv4-3: timed client /home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/spike-scratch/guest-public-dns-tcp-pipelining/out/r1/client.resolv.conf env RES_OPTIONS=use-vc getent ahostsv4 pipe-test.example.com
+93.184.216.34   STREAM pipe-test.example.com
+93.184.216.34   DGRAM  
+93.184.216.34   RAW    
+   [exit=0 wall=0.035s]
+--- wire (usevc-ahostsv4-3), port 53 (client<->responder and responder<->upstream), -vv:
+    1795878202.932210 IP (tos 0x0, ttl 64, id 64834, offset 0, flags [DF], proto TCP (6), length 60)
+        100.95.0.1.47436 > 100.95.0.1.53: Flags [S], cksum 0xc8ee (incorrect -> 0xa52a), seq 1784192404, win 65495, options [mss 65495,sackOK,TS val 860220258 ecr 0,nop,wscale 10], length 0
+    1795878202.932222 IP (tos 0x0, ttl 64, id 0, offset 0, flags [DF], proto TCP (6), length 60)
+        100.95.0.1.53 > 100.95.0.1.47436: Flags [S.], cksum 0xc8ee (incorrect -> 0xd457), seq 2767753141, ack 1784192405, win 65483, options [mss 65495,sackOK,TS val 1557675847 ecr 860220258,nop,wscale 10], length 0
+    1795878202.932234 IP (tos 0x0, ttl 64, id 64835, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.47436 > 100.95.0.1.53: Flags [.], cksum 0xc8e6 (incorrect -> 0xfcd6), seq 1, ack 1, win 64, options [nop,nop,TS val 860220258 ecr 1557675847], length 0
+    1795878202.932257 IP (tos 0x0, ttl 64, id 64836, offset 0, flags [DF], proto TCP (6), length 93)
+        100.95.0.1.47436 > 100.95.0.1.53: Flags [P.], cksum 0xc90f (incorrect -> 0x6fe2), seq 1:42, ack 1, win 64, options [nop,nop,TS val 860220258 ecr 1557675847], length 41 64838+ A? pipe-test.example.com. (39)
+    1795878202.932262 IP (tos 0x0, ttl 64, id 9307, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.47436: Flags [.], cksum 0xc8e6 (incorrect -> 0xfcad), seq 1, ack 42, win 64, options [nop,nop,TS val 1557675847 ecr 860220258], length 0
+    1795878202.932803 IP (tos 0x0, ttl 64, id 2927, offset 0, flags [DF], proto TCP (6), length 60)
+        127.0.0.1.56382 > 127.0.0.2.53: Flags [S], cksum 0xfe31 (incorrect -> 0x9d6b), seq 1214416093, win 65495, options [mss 65495,sackOK,TS val 356053926 ecr 0,nop,wscale 10], length 0
+    1795878202.932819 IP (tos 0x0, ttl 64, id 0, offset 0, flags [DF], proto TCP (6), length 60)
+        127.0.0.2.53 > 127.0.0.1.56382: Flags [S.], cksum 0xfe31 (incorrect -> 0x50fa), seq 2390679752, ack 1214416094, win 65483, options [mss 65495,sackOK,TS val 1226740742 ecr 356053926,nop,wscale 10], length 0
+    1795878202.932835 IP (tos 0x0, ttl 64, id 2928, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.56382 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x7979), seq 1, ack 1, win 64, options [nop,nop,TS val 356053926 ecr 1226740742], length 0
+    1795878202.932972 IP (tos 0x0, ttl 64, id 2929, offset 0, flags [DF], proto TCP (6), length 93)
+        127.0.0.1.56382 > 127.0.0.2.53: Flags [P.], cksum 0xfe52 (incorrect -> 0xec84), seq 1:42, ack 1, win 64, options [nop,nop,TS val 356053926 ecr 1226740742], length 41 64838+ A? pipe-test.example.com. (39)
+    1795878202.932991 IP (tos 0x0, ttl 64, id 50296, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.2.53 > 127.0.0.1.56382: Flags [.], cksum 0xfe29 (incorrect -> 0x7950), seq 1, ack 42, win 64, options [nop,nop,TS val 1226740742 ecr 356053926], length 0
+    1795878202.952599 IP (tos 0x0, ttl 64, id 50297, offset 0, flags [DF], proto TCP (6), length 54)
+        127.0.0.2.53 > 127.0.0.1.56382: Flags [P.], cksum 0xfe2b (incorrect -> 0x78fb), seq 1:3, ack 42, win 64, options [nop,nop,TS val 1226740762 ecr 356053926], length 2 [prefix length(55) != length(0)] (invalid)
+    1795878202.952613 IP (tos 0x0, ttl 64, id 2930, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.56382 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x7926), seq 42, ack 3, win 64, options [nop,nop,TS val 356053946 ecr 1226740762], length 0
+    1795878202.952624 IP (tos 0x0, ttl 64, id 50298, offset 0, flags [DF], proto TCP (6), length 107)
+        127.0.0.2.53 > 127.0.0.1.56382: Flags [P.], cksum 0xfe60 (incorrect -> 0x41d3), seq 3:58, ack 42, win 64, options [nop,nop,TS val 1226740762 ecr 356053946], length 55 [prefix length(64838) != length(53)] (invalid)
+    1795878202.952628 IP (tos 0x0, ttl 64, id 2931, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.56382 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x78ef), seq 42, ack 58, win 64, options [nop,nop,TS val 356053946 ecr 1226740762], length 0
+    1795878202.952639 IP (tos 0x0, ttl 64, id 50299, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.2.53 > 127.0.0.1.56382: Flags [F.], cksum 0xfe29 (incorrect -> 0x78ee), seq 58, ack 42, win 64, options [nop,nop,TS val 1226740762 ecr 356053946], length 0
+    1795878202.952764 IP (tos 0x0, ttl 64, id 2932, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.56382 > 127.0.0.2.53: Flags [F.], cksum 0xfe29 (incorrect -> 0x78ed), seq 42, ack 59, win 64, options [nop,nop,TS val 356053946 ecr 1226740762], length 0
+    1795878202.952793 IP (tos 0x0, ttl 64, id 50300, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.2.53 > 127.0.0.1.56382: Flags [.], cksum 0xfe29 (incorrect -> 0x78ed), seq 59, ack 43, win 64, options [nop,nop,TS val 1226740762 ecr 356053946], length 0
+    1795878202.952958 IP (tos 0x0, ttl 64, id 9308, offset 0, flags [DF], proto TCP (6), length 109)
+        100.95.0.1.53 > 100.95.0.1.47436: Flags [P.], cksum 0xc91f (incorrect -> 0xc50c), seq 1:58, ack 42, win 64, options [nop,nop,TS val 1557675868 ecr 860220258], length 57 64838 q: A? pipe-test.example.com. 1/0/0 pipe-test.example.com. A 93.184.216.34 (55)
+    1795878202.952971 IP (tos 0x0, ttl 64, id 64837, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.47436 > 100.95.0.1.53: Flags [.], cksum 0xc8e6 (incorrect -> 0xfc4a), seq 42, ack 58, win 64, options [nop,nop,TS val 860220279 ecr 1557675868], length 0
+    1795878202.952986 IP (tos 0x0, ttl 64, id 64838, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.47436 > 100.95.0.1.53: Flags [F.], cksum 0xc8e6 (incorrect -> 0xfc49), seq 42, ack 58, win 64, options [nop,nop,TS val 860220279 ecr 1557675868], length 0
+    1795878202.952989 IP (tos 0x0, ttl 64, id 9309, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.47436: Flags [F.], cksum 0xc8e6 (incorrect -> 0xfc49), seq 58, ack 42, win 64, options [nop,nop,TS val 1557675868 ecr 860220279], length 0
+    1795878202.952996 IP (tos 0x0, ttl 64, id 64839, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.47436 > 100.95.0.1.53: Flags [.], cksum 0xc8e6 (incorrect -> 0xfc48), seq 43, ack 59, win 64, options [nop,nop,TS val 860220279 ecr 1557675868], length 0
+    1795878202.953006 IP (tos 0x0, ttl 64, id 9310, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.47436: Flags [.], cksum 0xc8e6 (incorrect -> 0xfc48), seq 59, ack 43, win 64, options [nop,nop,TS val 1557675868 ecr 860220279], length 0
+--- CASE usevc-ahostsv6-3: timed client /home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/spike-scratch/guest-public-dns-tcp-pipelining/out/r1/client.resolv.conf env RES_OPTIONS=use-vc getent ahostsv6 pipe-test.example.com
+   [exit=2 wall=0.014s]
+--- wire (usevc-ahostsv6-3), port 53 (client<->responder and responder<->upstream), -vv:
+######## strace of glibc under use-vc, AF_UNSPEC
+93.184.216.34   STREAM pipe-test.example.com
+93.184.216.34   DGRAM  
+93.184.216.34   RAW    
+   [exit=0 wall=0.042s]
+    2890904 1795878204.744446 close(3)      = 0
+    2890904 1795878204.744597 read(3, "\177ELF\2\1\1\3\0\0\0\0\0\0\0\0\3\0>\0\1\0\0\0 \250\2\0\0\0\0\0"..., 832) = 832
+    2890904 1795878204.744846 close(3)      = 0
+    2890904 1795878204.745326 close(3)      = 0
+    2890904 1795878204.745471 close(3)      = 0
+    2890904 1795878204.745566 close(3)      = 0
+    2890904 1795878204.745704 close(3)      = 0
+    2890904 1795878204.745819 close(3)      = 0
+    2890904 1795878204.745934 close(3)      = 0
+    2890904 1795878204.746046 close(3)      = 0
+    2890904 1795878204.746159 close(3)      = 0
+    2890904 1795878204.746251 close(3)      = 0
+    2890904 1795878204.746339 close(3)      = 0
+    2890904 1795878204.746460 close(3)      = 0
+    2890904 1795878204.746574 close(3)      = 0
+    2890904 1795878204.746685 close(3)      = 0
+    2890904 1795878204.746794 close(3)      = 0
+    2890904 1795878204.746904 close(3)      = 0
+    2890904 1795878204.746958 socket(AF_NETLINK, SOCK_RAW|SOCK_CLOEXEC, NETLINK_ROUTE) = 3
+    2890904 1795878204.746997 bind(3, {sa_family=AF_NETLINK, nl_pid=0, nl_groups=00000000}, 12) = 0
+    2890904 1795878204.747039 getsockname(3, {sa_family=AF_NETLINK, nl_pid=2890904, nl_groups=00000000}, [12]) = 0
+    2890904 1795878204.747084 sendto(3, [{nlmsg_len=20, nlmsg_type=RTM_GETADDR, nlmsg_flags=NLM_F_REQUEST|NLM_F_DUMP, nlmsg_seq=1795878204, nlmsg_pid=0}, {ifa_family=AF_UNSPEC, ...}], 20, 0, {sa_family=AF_NETLINK, nl_pid=0, nl_groups=00000000}, 12) = 20
+    2890904 1795878204.747269 recvmsg(3, {msg_name={sa_family=AF_NETLINK, nl_pid=0, nl_groups=00000000}, msg_namelen=12, msg_iov=[{iov_base=[[{nlmsg_len=76, nlmsg_type=RTM_NEWADDR, nlmsg_flags=NLM_F_MULTI, nlmsg_seq=1795878204, nlmsg_pid=2890904}, {ifa_family=AF_INET, ifa_prefixlen=8, ifa_flags=IFA_F_PERMANENT, ifa_scope=RT_SCOPE_HOST, ifa_index=if_nametoindex("lo")}, [[{nla_len=8, nla_type=IFA_ADDRESS}, inet_addr("127.0.0.1")], [{nla_len=8, nla_type=IFA_LOCAL}, inet_addr("127.0.0.1")], [{nla_len=7, nla_type=IFA_LABEL}, "lo"], [{nla_len=8, nla_type=IFA_FLAGS}, IFA_F_PERMANENT], [{nla_len=20, nla_type=IFA_CACHEINFO}, {ifa_prefered=4294967295, ifa_valid=4294967295, cstamp=371309063, tstamp=371309063}]]], [{nlmsg_len=76, nlmsg_type=RTM_NEWADDR, nlmsg_flags=NLM_F_MULTI, nlmsg_seq=1795878204, nlmsg_pid=2890904}, {ifa_family=AF_INET, ifa_prefixlen=32, ifa_flags=IFA_F_PERMANENT, ifa_scope=RT_SCOPE_UNIVERSE, ifa_index=if_nametoindex("lo")}, [[{nla_len=8, nla_type=IFA_ADDRESS}, inet_addr("100.95.0.1")], [{nla_len=8, nla_type=IFA_LOCAL}, inet_addr("100.95.0.1")], [{nla_len=7, nla_type=IFA_LABEL}, "lo"], [{nla_len=8, nla_type=IFA_FLAGS}, IFA_F_PERMANENT], [{nla_len=20, nla_type=IFA_CACHEINFO}, {ifa_prefered=4294967295, ifa_valid=4294967295, cstamp=371309063, tstamp=371309063}]]], [{nlmsg_len=80, nlmsg_type=RTM_NEWADDR, nlmsg_flags=NLM_F_MULTI, nlmsg_seq=1795878204, nlmsg_pid=2890904}, {ifa_family=AF_INET6, ifa_prefixlen=128, ifa_flags=IFA_F_PERMANENT, ifa_scope=RT_SCOPE_HOST, ifa_index=if_nametoindex("lo")}, [[{nla_len=20, nla_type=IFA_ADDRESS}, inet_pton(AF_INET6, "::1")], [{nla_len=20, nla_type=IFA_CACHEINFO}, {ifa_prefered=4294967295, ifa_valid=4294967295, cstamp=371309063, tstamp=371309063}], [{nla_len=8, nla_type=IFA_FLAGS}, IFA_F_PERMANENT], [{nla_len=5, nla_type=IFA_PROTO}, "\x01"]]]], iov_len=4096}], msg_iovlen=1, msg_controllen=0, msg_flags=0}, 0) = 232
+    2890904 1795878204.747379 recvmsg(3, {msg_name={sa_family=AF_NETLINK, nl_pid=0, nl_groups=00000000}, msg_namelen=12, msg_iov=[{iov_base=[{nlmsg_len=20, nlmsg_type=NLMSG_DONE, nlmsg_flags=NLM_F_MULTI, nlmsg_seq=1795878204, nlmsg_pid=2890904}, 0], iov_len=4096}], msg_iovlen=1, msg_controllen=0, msg_flags=0}, 0) = 20
+    2890904 1795878204.747426 close(3)      = 0
+    2890904 1795878204.747470 socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC|SOCK_NONBLOCK, 0) = 3
+    2890904 1795878204.747547 close(3)      = 0
+    2890904 1795878204.747578 socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC|SOCK_NONBLOCK, 0) = 3
+    2890904 1795878204.747651 close(3)      = 0
+    2890904 1795878204.747769 read(3, "# /etc/nsswitch.conf\n#\n# Example"..., 4096) = 526
+    2890904 1795878204.747812 read(3, "", 4096) = 0
+    2890904 1795878204.747861 close(3)      = 0
+    2890904 1795878204.747958 read(3, "# The \"order\" line is only used "..., 4096) = 92
+    2890904 1795878204.747991 read(3, "", 4096) = 0
+    2890904 1795878204.748020 close(3)      = 0
+    2890904 1795878204.748106 read(3, "nameserver 100.95.0.1\n", 4096) = 22
+    2890904 1795878204.748141 read(3, "", 4096) = 0
+    2890904 1795878204.748209 close(3)      = 0
+    2890904 1795878204.748305 read(3, "# Your system has configured 'ma"..., 4096) = 571
+    2890904 1795878204.748339 read(3, "", 4096) = 0
+    2890904 1795878204.748375 close(3)      = 0
+    2890904 1795878204.748409 socket(AF_INET, SOCK_STREAM|SOCK_CLOEXEC, IPPROTO_IP) = 3
+    2890904 1795878204.748443 connect(3, {sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr("100.95.0.1")}, 16) = 0
+    2890904 1795878204.748581 writev(3, [{iov_base="\0'", iov_len=2}, {iov_base="\277'\1\0\0\1\0\0\0\0\0\0\tpipe-test\7example\3c"..., iov_len=39}], 2) = 41
+    2890904 1795878204.748680 read(3, "\0007", 2) = 2
+    2890904 1795878204.767542 read(3, "\277'\201\200\0\1\0\1\0\0\0\0\tpipe-test\7example\3c"..., 55) = 55
+    2890904 1795878204.767582 close(3)      = 0
+    2890904 1795878204.767721 close(3)      = 0
+    2890904 1795878204.767777 read(3, "\177ELF\2\1\1\0\0\0\0\0\0\0\0\0\3\0>\0\1\0\0\0\0\0\0\0\0\0\0\0"..., 832) = 832
+    2890904 1795878204.767946 close(3)      = 0
+    2890904 1795878204.767998 read(3, "\177ELF\2\1\1\0\0\0\0\0\0\0\0\0\3\0>\0\1\0\0\0\0\0\0\0\0\0\0\0"..., 832) = 832
+    2890904 1795878204.768158 close(3)      = 0
+    2890904 1795878204.768405 write(1, "93.184.216.34   STREAM pipe-test"..., 93) = 93
+    2890904 1795878204.768609 +++ exited with 0 +++
+######## 'options use-vc' in the resolv.conf file instead of RES_OPTIONS
+--- CASE usevc-file-ahosts: timed client /home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/spike-scratch/guest-public-dns-tcp-pipelining/out/r1/client-usevc.resolv.conf getent ahosts pipe-test.example.com
+93.184.216.34   STREAM pipe-test.example.com
+93.184.216.34   DGRAM  
+93.184.216.34   RAW    
+   [exit=0 wall=0.028s]
+--- wire (usevc-file-ahosts), port 53 (client<->responder and responder<->upstream), -vv:
+    1795878205.496112 IP (tos 0x0, ttl 64, id 2005, offset 0, flags [DF], proto TCP (6), length 60)
+        100.95.0.1.47452 > 100.95.0.1.53: Flags [S], cksum 0xc8ee (incorrect -> 0x91ec), seq 3847140884, win 65495, options [mss 65495,sackOK,TS val 3275873053 ecr 0,nop,wscale 10], length 0
+    1795878205.496125 IP (tos 0x0, ttl 64, id 0, offset 0, flags [DF], proto TCP (6), length 60)
+        100.95.0.1.53 > 100.95.0.1.47452: Flags [S.], cksum 0xc8ee (incorrect -> 0xfbf7), seq 155350542, ack 3847140885, win 65483, options [mss 65495,sackOK,TS val 165481666 ecr 3275873053,nop,wscale 10], length 0
+    1795878205.496137 IP (tos 0x0, ttl 64, id 2006, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.47452 > 100.95.0.1.53: Flags [.], cksum 0xc8e6 (incorrect -> 0x2477), seq 1, ack 1, win 64, options [nop,nop,TS val 3275873053 ecr 165481666], length 0
+    1795878205.496158 IP (tos 0x0, ttl 64, id 2007, offset 0, flags [DF], proto TCP (6), length 93)
+        100.95.0.1.47452 > 100.95.0.1.53: Flags [P.], cksum 0xc90f (incorrect -> 0x585b), seq 1:42, ack 1, win 64, options [nop,nop,TS val 3275873053 ecr 165481666], length 41 15470+ A? pipe-test.example.com. (39)
+    1795878205.496163 IP (tos 0x0, ttl 64, id 14759, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.47452: Flags [.], cksum 0xc8e6 (incorrect -> 0x244e), seq 1, ack 42, win 64, options [nop,nop,TS val 165481666 ecr 3275873053], length 0
+    1795878205.496651 IP (tos 0x0, ttl 64, id 25311, offset 0, flags [DF], proto TCP (6), length 60)
+        127.0.0.1.56394 > 127.0.0.2.53: Flags [S], cksum 0xfe31 (incorrect -> 0xf41a), seq 3578813557, win 65495, options [mss 65495,sackOK,TS val 2146160049 ecr 0,nop,wscale 10], length 0
+    1795878205.496668 IP (tos 0x0, ttl 64, id 0, offset 0, flags [DF], proto TCP (6), length 60)
+        127.0.0.2.53 > 127.0.0.1.56394: Flags [S.], cksum 0xfe31 (incorrect -> 0x3859), seq 2768867892, ack 3578813558, win 65483, options [mss 65495,sackOK,TS val 3301556148 ecr 2146160049,nop,wscale 10], length 0
+    1795878205.496684 IP (tos 0x0, ttl 64, id 25312, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.56394 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x60d8), seq 1, ack 1, win 64, options [nop,nop,TS val 2146160049 ecr 3301556148], length 0
+    1795878205.496835 IP (tos 0x0, ttl 64, id 25313, offset 0, flags [DF], proto TCP (6), length 93)
+        127.0.0.1.56394 > 127.0.0.2.53: Flags [P.], cksum 0xfe52 (incorrect -> 0x94bc), seq 1:42, ack 1, win 64, options [nop,nop,TS val 2146160049 ecr 3301556148], length 41 15470+ A? pipe-test.example.com. (39)
+    1795878205.496853 IP (tos 0x0, ttl 64, id 42281, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.2.53 > 127.0.0.1.56394: Flags [.], cksum 0xfe29 (incorrect -> 0x60af), seq 1, ack 42, win 64, options [nop,nop,TS val 3301556148 ecr 2146160049], length 0
+    1795878205.512726 IP (tos 0x0, ttl 64, id 42282, offset 0, flags [DF], proto TCP (6), length 54)
+        127.0.0.2.53 > 127.0.0.1.56394: Flags [P.], cksum 0xfe2b (incorrect -> 0x605e), seq 1:3, ack 42, win 64, options [nop,nop,TS val 3301556164 ecr 2146160049], length 2 [prefix length(55) != length(0)] (invalid)
+    1795878205.512734 IP (tos 0x0, ttl 64, id 25314, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.56394 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x608d), seq 42, ack 3, win 64, options [nop,nop,TS val 2146160065 ecr 3301556164], length 0
+    1795878205.512742 IP (tos 0x0, ttl 64, id 42283, offset 0, flags [DF], proto TCP (6), length 107)
+        127.0.0.2.53 > 127.0.0.1.56394: Flags [P.], cksum 0xfe60 (incorrect -> 0xea12), seq 3:58, ack 42, win 64, options [nop,nop,TS val 3301556164 ecr 2146160065], length 55 [prefix length(15470) != length(53)] (invalid)
+    1795878205.512746 IP (tos 0x0, ttl 64, id 25315, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.56394 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x6056), seq 42, ack 58, win 64, options [nop,nop,TS val 2146160065 ecr 3301556164], length 0
+    1795878205.512755 IP (tos 0x0, ttl 64, id 42284, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.2.53 > 127.0.0.1.56394: Flags [F.], cksum 0xfe29 (incorrect -> 0x6055), seq 58, ack 42, win 64, options [nop,nop,TS val 3301556164 ecr 2146160065], length 0
+    1795878205.512824 IP (tos 0x0, ttl 64, id 25316, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.56394 > 127.0.0.2.53: Flags [F.], cksum 0xfe29 (incorrect -> 0x6054), seq 42, ack 59, win 64, options [nop,nop,TS val 2146160065 ecr 3301556164], length 0
+    1795878205.512840 IP (tos 0x0, ttl 64, id 42285, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.2.53 > 127.0.0.1.56394: Flags [.], cksum 0xfe29 (incorrect -> 0x6054), seq 59, ack 43, win 64, options [nop,nop,TS val 3301556164 ecr 2146160065], length 0
+    1795878205.512930 IP (tos 0x0, ttl 64, id 14760, offset 0, flags [DF], proto TCP (6), length 109)
+        100.95.0.1.53 > 100.95.0.1.47452: Flags [P.], cksum 0xc91f (incorrect -> 0xad89), seq 1:58, ack 42, win 64, options [nop,nop,TS val 165481683 ecr 3275873053], length 57 15470 q: A? pipe-test.example.com. 1/0/0 pipe-test.example.com. A 93.184.216.34 (55)
+    1795878205.512936 IP (tos 0x0, ttl 64, id 2008, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.47452 > 100.95.0.1.53: Flags [.], cksum 0xc8e6 (incorrect -> 0x23f3), seq 42, ack 58, win 64, options [nop,nop,TS val 3275873070 ecr 165481683], length 0
+    1795878205.512946 IP (tos 0x0, ttl 64, id 14761, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.47452: Flags [F.], cksum 0xc8e6 (incorrect -> 0x23f2), seq 58, ack 42, win 64, options [nop,nop,TS val 165481683 ecr 3275873070], length 0
+    1795878205.512949 IP (tos 0x0, ttl 64, id 2009, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.47452 > 100.95.0.1.53: Flags [F.], cksum 0xc8e6 (incorrect -> 0x23f2), seq 42, ack 58, win 64, options [nop,nop,TS val 3275873070 ecr 165481683], length 0
+    1795878205.512953 IP (tos 0x0, ttl 64, id 14762, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.47452: Flags [.], cksum 0xc8e6 (incorrect -> 0x23f1), seq 59, ack 43, win 64, options [nop,nop,TS val 165481683 ecr 3275873070], length 0
+    1795878205.512958 IP (tos 0x0, ttl 64, id 2010, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.47452 > 100.95.0.1.53: Flags [.], cksum 0xc8e6 (incorrect -> 0x23f1), seq 43, ack 59, win 64, options [nop,nop,TS val 3275873070 ecr 165481683], length 0
+######## use-vc + single-request (sequential queries) control
+--- CASE usevc-singlereq-ahosts: timed client /home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/spike-scratch/guest-public-dns-tcp-pipelining/out/r1/client.resolv.conf env RES_OPTIONS=use-vc single-request getent ahosts pipe-test.example.com
+93.184.216.34   STREAM pipe-test.example.com
+93.184.216.34   DGRAM  
+93.184.216.34   RAW    
+   [exit=0 wall=0.018s]
+--- wire (usevc-singlereq-ahosts), port 53 (client<->responder and responder<->upstream), -vv:
+    1795878206.760703 IP (tos 0x0, ttl 64, id 55670, offset 0, flags [DF], proto TCP (6), length 60)
+        100.95.0.1.47466 > 100.95.0.1.53: Flags [S], cksum 0xc8ee (incorrect -> 0x6ea7), seq 1696214036, win 65495, options [mss 65495,sackOK,TS val 3859539391 ecr 0,nop,wscale 10], length 0
+    1795878206.760716 IP (tos 0x0, ttl 64, id 0, offset 0, flags [DF], proto TCP (6), length 60)
+        100.95.0.1.53 > 100.95.0.1.47466: Flags [S.], cksum 0xc8ee (incorrect -> 0x632e), seq 1884345982, ack 1696214037, win 65483, options [mss 65495,sackOK,TS val 2589534795 ecr 3859539391,nop,wscale 10], length 0
+    1795878206.760729 IP (tos 0x0, ttl 64, id 55671, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.47466 > 100.95.0.1.53: Flags [.], cksum 0xc8e6 (incorrect -> 0x8bad), seq 1, ack 1, win 64, options [nop,nop,TS val 3859539391 ecr 2589534795], length 0
+    1795878206.760751 IP (tos 0x0, ttl 64, id 55672, offset 0, flags [DF], proto TCP (6), length 93)
+        100.95.0.1.47466 > 100.95.0.1.53: Flags [P.], cksum 0xc90f (incorrect -> 0x4d9d), seq 1:42, ack 1, win 64, options [nop,nop,TS val 3859539391 ecr 2589534795], length 41 44642+ A? pipe-test.example.com. (39)
+    1795878206.760756 IP (tos 0x0, ttl 64, id 59557, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.47466: Flags [.], cksum 0xc8e6 (incorrect -> 0x8b84), seq 1, ack 42, win 64, options [nop,nop,TS val 2589534795 ecr 3859539391], length 0
+    1795878206.761327 IP (tos 0x0, ttl 64, id 32007, offset 0, flags [DF], proto TCP (6), length 60)
+        127.0.0.1.56406 > 127.0.0.2.53: Flags [S], cksum 0xfe31 (incorrect -> 0x7ebd), seq 860804339, win 65495, options [mss 65495,sackOK,TS val 1208722535 ecr 0,nop,wscale 10], length 0
+    1795878206.761343 IP (tos 0x0, ttl 64, id 0, offset 0, flags [DF], proto TCP (6), length 60)
+        127.0.0.2.53 > 127.0.0.1.56406: Flags [S.], cksum 0xfe31 (incorrect -> 0xf1d1), seq 1118728173, ack 860804340, win 65483, options [mss 65495,sackOK,TS val 2928683962 ecr 1208722535,nop,wscale 10], length 0
+    1795878206.761370 IP (tos 0x0, ttl 64, id 32008, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.56406 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x1a51), seq 1, ack 1, win 64, options [nop,nop,TS val 1208722535 ecr 2928683962], length 0
+    1795878206.761450 IP (tos 0x0, ttl 64, id 32009, offset 0, flags [DF], proto TCP (6), length 93)
+        127.0.0.1.56406 > 127.0.0.2.53: Flags [P.], cksum 0xfe52 (incorrect -> 0xdc3f), seq 1:42, ack 1, win 64, options [nop,nop,TS val 1208722536 ecr 2928683962], length 41 44642+ A? pipe-test.example.com. (39)
+    1795878206.761458 IP (tos 0x0, ttl 64, id 2351, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.2.53 > 127.0.0.1.56406: Flags [.], cksum 0xfe29 (incorrect -> 0x1a26), seq 1, ack 42, win 64, options [nop,nop,TS val 2928683963 ecr 1208722536], length 0
+    1795878206.762844 IP (tos 0x0, ttl 64, id 2352, offset 0, flags [DF], proto TCP (6), length 54)
+        127.0.0.2.53 > 127.0.0.1.56406: Flags [P.], cksum 0xfe2b (incorrect -> 0x19e4), seq 1:3, ack 42, win 64, options [nop,nop,TS val 2928683964 ecr 1208722536], length 2 [prefix length(55) != length(0)] (invalid)
+    1795878206.762860 IP (tos 0x0, ttl 64, id 32010, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.56406 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x1a22), seq 42, ack 3, win 64, options [nop,nop,TS val 1208722537 ecr 2928683964], length 0
+    1795878206.762871 IP (tos 0x0, ttl 64, id 2353, offset 0, flags [DF], proto TCP (6), length 107)
+        127.0.0.2.53 > 127.0.0.1.56406: Flags [P.], cksum 0xfe60 (incorrect -> 0x31b3), seq 3:58, ack 42, win 64, options [nop,nop,TS val 2928683964 ecr 1208722537], length 55 [prefix length(44642) != length(53)] (invalid)
+    1795878206.762875 IP (tos 0x0, ttl 64, id 32011, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.56406 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x19eb), seq 42, ack 58, win 64, options [nop,nop,TS val 1208722537 ecr 2928683964], length 0
+    1795878206.762885 IP (tos 0x0, ttl 64, id 2354, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.2.53 > 127.0.0.1.56406: Flags [F.], cksum 0xfe29 (incorrect -> 0x19ea), seq 58, ack 42, win 64, options [nop,nop,TS val 2928683964 ecr 1208722537], length 0
+    1795878206.762945 IP (tos 0x0, ttl 64, id 32012, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.56406 > 127.0.0.2.53: Flags [F.], cksum 0xfe29 (incorrect -> 0x19e9), seq 42, ack 59, win 64, options [nop,nop,TS val 1208722537 ecr 2928683964], length 0
+    1795878206.762964 IP (tos 0x0, ttl 64, id 2355, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.2.53 > 127.0.0.1.56406: Flags [.], cksum 0xfe29 (incorrect -> 0x19e9), seq 59, ack 43, win 64, options [nop,nop,TS val 2928683964 ecr 1208722537], length 0
+    1795878206.763075 IP (tos 0x0, ttl 64, id 59558, offset 0, flags [DF], proto TCP (6), length 109)
+        100.95.0.1.53 > 100.95.0.1.47466: Flags [P.], cksum 0xc91f (incorrect -> 0xa2da), seq 1:58, ack 42, win 64, options [nop,nop,TS val 2589534797 ecr 3859539391], length 57 44642 q: A? pipe-test.example.com. 1/0/0 pipe-test.example.com. A 93.184.216.34 (55)
+    1795878206.763083 IP (tos 0x0, ttl 64, id 55673, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.47466 > 100.95.0.1.53: Flags [.], cksum 0xc8e6 (incorrect -> 0x8b47), seq 42, ack 58, win 64, options [nop,nop,TS val 3859539393 ecr 2589534797], length 0
+    1795878206.763093 IP (tos 0x0, ttl 64, id 59559, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.47466: Flags [F.], cksum 0xc8e6 (incorrect -> 0x8b46), seq 58, ack 42, win 64, options [nop,nop,TS val 2589534797 ecr 3859539393], length 0
+    1795878206.763145 IP (tos 0x0, ttl 64, id 55674, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.47466 > 100.95.0.1.53: Flags [F.], cksum 0xc8e6 (incorrect -> 0x8b45), seq 42, ack 59, win 64, options [nop,nop,TS val 3859539393 ecr 2589534797], length 0
+    1795878206.763172 IP (tos 0x0, ttl 64, id 59560, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.47466: Flags [.], cksum 0xc8e6 (incorrect -> 0x8b45), seq 59, ack 43, win 64, options [nop,nop,TS val 2589534797 ecr 3859539393], length 0
+== upstream log (scripted):
+    upstream-Udp name=pipe-test.example.com qtype=1
+    upstream-Tcp name=pipe-test.example.com qtype=1
+    upstream-Tcp name=pipe-test.example.com qtype=1
+    upstream-Udp name=pipe-test.example.com qtype=1
+    upstream-Tcp name=pipe-test.example.com qtype=1
+    upstream-Tcp name=pipe-test.example.com qtype=1
+    upstream-Udp name=pipe-test.example.com qtype=1
+    upstream-Tcp name=pipe-test.example.com qtype=1
+    upstream-Tcp name=pipe-test.example.com qtype=1
+    upstream-Tcp name=pipe-test.example.com qtype=1
+    upstream-Tcp name=pipe-test.example.com qtype=1
+    upstream-Tcp name=pipe-test.example.com qtype=1
+== PHASE tc: harness: responder up on 100.95.0.1:53, upstream mode=tc
+    listen: udp   UNCONN 0      0          127.0.0.2:53        0.0.0.0:*    users:(("harness",pid=2890942,fd=11))
+    listen: udp   UNCONN 0      0            0.0.0.0:53        0.0.0.0:*    users:(("harness",pid=2890942,fd=9)) 
+    listen: tcp   LISTEN 0      128        127.0.0.2:53        0.0.0.0:*    users:(("harness",pid=2890942,fd=12))
+    listen: tcp   LISTEN 0      128       100.95.0.1:53        0.0.0.0:*    users:(("harness",pid=2890942,fd=10))
+######## rep 1 (TC mode)
+--- CASE tc-glibc-ahosts-1: timed client /home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/spike-scratch/guest-public-dns-tcp-pipelining/out/r1/client.resolv.conf getent ahosts pipe-test.example.com
+93.184.216.34   STREAM pipe-test.example.com
+93.184.216.34   DGRAM  
+93.184.216.34   RAW    
+   [exit=0 wall=0.015s]
+--- wire (tc-glibc-ahosts-1), port 53 (client<->responder and responder<->upstream), -vv:
+    1795878208.111264 IP (tos 0x0, ttl 64, id 53449, offset 0, flags [DF], proto UDP (17), length 67)
+        100.95.0.1.60749 > 100.95.0.1.53: [bad udp cksum 0xc900 -> 0xc837!] 61887+ A? pipe-test.example.com. (39)
+    1795878208.112022 IP (tos 0x0, ttl 64, id 47197, offset 0, flags [DF], proto UDP (17), length 67)
+        127.0.0.1.53312 > 127.0.0.2.53: [bad udp cksum 0xfe43 -> 0xb001!] 61887+ A? pipe-test.example.com. (39)
+    1795878208.112085 IP (tos 0x0, ttl 64, id 8177, offset 0, flags [DF], proto UDP (17), length 67)
+        127.0.0.2.53 > 127.0.0.1.53312: [bad udp cksum 0xfe43 -> 0x2d81!] 61887| q: A? pipe-test.example.com. 0/0/0 (39)
+    1795878208.112263 IP (tos 0x0, ttl 64, id 31760, offset 0, flags [DF], proto UDP (17), length 67)
+        100.95.0.1.53 > 100.95.0.1.60749: [bad udp cksum 0xc900 -> 0x45b7!] 61887| q: A? pipe-test.example.com. 0/0/0 (39)
+    1795878208.112310 IP (tos 0x0, ttl 64, id 56128, offset 0, flags [DF], proto TCP (6), length 60)
+        100.95.0.1.47480 > 100.95.0.1.53: Flags [S], cksum 0xc8ee (incorrect -> 0xbfb3), seq 4289072573, win 65495, options [mss 65495,sackOK,TS val 1341304457 ecr 0,nop,wscale 10], length 0
+    1795878208.112321 IP (tos 0x0, ttl 64, id 0, offset 0, flags [DF], proto TCP (6), length 60)
+        100.95.0.1.53 > 100.95.0.1.47480: Flags [S.], cksum 0xc8ee (incorrect -> 0xa23d), seq 3318937104, ack 4289072574, win 65483, options [mss 65495,sackOK,TS val 1869083173 ecr 1341304457,nop,wscale 10], length 0
+    1795878208.112333 IP (tos 0x0, ttl 64, id 56129, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.47480 > 100.95.0.1.53: Flags [.], cksum 0xc8e6 (incorrect -> 0xcabc), seq 1, ack 1, win 64, options [nop,nop,TS val 1341304457 ecr 1869083173], length 0
+    1795878208.112353 IP (tos 0x0, ttl 64, id 56130, offset 0, flags [DF], proto TCP (6), length 93)
+        100.95.0.1.47480 > 100.95.0.1.53: Flags [P.], cksum 0xc90f (incorrect -> 0x494f), seq 1:42, ack 1, win 64, options [nop,nop,TS val 1341304457 ecr 1869083173], length 41 61887+ A? pipe-test.example.com. (39)
+    1795878208.112363 IP (tos 0x0, ttl 64, id 60942, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.47480: Flags [.], cksum 0xc8e6 (incorrect -> 0xca93), seq 1, ack 42, win 64, options [nop,nop,TS val 1869083173 ecr 1341304457], length 0
+    1795878208.112662 IP (tos 0x0, ttl 64, id 9631, offset 0, flags [DF], proto TCP (6), length 60)
+        127.0.0.1.56416 > 127.0.0.2.53: Flags [S], cksum 0xfe31 (incorrect -> 0xb4fd), seq 2817487890, win 65495, options [mss 65495,sackOK,TS val 2833709441 ecr 0,nop,wscale 10], length 0
+    1795878208.112679 IP (tos 0x0, ttl 64, id 0, offset 0, flags [DF], proto TCP (6), length 60)
+        127.0.0.2.53 > 127.0.0.1.56416: Flags [S.], cksum 0xfe31 (incorrect -> 0xc75a), seq 742347534, ack 2817487891, win 65483, options [mss 65495,sackOK,TS val 232349815 ecr 2833709441,nop,wscale 10], length 0
+    1795878208.112695 IP (tos 0x0, ttl 64, id 9632, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.56416 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0xefd9), seq 1, ack 1, win 64, options [nop,nop,TS val 2833709441 ecr 232349815], length 0
+    1795878208.112866 IP (tos 0x0, ttl 64, id 9633, offset 0, flags [DF], proto TCP (6), length 93)
+        127.0.0.1.56416 > 127.0.0.2.53: Flags [P.], cksum 0xfe52 (incorrect -> 0x6e6c), seq 1:42, ack 1, win 64, options [nop,nop,TS val 2833709441 ecr 232349815], length 41 61887+ A? pipe-test.example.com. (39)
+    1795878208.112890 IP (tos 0x0, ttl 64, id 13810, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.2.53 > 127.0.0.1.56416: Flags [.], cksum 0xfe29 (incorrect -> 0xefb0), seq 1, ack 42, win 64, options [nop,nop,TS val 232349815 ecr 2833709441], length 0
+    1795878208.112933 IP (tos 0x0, ttl 64, id 13811, offset 0, flags [DF], proto TCP (6), length 54)
+        127.0.0.2.53 > 127.0.0.1.56416: Flags [P.], cksum 0xfe2b (incorrect -> 0xef6f), seq 1:3, ack 42, win 64, options [nop,nop,TS val 232349815 ecr 2833709441], length 2 [prefix length(55) != length(0)] (invalid)
+    1795878208.112942 IP (tos 0x0, ttl 64, id 9634, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.56416 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0xefae), seq 42, ack 3, win 64, options [nop,nop,TS val 2833709441 ecr 232349815], length 0
+    1795878208.112951 IP (tos 0x0, ttl 64, id 13812, offset 0, flags [DF], proto TCP (6), length 107)
+        127.0.0.2.53 > 127.0.0.1.56416: Flags [P.], cksum 0xfe60 (incorrect -> 0xc3e2), seq 3:58, ack 42, win 64, options [nop,nop,TS val 232349815 ecr 2833709441], length 55 [prefix length(61887) != length(53)] (invalid)
+    1795878208.112956 IP (tos 0x0, ttl 64, id 9635, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.56416 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0xef77), seq 42, ack 58, win 64, options [nop,nop,TS val 2833709441 ecr 232349815], length 0
+    1795878208.113004 IP (tos 0x0, ttl 64, id 9636, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.56416 > 127.0.0.2.53: Flags [F.], cksum 0xfe29 (incorrect -> 0xef76), seq 42, ack 58, win 64, options [nop,nop,TS val 2833709441 ecr 232349815], length 0
+    1795878208.113020 IP (tos 0x0, ttl 64, id 13813, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.2.53 > 127.0.0.1.56416: Flags [F.], cksum 0xfe29 (incorrect -> 0xef75), seq 58, ack 43, win 64, options [nop,nop,TS val 232349815 ecr 2833709441], length 0
+    1795878208.113034 IP (tos 0x0, ttl 64, id 9637, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.56416 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0xef75), seq 43, ack 59, win 64, options [nop,nop,TS val 2833709441 ecr 232349815], length 0
+    1795878208.113182 IP (tos 0x0, ttl 64, id 60943, offset 0, flags [DF], proto TCP (6), length 109)
+        100.95.0.1.53 > 100.95.0.1.47480: Flags [P.], cksum 0xc91f (incorrect -> 0x9e8d), seq 1:58, ack 42, win 64, options [nop,nop,TS val 1869083174 ecr 1341304457], length 57 61887 q: A? pipe-test.example.com. 1/0/0 pipe-test.example.com. A 93.184.216.34 (55)
+    1795878208.113194 IP (tos 0x0, ttl 64, id 56131, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.47480 > 100.95.0.1.53: Flags [.], cksum 0xc8e6 (incorrect -> 0xca58), seq 42, ack 58, win 64, options [nop,nop,TS val 1341304458 ecr 1869083174], length 0
+    1795878208.113210 IP (tos 0x0, ttl 64, id 60944, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.47480: Flags [F.], cksum 0xc8e6 (incorrect -> 0xca57), seq 58, ack 42, win 64, options [nop,nop,TS val 1869083174 ecr 1341304458], length 0
+    1795878208.113229 IP (tos 0x0, ttl 64, id 56132, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.47480 > 100.95.0.1.53: Flags [F.], cksum 0xc8e6 (incorrect -> 0xca56), seq 42, ack 59, win 64, options [nop,nop,TS val 1341304458 ecr 1869083174], length 0
+    1795878208.113246 IP (tos 0x0, ttl 64, id 60945, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.47480: Flags [.], cksum 0xc8e6 (incorrect -> 0xca56), seq 59, ack 43, win 64, options [nop,nop,TS val 1869083174 ecr 1341304458], length 0
+--- CASE tc-musl-1: timed client /home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/spike-scratch/guest-public-dns-tcp-pipelining/out/r1/client.resolv.conf /home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/spike-scratch/guest-public-dns-tcp-pipelining/out/r1/musl_lookup pipe-test.example.com
+musl getaddrinfo(pipe-test.example.com) -> Ok([93.184.216.34:80]) in 2.009105ms
+   [exit=0 wall=0.013s]
+--- wire (tc-musl-1), port 53 (client<->responder and responder<->upstream), -vv:
+    1795878209.359960 IP (tos 0x0, ttl 64, id 31852, offset 0, flags [DF], proto UDP (17), length 67)
+        100.95.0.1.45173 > 100.95.0.1.53: [bad udp cksum 0xc900 -> 0xe140!] 5519+ A? pipe-test.example.com. (39)
+    1795878209.359975 IP (tos 0x0, ttl 64, id 31853, offset 0, flags [DF], proto UDP (17), length 67)
+        100.95.0.1.45173 > 100.95.0.1.53: [bad udp cksum 0xc900 -> 0xc56e!] 5729+ AAAA? pipe-test.example.com. (39)
+    1795878209.360442 IP (tos 0x0, ttl 64, id 23535, offset 0, flags [DF], proto UDP (17), length 67)
+        127.0.0.1.47554 > 127.0.0.2.53: [bad udp cksum 0xfe43 -> 0xa2b0!] 5519+ A? pipe-test.example.com. (39)
+    1795878209.360529 IP (tos 0x0, ttl 64, id 8834, offset 0, flags [DF], proto UDP (17), length 67)
+        127.0.0.2.53 > 127.0.0.1.47554: [bad udp cksum 0xfe43 -> 0x2030!] 5519| q: A? pipe-test.example.com. 0/0/0 (39)
+    1795878209.360570 IP (tos 0x0, ttl 64, id 44047, offset 0, flags [DF], proto UDP (17), length 67)
+        127.0.0.1.60908 > 127.0.0.2.53: [bad udp cksum 0xfe43 -> 0x52b4!] 5729+ AAAA? pipe-test.example.com. (39)
+    1795878209.360616 IP (tos 0x0, ttl 64, id 8835, offset 0, flags [DF], proto UDP (17), length 67)
+        127.0.0.2.53 > 127.0.0.1.60908: [bad udp cksum 0xfe43 -> 0xd033!] 5729| q: AAAA? pipe-test.example.com. 0/0/0 (39)
+    1795878209.360795 IP (tos 0x0, ttl 64, id 31854, offset 0, flags [DF], proto UDP (17), length 67)
+        100.95.0.1.53 > 100.95.0.1.45173: [bad udp cksum 0xc900 -> 0x5ec0!] 5519| q: A? pipe-test.example.com. 0/0/0 (39)
+    1795878209.360842 IP (tos 0x0, ttl 64, id 56306, offset 0, flags [DF], proto TCP (6), length 64)
+        100.95.0.1.47494 > 100.95.0.1.53: Flags [S], cksum 0xc8f2 (incorrect -> 0x5333), seq 1711654214, win 65495, options [mss 65495,sackOK,TS val 1847176165 ecr 0,nop,wscale 10,tfo  cookiereq,nop,nop], length 0
+    1795878209.360853 IP (tos 0x0, ttl 64, id 0, offset 0, flags [DF], proto TCP (6), length 60)
+        100.95.0.1.53 > 100.95.0.1.47494: Flags [S.], cksum 0xc8ee (incorrect -> 0x970f), seq 1009106988, ack 1711654215, win 65483, options [mss 65495,sackOK,TS val 1158589893 ecr 1847176165,nop,wscale 10], length 0
+    1795878209.360865 IP (tos 0x0, ttl 64, id 56307, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.47494 > 100.95.0.1.53: Flags [.], cksum 0xc8e6 (incorrect -> 0xbf8e), seq 1, ack 1, win 64, options [nop,nop,TS val 1847176165 ecr 1158589893], length 0
+    1795878209.360863 IP (tos 0x0, ttl 64, id 31855, offset 0, flags [DF], proto UDP (17), length 67)
+        100.95.0.1.53 > 100.95.0.1.45173: [bad udp cksum 0xc900 -> 0x42ee!] 5729| q: AAAA? pipe-test.example.com. 0/0/0 (39)
+    1795878209.360889 IP (tos 0x0, ttl 64, id 10132, offset 0, flags [DF], proto TCP (6), length 64)
+        100.95.0.1.47510 > 100.95.0.1.53: Flags [S], cksum 0xc8f2 (incorrect -> 0xedc3), seq 3189367561, win 65495, options [mss 65495,sackOK,TS val 2618333418 ecr 0,nop,wscale 10,exp-tfo cookiereq], length 0
+    1795878209.360894 IP (tos 0x0, ttl 64, id 0, offset 0, flags [DF], proto TCP (6), length 60)
+        100.95.0.1.53 > 100.95.0.1.47510: Flags [S.], cksum 0xc8ee (incorrect -> 0x4b5d), seq 1479043332, ack 3189367562, win 65483, options [mss 65495,sackOK,TS val 3078041936 ecr 2618333418,nop,wscale 10], length 0
+    1795878209.360899 IP (tos 0x0, ttl 64, id 10133, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.47510 > 100.95.0.1.53: Flags [.], cksum 0xc8e6 (incorrect -> 0x73dc), seq 1, ack 1, win 64, options [nop,nop,TS val 2618333418 ecr 3078041936], length 0
+    1795878209.360928 IP (tos 0x0, ttl 64, id 56308, offset 0, flags [DF], proto TCP (6), length 93)
+        100.95.0.1.47494 > 100.95.0.1.53: Flags [P.], cksum 0xc90f (incorrect -> 0x1a52), seq 1:42, ack 1, win 64, options [nop,nop,TS val 1847176165 ecr 1158589893], length 41 5519+ A? pipe-test.example.com. (39)
+    1795878209.360933 IP (tos 0x0, ttl 64, id 25919, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.47494: Flags [.], cksum 0xc8e6 (incorrect -> 0xbf65), seq 1, ack 42, win 64, options [nop,nop,TS val 1158589893 ecr 1847176165], length 0
+    1795878209.360941 IP (tos 0x0, ttl 64, id 10134, offset 0, flags [DF], proto TCP (6), length 93)
+        100.95.0.1.47510 > 100.95.0.1.53: Flags [P.], cksum 0xc90f (incorrect -> 0xb2cd), seq 1:42, ack 1, win 64, options [nop,nop,TS val 2618333418 ecr 3078041936], length 41 5729+ AAAA? pipe-test.example.com. (39)
+    1795878209.360944 IP (tos 0x0, ttl 64, id 25911, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.47510: Flags [.], cksum 0xc8e6 (incorrect -> 0x73b3), seq 1, ack 42, win 64, options [nop,nop,TS val 3078041936 ecr 2618333418], length 0
+    1795878209.361282 IP (tos 0x0, ttl 64, id 11412, offset 0, flags [DF], proto TCP (6), length 60)
+        127.0.0.1.56420 > 127.0.0.2.53: Flags [S], cksum 0xfe31 (incorrect -> 0xb93c), seq 3692264760, win 65495, options [mss 65495,sackOK,TS val 1715796630 ecr 0,nop,wscale 10], length 0
+    1795878209.361286 IP (tos 0x0, ttl 64, id 62855, offset 0, flags [DF], proto TCP (6), length 60)
+        127.0.0.1.56422 > 127.0.0.2.53: Flags [S], cksum 0xfe31 (incorrect -> 0x581d), seq 1585751823, win 65495, options [mss 65495,sackOK,TS val 2385610623 ecr 0,nop,wscale 10], length 0
+    1795878209.361298 IP (tos 0x0, ttl 64, id 0, offset 0, flags [DF], proto TCP (6), length 60)
+        127.0.0.2.53 > 127.0.0.1.56420: Flags [S.], cksum 0xfe31 (incorrect -> 0xf542), seq 279081729, ack 3692264761, win 65483, options [mss 65495,sackOK,TS val 1024262980 ecr 1715796630,nop,wscale 10], length 0
+    1795878209.361302 IP (tos 0x0, ttl 64, id 0, offset 0, flags [DF], proto TCP (6), length 60)
+        127.0.0.2.53 > 127.0.0.1.56422: Flags [S.], cksum 0xfe31 (incorrect -> 0x736e), seq 3729464969, ack 1585751824, win 65483, options [mss 65495,sackOK,TS val 735493118 ecr 2385610623,nop,wscale 10], length 0
+    1795878209.361314 IP (tos 0x0, ttl 64, id 11413, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.56420 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x1dc2), seq 1, ack 1, win 64, options [nop,nop,TS val 1715796630 ecr 1024262980], length 0
+    1795878209.361317 IP (tos 0x0, ttl 64, id 62856, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.56422 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x9bed), seq 1, ack 1, win 64, options [nop,nop,TS val 2385610623 ecr 735493118], length 0
+    1795878209.361392 IP (tos 0x0, ttl 64, id 11414, offset 0, flags [DF], proto TCP (6), length 93)
+        127.0.0.1.56420 > 127.0.0.2.53: Flags [P.], cksum 0xfe52 (incorrect -> 0x5cb2), seq 1:42, ack 1, win 64, options [nop,nop,TS val 1715796631 ecr 1024262980], length 41 5729+ AAAA? pipe-test.example.com. (39)
+    1795878209.361401 IP (tos 0x0, ttl 64, id 22792, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.2.53 > 127.0.0.1.56420: Flags [.], cksum 0xfe29 (incorrect -> 0x1d97), seq 1, ack 42, win 64, options [nop,nop,TS val 1024262981 ecr 1715796631], length 0
+    1795878209.361408 IP (tos 0x0, ttl 64, id 62857, offset 0, flags [DF], proto TCP (6), length 93)
+        127.0.0.1.56422 > 127.0.0.2.53: Flags [P.], cksum 0xfe52 (incorrect -> 0xf6af), seq 1:42, ack 1, win 64, options [nop,nop,TS val 2385610624 ecr 735493118], length 41 5519+ A? pipe-test.example.com. (39)
+    1795878209.361416 IP (tos 0x0, ttl 64, id 61129, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.2.53 > 127.0.0.1.56422: Flags [.], cksum 0xfe29 (incorrect -> 0x9bc2), seq 1, ack 42, win 64, options [nop,nop,TS val 735493119 ecr 2385610624], length 0
+    1795878209.361598 IP (tos 0x0, ttl 64, id 22793, offset 0, flags [DF], proto TCP (6), length 54)
+        127.0.0.2.53 > 127.0.0.1.56420: Flags [P.], cksum 0xfe2b (incorrect -> 0x1d66), seq 1:3, ack 42, win 64, options [nop,nop,TS val 1024262981 ecr 1715796631], length 2 [prefix length(39) != length(0)] (invalid)
+    1795878209.361618 IP (tos 0x0, ttl 64, id 61130, offset 0, flags [DF], proto TCP (6), length 54)
+        127.0.0.2.53 > 127.0.0.1.56422: Flags [P.], cksum 0xfe2b (incorrect -> 0x9b81), seq 1:3, ack 42, win 64, options [nop,nop,TS val 735493119 ecr 2385610624], length 2 [prefix length(55) != length(0)] (invalid)
+    1795878209.361620 IP (tos 0x0, ttl 64, id 11415, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.56420 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x1d95), seq 42, ack 3, win 64, options [nop,nop,TS val 1715796631 ecr 1024262981], length 0
+    1795878209.361627 IP (tos 0x0, ttl 64, id 62858, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.56422 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x9bc0), seq 42, ack 3, win 64, options [nop,nop,TS val 2385610624 ecr 735493119], length 0
+    1795878209.361638 IP (tos 0x0, ttl 64, id 22794, offset 0, flags [DF], proto TCP (6), length 91)
+        127.0.0.2.53 > 127.0.0.1.56420: Flags [P.], cksum 0xfe50 (incorrect -> 0xdc2e), seq 3:42, ack 42, win 64, options [nop,nop,TS val 1024262981 ecr 1715796631], length 39 [prefix length(5729) != length(37)] (invalid)
+    1795878209.361642 IP (tos 0x0, ttl 64, id 61131, offset 0, flags [DF], proto TCP (6), length 107)
+        127.0.0.2.53 > 127.0.0.1.56422: Flags [P.], cksum 0xfe60 (incorrect -> 0x4c25), seq 3:58, ack 42, win 64, options [nop,nop,TS val 735493119 ecr 2385610624], length 55 [prefix length(5519) != length(53)] (invalid)
+    1795878209.361646 IP (tos 0x0, ttl 64, id 11416, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.56420 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x1d6e), seq 42, ack 42, win 64, options [nop,nop,TS val 1715796631 ecr 1024262981], length 0
+    1795878209.361650 IP (tos 0x0, ttl 64, id 62859, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.56422 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x9b89), seq 42, ack 58, win 64, options [nop,nop,TS val 2385610624 ecr 735493119], length 0
+    1795878209.361716 IP (tos 0x0, ttl 64, id 11417, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.56420 > 127.0.0.2.53: Flags [F.], cksum 0xfe29 (incorrect -> 0x1d6d), seq 42, ack 42, win 64, options [nop,nop,TS val 1715796631 ecr 1024262981], length 0
+    1795878209.361718 IP (tos 0x0, ttl 64, id 62860, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.56422 > 127.0.0.2.53: Flags [F.], cksum 0xfe29 (incorrect -> 0x9b88), seq 42, ack 58, win 64, options [nop,nop,TS val 2385610624 ecr 735493119], length 0
+    1795878209.361746 IP (tos 0x0, ttl 64, id 61132, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.2.53 > 127.0.0.1.56422: Flags [F.], cksum 0xfe29 (incorrect -> 0x9b87), seq 58, ack 43, win 64, options [nop,nop,TS val 735493119 ecr 2385610624], length 0
+    1795878209.361747 IP (tos 0x0, ttl 64, id 22795, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.2.53 > 127.0.0.1.56420: Flags [F.], cksum 0xfe29 (incorrect -> 0x1d6c), seq 42, ack 43, win 64, options [nop,nop,TS val 1024262981 ecr 1715796631], length 0
+    1795878209.361767 IP (tos 0x0, ttl 64, id 62861, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.56422 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x9b87), seq 43, ack 59, win 64, options [nop,nop,TS val 2385610624 ecr 735493119], length 0
+    1795878209.361769 IP (tos 0x0, ttl 64, id 11418, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.56420 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x1d6c), seq 43, ack 43, win 64, options [nop,nop,TS val 1715796631 ecr 1024262981], length 0
+    1795878209.361793 IP (tos 0x0, ttl 64, id 25912, offset 0, flags [DF], proto TCP (6), length 93)
+        100.95.0.1.53 > 100.95.0.1.47510: Flags [P.], cksum 0xc90f (incorrect -> 0x3223), seq 1:42, ack 42, win 64, options [nop,nop,TS val 3078041937 ecr 2618333418], length 41 5729 q: AAAA? pipe-test.example.com. 0/0/0 (39)
+    1795878209.361802 IP (tos 0x0, ttl 64, id 10135, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.47510 > 100.95.0.1.53: Flags [.], cksum 0xc8e6 (incorrect -> 0x7388), seq 42, ack 42, win 64, options [nop,nop,TS val 2618333419 ecr 3078041937], length 0
+    1795878209.361803 IP (tos 0x0, ttl 64, id 25920, offset 0, flags [DF], proto TCP (6), length 109)
+        100.95.0.1.53 > 100.95.0.1.47494: Flags [P.], cksum 0xc91f (incorrect -> 0x6f90), seq 1:58, ack 42, win 64, options [nop,nop,TS val 1158589894 ecr 1847176165], length 57 5519 q: A? pipe-test.example.com. 1/0/0 pipe-test.example.com. A 93.184.216.34 (55)
+    1795878209.361811 IP (tos 0x0, ttl 64, id 56309, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.47494 > 100.95.0.1.53: Flags [.], cksum 0xc8e6 (incorrect -> 0xbf2a), seq 42, ack 58, win 64, options [nop,nop,TS val 1847176166 ecr 1158589894], length 0
+    1795878209.361818 IP (tos 0x0, ttl 64, id 25913, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.47510: Flags [F.], cksum 0xc8e6 (incorrect -> 0x7387), seq 42, ack 42, win 64, options [nop,nop,TS val 3078041937 ecr 2618333419], length 0
+    1795878209.361821 IP (tos 0x0, ttl 64, id 25921, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.47494: Flags [F.], cksum 0xc8e6 (incorrect -> 0xbf29), seq 58, ack 42, win 64, options [nop,nop,TS val 1158589894 ecr 1847176166], length 0
+    1795878209.361850 IP (tos 0x0, ttl 64, id 56310, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.47494 > 100.95.0.1.53: Flags [F.], cksum 0xc8e6 (incorrect -> 0xbf28), seq 42, ack 59, win 64, options [nop,nop,TS val 1847176166 ecr 1158589894], length 0
+    1795878209.361865 IP (tos 0x0, ttl 64, id 25922, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.47494: Flags [.], cksum 0xc8e6 (incorrect -> 0xbf28), seq 59, ack 43, win 64, options [nop,nop,TS val 1158589894 ecr 1847176166], length 0
+    1795878209.361880 IP (tos 0x0, ttl 64, id 10136, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.47510 > 100.95.0.1.53: Flags [F.], cksum 0xc8e6 (incorrect -> 0x7386), seq 42, ack 43, win 64, options [nop,nop,TS val 2618333419 ecr 3078041937], length 0
+    1795878209.361888 IP (tos 0x0, ttl 64, id 25914, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.47510: Flags [.], cksum 0xc8e6 (incorrect -> 0x7386), seq 43, ack 43, win 64, options [nop,nop,TS val 3078041937 ecr 2618333419], length 0
+######## rep 2 (TC mode)
+--- CASE tc-glibc-ahosts-2: timed client /home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/spike-scratch/guest-public-dns-tcp-pipelining/out/r1/client.resolv.conf getent ahosts pipe-test.example.com
+93.184.216.34   STREAM pipe-test.example.com
+93.184.216.34   DGRAM  
+93.184.216.34   RAW    
+   [exit=0 wall=0.016s]
+--- wire (tc-glibc-ahosts-2), port 53 (client<->responder and responder<->upstream), -vv:
+    1795878210.614519 IP (tos 0x0, ttl 64, id 10378, offset 0, flags [DF], proto UDP (17), length 67)
+        100.95.0.1.35213 > 100.95.0.1.53: [bad udp cksum 0xc900 -> 0x132a!] 2702+ A? pipe-test.example.com. (39)
+    1795878210.615127 IP (tos 0x0, ttl 64, id 53746, offset 0, flags [DF], proto UDP (17), length 67)
+        127.0.0.1.46747 > 127.0.0.2.53: [bad udp cksum 0xfe43 -> 0xb0d8!] 2702+ A? pipe-test.example.com. (39)
+    1795878210.615219 IP (tos 0x0, ttl 64, id 9677, offset 0, flags [DF], proto UDP (17), length 67)
+        127.0.0.2.53 > 127.0.0.1.46747: [bad udp cksum 0xfe43 -> 0x2e58!] 2702| q: A? pipe-test.example.com. 0/0/0 (39)
+    1795878210.615415 IP (tos 0x0, ttl 64, id 32958, offset 0, flags [DF], proto UDP (17), length 67)
+        100.95.0.1.53 > 100.95.0.1.35213: [bad udp cksum 0xc900 -> 0x90a9!] 2702| q: A? pipe-test.example.com. 0/0/0 (39)
+    1795878210.615460 IP (tos 0x0, ttl 64, id 24045, offset 0, flags [DF], proto TCP (6), length 60)
+        100.95.0.1.47526 > 100.95.0.1.53: Flags [S], cksum 0xc8ee (incorrect -> 0x859d), seq 3053315889, win 65495, options [mss 65495,sackOK,TS val 782793200 ecr 0,nop,wscale 10], length 0
+    1795878210.615471 IP (tos 0x0, ttl 64, id 0, offset 0, flags [DF], proto TCP (6), length 60)
+        100.95.0.1.53 > 100.95.0.1.47526: Flags [S.], cksum 0xc8ee (incorrect -> 0x1d85), seq 1027894451, ack 3053315890, win 65483, options [mss 65495,sackOK,TS val 249081667 ecr 782793200,nop,wscale 10], length 0
+    1795878210.615483 IP (tos 0x0, ttl 64, id 24046, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.47526 > 100.95.0.1.53: Flags [.], cksum 0xc8e6 (incorrect -> 0x4604), seq 1, ack 1, win 64, options [nop,nop,TS val 782793200 ecr 249081667], length 0
+    1795878210.615503 IP (tos 0x0, ttl 64, id 24047, offset 0, flags [DF], proto TCP (6), length 93)
+        100.95.0.1.47526 > 100.95.0.1.53: Flags [P.], cksum 0xc90f (incorrect -> 0xabc8), seq 1:42, ack 1, win 64, options [nop,nop,TS val 782793200 ecr 249081667], length 41 2702+ A? pipe-test.example.com. (39)
+    1795878210.615508 IP (tos 0x0, ttl 64, id 33669, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.47526: Flags [.], cksum 0xc8e6 (incorrect -> 0x45db), seq 1, ack 42, win 64, options [nop,nop,TS val 249081667 ecr 782793200], length 0
+    1795878210.615850 IP (tos 0x0, ttl 64, id 61469, offset 0, flags [DF], proto TCP (6), length 60)
+        127.0.0.1.56424 > 127.0.0.2.53: Flags [S], cksum 0xfe31 (incorrect -> 0xbce7), seq 3620989408, win 65495, options [mss 65495,sackOK,TS val 2498912209 ecr 0,nop,wscale 10], length 0
+    1795878210.615866 IP (tos 0x0, ttl 64, id 0, offset 0, flags [DF], proto TCP (6), length 60)
+        127.0.0.2.53 > 127.0.0.1.56424: Flags [S.], cksum 0xfe31 (incorrect -> 0x4ebe), seq 3758065235, ack 3620989409, win 65483, options [mss 65495,sackOK,TS val 573760926 ecr 2498912209,nop,wscale 10], length 0
+    1795878210.615881 IP (tos 0x0, ttl 64, id 61470, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.56424 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x773d), seq 1, ack 1, win 64, options [nop,nop,TS val 2498912209 ecr 573760926], length 0
+    1795878210.616003 IP (tos 0x0, ttl 64, id 61471, offset 0, flags [DF], proto TCP (6), length 93)
+        127.0.0.1.56424 > 127.0.0.2.53: Flags [P.], cksum 0xfe52 (incorrect -> 0xdd01), seq 1:42, ack 1, win 64, options [nop,nop,TS val 2498912209 ecr 573760926], length 41 2702+ A? pipe-test.example.com. (39)
+    1795878210.616022 IP (tos 0x0, ttl 64, id 14010, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.2.53 > 127.0.0.1.56424: Flags [.], cksum 0xfe29 (incorrect -> 0x7714), seq 1, ack 42, win 64, options [nop,nop,TS val 573760926 ecr 2498912209], length 0
+    1795878210.616066 IP (tos 0x0, ttl 64, id 14011, offset 0, flags [DF], proto TCP (6), length 54)
+        127.0.0.2.53 > 127.0.0.1.56424: Flags [P.], cksum 0xfe2b (incorrect -> 0x76d3), seq 1:3, ack 42, win 64, options [nop,nop,TS val 573760926 ecr 2498912209], length 2 [prefix length(55) != length(0)] (invalid)
+    1795878210.616080 IP (tos 0x0, ttl 64, id 61472, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.56424 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x7712), seq 42, ack 3, win 64, options [nop,nop,TS val 2498912209 ecr 573760926], length 0
+    1795878210.616095 IP (tos 0x0, ttl 64, id 14012, offset 0, flags [DF], proto TCP (6), length 107)
+        127.0.0.2.53 > 127.0.0.1.56424: Flags [P.], cksum 0xfe60 (incorrect -> 0x3278), seq 3:58, ack 42, win 64, options [nop,nop,TS val 573760926 ecr 2498912209], length 55 [prefix length(2702) != length(53)] (invalid)
+    1795878210.616103 IP (tos 0x0, ttl 64, id 61473, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.56424 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x76db), seq 42, ack 58, win 64, options [nop,nop,TS val 2498912209 ecr 573760926], length 0
+    1795878210.616133 IP (tos 0x0, ttl 64, id 61474, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.56424 > 127.0.0.2.53: Flags [F.], cksum 0xfe29 (incorrect -> 0x76da), seq 42, ack 58, win 64, options [nop,nop,TS val 2498912209 ecr 573760926], length 0
+    1795878210.616156 IP (tos 0x0, ttl 64, id 14013, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.2.53 > 127.0.0.1.56424: Flags [F.], cksum 0xfe29 (incorrect -> 0x76d9), seq 58, ack 43, win 64, options [nop,nop,TS val 573760926 ecr 2498912209], length 0
+    1795878210.616175 IP (tos 0x0, ttl 64, id 61475, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.56424 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x76d9), seq 43, ack 59, win 64, options [nop,nop,TS val 2498912209 ecr 573760926], length 0
+    1795878210.616206 IP (tos 0x0, ttl 64, id 33670, offset 0, flags [DF], proto TCP (6), length 109)
+        100.95.0.1.53 > 100.95.0.1.47526: Flags [P.], cksum 0xc91f (incorrect -> 0x0108), seq 1:58, ack 42, win 64, options [nop,nop,TS val 249081667 ecr 782793200], length 57 2702 q: A? pipe-test.example.com. 1/0/0 pipe-test.example.com. A 93.184.216.34 (55)
+    1795878210.616212 IP (tos 0x0, ttl 64, id 24048, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.47526 > 100.95.0.1.53: Flags [.], cksum 0xc8e6 (incorrect -> 0x45a2), seq 42, ack 58, win 64, options [nop,nop,TS val 782793200 ecr 249081667], length 0
+    1795878210.616221 IP (tos 0x0, ttl 64, id 33671, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.47526: Flags [F.], cksum 0xc8e6 (incorrect -> 0x45a1), seq 58, ack 42, win 64, options [nop,nop,TS val 249081667 ecr 782793200], length 0
+    1795878210.616247 IP (tos 0x0, ttl 64, id 24049, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.47526 > 100.95.0.1.53: Flags [F.], cksum 0xc8e6 (incorrect -> 0x45a0), seq 42, ack 59, win 64, options [nop,nop,TS val 782793200 ecr 249081667], length 0
+    1795878210.616269 IP (tos 0x0, ttl 64, id 33672, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.47526: Flags [.], cksum 0xc8e6 (incorrect -> 0x45a0), seq 59, ack 43, win 64, options [nop,nop,TS val 249081667 ecr 782793200], length 0
+--- CASE tc-musl-2: timed client /home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/spike-scratch/guest-public-dns-tcp-pipelining/out/r1/client.resolv.conf /home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/spike-scratch/guest-public-dns-tcp-pipelining/out/r1/musl_lookup pipe-test.example.com
+musl getaddrinfo(pipe-test.example.com) -> Ok([93.184.216.34:80]) in 1.760481ms
+   [exit=0 wall=0.015s]
+--- wire (tc-musl-2), port 53 (client<->responder and responder<->upstream), -vv:
+    1795878211.866876 IP (tos 0x0, ttl 64, id 33511, offset 0, flags [DF], proto UDP (17), length 67)
+        100.95.0.1.54851 > 100.95.0.1.53: [bad udp cksum 0xc900 -> 0xa109!] 12280+ A? pipe-test.example.com. (39)
+    1795878211.866891 IP (tos 0x0, ttl 64, id 33512, offset 0, flags [DF], proto UDP (17), length 67)
+        100.95.0.1.54851 > 100.95.0.1.53: [bad udp cksum 0xc900 -> 0x8537!] 12490+ AAAA? pipe-test.example.com. (39)
+    1795878211.867385 IP (tos 0x0, ttl 64, id 21093, offset 0, flags [DF], proto UDP (17), length 67)
+        127.0.0.1.42079 > 127.0.0.2.53: [bad udp cksum 0xfe43 -> 0x9daa!] 12280+ A? pipe-test.example.com. (39)
+    1795878211.867432 IP (tos 0x0, ttl 64, id 16445, offset 0, flags [DF], proto UDP (17), length 67)
+        127.0.0.1.41696 > 127.0.0.2.53: [bad udp cksum 0xfe43 -> 0x8357!] 12490+ AAAA? pipe-test.example.com. (39)
+    1795878211.867444 IP (tos 0x0, ttl 64, id 10814, offset 0, flags [DF], proto UDP (17), length 67)
+        127.0.0.2.53 > 127.0.0.1.42079: [bad udp cksum 0xfe43 -> 0x1b2a!] 12280| q: A? pipe-test.example.com. 0/0/0 (39)
+    1795878211.867459 IP (tos 0x0, ttl 64, id 10815, offset 0, flags [DF], proto UDP (17), length 67)
+        127.0.0.2.53 > 127.0.0.1.41696: [bad udp cksum 0xfe43 -> 0x00d7!] 12490| q: AAAA? pipe-test.example.com. 0/0/0 (39)
+    1795878211.867676 IP (tos 0x0, ttl 64, id 33514, offset 0, flags [DF], proto UDP (17), length 67)
+        100.95.0.1.53 > 100.95.0.1.54851: [bad udp cksum 0xc900 -> 0x02b7!] 12490| q: AAAA? pipe-test.example.com. 0/0/0 (39)
+    1795878211.867674 IP (tos 0x0, ttl 64, id 33513, offset 0, flags [DF], proto UDP (17), length 67)
+        100.95.0.1.53 > 100.95.0.1.54851: [bad udp cksum 0xc900 -> 0x1e89!] 12280| q: A? pipe-test.example.com. 0/0/0 (39)
+    1795878211.867719 IP (tos 0x0, ttl 64, id 13505, offset 0, flags [DF], proto TCP (6), length 64)
+        100.95.0.1.48856 > 100.95.0.1.53: Flags [S], cksum 0xc8f2 (incorrect -> 0x338d), seq 2191858703, win 65495, options [mss 65495,sackOK,TS val 3050769171 ecr 0,nop,wscale 10,tfo  cookiereq,nop,nop], length 0
+    1795878211.867730 IP (tos 0x0, ttl 64, id 0, offset 0, flags [DF], proto TCP (6), length 60)
+        100.95.0.1.53 > 100.95.0.1.48856: Flags [S.], cksum 0xc8ee (incorrect -> 0xd93a), seq 2816506854, ack 2191858704, win 65483, options [mss 65495,sackOK,TS val 588072576 ecr 3050769171,nop,wscale 10], length 0
+    1795878211.867741 IP (tos 0x0, ttl 64, id 13506, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.48856 > 100.95.0.1.53: Flags [.], cksum 0xc8e6 (incorrect -> 0x01ba), seq 1, ack 1, win 64, options [nop,nop,TS val 3050769171 ecr 588072576], length 0
+    1795878211.867764 IP (tos 0x0, ttl 64, id 31017, offset 0, flags [DF], proto TCP (6), length 64)
+        100.95.0.1.48858 > 100.95.0.1.53: Flags [S], cksum 0xc8f2 (incorrect -> 0x9d79), seq 2705256692, win 65495, options [mss 65495,sackOK,TS val 163928504 ecr 0,nop,wscale 10,tfo  cookiereq,nop,nop], length 0
+    1795878211.867768 IP (tos 0x0, ttl 64, id 0, offset 0, flags [DF], proto TCP (6), length 60)
+        100.95.0.1.53 > 100.95.0.1.48858: Flags [S.], cksum 0xc8ee (incorrect -> 0x977d), seq 2631008295, ack 2705256693, win 65483, options [mss 65495,sackOK,TS val 3809982700 ecr 163928504,nop,wscale 10], length 0
+    1795878211.867774 IP (tos 0x0, ttl 64, id 31018, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.48858 > 100.95.0.1.53: Flags [.], cksum 0xc8e6 (incorrect -> 0xbffc), seq 1, ack 1, win 64, options [nop,nop,TS val 163928504 ecr 3809982700], length 0
+    1795878211.867788 IP (tos 0x0, ttl 64, id 31019, offset 0, flags [DF], proto TCP (6), length 93)
+        100.95.0.1.48858 > 100.95.0.1.53: Flags [P.], cksum 0xc90f (incorrect -> 0x0057), seq 1:42, ack 1, win 64, options [nop,nop,TS val 163928504 ecr 3809982700], length 41 12280+ A? pipe-test.example.com. (39)
+    1795878211.867793 IP (tos 0x0, ttl 64, id 29690, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.48858: Flags [.], cksum 0xc8e6 (incorrect -> 0xbfd3), seq 1, ack 42, win 64, options [nop,nop,TS val 3809982700 ecr 163928504], length 0
+    1795878211.867801 IP (tos 0x0, ttl 64, id 13507, offset 0, flags [DF], proto TCP (6), length 93)
+        100.95.0.1.48856 > 100.95.0.1.53: Flags [P.], cksum 0xc90f (incorrect -> 0x2642), seq 1:42, ack 1, win 64, options [nop,nop,TS val 3050769171 ecr 588072576], length 41 12490+ AAAA? pipe-test.example.com. (39)
+    1795878211.867804 IP (tos 0x0, ttl 64, id 34648, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.48856: Flags [.], cksum 0xc8e6 (incorrect -> 0x0191), seq 1, ack 42, win 64, options [nop,nop,TS val 588072576 ecr 3050769171], length 0
+    1795878211.868104 IP (tos 0x0, ttl 64, id 16172, offset 0, flags [DF], proto TCP (6), length 60)
+        127.0.0.1.40486 > 127.0.0.2.53: Flags [S], cksum 0xfe31 (incorrect -> 0xc72b), seq 1970370084, win 65495, options [mss 65495,sackOK,TS val 757584313 ecr 0,nop,wscale 10], length 0
+    1795878211.868104 IP (tos 0x0, ttl 64, id 26145, offset 0, flags [DF], proto TCP (6), length 60)
+        127.0.0.1.40494 > 127.0.0.2.53: Flags [S], cksum 0xfe31 (incorrect -> 0xa973), seq 1670228689, win 65495, options [mss 65495,sackOK,TS val 214101253 ecr 0,nop,wscale 10], length 0
+    1795878211.868123 IP (tos 0x0, ttl 64, id 0, offset 0, flags [DF], proto TCP (6), length 60)
+        127.0.0.2.53 > 127.0.0.1.40494: Flags [S.], cksum 0xfe31 (incorrect -> 0xdcbc), seq 3432578985, ack 1670228690, win 65483, options [mss 65495,sackOK,TS val 1162132266 ecr 214101253,nop,wscale 10], length 0
+    1795878211.868123 IP (tos 0x0, ttl 64, id 0, offset 0, flags [DF], proto TCP (6), length 60)
+        127.0.0.2.53 > 127.0.0.1.40486: Flags [S.], cksum 0xfe31 (incorrect -> 0x1a3d), seq 3901730563, ack 1970370085, win 65483, options [mss 65495,sackOK,TS val 1645196102 ecr 757584313,nop,wscale 10], length 0
+    1795878211.868141 IP (tos 0x0, ttl 64, id 16173, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.40486 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x42bc), seq 1, ack 1, win 64, options [nop,nop,TS val 757584313 ecr 1645196102], length 0
+    1795878211.868141 IP (tos 0x0, ttl 64, id 26146, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.40494 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x053c), seq 1, ack 1, win 64, options [nop,nop,TS val 214101253 ecr 1162132266], length 0
+    1795878211.868233 IP (tos 0x0, ttl 64, id 16174, offset 0, flags [DF], proto TCP (6), length 93)
+        127.0.0.1.40486 > 127.0.0.2.53: Flags [P.], cksum 0xfe52 (incorrect -> 0x8316), seq 1:42, ack 1, win 64, options [nop,nop,TS val 757584313 ecr 1645196102], length 41 12280+ A? pipe-test.example.com. (39)
+    1795878211.868233 IP (tos 0x0, ttl 64, id 26147, offset 0, flags [DF], proto TCP (6), length 93)
+        127.0.0.1.40494 > 127.0.0.2.53: Flags [P.], cksum 0xfe52 (incorrect -> 0x29c4), seq 1:42, ack 1, win 64, options [nop,nop,TS val 214101253 ecr 1162132266], length 41 12490+ AAAA? pipe-test.example.com. (39)
+    1795878211.868244 IP (tos 0x0, ttl 64, id 35222, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.2.53 > 127.0.0.1.40494: Flags [.], cksum 0xfe29 (incorrect -> 0x0513), seq 1, ack 42, win 64, options [nop,nop,TS val 1162132266 ecr 214101253], length 0
+    1795878211.868244 IP (tos 0x0, ttl 64, id 17046, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.2.53 > 127.0.0.1.40486: Flags [.], cksum 0xfe29 (incorrect -> 0x4293), seq 1, ack 42, win 64, options [nop,nop,TS val 1645196102 ecr 757584313], length 0
+    1795878211.868298 IP (tos 0x0, ttl 64, id 35223, offset 0, flags [DF], proto TCP (6), length 54)
+        127.0.0.2.53 > 127.0.0.1.40494: Flags [P.], cksum 0xfe2b (incorrect -> 0x04e2), seq 1:3, ack 42, win 64, options [nop,nop,TS val 1162132266 ecr 214101253], length 2 [prefix length(39) != length(0)] (invalid)
+    1795878211.868299 IP (tos 0x0, ttl 64, id 17047, offset 0, flags [DF], proto TCP (6), length 54)
+        127.0.0.2.53 > 127.0.0.1.40486: Flags [P.], cksum 0xfe2b (incorrect -> 0x4252), seq 1:3, ack 42, win 64, options [nop,nop,TS val 1645196102 ecr 757584313], length 2 [prefix length(55) != length(0)] (invalid)
+    1795878211.868311 IP (tos 0x0, ttl 64, id 16175, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.40486 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x4291), seq 42, ack 3, win 64, options [nop,nop,TS val 757584313 ecr 1645196102], length 0
+    1795878211.868311 IP (tos 0x0, ttl 64, id 26148, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.40494 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x0511), seq 42, ack 3, win 64, options [nop,nop,TS val 214101253 ecr 1162132266], length 0
+    1795878211.868322 IP (tos 0x0, ttl 64, id 17048, offset 0, flags [DF], proto TCP (6), length 107)
+        127.0.0.2.53 > 127.0.0.1.40486: Flags [P.], cksum 0xfe60 (incorrect -> 0xd88c), seq 3:58, ack 42, win 64, options [nop,nop,TS val 1645196102 ecr 757584313], length 55 [prefix length(12280) != length(53)] (invalid)
+    1795878211.868323 IP (tos 0x0, ttl 64, id 35224, offset 0, flags [DF], proto TCP (6), length 91)
+        127.0.0.2.53 > 127.0.0.1.40494: Flags [P.], cksum 0xfe50 (incorrect -> 0xa941), seq 3:42, ack 42, win 64, options [nop,nop,TS val 1162132266 ecr 214101253], length 39 [prefix length(12490) != length(37)] (invalid)
+    1795878211.868326 IP (tos 0x0, ttl 64, id 16176, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.40486 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x425a), seq 42, ack 58, win 64, options [nop,nop,TS val 757584313 ecr 1645196102], length 0
+    1795878211.868329 IP (tos 0x0, ttl 64, id 26149, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.40494 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x04ea), seq 42, ack 42, win 64, options [nop,nop,TS val 214101253 ecr 1162132266], length 0
+    1795878211.868375 IP (tos 0x0, ttl 64, id 16177, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.40486 > 127.0.0.2.53: Flags [F.], cksum 0xfe29 (incorrect -> 0x4258), seq 42, ack 58, win 64, options [nop,nop,TS val 757584314 ecr 1645196102], length 0
+    1795878211.868392 IP (tos 0x0, ttl 64, id 17049, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.2.53 > 127.0.0.1.40486: Flags [F.], cksum 0xfe29 (incorrect -> 0x4256), seq 58, ack 43, win 64, options [nop,nop,TS val 1645196103 ecr 757584314], length 0
+    1795878211.868407 IP (tos 0x0, ttl 64, id 16178, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.40486 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x4256), seq 43, ack 59, win 64, options [nop,nop,TS val 757584314 ecr 1645196103], length 0
+    1795878211.868423 IP (tos 0x0, ttl 64, id 26150, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.40494 > 127.0.0.2.53: Flags [F.], cksum 0xfe29 (incorrect -> 0x04e8), seq 42, ack 42, win 64, options [nop,nop,TS val 214101254 ecr 1162132266], length 0
+    1795878211.868445 IP (tos 0x0, ttl 64, id 35225, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.2.53 > 127.0.0.1.40494: Flags [F.], cksum 0xfe29 (incorrect -> 0x04e6), seq 42, ack 43, win 64, options [nop,nop,TS val 1162132267 ecr 214101254], length 0
+    1795878211.868459 IP (tos 0x0, ttl 64, id 26151, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.40494 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x04e6), seq 43, ack 43, win 64, options [nop,nop,TS val 214101254 ecr 1162132267], length 0
+    1795878211.868497 IP (tos 0x0, ttl 64, id 29691, offset 0, flags [DF], proto TCP (6), length 109)
+        100.95.0.1.53 > 100.95.0.1.48858: Flags [P.], cksum 0xc91f (incorrect -> 0x5595), seq 1:58, ack 42, win 64, options [nop,nop,TS val 3809982701 ecr 163928504], length 57 12280 q: A? pipe-test.example.com. 1/0/0 pipe-test.example.com. A 93.184.216.34 (55)
+    1795878211.868506 IP (tos 0x0, ttl 64, id 31020, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.48858 > 100.95.0.1.53: Flags [.], cksum 0xc8e6 (incorrect -> 0xbf98), seq 42, ack 58, win 64, options [nop,nop,TS val 163928505 ecr 3809982701], length 0
+    1795878211.868518 IP (tos 0x0, ttl 64, id 29692, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.48858: Flags [F.], cksum 0xc8e6 (incorrect -> 0xbf97), seq 58, ack 42, win 64, options [nop,nop,TS val 3809982701 ecr 163928505], length 0
+    1795878211.868521 IP (tos 0x0, ttl 64, id 34649, offset 0, flags [DF], proto TCP (6), length 93)
+        100.95.0.1.53 > 100.95.0.1.48856: Flags [P.], cksum 0xc90f (incorrect -> 0xa597), seq 1:42, ack 42, win 64, options [nop,nop,TS val 588072577 ecr 3050769171], length 41 12490 q: AAAA? pipe-test.example.com. 0/0/0 (39)
+    1795878211.868530 IP (tos 0x0, ttl 64, id 31021, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.48858 > 100.95.0.1.53: Flags [F.], cksum 0xc8e6 (incorrect -> 0xbf96), seq 42, ack 59, win 64, options [nop,nop,TS val 163928505 ecr 3809982701], length 0
+    1795878211.868532 IP (tos 0x0, ttl 64, id 13508, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.48856 > 100.95.0.1.53: Flags [.], cksum 0xc8e6 (incorrect -> 0x0166), seq 42, ack 42, win 64, options [nop,nop,TS val 3050769172 ecr 588072577], length 0
+    1795878211.868538 IP (tos 0x0, ttl 64, id 29693, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.48858: Flags [.], cksum 0xc8e6 (incorrect -> 0xbf96), seq 59, ack 43, win 64, options [nop,nop,TS val 3809982701 ecr 163928505], length 0
+    1795878211.868551 IP (tos 0x0, ttl 64, id 34650, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.48856: Flags [F.], cksum 0xc8e6 (incorrect -> 0x0165), seq 42, ack 42, win 64, options [nop,nop,TS val 588072577 ecr 3050769172], length 0
+    1795878211.868559 IP (tos 0x0, ttl 64, id 13509, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.48856 > 100.95.0.1.53: Flags [F.], cksum 0xc8e6 (incorrect -> 0x0164), seq 42, ack 43, win 64, options [nop,nop,TS val 3050769172 ecr 588072577], length 0
+    1795878211.868571 IP (tos 0x0, ttl 64, id 34651, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.48856: Flags [.], cksum 0xc8e6 (incorrect -> 0x0164), seq 43, ack 43, win 64, options [nop,nop,TS val 588072577 ecr 3050769172], length 0
+######## rep 3 (TC mode)
+--- CASE tc-glibc-ahosts-3: timed client /home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/spike-scratch/guest-public-dns-tcp-pipelining/out/r1/client.resolv.conf getent ahosts pipe-test.example.com
+93.184.216.34   STREAM pipe-test.example.com
+93.184.216.34   DGRAM  
+93.184.216.34   RAW    
+   [exit=0 wall=0.013s]
+--- wire (tc-glibc-ahosts-3), port 53 (client<->responder and responder<->upstream), -vv:
+    1795878213.119552 IP (tos 0x0, ttl 64, id 43612, offset 0, flags [DF], proto UDP (17), length 67)
+        100.95.0.1.47473 > 100.95.0.1.53: [bad udp cksum 0xc900 -> 0x0225!] 60334+ A? pipe-test.example.com. (39)
+    1795878213.120091 IP (tos 0x0, ttl 64, id 54554, offset 0, flags [DF], proto UDP (17), length 67)
+        127.0.0.1.46018 > 127.0.0.2.53: [bad udp cksum 0xfe43 -> 0xd290!] 60334+ A? pipe-test.example.com. (39)
+    1795878213.120188 IP (tos 0x0, ttl 64, id 11476, offset 0, flags [DF], proto UDP (17), length 67)
+        127.0.0.2.53 > 127.0.0.1.46018: [bad udp cksum 0xfe43 -> 0x5010!] 60334| q: A? pipe-test.example.com. 0/0/0 (39)
+    1795878213.120403 IP (tos 0x0, ttl 64, id 34214, offset 0, flags [DF], proto UDP (17), length 67)
+        100.95.0.1.53 > 100.95.0.1.47473: [bad udp cksum 0xc900 -> 0x7fa4!] 60334| q: A? pipe-test.example.com. 0/0/0 (39)
+    1795878213.120477 IP (tos 0x0, ttl 64, id 4900, offset 0, flags [DF], proto TCP (6), length 60)
+        100.95.0.1.48868 > 100.95.0.1.53: Flags [S], cksum 0xc8ee (incorrect -> 0x5e57), seq 3257584622, win 65495, options [mss 65495,sackOK,TS val 1345685889 ecr 0,nop,wscale 10], length 0
+    1795878213.120489 IP (tos 0x0, ttl 64, id 0, offset 0, flags [DF], proto TCP (6), length 60)
+        100.95.0.1.53 > 100.95.0.1.48868: Flags [S.], cksum 0xc8ee (incorrect -> 0x9a7e), seq 3043175605, ack 3257584623, win 65483, options [mss 65495,sackOK,TS val 4099140966 ecr 1345685889,nop,wscale 10], length 0
+    1795878213.120501 IP (tos 0x0, ttl 64, id 4901, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.48868 > 100.95.0.1.53: Flags [.], cksum 0xc8e6 (incorrect -> 0xc2fd), seq 1, ack 1, win 64, options [nop,nop,TS val 1345685889 ecr 4099140966], length 0
+    1795878213.120523 IP (tos 0x0, ttl 64, id 4902, offset 0, flags [DF], proto TCP (6), length 93)
+        100.95.0.1.48868 > 100.95.0.1.53: Flags [P.], cksum 0xc90f (incorrect -> 0x47a1), seq 1:42, ack 1, win 64, options [nop,nop,TS val 1345685889 ecr 4099140966], length 41 60334+ A? pipe-test.example.com. (39)
+    1795878213.120528 IP (tos 0x0, ttl 64, id 48076, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.48868: Flags [.], cksum 0xc8e6 (incorrect -> 0xc2d4), seq 1, ack 42, win 64, options [nop,nop,TS val 4099140966 ecr 1345685889], length 0
+    1795878213.120835 IP (tos 0x0, ttl 64, id 48340, offset 0, flags [DF], proto TCP (6), length 60)
+        127.0.0.1.40496 > 127.0.0.2.53: Flags [S], cksum 0xfe31 (incorrect -> 0x4b4a), seq 1565938587, win 65495, options [mss 65495,sackOK,TS val 2189439708 ecr 0,nop,wscale 10], length 0
+    1795878213.120852 IP (tos 0x0, ttl 64, id 0, offset 0, flags [DF], proto TCP (6), length 60)
+        127.0.0.2.53 > 127.0.0.1.40496: Flags [S.], cksum 0xfe31 (incorrect -> 0x381c), seq 3022590961, ack 1565938588, win 65483, options [mss 65495,sackOK,TS val 1267924859 ecr 2189439708,nop,wscale 10], length 0
+    1795878213.120868 IP (tos 0x0, ttl 64, id 48341, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.40496 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x609b), seq 1, ack 1, win 64, options [nop,nop,TS val 2189439708 ecr 1267924859], length 0
+    1795878213.120993 IP (tos 0x0, ttl 64, id 48342, offset 0, flags [DF], proto TCP (6), length 93)
+        127.0.0.1.40496 > 127.0.0.2.53: Flags [P.], cksum 0xfe52 (incorrect -> 0xe53e), seq 1:42, ack 1, win 64, options [nop,nop,TS val 2189439708 ecr 1267924859], length 41 60334+ A? pipe-test.example.com. (39)
+    1795878213.121011 IP (tos 0x0, ttl 64, id 4239, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.2.53 > 127.0.0.1.40496: Flags [.], cksum 0xfe29 (incorrect -> 0x6072), seq 1, ack 42, win 64, options [nop,nop,TS val 1267924859 ecr 2189439708], length 0
+    1795878213.121040 IP (tos 0x0, ttl 64, id 4240, offset 0, flags [DF], proto TCP (6), length 54)
+        127.0.0.2.53 > 127.0.0.1.40496: Flags [P.], cksum 0xfe2b (incorrect -> 0x6031), seq 1:3, ack 42, win 64, options [nop,nop,TS val 1267924859 ecr 2189439708], length 2 [prefix length(55) != length(0)] (invalid)
+    1795878213.121049 IP (tos 0x0, ttl 64, id 48343, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.40496 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x6070), seq 42, ack 3, win 64, options [nop,nop,TS val 2189439708 ecr 1267924859], length 0
+    1795878213.121058 IP (tos 0x0, ttl 64, id 4241, offset 0, flags [DF], proto TCP (6), length 107)
+        127.0.0.2.53 > 127.0.0.1.40496: Flags [P.], cksum 0xfe60 (incorrect -> 0x3ab5), seq 3:58, ack 42, win 64, options [nop,nop,TS val 1267924859 ecr 2189439708], length 55 [prefix length(60334) != length(53)] (invalid)
+    1795878213.121062 IP (tos 0x0, ttl 64, id 48344, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.40496 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x6039), seq 42, ack 58, win 64, options [nop,nop,TS val 2189439708 ecr 1267924859], length 0
+    1795878213.121105 IP (tos 0x0, ttl 64, id 48345, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.40496 > 127.0.0.2.53: Flags [F.], cksum 0xfe29 (incorrect -> 0x6038), seq 42, ack 58, win 64, options [nop,nop,TS val 2189439708 ecr 1267924859], length 0
+    1795878213.121129 IP (tos 0x0, ttl 64, id 4242, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.2.53 > 127.0.0.1.40496: Flags [F.], cksum 0xfe29 (incorrect -> 0x6037), seq 58, ack 43, win 64, options [nop,nop,TS val 1267924859 ecr 2189439708], length 0
+    1795878213.121144 IP (tos 0x0, ttl 64, id 48346, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.40496 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x6037), seq 43, ack 59, win 64, options [nop,nop,TS val 2189439708 ecr 1267924859], length 0
+    1795878213.121243 IP (tos 0x0, ttl 64, id 48077, offset 0, flags [DF], proto TCP (6), length 109)
+        100.95.0.1.53 > 100.95.0.1.48868: Flags [P.], cksum 0xc91f (incorrect -> 0x9ce0), seq 1:58, ack 42, win 64, options [nop,nop,TS val 4099140966 ecr 1345685889], length 57 60334 q: A? pipe-test.example.com. 1/0/0 pipe-test.example.com. A 93.184.216.34 (55)
+    1795878213.121254 IP (tos 0x0, ttl 64, id 4903, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.48868 > 100.95.0.1.53: Flags [.], cksum 0xc8e6 (incorrect -> 0xc29b), seq 42, ack 58, win 64, options [nop,nop,TS val 1345685889 ecr 4099140966], length 0
+    1795878213.121269 IP (tos 0x0, ttl 64, id 4904, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.48868 > 100.95.0.1.53: Flags [F.], cksum 0xc8e6 (incorrect -> 0xc29a), seq 42, ack 58, win 64, options [nop,nop,TS val 1345685889 ecr 4099140966], length 0
+    1795878213.121272 IP (tos 0x0, ttl 64, id 48078, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.48868: Flags [F.], cksum 0xc8e6 (incorrect -> 0xc29a), seq 58, ack 42, win 64, options [nop,nop,TS val 4099140966 ecr 1345685889], length 0
+    1795878213.121279 IP (tos 0x0, ttl 64, id 4905, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.48868 > 100.95.0.1.53: Flags [.], cksum 0xc8e6 (incorrect -> 0xc299), seq 43, ack 59, win 64, options [nop,nop,TS val 1345685889 ecr 4099140966], length 0
+    1795878213.121288 IP (tos 0x0, ttl 64, id 48079, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.48868: Flags [.], cksum 0xc8e6 (incorrect -> 0xc299), seq 59, ack 43, win 64, options [nop,nop,TS val 4099140966 ecr 1345685889], length 0
+--- CASE tc-musl-3: timed client /home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/spike-scratch/guest-public-dns-tcp-pipelining/out/r1/client.resolv.conf /home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/spike-scratch/guest-public-dns-tcp-pipelining/out/r1/musl_lookup pipe-test.example.com
+musl getaddrinfo(pipe-test.example.com) -> Ok([93.184.216.34:80]) in 1.667301ms
+   [exit=0 wall=0.014s]
+--- wire (tc-musl-3), port 53 (client<->responder and responder<->upstream), -vv:
+    1795878214.369033 IP (tos 0x0, ttl 64, id 34223, offset 0, flags [DF], proto UDP (17), length 67)
+        100.95.0.1.42075 > 100.95.0.1.53: [bad udp cksum 0xc900 -> 0x7cce!] 34331+ A? pipe-test.example.com. (39)
+    1795878214.369048 IP (tos 0x0, ttl 64, id 34224, offset 0, flags [DF], proto UDP (17), length 67)
+        100.95.0.1.42075 > 100.95.0.1.53: [bad udp cksum 0xc900 -> 0x5ffc!] 34797+ AAAA? pipe-test.example.com. (39)
+    1795878214.369543 IP (tos 0x0, ttl 64, id 28038, offset 0, flags [DF], proto UDP (17), length 67)
+        127.0.0.1.44823 > 127.0.0.2.53: [bad udp cksum 0xfe43 -> 0x3ccf!] 34331+ A? pipe-test.example.com. (39)
+    1795878214.369549 IP (tos 0x0, ttl 64, id 18385, offset 0, flags [DF], proto UDP (17), length 67)
+        127.0.0.1.55562 > 127.0.0.2.53: [bad udp cksum 0xfe43 -> 0xf609!] 34797+ AAAA? pipe-test.example.com. (39)
+    1795878214.369589 IP (tos 0x0, ttl 64, id 12725, offset 0, flags [DF], proto UDP (17), length 67)
+        127.0.0.2.53 > 127.0.0.1.55562: [bad udp cksum 0xfe43 -> 0x7389!] 34797| q: AAAA? pipe-test.example.com. 0/0/0 (39)
+    1795878214.369605 IP (tos 0x0, ttl 64, id 12726, offset 0, flags [DF], proto UDP (17), length 67)
+        127.0.0.2.53 > 127.0.0.1.44823: [bad udp cksum 0xfe43 -> 0xba4e!] 34331| q: A? pipe-test.example.com. 0/0/0 (39)
+    1795878214.369766 IP (tos 0x0, ttl 64, id 34225, offset 0, flags [DF], proto UDP (17), length 67)
+        100.95.0.1.53 > 100.95.0.1.42075: [bad udp cksum 0xc900 -> 0xdd7b!] 34797| q: AAAA? pipe-test.example.com. 0/0/0 (39)
+    1795878214.369766 IP (tos 0x0, ttl 64, id 34226, offset 0, flags [DF], proto UDP (17), length 67)
+        100.95.0.1.53 > 100.95.0.1.42075: [bad udp cksum 0xc900 -> 0xfa4d!] 34331| q: A? pipe-test.example.com. 0/0/0 (39)
+    1795878214.369831 IP (tos 0x0, ttl 64, id 8423, offset 0, flags [DF], proto TCP (6), length 64)
+        100.95.0.1.48878 > 100.95.0.1.53: Flags [S], cksum 0xc8f2 (incorrect -> 0x2259), seq 1485683157, win 65495, options [mss 65495,sackOK,TS val 3665396704 ecr 0,nop,wscale 10,tfo  cookiereq,nop,nop], length 0
+    1795878214.369842 IP (tos 0x0, ttl 64, id 0, offset 0, flags [DF], proto TCP (6), length 60)
+        100.95.0.1.53 > 100.95.0.1.48878: Flags [S.], cksum 0xc8ee (incorrect -> 0xf345), seq 1868152593, ack 1485683158, win 65483, options [mss 65495,sackOK,TS val 752813771 ecr 3665396704,nop,wscale 10], length 0
+    1795878214.369854 IP (tos 0x0, ttl 64, id 8424, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.48878 > 100.95.0.1.53: Flags [.], cksum 0xc8e6 (incorrect -> 0x1bc5), seq 1, ack 1, win 64, options [nop,nop,TS val 3665396704 ecr 752813771], length 0
+    1795878214.369877 IP (tos 0x0, ttl 64, id 64380, offset 0, flags [DF], proto TCP (6), length 64)
+        100.95.0.1.48882 > 100.95.0.1.53: Flags [S], cksum 0xc8f2 (incorrect -> 0x8e63), seq 3317457762, win 65495, options [mss 65495,sackOK,TS val 1942972352 ecr 0,nop,wscale 10,tfo  cookiereq,nop,nop], length 0
+    1795878214.369882 IP (tos 0x0, ttl 64, id 0, offset 0, flags [DF], proto TCP (6), length 60)
+        100.95.0.1.53 > 100.95.0.1.48882: Flags [S.], cksum 0xc8ee (incorrect -> 0x9cb0), seq 2161919220, ack 3317457763, win 65483, options [mss 65495,sackOK,TS val 2956308142 ecr 1942972352,nop,wscale 10], length 0
+    1795878214.369888 IP (tos 0x0, ttl 64, id 64381, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.48882 > 100.95.0.1.53: Flags [.], cksum 0xc8e6 (incorrect -> 0xc52f), seq 1, ack 1, win 64, options [nop,nop,TS val 1942972352 ecr 2956308142], length 0
+    1795878214.369903 IP (tos 0x0, ttl 64, id 64382, offset 0, flags [DF], proto TCP (6), length 93)
+        100.95.0.1.48882 > 100.95.0.1.53: Flags [P.], cksum 0xc90f (incorrect -> 0xaf66), seq 1:42, ack 1, win 64, options [nop,nop,TS val 1942972352 ecr 2956308142], length 41 34331+ A? pipe-test.example.com. (39)
+    1795878214.369908 IP (tos 0x0, ttl 64, id 525, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.48882: Flags [.], cksum 0xc8e6 (incorrect -> 0xc506), seq 1, ack 42, win 64, options [nop,nop,TS val 2956308142 ecr 1942972352], length 0
+    1795878214.369916 IP (tos 0x0, ttl 64, id 8425, offset 0, flags [DF], proto TCP (6), length 93)
+        100.95.0.1.48878 > 100.95.0.1.53: Flags [P.], cksum 0xc90f (incorrect -> 0xe929), seq 1:42, ack 1, win 64, options [nop,nop,TS val 3665396704 ecr 752813771], length 41 34797+ AAAA? pipe-test.example.com. (39)
+    1795878214.369919 IP (tos 0x0, ttl 64, id 64238, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.48878: Flags [.], cksum 0xc8e6 (incorrect -> 0x1b9c), seq 1, ack 42, win 64, options [nop,nop,TS val 752813771 ecr 3665396704], length 0
+    1795878214.370141 IP (tos 0x0, ttl 64, id 62896, offset 0, flags [DF], proto TCP (6), length 60)
+        127.0.0.1.40508 > 127.0.0.2.53: Flags [S], cksum 0xfe31 (incorrect -> 0x9496), seq 3405109019, win 65495, options [mss 65495,sackOK,TS val 1095973265 ecr 0,nop,wscale 10], length 0
+    1795878214.370141 IP (tos 0x0, ttl 64, id 44975, offset 0, flags [DF], proto TCP (6), length 60)
+        127.0.0.1.40506 > 127.0.0.2.53: Flags [S], cksum 0xfe31 (incorrect -> 0xe980), seq 771341756, win 65495, options [mss 65495,sackOK,TS val 598522027 ecr 0,nop,wscale 10], length 0
+    1795878214.370151 IP (tos 0x0, ttl 64, id 0, offset 0, flags [DF], proto TCP (6), length 60)
+        127.0.0.2.53 > 127.0.0.1.40508: Flags [S.], cksum 0xfe31 (incorrect -> 0xc40c), seq 203640412, ack 3405109020, win 65483, options [mss 65495,sackOK,TS val 2621102538 ecr 1095973265,nop,wscale 10], length 0
+    1795878214.370151 IP (tos 0x0, ttl 64, id 0, offset 0, flags [DF], proto TCP (6), length 60)
+        127.0.0.2.53 > 127.0.0.1.40506: Flags [S.], cksum 0xfe31 (incorrect -> 0x102b), seq 607413970, ack 771341757, win 65483, options [mss 65495,sackOK,TS val 3687805562 ecr 598522027,nop,wscale 10], length 0
+    1795878214.370161 IP (tos 0x0, ttl 64, id 44976, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.40506 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x38aa), seq 1, ack 1, win 64, options [nop,nop,TS val 598522027 ecr 3687805562], length 0
+    1795878214.370161 IP (tos 0x0, ttl 64, id 62897, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.40508 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0xec8b), seq 1, ack 1, win 64, options [nop,nop,TS val 1095973265 ecr 2621102538], length 0
+    1795878214.370211 IP (tos 0x0, ttl 64, id 62898, offset 0, flags [DF], proto TCP (6), length 93)
+        127.0.0.1.40508 > 127.0.0.2.53: Flags [P.], cksum 0xfe52 (incorrect -> 0xd6c2), seq 1:42, ack 1, win 64, options [nop,nop,TS val 1095973265 ecr 2621102538], length 41 34331+ A? pipe-test.example.com. (39)
+    1795878214.370211 IP (tos 0x0, ttl 64, id 44977, offset 0, flags [DF], proto TCP (6), length 93)
+        127.0.0.1.40506 > 127.0.0.2.53: Flags [P.], cksum 0xfe52 (incorrect -> 0x060f), seq 1:42, ack 1, win 64, options [nop,nop,TS val 598522027 ecr 3687805562], length 41 34797+ AAAA? pipe-test.example.com. (39)
+    1795878214.370216 IP (tos 0x0, ttl 64, id 916, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.2.53 > 127.0.0.1.40508: Flags [.], cksum 0xfe29 (incorrect -> 0xec62), seq 1, ack 42, win 64, options [nop,nop,TS val 2621102538 ecr 1095973265], length 0
+    1795878214.370216 IP (tos 0x0, ttl 64, id 47710, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.2.53 > 127.0.0.1.40506: Flags [.], cksum 0xfe29 (incorrect -> 0x3881), seq 1, ack 42, win 64, options [nop,nop,TS val 3687805562 ecr 598522027], length 0
+    1795878214.370338 IP (tos 0x0, ttl 64, id 917, offset 0, flags [DF], proto TCP (6), length 54)
+        127.0.0.2.53 > 127.0.0.1.40508: Flags [P.], cksum 0xfe2b (incorrect -> 0xec21), seq 1:3, ack 42, win 64, options [nop,nop,TS val 2621102538 ecr 1095973265], length 2 [prefix length(55) != length(0)] (invalid)
+    1795878214.370345 IP (tos 0x0, ttl 64, id 62899, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.40508 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0xec60), seq 42, ack 3, win 64, options [nop,nop,TS val 1095973265 ecr 2621102538], length 0
+    1795878214.370352 IP (tos 0x0, ttl 64, id 47711, offset 0, flags [DF], proto TCP (6), length 54)
+        127.0.0.2.53 > 127.0.0.1.40506: Flags [P.], cksum 0xfe2b (incorrect -> 0x3850), seq 1:3, ack 42, win 64, options [nop,nop,TS val 3687805562 ecr 598522027], length 2 [prefix length(39) != length(0)] (invalid)
+    1795878214.370354 IP (tos 0x0, ttl 64, id 918, offset 0, flags [DF], proto TCP (6), length 107)
+        127.0.0.2.53 > 127.0.0.1.40508: Flags [P.], cksum 0xfe60 (incorrect -> 0x2c39), seq 3:58, ack 42, win 64, options [nop,nop,TS val 2621102538 ecr 1095973265], length 55 [prefix length(34331) != length(53)] (invalid)
+    1795878214.370362 IP (tos 0x0, ttl 64, id 62900, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.40508 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0xec29), seq 42, ack 58, win 64, options [nop,nop,TS val 1095973265 ecr 2621102538], length 0
+    1795878214.370379 IP (tos 0x0, ttl 64, id 44978, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.40506 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x387e), seq 42, ack 3, win 64, options [nop,nop,TS val 598522028 ecr 3687805562], length 0
+    1795878214.370386 IP (tos 0x0, ttl 64, id 62901, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.40508 > 127.0.0.2.53: Flags [F.], cksum 0xfe29 (incorrect -> 0xec27), seq 42, ack 58, win 64, options [nop,nop,TS val 1095973266 ecr 2621102538], length 0
+    1795878214.370398 IP (tos 0x0, ttl 64, id 47712, offset 0, flags [DF], proto TCP (6), length 91)
+        127.0.0.2.53 > 127.0.0.1.40506: Flags [P.], cksum 0xfe50 (incorrect -> 0x858a), seq 3:42, ack 42, win 64, options [nop,nop,TS val 3687805563 ecr 598522028], length 39 [prefix length(34797) != length(37)] (invalid)
+    1795878214.370403 IP (tos 0x0, ttl 64, id 919, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.2.53 > 127.0.0.1.40508: Flags [F.], cksum 0xfe29 (incorrect -> 0xec25), seq 58, ack 43, win 64, options [nop,nop,TS val 2621102539 ecr 1095973266], length 0
+    1795878214.370406 IP (tos 0x0, ttl 64, id 44979, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.40506 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x3856), seq 42, ack 42, win 64, options [nop,nop,TS val 598522028 ecr 3687805563], length 0
+    1795878214.370414 IP (tos 0x0, ttl 64, id 62902, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.40508 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0xec25), seq 43, ack 59, win 64, options [nop,nop,TS val 1095973266 ecr 2621102539], length 0
+    1795878214.370454 IP (tos 0x0, ttl 64, id 526, offset 0, flags [DF], proto TCP (6), length 109)
+        100.95.0.1.53 > 100.95.0.1.48882: Flags [P.], cksum 0xc91f (incorrect -> 0x04a5), seq 1:58, ack 42, win 64, options [nop,nop,TS val 2956308143 ecr 1942972352], length 57 34331 q: A? pipe-test.example.com. 1/0/0 pipe-test.example.com. A 93.184.216.34 (55)
+    1795878214.370460 IP (tos 0x0, ttl 64, id 64383, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.48882 > 100.95.0.1.53: Flags [.], cksum 0xc8e6 (incorrect -> 0xc4cb), seq 42, ack 58, win 64, options [nop,nop,TS val 1942972353 ecr 2956308143], length 0
+    1795878214.370471 IP (tos 0x0, ttl 64, id 527, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.48882: Flags [F.], cksum 0xc8e6 (incorrect -> 0xc4ca), seq 58, ack 42, win 64, options [nop,nop,TS val 2956308143 ecr 1942972353], length 0
+    1795878214.370472 IP (tos 0x0, ttl 64, id 64384, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.48882 > 100.95.0.1.53: Flags [F.], cksum 0xc8e6 (incorrect -> 0xc4ca), seq 42, ack 58, win 64, options [nop,nop,TS val 1942972353 ecr 2956308143], length 0
+    1795878214.370477 IP (tos 0x0, ttl 64, id 528, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.48882: Flags [.], cksum 0xc8e6 (incorrect -> 0xc4c9), seq 59, ack 43, win 64, options [nop,nop,TS val 2956308143 ecr 1942972353], length 0
+    1795878214.370477 IP (tos 0x0, ttl 64, id 64385, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.48882 > 100.95.0.1.53: Flags [.], cksum 0xc8e6 (incorrect -> 0xc4c9), seq 43, ack 59, win 64, options [nop,nop,TS val 1942972353 ecr 2956308143], length 0
+    1795878214.370549 IP (tos 0x0, ttl 64, id 44980, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.40506 > 127.0.0.2.53: Flags [F.], cksum 0xfe29 (incorrect -> 0x3855), seq 42, ack 42, win 64, options [nop,nop,TS val 598522028 ecr 3687805563], length 0
+    1795878214.370575 IP (tos 0x0, ttl 64, id 47713, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.2.53 > 127.0.0.1.40506: Flags [F.], cksum 0xfe29 (incorrect -> 0x3854), seq 42, ack 43, win 64, options [nop,nop,TS val 3687805563 ecr 598522028], length 0
+    1795878214.370592 IP (tos 0x0, ttl 64, id 64239, offset 0, flags [DF], proto TCP (6), length 93)
+        100.95.0.1.53 > 100.95.0.1.48878: Flags [P.], cksum 0xc90f (incorrect -> 0x687f), seq 1:42, ack 42, win 64, options [nop,nop,TS val 752813772 ecr 3665396704], length 41 34797 q: AAAA? pipe-test.example.com. 0/0/0 (39)
+    1795878214.370598 IP (tos 0x0, ttl 64, id 8426, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.48878 > 100.95.0.1.53: Flags [.], cksum 0xc8e6 (incorrect -> 0x1b71), seq 42, ack 42, win 64, options [nop,nop,TS val 3665396705 ecr 752813772], length 0
+    1795878214.370599 IP (tos 0x0, ttl 64, id 44981, offset 0, flags [DF], proto TCP (6), length 52)
+        127.0.0.1.40506 > 127.0.0.2.53: Flags [.], cksum 0xfe29 (incorrect -> 0x3854), seq 43, ack 43, win 64, options [nop,nop,TS val 598522028 ecr 3687805563], length 0
+    1795878214.370608 IP (tos 0x0, ttl 64, id 8427, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.48878 > 100.95.0.1.53: Flags [F.], cksum 0xc8e6 (incorrect -> 0x1b70), seq 42, ack 42, win 64, options [nop,nop,TS val 3665396705 ecr 752813772], length 0
+    1795878214.370608 IP (tos 0x0, ttl 64, id 64240, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.48878: Flags [F.], cksum 0xc8e6 (incorrect -> 0x1b70), seq 42, ack 42, win 64, options [nop,nop,TS val 752813772 ecr 3665396705], length 0
+    1795878214.370613 IP (tos 0x0, ttl 64, id 64241, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.53 > 100.95.0.1.48878: Flags [.], cksum 0xc8e6 (incorrect -> 0x1b6f), seq 43, ack 43, win 64, options [nop,nop,TS val 752813772 ecr 3665396705], length 0
+    1795878214.370613 IP (tos 0x0, ttl 64, id 8428, offset 0, flags [DF], proto TCP (6), length 52)
+        100.95.0.1.48878 > 100.95.0.1.53: Flags [.], cksum 0xc8e6 (incorrect -> 0x1b6f), seq 43, ack 43, win 64, options [nop,nop,TS val 3665396705 ecr 752813772], length 0
+######## strace musl
+musl getaddrinfo(pipe-test.example.com) -> Ok([93.184.216.34:80]) in 3.195571ms
+    2891053 1795878214.909091 poll([{fd=0, events=0}, {fd=1, events=0}, {fd=2, events=0}], 3, 0) = 0 (Timeout)
+    2891053 1795878214.909622 read(3, "# Your system has configured 'ma"..., 1024) = 571
+    2891053 1795878214.909668 read(3, "", 1024) = 0
+    2891053 1795878214.909698 close(3)      = 0
+    2891053 1795878214.909771 read(3, "nameserver 100.95.0.1\n", 248) = 22
+    2891053 1795878214.909803 read(3, "", 248) = 0
+    2891053 1795878214.909832 close(3)      = 0
+    2891053 1795878214.909862 socket(AF_INET, SOCK_DGRAM|SOCK_CLOEXEC|SOCK_NONBLOCK, IPPROTO_IP) = 3
+    2891053 1795878214.909900 bind(3, {sa_family=AF_INET, sin_port=htons(0), sin_addr=inet_addr("0.0.0.0")}, 16) = 0
+    2891053 1795878214.909945 sendto(3, "\206\4\1\0\0\1\0\0\0\0\0\0\tpipe-test\7example\3c"..., 39, MSG_NOSIGNAL, {sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr("100.95.0.1")}, 16) = 39
+    2891053 1795878214.910074 sendto(3, "\207\315\1\0\0\1\0\0\0\0\0\0\tpipe-test\7example\3c"..., 39, MSG_NOSIGNAL, {sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr("100.95.0.1")}, 16) = 39
+    2891053 1795878214.910115 poll([{fd=-1}, {fd=-1}, {fd=3, events=POLLIN}], 3, 2500) = 1 ([{fd=3, revents=POLLIN}])
+    2891053 1795878214.910979 recvmsg(3, {msg_name={sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr("100.95.0.1")}, msg_namelen=16, msg_iov=[{iov_base="\206\4\203\200\0\1\0\0\0\0\0\0\tpipe-test\7example\3c"..., iov_len=4800}], msg_iovlen=1, msg_controllen=0, msg_flags=0}, 0) = 39
+    2891053 1795878214.911084 socket(AF_INET, SOCK_STREAM|SOCK_CLOEXEC|SOCK_NONBLOCK, IPPROTO_IP) = 4
+    2891053 1795878214.911159 setsockopt(4, SOL_TCP, TCP_FASTOPEN_CONNECT, [1], 4) = 0
+    2891053 1795878214.911227 sendmsg(4, {msg_name={sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr("100.95.0.1")}, msg_namelen=16, msg_iov=[{iov_base="\0'", iov_len=2}, {iov_base="\206\4\1\0\0\1\0\0\0\0\0\0\tpipe-test\7example\3c"..., iov_len=39}], msg_iovlen=2, msg_controllen=0, msg_flags=0}, MSG_NOSIGNAL|MSG_FASTOPEN) = -1 EINPROGRESS (Operation now in progress)
+    2891053 1795878214.911422 recvmsg(3, {msg_name={sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr("100.95.0.1")}, msg_namelen=16, msg_iov=[{iov_base="\207\315\203\200\0\1\0\0\0\0\0\0\tpipe-test\7example\3c"..., iov_len=4800}], msg_iovlen=1, msg_controllen=0, msg_flags=0}, 0) = 39
+    2891053 1795878214.911517 socket(AF_INET, SOCK_STREAM|SOCK_CLOEXEC|SOCK_NONBLOCK, IPPROTO_IP) = 5
+    2891053 1795878214.911583 setsockopt(5, SOL_TCP, TCP_FASTOPEN_CONNECT, [1], 4) = 0
+    2891053 1795878214.911647 sendmsg(5, {msg_name={sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr("100.95.0.1")}, msg_namelen=16, msg_iov=[{iov_base="\0'", iov_len=2}, {iov_base="\207\315\1\0\0\1\0\0\0\0\0\0\tpipe-test\7example\3c"..., iov_len=39}], msg_iovlen=2, msg_controllen=0, msg_flags=0}, MSG_NOSIGNAL|MSG_FASTOPEN) = -1 EINPROGRESS (Operation now in progress)
+    2891053 1795878214.911753 poll([{fd=4, events=POLLOUT}, {fd=5, events=POLLOUT}, {fd=3, events=0}], 3, 2498) = 2 ([{fd=4, revents=POLLOUT}, {fd=5, revents=POLLOUT}])
+    2891053 1795878214.911824 sendmsg(4, {msg_name=NULL, msg_namelen=0, msg_iov=[{iov_base="\0'", iov_len=2}, {iov_base="\206\4\1\0\0\1\0\0\0\0\0\0\tpipe-test\7example\3c"..., iov_len=39}], msg_iovlen=2, msg_controllen=0, msg_flags=0}, MSG_NOSIGNAL) = 41
+    2891053 1795878214.911938 sendmsg(5, {msg_name=NULL, msg_namelen=0, msg_iov=[{iov_base="\0'", iov_len=2}, {iov_base="\207\315\1\0\0\1\0\0\0\0\0\0\tpipe-test\7example\3c"..., iov_len=39}], msg_iovlen=2, msg_controllen=0, msg_flags=0}, MSG_NOSIGNAL) = 41
+    2891053 1795878214.912010 poll([{fd=4, events=POLLIN}, {fd=5, events=POLLIN}, {fd=3, events=0}], 3, 2498) = 1 ([{fd=5, revents=POLLIN}])
+    2891053 1795878214.912501 recvmsg(5, {msg_name=NULL, msg_namelen=0, msg_iov=[{iov_base="\0'", iov_len=2}, {iov_base="\207\315\201\200\0\1\0\0\0\0\0\0\tpipe-test\7example\3c"..., iov_len=4800}], msg_iovlen=2, msg_controllen=0, msg_flags=0}, 0) = 41
+    2891053 1795878214.912557 close(5)      = 0
+    2891053 1795878214.912606 poll([{fd=4, events=POLLIN}, {fd=-1}, {fd=3, events=0}], 3, 2497) = 1 ([{fd=4, revents=POLLIN}])
+    2891053 1795878214.912643 recvmsg(4, {msg_name=NULL, msg_namelen=0, msg_iov=[{iov_base="\0007", iov_len=2}, {iov_base="\206\4\201\200\0\1\0\1\0\0\0\0\tpipe-test\7example\3c"..., iov_len=4800}], msg_iovlen=2, msg_controllen=0, msg_flags=0}, 0) = 57
+    2891053 1795878214.912690 close(4)      = 0
+    2891053 1795878214.912735 close(3)      = 0
+    2891053 1795878214.912804 write(1, "musl getaddrinfo(pipe-test.examp"..., 80) = 80
+    2891053 1795878214.913084 +++ exited with 0 +++
+== upstream log (tc):
+    upstream-udp qtype=1 tc=true
+    upstream-tcp qtype=1 tc=false
+    upstream-udp qtype=1 tc=true
+    upstream-udp qtype=28 tc=true
+    upstream-tcp qtype=28 tc=false
+    upstream-tcp qtype=1 tc=false
+    upstream-udp qtype=1 tc=true
+    upstream-tcp qtype=1 tc=false
+    upstream-udp qtype=1 tc=true
+    upstream-udp qtype=28 tc=true
+    upstream-tcp qtype=1 tc=false
+    upstream-tcp qtype=28 tc=false
+    upstream-udp qtype=1 tc=true
+    upstream-tcp qtype=1 tc=false
+    upstream-udp qtype=28 tc=true
+    upstream-udp qtype=1 tc=true
+    upstream-tcp qtype=28 tc=false
+    upstream-tcp qtype=1 tc=false
+    upstream-udp qtype=1 tc=true
+    upstream-udp qtype=28 tc=true
+    upstream-tcp qtype=28 tc=false
+    upstream-tcp qtype=1 tc=false
+== done
