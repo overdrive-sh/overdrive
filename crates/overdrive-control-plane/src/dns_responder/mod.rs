@@ -6,36 +6,21 @@
 //! running-AND-healthy IPv4 backend addr, NODATA for AAAA-on-live, and
 //! NXDOMAIN when no running-and-healthy backend exists.
 //!
-//! # Module map (per ADR-0072 § Component decomposition)
+//! # Module map
 //!
-//! Step 01-02 lands ONLY [`wire`] — the `hickory-proto` DNS codec behind the
-//! DDN-4 / D-DBN-5 anti-corruption boundary (decode the inbound query; encode
-//! the A / NODATA-SOA / NXDOMAIN-SOA reply). The remaining components are
-//! later slices and are NOT declared here yet (the MANIFEST forbids
-//! pre-declaring modules that don't exist):
-//!
-//! - `answer.rs` — the pure `answer_for(name, qtype, &index) -> NameAnswer`
-//!   (the mutation-gate target).
-//! - `name_index.rs` — the name-keyed `NameIndex` (List-then-Watch sibling
-//!   reader over the `service_backends` rows).
-//! - `responder.rs` — the `DnsResponder` host adapter (bind + `IP_PKTINFO`
-//!   recv/sendmsg loop).
-//!
-//! Step 01-02 lands `wire` GREEN — its `encode`/`decode` are fully
-//! implemented. Step 01-04 lands `frontend_addr_allocator` GREEN — its
-//! `assign`/`release`/`snapshot` bodies are fully implemented, so the module
-//! carries no `clippy::todo` scaffold expectation. Step 01-03 lands `answer`
-//! (the pure `answer_for`) and `name_index` (the List-then-Watch `NameIndex`
-//! that maps each resolvable `<workload>` to its stable frontend addr `F`); both
-//! are fully implemented GREEN in the same slice. Step 01-05 lands
-//! `boot_rebuild` — the empty-on-boot converge-on-boot rebuild that
-//! re-populates the [`frontend_addr_allocator::FrontendAddrAllocator`] from
-//! the declared-Service intent SSOT (the writer's boot half; the
-//! assign-on-declare half lives in the `submit_workload` Service arm).
-//! Step 02-01 lands `responder` — the `DnsResponder` host adapter (the
-//! wildcard-first / per-gateway-addr-fallback bind + the `recvmsg`/`sendmsg`
-//! `IP_PKTINFO` source-pinned serve loop) wired into `run_server` behind the
-//! Earned-Trust probe gate (DDN-6).
+//! - `wire` — the `hickory-proto` DNS codec behind the anti-corruption
+//!   boundary: decode and classify the inbound query; encode the A /
+//!   NODATA-SOA / NXDOMAIN-SOA and SERVFAIL replies.
+//! - `answer` — the pure `answer_for(name, qtype, &index) -> NameAnswer`.
+//! - `name_index` — the List-then-Watch `NameIndex` mapping each resolvable
+//!   `<workload>` to its stable frontend address.
+//! - `frontend_addr_allocator` / `boot_rebuild` — the shared frontend
+//!   allocator and its converge-on-boot rebuild from declared-Service intent.
+//! - `responder` — the `DnsResponder` host adapter: UDP `:53` and TCP
+//!   `gateway:53` serve loops behind the Earned-Trust probe gate.
+//! - `forwarder` / `upstream` / `upstream_host` / `owned_ranges` — forwarding
+//!   of public names: permits and the owned-range answer guard, the upstream
+//!   ports, their host adapters, and the Overdrive-owned address ranges.
 
 pub mod answer;
 pub mod boot_rebuild;
@@ -134,7 +119,7 @@ impl GuestDnsFactory for HostGuestDnsFactory {
             deps.gateway,
             deps.forward_permits,
         );
-        Arc::new(DnsResponder::forwarding(
+        Arc::new(DnsResponder::new(
             deps.store,
             deps.clock,
             deps.gateway,

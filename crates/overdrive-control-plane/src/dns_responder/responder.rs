@@ -1,12 +1,12 @@
 //! `DnsResponder` — the node-local dial-by-name DNS host adapter (ADR-0072
-//! REV-2, GH #243; roadmap 02-01 / DDN-4 / DDN-5 / DDN-6).
+//! REV-2, GH #243; DDN-4 / DDN-5 / DDN-6).
 //!
 //! # What it is
 //!
 //! The `DnsResponder` is the socket-loop host adapter that answers
-//! `<workload>.svc.overdrive.local` queries on UDP `:53`. It is the bind +
-//! `recvmsg`/`sendmsg` `IP_PKTINFO` loop around the pure decision substrate the
-//! prior slices landed GREEN:
+//! `<workload>.svc.overdrive.local` queries on UDP `:53` and TCP `gateway:53`,
+//! and forwards gateway-addressed public names upstream. It is the bind +
+//! `recvmsg`/`sendmsg` `IP_PKTINFO` loop around the pure decision substrate:
 //!
 //! - [`super::wire`] — decode the inbound query / encode the A · NODATA-SOA ·
 //!   NXDOMAIN-SOA reply (the `hickory-proto` anti-corruption boundary).
@@ -95,7 +95,12 @@ const RECV_BUF_LEN: usize = 1500;
 /// reply.
 const TCP_READ_DEADLINE: Duration = Duration::from_secs(5);
 
-/// The pause after a failed `accept`, so a persistent failure cannot spin.
+/// The write deadline of one TCP reply; on expiry the connection closes with no
+/// further writes.
+const TCP_WRITE_DEADLINE: Duration = Duration::from_secs(5);
+
+/// The pause after an `accept` that failed on resource exhaustion, which leaves
+/// the pending connection queued and would otherwise spin.
 const ACCEPT_ERROR_PAUSE: Duration = Duration::from_millis(50);
 
 /// `recvmsg` poll cadence — `SO_RCVTIMEO` so the blocking recv wakes every
@@ -227,9 +232,9 @@ pub struct DnsResponder {
     stop: Arc<AtomicBool>,
     /// Receives the outcome and service time of every datagram (DDD-12).
     observer: Arc<dyn super::QueryObserver>,
-    /// The forwarder for gateway-addressed public names. `None` is a
-    /// mesh-only responder: every non-mesh query is dropped.
-    forwarder: Option<Arc<Forwarder>>,
+    /// The forwarder for gateway-addressed public names; it also owns the
+    /// permits that bound in-flight UDP forwards and open TCP connections.
+    forwarder: Arc<Forwarder>,
     /// Cancelled by [`Self::stop`]; every forward task and the TCP accept loop
     /// observe it.
     cancel: CancellationToken,
@@ -280,13 +285,6 @@ impl ReplyPath {
     }
 }
 
-/// One datagram handed to a forward task.
-struct ForwardJob {
-    datagram: Vec<u8>,
-    reply_path: ReplyPath,
-    received_at: Instant,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct DnsSocketIdentity {
     address: Ipv4Addr,
@@ -296,7 +294,7 @@ struct DnsSocketIdentity {
 
 impl DnsResponder {
     /// Construct the responder from its REQUIRED dependencies — all mandatory,
-    /// no builder. The internal [`NameIndex`](super::name_index::NameIndex) is
+    /// no builder. `forwarder` serves gateway-addressed public names. The internal [`NameIndex`](super::name_index::NameIndex) is
     /// built from `(store, frontend)` inside [`probe`](Self::probe); the
     /// responder does NOT take a `NameIndex` (DDN-2: the `name_index` reads the
     /// SAME shared `frontend` allocator the resolve path keys `by_frontend`
@@ -308,6 +306,7 @@ impl DnsResponder {
         gateway: Ipv4Addr,
         frontend: FrontendAddrAllocator,
         observer: Arc<dyn super::QueryObserver>,
+        forwarder: Arc<Forwarder>,
     ) -> Self {
         // Build the internal NameIndex from the SAME store + the SHARED
         // allocator (DDN-2): the index answers `F` from this allocator's
@@ -322,24 +321,10 @@ impl DnsResponder {
             socket_identities: Mutex::new(Vec::new()),
             stop: Arc::new(AtomicBool::new(false)),
             observer,
-            forwarder: None,
+            forwarder,
             cancel: CancellationToken::new(),
             tcp_listener: Mutex::new(None),
         }
-    }
-
-    /// A responder that also forwards gateway-addressed public names through
-    /// `forwarder` (the production composition, built by the factory).
-    #[must_use]
-    pub(super) fn forwarding(
-        store: Arc<dyn ObservationStore>,
-        clock: Arc<dyn Clock>,
-        gateway: Ipv4Addr,
-        frontend: FrontendAddrAllocator,
-        observer: Arc<dyn super::QueryObserver>,
-        forwarder: Arc<Forwarder>,
-    ) -> Self {
-        Self { forwarder: Some(forwarder), ..Self::new(store, clock, gateway, frontend, observer) }
     }
 
     /// Signal the serve loop to stop. The `SO_RCVTIMEO`-bounded `recvmsg` wakes
@@ -435,12 +420,15 @@ impl DnsResponder {
         })
     }
 
-    /// Run the `recvmsg`/`sendmsg` `IP_PKTINFO` serve loop: decode each inbound
-    /// query, answer via the internal [`NameIndex`](super::name_index::NameIndex)
-    /// (`frontend_for` → [`answer_for`](super::answer::answer_for) →
-    /// [`wire::encode`](super::wire)), and `sendmsg` the reply source-pinned to
-    /// the queried gateway via `ipi_spec_dst`. `serve` runs the bound socket set
-    /// as captured at probe time (`std::mem::take`).
+    /// Run the serve loops: one `recvmsg`/`sendmsg` `IP_PKTINFO` loop per bound
+    /// UDP socket and the TCP accept loop on `gateway:53`. Each query is
+    /// classified: a mesh name is answered via the internal
+    /// [`NameIndex`](super::name_index::NameIndex) (`frontend_for` →
+    /// [`answer_for`](super::answer::answer_for) → [`wire::encode`](super::wire)),
+    /// an unknown platform-zone name is answered NXDOMAIN, and any other name
+    /// addressed to the gateway is forwarded upstream under a permit. UDP replies
+    /// are source-pinned to the queried gateway via `ipi_spec_dst`. `serve` runs
+    /// the bound socket set as captured at probe time (`std::mem::take`).
     ///
     /// Consumes `self: Arc<Self>` so the composition root can `tokio::spawn` the
     /// loop and hold the `JoinHandle`.
@@ -492,29 +480,28 @@ impl DnsResponder {
             let (stream, _peer) = match accepted {
                 Ok(connection) => connection,
                 Err(error) => {
-                    tracing::warn!(
+                    tracing::debug!(
                         name: "dns.responder.accept_failed",
                         %error,
                         "DNS responder TCP accept failed"
                     );
-                    tokio::select! {
-                        biased;
-                        () = self.cancel.cancelled() => return,
-                        () = tokio::time::sleep(ACCEPT_ERROR_PAUSE) => {}
+                    if is_resource_exhaustion(&error) {
+                        tokio::select! {
+                            biased;
+                            () = self.cancel.cancelled() => return,
+                            () = tokio::time::sleep(ACCEPT_ERROR_PAUSE) => {}
+                        }
                     }
                     continue;
                 }
             };
             let received_at = self.clock.now();
-            let permit = match self.forwarder.as_ref().map(|forwarder| forwarder.try_acquire()) {
-                Some(None) => {
-                    drop(stream);
-                    self.observer
-                        .observe(QueryOutcome::Shed, self.clock.now().duration_since(received_at));
-                    continue;
-                }
-                Some(Some(permit)) => Some(permit),
-                None => None,
+            let Some(permit) = self.forwarder.try_acquire() else {
+                // Close before reporting, so an observer sees the connection gone.
+                drop(stream);
+                self.observer
+                    .observe(QueryOutcome::Shed, self.clock.now().duration_since(received_at));
+                continue;
             };
             let responder = Arc::clone(&self);
             let token = self.cancel.child_token();
@@ -525,28 +512,26 @@ impl DnsResponder {
     }
 
     /// One query per connection: read, answer or forward, write, close. The
-    /// permit, if any, is held until the connection closes; shutdown ends the
+    /// permit is held until the connection closes; shutdown ends the
     /// connection at its next await.
     async fn serve_connection(
         &self,
         mut stream: TcpStream,
-        permit: Option<ForwardPermit>,
+        permit: ForwardPermit,
         token: CancellationToken,
         received_at: Instant,
     ) {
         tokio::select! {
             biased;
             () = token.cancelled() => {}
-            () = self.answer_connection(&mut stream, permit.as_ref(), received_at) => {}
+            () = self.answer_connection(&mut stream, &permit, received_at) => {}
         }
-        drop(stream);
-        drop(permit);
     }
 
     async fn answer_connection(
         &self,
         stream: &mut TcpStream,
-        permit: Option<&ForwardPermit>,
+        permit: &ForwardPermit,
         received_at: Instant,
     ) {
         let answered = match read_framed_query(stream).await {
@@ -558,12 +543,22 @@ impl DnsResponder {
                 .observe(QueryOutcome::Dropped, self.clock.now().duration_since(received_at));
             return;
         };
-        if let Err(error) = write_framed_reply(stream, &reply).await {
-            tracing::debug!(
-                name: "dns.responder.tcp_write_failed",
-                %error,
-                "DNS responder TCP reply write failed"
-            );
+        match tokio::time::timeout(TCP_WRITE_DEADLINE, write_framed_reply(stream, &reply)).await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                tracing::debug!(
+                    name: "dns.responder.tcp_write_failed",
+                    %error,
+                    "DNS responder TCP reply write failed"
+                );
+            }
+            Err(elapsed) => {
+                tracing::debug!(
+                    name: "dns.responder.tcp_write_failed",
+                    error = %elapsed,
+                    "DNS responder TCP reply write timed out"
+                );
+            }
         }
         self.observer.observe(outcome, self.clock.now().duration_since(received_at));
     }
@@ -573,25 +568,25 @@ impl DnsResponder {
     async fn answer_query(
         &self,
         query: &[u8],
-        permit: Option<&ForwardPermit>,
+        permit: &ForwardPermit,
     ) -> Option<(Vec<u8>, QueryOutcome)> {
         match self.dispose(query, true) {
             Disposition::Drop => None,
             Disposition::Reply(reply, outcome) => Some((reply, outcome)),
             Disposition::Forward => {
-                let forwarder = self.forwarder.as_ref()?;
-                Some(Self::forward_outcome(forwarder, query, DnsTransport::Tcp, permit?).await)
+                Some(Self::forward_outcome(&self.forwarder, query, DnsTransport::Tcp, permit).await)
             }
         }
     }
 
     /// The blocking `recvmsg`/`sendmsg` `IP_PKTINFO` loop for ONE bound socket.
-    /// Each inbound datagram is decoded, answered via the internal `NameIndex`
-    /// (`frontend_for` → [`answer_for`] → [`wire::encode`]), and replied
-    /// source-pinned to the datagram's `ipi_spec_dst` (the gateway the query
-    /// was addressed to) via a `ControlMessage::Ipv4PacketInfo` on `sendmsg` —
-    /// the DDN-5 source-pin the `getent` litmus requires on the multi-homed
-    /// wildcard socket.
+    /// Each inbound datagram is decoded and disposed of (see
+    /// [`Self::dispose`]): a mesh answer or NXDOMAIN is replied inline, a
+    /// forwardable name is handed to a task under a permit, and the rest are
+    /// dropped. Replies are source-pinned to the datagram's `ipi_spec_dst` (the
+    /// gateway the query was addressed to) via a
+    /// `ControlMessage::Ipv4PacketInfo` on `sendmsg` — the DDN-5 source-pin the
+    /// `getent` litmus requires on the multi-homed wildcard socket.
     fn serve_one_socket(self: &Arc<Self>, fd: &Arc<OwnedFd>, runtime: &tokio::runtime::Handle) {
         let mut buf = [0u8; RECV_BUF_LEN];
         let mut cmsg_space = nix::cmsg_space!(libc::in_pktinfo);
@@ -657,7 +652,7 @@ impl DnsResponder {
                     self.observer.observe(outcome, self.clock.now().duration_since(received_at));
                 }
                 Disposition::Forward => {
-                    self.forward_or_shed(ForwardJob { datagram, reply_path, received_at }, runtime);
+                    self.forward_or_shed(datagram, reply_path, received_at, runtime);
                 }
             }
         }
@@ -666,29 +661,40 @@ impl DnsResponder {
     /// Take a permit and hand the query to a task on the serve runtime; with no
     /// permit free, answer SERVFAIL from the datagram at once. The receive loop
     /// never waits on an upstream.
-    fn forward_or_shed(self: &Arc<Self>, job: ForwardJob, runtime: &tokio::runtime::Handle) {
-        let Some(forwarder) = self.forwarder.as_ref().map(Arc::clone) else { return };
-        let Some(permit) = forwarder.try_acquire() else {
-            job.reply_path.send(&wire::servfail_reply(&job.datagram));
-            self.observer
-                .observe(QueryOutcome::Shed, self.clock.now().duration_since(job.received_at));
+    fn forward_or_shed(
+        self: &Arc<Self>,
+        datagram: Vec<u8>,
+        reply_path: ReplyPath,
+        received_at: Instant,
+        runtime: &tokio::runtime::Handle,
+    ) {
+        let Some(permit) = self.forwarder.try_acquire() else {
+            reply_path.send(&wire::servfail_reply(&datagram));
+            self.observer.observe(QueryOutcome::Shed, self.clock.now().duration_since(received_at));
             return;
         };
         let responder = Arc::clone(self);
-        runtime.spawn(async move { responder.run_forward(&forwarder, job, permit).await });
+        runtime.spawn(async move {
+            responder.run_forward(datagram, reply_path, received_at, permit).await;
+        });
     }
 
     /// One forward under `permit`, ended early only by shutdown. The permit is
     /// held until the reply is sent.
-    async fn run_forward(&self, forwarder: &Forwarder, job: ForwardJob, permit: ForwardPermit) {
+    async fn run_forward(
+        &self,
+        datagram: Vec<u8>,
+        reply_path: ReplyPath,
+        received_at: Instant,
+        permit: ForwardPermit,
+    ) {
         let (reply, outcome) = tokio::select! {
             biased;
             () = self.cancel.cancelled() => return,
-            relayed = Self::forward_outcome(forwarder, &job.datagram, DnsTransport::Udp, &permit) => relayed,
+            relayed = Self::forward_outcome(&self.forwarder, &datagram, DnsTransport::Udp, &permit) => relayed,
         };
-        job.reply_path.send(&reply);
-        self.observer.observe(outcome, self.clock.now().duration_since(job.received_at));
-        drop(permit);
+        reply_path.send(&reply);
+        self.observer.observe(outcome, self.clock.now().duration_since(received_at));
     }
 
     /// Forward `wire` over `transport` under `permit`, projecting the forwarder's
@@ -738,9 +744,7 @@ impl DnsResponder {
                 );
                 Disposition::Reply(reply, QueryOutcome::NameError)
             }
-            wire::QueryClass::Forwardable if to_gateway && self.forwarder.is_some() => {
-                Disposition::Forward
-            }
+            wire::QueryClass::Forwardable if to_gateway => Disposition::Forward,
             wire::QueryClass::PlatformUnknown | wire::QueryClass::Forwardable => Disposition::Drop,
         }
     }
@@ -888,6 +892,14 @@ fn kernel_udp_socket_identities() -> std::io::Result<BTreeSet<DnsSocketIdentity>
         });
     }
     Ok(identities)
+}
+
+/// Whether an `accept` error is resource exhaustion (`EMFILE`, `ENFILE`,
+/// `ENOBUFS`, `ENOMEM`): the pending connection stays queued, so an immediate
+/// retry would spin. Every other accept error concerns one connection and is
+/// retried at once.
+fn is_resource_exhaustion(error: &std::io::Error) -> bool {
+    matches!(error.raw_os_error(), Some(libc::EMFILE | libc::ENFILE | libc::ENOBUFS | libc::ENOMEM))
 }
 
 /// Whether an `io::Error` from `bind` is `EADDRINUSE` (the wildcard-already-held

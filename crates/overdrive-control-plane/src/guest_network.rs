@@ -948,8 +948,8 @@ impl HostSharedGuestNetworkOwner {
 /// the DNS forwarder's descriptor reserve (ADR-0362).
 #[must_use]
 pub fn guest_flow_fd_requirement() -> u64 {
-    // ADMISSIONREFUSAL1 retains the accepted four-place-per-attachment node
-    // baseline and adds one descriptor for each bounded refusal reader.
+    // Retains the four-descriptors-per-attachment baseline and adds one per
+    // bounded refusal reader.
     u64::from(GUEST_FLOW_MAX_PAIRS) * 4 + u64::from(GUEST_FLOW_MAX_PAIRS) + 16_384 + 1 + 32_767
 }
 

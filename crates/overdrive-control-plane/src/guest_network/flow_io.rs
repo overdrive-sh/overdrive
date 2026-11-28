@@ -64,7 +64,7 @@
 //!   `FlowForwarder` contract unchanged.
 //!
 //! The production adapter [`HostGuestFlowIo`] is composed by the owner from
-//! `GuestFlowAdapter::host(nofile_soft)` (DG-2 row 9).
+//! `GuestFlowAdapter::host(nofile_soft)`.
 
 #![allow(
     clippy::redundant_pub_crate,

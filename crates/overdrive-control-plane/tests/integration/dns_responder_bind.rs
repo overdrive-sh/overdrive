@@ -69,9 +69,13 @@ use std::time::Duration;
 use hickory_proto::op::{Message, MessageType, OpCode, Query};
 use hickory_proto::rr::{Name, RecordType};
 use hickory_proto::serialize::binary::BinEncodable;
+use overdrive_control_plane::dns_responder::forwarder::Forwarder;
 use overdrive_control_plane::dns_responder::frontend_addr_allocator::FrontendAddrAllocator;
 use overdrive_control_plane::dns_responder::owned_ranges::OwnedAddressRanges;
 use overdrive_control_plane::dns_responder::responder::{DnsResponder, DnsResponderError};
+use overdrive_control_plane::dns_responder::upstream_host::{
+    HostUpstreamExchange, ResolvConfUpstreams,
+};
 use overdrive_control_plane::dns_responder::{
     GuestDns, GuestDnsDeps, GuestDnsFactory, HostGuestDnsFactory,
 };
@@ -263,6 +267,14 @@ fn responder(
         gateway,
         frontend,
         Arc::new(overdrive_control_plane::dns_responder::NoQueryObserver),
+        Arc::new(Forwarder::new(
+            Arc::new(ResolvConfUpstreams::from_path("/nonexistent/resolv.conf")),
+            Arc::new(HostUpstreamExchange),
+            Arc::new(SimClock::new()),
+            OwnedAddressRanges::platform(&VipRange::default()),
+            gateway,
+            1,
+        )),
     ))
 }
 

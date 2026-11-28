@@ -4730,7 +4730,7 @@ async fn boot_server(
         tracing::info!(
             name: "dns.forward.permits",
             permits = forward_permits,
-            nofile_soft = nofile_soft,
+            nofile_soft,
             reserve = forward_reserve,
         );
 

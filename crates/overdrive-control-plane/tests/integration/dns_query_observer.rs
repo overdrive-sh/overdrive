@@ -26,8 +26,13 @@ use async_trait::async_trait;
 use hickory_proto::op::{Message, MessageType, OpCode, Query};
 use hickory_proto::rr::{Name, RecordType};
 use hickory_proto::serialize::binary::BinEncodable;
+use overdrive_control_plane::dns_responder::forwarder::Forwarder;
 use overdrive_control_plane::dns_responder::frontend_addr_allocator::FrontendAddrAllocator;
+use overdrive_control_plane::dns_responder::owned_ranges::OwnedAddressRanges;
 use overdrive_control_plane::dns_responder::responder::DnsResponder;
+use overdrive_control_plane::dns_responder::upstream_host::{
+    HostUpstreamExchange, ResolvConfUpstreams,
+};
 use overdrive_control_plane::dns_responder::{NoQueryObserver, QueryObserver, QueryOutcome};
 use overdrive_core::id::{MeshServiceName, NodeId, ServiceId, SpiffeId, WorkloadId};
 use overdrive_core::traits::clock::Clock;
@@ -35,6 +40,7 @@ use overdrive_core::traits::dataplane::Backend;
 use overdrive_core::traits::observation_store::{
     LogicalTimestamp, ObservationStore, ObservationWrite, ServiceBackendRow,
 };
+use overdrive_dataplane::allocators::VipRange;
 use overdrive_sim::adapters::clock::SimClock;
 use overdrive_sim::adapters::observation_store::SimObservationStore;
 use overdrive_testing::overdrive_test;
@@ -136,6 +142,14 @@ async fn exchange(
         Ipv4Addr::new(100, 95, 0, 1),
         frontend,
         observer,
+        Arc::new(Forwarder::new(
+            Arc::new(ResolvConfUpstreams::from_path("/nonexistent/resolv.conf")),
+            Arc::new(HostUpstreamExchange),
+            Arc::new(SimClock::new()),
+            OwnedAddressRanges::platform(&VipRange::default()),
+            Ipv4Addr::new(100, 95, 0, 1),
+            1,
+        )),
     ));
     dns.probe().await.expect("probe binds :53");
     let serve = tokio::spawn(Arc::clone(&dns).serve());

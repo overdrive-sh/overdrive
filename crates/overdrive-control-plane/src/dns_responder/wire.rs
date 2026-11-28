@@ -214,14 +214,7 @@ pub(super) fn encode_platform_nxdomain(
     qtype: RecordType,
     serial_reading: Duration,
 ) -> Vec<u8> {
-    let owner = name.to_hickory();
-    let mut message = Message::new(id, MessageType::Response, OpCode::Query);
-    message.add_query(hickory_proto::op::Query::query(owner.clone(), qtype));
-    message.metadata.response_code = ResponseCode::NXDomain;
-    message.add_authority(build_soa_record(&owner, serial_reading));
-    message
-        .to_vec()
-        .unwrap_or_else(|err| unreachable!("self-constructed DNS Message must encode: {err}"))
+    build_reply(id, &name.to_hickory(), qtype, &NameAnswer::NxDomain, serial_reading)
 }
 
 /// Encode a [`NameAnswer`] into a DNS response datagram for the query
@@ -254,11 +247,19 @@ pub fn encode(
     // `MeshServiceName` renders the full grammar; hickory's `Name` parser
     // accepts it (it appends the implicit root label).
     let owner = parse_name(&name.to_string());
+    build_reply(id, &owner, qtype, answer, serial_reading)
+}
 
-    // A response carries the question echoed back (RFC 1035 § 4.1.1): build a
-    // Response message echoing the query's ID, echo the question, and fill the
-    // matching section. The ID MUST match the request or a stub resolver
-    // discards the response.
+/// The reply message for `(owner, qtype)`: a response echoing the query's ID
+/// and question (RFC 1035 § 4.1.1; a stub resolver discards a mismatched ID),
+/// with the section `answer` selects filled in.
+fn build_reply(
+    id: u16,
+    owner: &Name,
+    qtype: RecordType,
+    answer: &NameAnswer,
+    serial_reading: Duration,
+) -> Vec<u8> {
     let mut message = Message::new(id, MessageType::Response, OpCode::Query);
     message.add_query(hickory_proto::op::Query::query(owner.clone(), qtype));
 
@@ -274,11 +275,11 @@ pub fn encode(
             // The name IS resolvable (NOERROR) but has no record of the queried
             // type; RFC 2308 negative caching rides on the AUTHORITY SOA.
             message.metadata.response_code = ResponseCode::NoError;
-            message.add_authority(build_soa_record(&owner, serial_reading));
+            message.add_authority(build_soa_record(owner, serial_reading));
         }
         NameAnswer::NxDomain => {
             message.metadata.response_code = ResponseCode::NXDomain;
-            message.add_authority(build_soa_record(&owner, serial_reading));
+            message.add_authority(build_soa_record(owner, serial_reading));
         }
     }
 
