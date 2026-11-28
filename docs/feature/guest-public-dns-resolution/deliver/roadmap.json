@@ -2,7 +2,7 @@
   "roadmap": {
     "project_id": "guest-public-dns-resolution",
     "created_at": "2026-11-27T00:00:00Z",
-    "total_steps": 15,
+    "total_steps": 16,
     "goal": "GH #382: VM guests resolve public DNS names through their default resolver. The node DNS responder forwards gateway-addressed non-mesh queries to the host resolvers (ADR-0356..0363), guarded by one owned-range list, over UDP and TCP, bounded by descriptor-derived permits.",
     "authoritative_inputs": [
       "docs/feature/guest-public-dns-resolution/feature-delta.md (DESIGN: GPD-1..GPD-8, [REF] Component decomposition, [REF] Interface contracts (pinned))",
@@ -400,6 +400,35 @@
             "04-03"
           ],
           "implementation_notes": "Terminal vertical-slice gate (CLAUDE.md 'Build vertical slices through production entry points'): serve and deploy run in-process through the production composition, nothing is installed in the guest and no test hand-installs a resolver, route, rule or socket production omits. Expected to be marker removal plus verification: the production code is complete after 04-03; if G-1..G-3 fail for a reason the earlier steps' tests did not reveal, diagnose against the production path (debugging.md), fix the production code in the owning component, and do not edit the test bodies or the guest program support in overdrive-testing. G-4 asserts only a definite error and a terminated Job, no timing bound (musl SERVFAIL handling: decided by DISTILL); the node-side promptness oracle is W-8/F-8. Do not edit E17 or capture it here; it is captured after DELIVER by a different reviewer. Prerequisites on a fresh box: cargo xtask metal run -- env OVERDRIVE_BPF_NATIVE=1 cargo xtask bpf-build; cargo xtask metal run -- cargo xtask guest-kit-prepare; cargo xtask metal run --exclusive -- cargo xtask kmod-load. Test command: cargo xtask metal run -- cargo nextest run -p overdrive-cli --features integration-tests,kvm-tests -E 'binary(integration) & test(guest_public_dns)'. Final feature gates: cargo xtask metal run -- cargo clippy --workspace --all-targets --features integration-tests -- -D warnings; cargo xtask metal run -- cargo xtask placement-lint; cargo xtask metal run -- cargo nextest run -p overdrive-control-plane --features integration-tests -E 'test(dns_)'."
+        }
+      ]
+    },
+    {
+      "id": "06",
+      "name": "TCP listener serves pipelined queries (defect fix, ADR-0360 amendment 2026-11-28)",
+      "steps": [
+        {
+          "id": "06-01",
+          "name": "The gateway TCP listener serves pipelined queries until the client closes",
+          "agent": "nw-software-crafter",
+          "criteria": [
+            "W-11 (revised 2026-11-28): a query over TCP is forwarded over TCP and answered, and a second query on the same connection is answered too; the server does not close the connection after a reply.",
+            "W-16 (regression, 2026-11-28): two framed queries written in one write on one connection (an A and an AAAA, as glibc sends them) are both answered, ids and questions matching, in order, including after the client half-closes its write side.",
+            "Every row of the amendment's behaviour table holds, including its observer outcome per frame: clean EOF or read-deadline expiry at a frame boundary end the connection with no outcome; in-frame expiry, zero or oversize length, short read and WireReject report Dropped once; a write failure adds no outcome.",
+            "One permit per connection for its whole life, taken at accept; one upstream exchange at a time per connection; W-12, W-13 and W-15 stay green."
+          ],
+          "test_file": "crates/overdrive-control-plane/tests/integration/dns_forwarding_real_wire.rs",
+          "scenario_name": "W-11 a_query_over_tcp_is_forwarded_over_tcp_and_answered_until_the_client_closes; W-16 two_pipelined_queries_in_one_write_are_both_answered_in_order_on_one_connection; regression W-12, W-13, W-15",
+          "files_to_modify": [
+            "crates/overdrive-control-plane/src/dns_responder/responder.rs"
+          ],
+          "deps": [
+            "04-03"
+          ],
+          "dependencies": [
+            "04-03"
+          ],
+          "implementation_notes": "Defect fix found after delivery: glibc writes A and AAAA on one TCP connection and failed against one-query-per-connection (spike/findings-tcp-one-query-per-connection.md). Pinned contract: ADR-0360 amendment 2026-11-28 (D1-D5, user-approved) and feature-delta '[REF] Amendment 2026-11-28 \u2014 TCP serves pipelined queries' (behaviour table is the SSOT, incl. observer outcomes). Change only the per-connection handling in responder.rs (serve_connection / answer_connection): loop read-frame -> classify/answer-or-forward -> write-reply until clean EOF, a deadline expiry, a malformed frame, a WireReject, or stop(); TCP_READ_DEADLINE (5 s) per next frame, TCP_WRITE_DEADLINE (5 s) per reply, no new constant, no query cap, no new public API. D5: the upstream exchange is unchanged. Test command: cargo xtask metal run -- cargo nextest run -p overdrive-control-plane --features integration-tests -E 'binary(integration) & (test(dns_forwarding_real_wire) | test(dns_responder_bind) | test(dns_query_observer))'. Note: step 04-03's W-11 text is the pre-amendment history. Remove only the two pending #[should_panic(expected = ...)] markers (W-11, W-16), confirm their semantic RED first, never edit the test bodies."
         }
       ]
     }
