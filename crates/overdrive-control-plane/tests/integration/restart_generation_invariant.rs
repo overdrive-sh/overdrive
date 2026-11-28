@@ -73,11 +73,11 @@
 //! today. A test that passes today is a GUARD and says so. Where the property fails only after
 //! several steps, the first failing assertion is the one named.
 //!
-//! The tests marked "count rule" share one cause (ADR-0355 section 2, RB-13). A launch that ended
+//! The tests marked "count basis" share one cause (ADR-0355 section 2, RB-13). A launch that ended
 //! before running (abandoned by shutdown, or lost with the control plane) leaves a `Pending` row
-//! that ends `LaunchSuperseded` or `LaunchLostWithControlPlane`, and the relaunch still counts that
-//! row. The charge assertion ("must charge nothing" or "must re-assign the count") is therefore the
-//! first to fail, and the tests stay pending until the count rule lands.
+//! that ends `LaunchSuperseded` or `LaunchLostWithControlPlane`, and the relaunch reads its count
+//! from the newest row that ran, not from that row. The charge assertion ("must charge nothing" or
+//! "must re-assign the count") is what they guard.
 
 #![allow(
     clippy::expect_used,
@@ -1283,7 +1283,7 @@ async fn restart_of_a_running_workload_overridden_by_a_second_restart_places_exa
     .await;
 }
 
-/// PENDING, count rule (ADR-0335): a restart of a `Running` workload whose replacement launch is
+/// GUARD (count basis, ADR-0355 section 2): a restart of a `Running` workload whose replacement launch is
 /// held is abandoned by node shutdown (`supersede_all_lanes`); the next boot relaunches the same
 /// generation once, uncharged. The launch ends its `Pending` row `LaunchSuperseded` (ADR-0355 W2).
 /// Contract shape: bounded-change.
@@ -1293,7 +1293,7 @@ async fn restart_of_a_running_workload_abandoned_by_shutdown_is_relaunched_on_th
         .await;
 }
 
-/// PENDING, count rule (ADR-0335): a restart of a `Running` workload whose replacement launch is
+/// GUARD (count basis, ADR-0355 section 2): a restart of a `Running` workload whose replacement launch is
 /// held when the control plane dies. The View was persisted before the dispatch and records the
 /// issued id; the launch left its `Pending` row, which boot ends `LaunchLostWithControlPlane`
 /// (ADR-0355 W4) and the next evaluation relaunches.
@@ -1326,7 +1326,7 @@ async fn resume_of_a_stopped_workload_overridden_by_a_second_restart_places_exac
     .await;
 }
 
-/// PENDING, count rule (ADR-0335): the resume of an operator-stopped workload whose launch is held
+/// GUARD (count basis, ADR-0355 section 2): the resume of an operator-stopped workload whose launch is held
 /// is abandoned by node shutdown; the next boot relaunches it. The launch ends `LaunchSuperseded`
 /// (ADR-0355 W1).
 /// Contract shape: bounded-change.
@@ -1336,7 +1336,7 @@ async fn resume_of_a_stopped_workload_abandoned_by_shutdown_is_relaunched_on_the
         .await;
 }
 
-/// PENDING, count rule (ADR-0335): the resume of an operator-stopped workload whose launch is lost
+/// GUARD (count basis, ADR-0355 section 2): the resume of an operator-stopped workload whose launch is lost
 /// with the control plane. Boot ends the `Pending` row `LaunchLostWithControlPlane` (ADR-0355 W4)
 /// and the workload is relaunched.
 /// Contract shape: bounded-change.
@@ -1774,7 +1774,7 @@ async fn crash_restart_successor_abandoned(seed: u64, interruption: Interruption
     }
 }
 
-/// PENDING, count rule (RB-13), charge (c): a crash-restart successor lost with the control plane
+/// GUARD (count basis, RB-13), charge (c): a crash-restart successor lost with the control plane
 /// is relaunched with the same count (1, not 2).
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]
@@ -1784,7 +1784,7 @@ async fn a_crash_restart_successor_lost_with_the_control_plane_is_relaunched_wit
     }
 }
 
-/// PENDING, count rule (RB-13): the same for a launch abandoned by node shutdown
+/// GUARD (count basis, RB-13): the same for a launch abandoned by node shutdown
 /// (`LaunchSuperseded`).
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]
@@ -1860,7 +1860,7 @@ async fn job_first_launch_abandoned(seed: u64, interruption: Interruption, label
     }
 }
 
-/// PENDING, count rule (RB-13), S-INV-01, Job dimension: a Job whose first launch is lost with the
+/// GUARD (count basis, RB-13), S-INV-01, Job dimension: a Job whose first launch is lost with the
 /// control plane is relaunched once on the next boot and is not finalised, because
 /// `is_natural_exit` excludes the abandoned row.
 /// Contract shape: bounded-change.
@@ -1872,7 +1872,7 @@ async fn a_job_whose_first_launch_is_lost_with_the_control_plane_is_relaunched_o
     }
 }
 
-/// PENDING, count rule (RB-13), S-INV-01, Job dimension: a Job whose first launch is abandoned by
+/// GUARD (count basis, RB-13), S-INV-01, Job dimension: a Job whose first launch is abandoned by
 /// node shutdown is relaunched once on the next boot and is not finalised.
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]

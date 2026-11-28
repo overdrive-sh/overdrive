@@ -17,17 +17,11 @@
 //! the dispatch would have written (an abandoned launch ends as one abandoned row). Oracle: the
 //! returned actions and the returned View. Tier: Tier 1, default lane (pure, no I/O).
 //!
-//! Classification, stated honestly. The reconciler does not yet derive through
-//! `last_ran_alloc`, so every test whose body needs the basis is PENDING (proven RED,
-//! `#[should_panic]` on the assertion in its own body):
-//! - the three count scenarios (`..._forgives_the_crash`, `..._charges_the_crash_once`,
-//!   `..._carries_zero`), the generation-replacement relaunch, a Job whose launch never ran is not
-//!   finalised, and the deletion-equivalence property;
-//! - the pending-generation agreement clause, a separate property (its function is still a
-//!   scaffold that panics until the generation rule is implemented).
-//!
-//! GUARDs (pass today, implemented with the predicate): the `last_ran_alloc` units and the
-//! backend-membership guard for an abandoned or `Pending` Service row.
+//! Classification. The count scenarios, the generation-replacement relaunch, the Job scenario,
+//! the `last_ran_alloc` units, the backend-membership guard and the deletion-equivalence
+//! property pass against the reconciler. The pending-generation agreement clause is a separate
+//! property still PENDING (proven RED, `#[should_panic]` on the assertion in its own body): its
+//! function is a scaffold that panics until the generation rule is implemented.
 //!
 //! Mutation targets (`workload_lifecycle.rs`): the `!is_launch_abandoned` filter of
 //! `last_ran_alloc` (`last_ran_skips_abandoned_rows...`), every read of the count basis at the
@@ -416,6 +410,40 @@ fn two_consecutive_abandoned_launches_charge_the_crash_once() {
     );
 }
 
+/// RB-13, reconciler half of the restart-status agreement (the accessor half is
+/// `restart_status_of_an_abandoned_current_row_reads_the_attempts_of_the_launch_that_ran`):
+/// the crash `#0` failed at `CEILING - 1`, its crash restart `#1` was abandoned carrying
+/// `CEILING`. The abandoned launch is not counted, so the budget is not spent: the reconciler
+/// places a successor, carrying the failed launch's count plus one (`CEILING`).
+#[test]
+fn a_crash_restart_abandoned_at_the_ceiling_is_restarted_again() {
+    for why in Abandon::BOTH {
+        let rows = [
+            ran(0, WorkloadKind::Service, Class::Crashed),
+            abandoned(1, WorkloadKind::Service, why),
+        ];
+        let mut view = crashed_predecessor_view(RESTART_BACKOFF_CEILING - 1);
+        view.restart_counts.insert(aid(1), RESTART_BACKOFF_CEILING);
+        view.issued_generation.insert(aid(1), 0);
+        let evaluation = evaluate(WorkloadKind::Service, &rows, &view, 0, 1_000_000);
+        assert!(
+            evaluation.finalised().is_empty(),
+            "an abandoned launch at the ceiling must not exhaust the budget ({why:?}), got {:?}",
+            evaluation.finalised()
+        );
+        assert_eq!(
+            evaluation.issued(),
+            vec![aid(2)],
+            "the crash restart abandoned at the ceiling must be restarted again ({why:?})"
+        );
+        assert_eq!(
+            evaluation.count_of(&aid(2)),
+            Some(RESTART_BACKOFF_CEILING),
+            "the relaunch carries the failed launch's count plus one ({why:?})"
+        );
+    }
+}
+
 // ---------------------------------------------------------------------------
 // (3) A launch abandoned before anything ran carries 0; a replacement stays a replacement
 // ---------------------------------------------------------------------------
@@ -631,24 +659,45 @@ fn a_service_allocation_that_never_ran_is_not_a_backend_candidate() {
 /// One launch in a generated chain, with the View entries the reconciler holds for its id.
 #[derive(Debug, Clone)]
 enum Slot {
-    Ran { class: Class, count: u32, seen: Option<u64> },
+    Ran { class: Class, count: u32, seen: Option<u64>, issued: u64 },
     Abandoned { why: Abandon, count: u32, seen: Option<u64>, issued: u64 },
+}
+
+/// A generated chain: the workload kind, its launches oldest first, and the committed generation.
+#[derive(Debug, Clone)]
+struct Chain {
+    kind: WorkloadKind,
+    slots: Vec<Slot>,
+    generation: u64,
 }
 
 fn arb_slot() -> impl Strategy<Value = Slot> {
     let seen = prop::option::of(995_u64..=1000);
     prop_oneof![
         (
-            prop_oneof![Just(Class::Crashed), Just(Class::PlatformReclaimed)],
+            prop_oneof![
+                Just(Class::Crashed),
+                Just(Class::PlatformReclaimed),
+                Just(Class::OperatorStopped),
+                Just(Class::Running),
+                Just(Class::Completed),
+                Just(Class::JobFailed),
+            ],
             0..=RESTART_BACKOFF_CEILING,
             seen.clone(),
+            0_u64..=2,
         )
-            .prop_map(|(class, count, seen)| Slot::Ran { class, count, seen }),
+            .prop_map(|(class, count, seen, issued)| Slot::Ran {
+                class,
+                count,
+                seen,
+                issued
+            }),
         (
             prop_oneof![Just(Abandon::Superseded), Just(Abandon::LostWithControlPlane)],
             0..=RESTART_BACKOFF_CEILING + 2,
             seen,
-            0_u64..=1,
+            0_u64..=2,
         )
             .prop_map(|(why, count, seen, issued)| Slot::Abandoned {
                 why,
@@ -659,39 +708,73 @@ fn arb_slot() -> impl Strategy<Value = Slot> {
     ]
 }
 
-/// The committed generation of the deletion-equivalence property. The last row that ran serves
-/// it (so no generation is pending); abandoned ids carry arbitrary entries up to it.
-const GENERATION: u64 = 1;
+/// A chain a workload can actually produce. A launch is only replaced once its predecessor has
+/// ended, so a `Running` row, and a finished Job's row (final, a restart issues no id), is only
+/// ever the newest row; and only a Job has a finished row. The committed generation never falls
+/// below the generation any launch was issued for (it only grows), and a launch issued after an
+/// operator stop was issued for a later generation than the stopped row (only a restart or a
+/// resume lifts the stop, and each commits a new generation).
+fn arb_chain() -> impl Strategy<Value = Chain> {
+    (any::<bool>(), prop::collection::vec(arb_slot(), 1..=6), 0_u64..=2).prop_map(
+        |(is_job, mut slots, headroom)| {
+            let kind = if is_job { WorkloadKind::Job } else { WorkloadKind::Service };
+            let newest = slots.len() - 1;
+            let mut issued_for = 0_u64;
+            let mut after_operator_stop = false;
+            for (index, slot) in slots.iter_mut().enumerate() {
+                let (Slot::Ran { issued, .. } | Slot::Abandoned { issued, .. }) = slot;
+                let bump = if after_operator_stop { (*issued).max(1) } else { *issued % 2 };
+                issued_for += bump;
+                *issued = issued_for;
+                if let Slot::Ran { class, .. } = slot {
+                    let final_class =
+                        matches!(class, Class::Running | Class::Completed | Class::JobFailed);
+                    let job_only = matches!(class, Class::Completed | Class::JobFailed);
+                    if (final_class && index != newest) || (job_only && !is_job) {
+                        *class = Class::Crashed;
+                    }
+                    after_operator_stop = *class == Class::OperatorStopped;
+                } else {
+                    after_operator_stop = false;
+                }
+            }
+            // An operator-stopped basis followed by abandoned launches issued under the committed
+            // generation itself is the pending-generation agreement clause below (the read of
+            // "is a replacement still pending against the stopped row" is that clause's subject);
+            // here the operator restarts once more after the abandoned launch.
+            let basis = slots.iter().rposition(|slot| matches!(slot, Slot::Ran { .. }));
+            let stopped_then_abandoned = basis.is_some_and(|index| {
+                index < newest
+                    && matches!(slots[index], Slot::Ran { class: Class::OperatorStopped, .. })
+            });
+            let headroom = if stopped_then_abandoned { headroom.max(1) } else { headroom };
+            Chain { kind, slots, generation: issued_for + headroom }
+        },
+    )
+}
+
 /// The evaluation instant; generated failure times sit inside and just outside the backoff window.
 const NOW: u64 = 1000;
 
 /// The full chain, the chain with the abandoned rows deleted, and the View both are read with.
-fn build_chain(
-    slots: &[Slot],
-) -> (Vec<AllocStatusRow>, Vec<AllocStatusRow>, WorkloadLifecycleView) {
-    let last_ran = slots.iter().rposition(|slot| matches!(slot, Slot::Ran { .. }));
+fn build_chain(chain: &Chain) -> (Vec<AllocStatusRow>, Vec<AllocStatusRow>, WorkloadLifecycleView) {
     let mut view = WorkloadLifecycleView::default();
-    let mut full = Vec::with_capacity(slots.len());
-    for (index, slot) in slots.iter().enumerate() {
+    let mut full = Vec::with_capacity(chain.slots.len());
+    for (index, slot) in chain.slots.iter().enumerate() {
         let suffix = index as u32;
-        match slot {
-            Slot::Ran { class, count, seen } => {
-                full.push(ran(suffix, WorkloadKind::Service, *class));
-                view.restart_counts.insert(aid(suffix), *count);
-                let issued = if Some(index) == last_ran { GENERATION } else { 0 };
-                view.issued_generation.insert(aid(suffix), issued);
-                if let Some(seen) = seen {
-                    view.last_failure_seen_at.insert(aid(suffix), instant(*seen));
-                }
+        let (row, count, seen, issued) = match slot {
+            Slot::Ran { class, count, seen, issued } => {
+                (ran(suffix, chain.kind, *class), count, seen, issued)
             }
             Slot::Abandoned { why, count, seen, issued } => {
-                full.push(abandoned(suffix, WorkloadKind::Service, *why));
-                view.restart_counts.insert(aid(suffix), *count);
-                view.issued_generation.insert(aid(suffix), *issued);
-                if let Some(seen) = seen {
-                    view.last_failure_seen_at.insert(aid(suffix), instant(*seen));
-                }
+                (abandoned(suffix, chain.kind, *why), count, seen, issued)
             }
+        };
+        full.push(row);
+        view.restart_counts.insert(aid(suffix), *count);
+        view.issued_generation.insert(aid(suffix), *issued);
+        if let Some(seen) = seen {
+            view.last_failure_seen_at.insert(aid(suffix), instant(*seen));
         }
     }
     let deleted: Vec<AllocStatusRow> =
@@ -699,13 +782,13 @@ fn build_chain(
     (full, deleted, view)
 }
 
-/// What an evaluation decided about the next launch: the count it carries, or the exhausted
-/// budget's finalisation, or nothing. Ids differ across the two chains and are not compared
-/// for a launch; a finalisation names the basis row in both.
+/// What an evaluation decided about the next launch: the count and the failure time it carries,
+/// or the exhausted budget's finalisation, or nothing. Ids differ across the two chains and are
+/// not compared for a launch; a finalisation names the basis row in both.
 #[derive(Debug, PartialEq, Eq)]
 enum Decision {
     Quiet,
-    Launch { count: Option<u32> },
+    Launch { count: Option<u32>, last_failure_seen_at: Option<UnixInstant> },
     Finalise { alloc: AllocationId, terminal: Option<TerminalCondition> },
 }
 
@@ -713,37 +796,37 @@ fn decision(evaluation: &Evaluation) -> Decision {
     if let Some((alloc, terminal)) = evaluation.finalised().into_iter().next() {
         return Decision::Finalise { alloc, terminal };
     }
-    evaluation
-        .issued()
-        .first()
-        .map_or(Decision::Quiet, |id| Decision::Launch { count: evaluation.count_of(id) })
+    evaluation.issued().first().map_or(Decision::Quiet, |id| Decision::Launch {
+        count: evaluation.count_of(id),
+        last_failure_seen_at: evaluation.view.last_failure_seen_at.get(id).copied(),
+    })
 }
 
 proptest! {
-    // The test is PENDING and fails by design today: do not persist its seeds into the repo.
-    // Drop this setting together with the `should_panic` marker at the activation step.
-    #![proptest_config(ProptestConfig { failure_persistence: None, ..ProptestConfig::default() })]
-
-    /// Deleting the abandoned rows from any chain changes no later launch's count, charged or
-    /// exhausted: the same count is carried, the same budget exhaustion is finalised naming the
-    /// same row, and the backoff gate holds or opens identically, whatever View entries the
-    /// abandoned ids carry. Chains mix launches that ran (crashed or platform-reclaimed, with
-    /// counts up to the ceiling) with abandoned launches of both reasons, in any order.
-    /// The seed is printed on failure by proptest.
+    /// Deleting the abandoned rows from any chain changes no later launch's count, charge or
+    /// exhaustion: the same count and failure time are carried, the same budget exhaustion is
+    /// finalised naming the same row, and the backoff gate holds or opens identically, whatever
+    /// View entries the abandoned ids carry. Chains mix launches that ran (crashed,
+    /// platform-reclaimed, operator-stopped, running, or a finished Job) with abandoned launches
+    /// of both reasons, in any order a workload can produce, for a Service or a Job, under any
+    /// committed generation, so the pending-generation replacement and the operator-stop veto are
+    /// reached. The oracle is differential: the full chain against the chain with the abandoned
+    /// rows deleted. The seed is printed on failure by proptest.
     #[test]
     fn deleting_abandoned_rows_changes_no_later_launchs_count_charge_or_exhaustion(
-        slots in prop::collection::vec(arb_slot(), 1..=6),
+        chain in arb_chain(),
     ) {
-        let (full, deleted, view) = build_chain(&slots);
-        let with_abandoned = decision(&evaluate(WorkloadKind::Service, &full, &view, GENERATION, NOW));
-        let without_abandoned =
-            decision(&evaluate(WorkloadKind::Service, &deleted, &view, GENERATION, NOW));
+        let generation = chain.generation;
+        let (full, deleted, view) = build_chain(&chain);
+        let with_abandoned = decision(&evaluate(chain.kind, &full, &view, generation, NOW));
+        let without_abandoned = decision(&evaluate(chain.kind, &deleted, &view, generation, NOW));
         prop_assert_eq!(
             with_abandoned,
             without_abandoned,
             "deleting the abandoned rows from a chain must not change the next launch's count, \
-             charge or exhaustion (chain {:?})",
-            slots
+             charge or exhaustion (generation {}, chain {:?})",
+            generation,
+            chain
         );
     }
 }

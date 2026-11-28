@@ -4156,7 +4156,7 @@ mod restart_ssot_agreement {
     use super::netns_density_lifecycle_fixture::{
         Intent, RowFact, at, observation, reconcile, row, states, view,
     };
-    use super::{RESTART_BACKOFF_CEILING, restart_after_failure};
+    use super::{RESTART_BACKOFF_CEILING, current_alloc, last_ran_alloc, restart_after_failure};
 
     /// The current row's class (feature-delta obligation 4's list).
     #[derive(Debug, Clone, Copy)]
@@ -4237,6 +4237,50 @@ mod restart_ssot_agreement {
         }
     }
 
+    impl Class {
+        /// Whether a launch can follow a row of this class and end before it ran: the row has
+        /// ended and carries no final claim (a `Running` or `Pending` row is still live, a finished
+        /// Job or an exhausted budget is final). A Job (or Schedule) row that ended on its own is
+        /// final too: a Job relaunches only after a platform reclamation or a stop its operator
+        /// lifted.
+        const fn can_precede_an_abandoned_launch(self, kind: WorkloadKind) -> bool {
+            match self {
+                Self::Draining
+                | Self::Running
+                | Self::Pending
+                | Self::NaturalExitCompleted
+                | Self::BackoffExhausted => false,
+                Self::PlatformReclaimed | Self::OperatorStopped => true,
+                Self::Crashed
+                | Self::ExitedCrashed
+                | Self::StartRejected
+                | Self::LivenessKilled
+                | Self::GcStopped => matches!(kind, WorkloadKind::Service),
+            }
+        }
+
+        /// An intentional stop: only a committed generation lifts it, so a launch after it was
+        /// issued for a pending generation.
+        const fn is_intentional_stop(self) -> bool {
+            matches!(self, Self::OperatorStopped | Self::GcStopped)
+        }
+    }
+
+    /// A launch that ended before it ran (`Terminated`, no terminal claim, never started).
+    fn abandoned_row(suffix: u32, lost: bool, kind: WorkloadKind) -> AllocStatusRow {
+        AllocStatusRow {
+            state: AllocState::Terminated,
+            reason: Some(if lost {
+                TransitionReason::LaunchLostWithControlPlane
+            } else {
+                TransitionReason::LaunchSuperseded
+            }),
+            terminal: None,
+            started_at: None,
+            ..row(suffix, RowFact::ExitedCrashed, kind)
+        }
+    }
+
     fn kind_strategy() -> impl Strategy<Value = WorkloadKind> {
         prop::sample::select(vec![WorkloadKind::Job, WorkloadKind::Service, WorkloadKind::Schedule])
     }
@@ -4255,6 +4299,7 @@ mod restart_ssot_agreement {
             intent in intent_strategy(),
             class in prop::sample::select(CLASSES.to_vec()),
             lineage in prop::collection::vec(any::<bool>(), 0..=2),
+            abandoned_successor in prop::option::of(any::<bool>()),
         ) {
             let earlier = u32::try_from(lineage.len()).expect("at most two earlier rows");
             let mut rows: Vec<AllocStatusRow> = lineage
@@ -4264,11 +4309,28 @@ mod restart_ssot_agreement {
                     earlier_row(u32::try_from(n).expect("small index"), *reclaimed, kind)
                 })
                 .collect();
-            let current = current_row(earlier, class, kind);
-            rows.push(current.clone());
-            let issued = rows.iter().map(|r| (r.alloc_id.clone(), 0)).chain([(current.alloc_id.clone(), attempts)]);
-            let mut lifecycle_view = view(issued, Some((current.alloc_id.clone(), at(1_000))));
+            let ran_row = current_row(earlier, class, kind);
+            rows.push(ran_row.clone());
+            let issued = rows.iter().map(|r| (r.alloc_id.clone(), 0)).chain([(ran_row.alloc_id.clone(), attempts)]);
+            let mut lifecycle_view = view(issued, Some((ran_row.alloc_id, at(1_000))));
             lifecycle_view.issued_generation.clear();
+            // The launch placed after `ran_row` may have ended before it ran: an abandoned row,
+            // the workload's current allocation, carrying a count of its own (a crash restart's
+            // `attempts + 1`) that no decision may read. The decision reads the count basis.
+            let abandoned_successor =
+                abandoned_successor.filter(|_| class.can_precede_an_abandoned_launch(kind));
+            let generation_replacement =
+                generation_replacement || (abandoned_successor.is_some() && class.is_intentional_stop());
+            if let Some(lost) = abandoned_successor {
+                let successor = abandoned_row(earlier + 1, lost, kind);
+                lifecycle_view
+                    .restart_counts
+                    .insert(successor.alloc_id.clone(), attempts.saturating_add(1));
+                rows.push(successor);
+            }
+            let refs: Vec<&AllocStatusRow> = rows.iter().collect();
+            let current = current_alloc(&refs).expect("a current row").clone();
+            let ran = last_ran_alloc(&refs).cloned();
             let (mut desired, actual) = states(intent, kind, rows, &observation(0, 0, std::collections::BTreeMap::new()));
             desired.generation = u64::from(generation_replacement);
             let run_desired = desired.job.is_some() && !desired.desired_to_stop;
@@ -4286,13 +4348,17 @@ mod restart_ssot_agreement {
                     kind,
                     run_desired,
                     &current,
-                    Some(&current),
-                    attempts,
+                    ran.as_ref(),
+                    ran.as_ref()
+                        .and_then(|row| lifecycle_view.restart_counts.get(&row.alloc_id))
+                        .copied()
+                        .unwrap_or(0),
                     generation_replacement
                 ),
                 restarted,
-                "{:?} row of a {:?} at {} attempts, generation pending {}, intent {:?}",
-                class, kind, attempts, generation_replacement, intent
+                "{:?} row of a {:?} at {} attempts, generation pending {}, intent {:?}, \
+                 abandoned successor {:?}",
+                class, kind, attempts, generation_replacement, intent, abandoned_successor
             );
         }
     }

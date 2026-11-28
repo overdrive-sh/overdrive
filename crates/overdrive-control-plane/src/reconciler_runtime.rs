@@ -2098,6 +2098,58 @@ mod tests {
         );
     }
 
+    /// RB-13, accessor half: the current row is an abandoned launch, so the count basis is the
+    /// row that ran before it. The workload's restart status reads that row's attempts: `alloc-0`
+    /// failed at `CEILING - 1`, its crash restart `alloc-1` was abandoned carrying `CEILING`; the
+    /// reconciler still restarts it (the abandoned launch is not counted, so the budget is not
+    /// spent), and the attempt index is the failed launch's (`CEILING`), not the abandoned
+    /// launch's (`CEILING + 1`). The reconciler's own decision for the same rows is pinned by
+    /// `a_crash_restart_abandoned_at_the_ceiling_is_restarted_again` (reconcilers crate).
+    ///
+    /// CONTRACT_SHAPE: pure-function.
+    #[tokio::test]
+    async fn restart_status_of_an_abandoned_current_row_reads_the_attempts_of_the_launch_that_ran()
+    {
+        use overdrive_core::traits::observation_store::AllocState;
+        use overdrive_core::transition_reason::TransitionReason;
+        use overdrive_reconcilers::workload_lifecycle::last_ran_alloc;
+        use overdrive_reconcilers::{RESTART_BACKOFF_CEILING, current_alloc};
+        let failed = failed_payments_row(None);
+        let abandoned = AllocStatusRow {
+            alloc_id: AllocationId::new("alloc-payments-1").expect("alloc id"),
+            state: AllocState::Terminated,
+            ..failed_payments_row(Some(TransitionReason::LaunchSuperseded))
+        };
+        let rows = [failed.clone(), abandoned.clone()];
+        let refs: Vec<&AllocStatusRow> = rows.iter().collect();
+        assert_eq!(
+            current_alloc(&refs),
+            Some(&abandoned),
+            "setup: the abandoned launch is current"
+        );
+        let ran = last_ran_alloc(&refs);
+        assert_eq!(ran, Some(&failed), "setup: the failed launch is the count basis");
+
+        let tmp = tempfile::TempDir::new().expect("tempdir");
+        let (runtime, target) = runtime_with_attempts(&tmp, RESTART_BACKOFF_CEILING - 1, 0).await;
+        let mut view = runtime.view_for_workload_lifecycle(&target);
+        view.restart_counts.insert(abandoned.alloc_id.clone(), RESTART_BACKOFF_CEILING);
+        runtime.seed_workload_lifecycle_view_for_test(&target, view);
+        assert_eq!(
+            runtime.restart_status_for_alloc(
+                &target,
+                WorkloadKind::Service,
+                true,
+                &abandoned,
+                ran,
+                0
+            ),
+            (RESTART_BACKOFF_CEILING, true),
+            "an abandoned launch at the ceiling is not counted: the failed launch below it is \
+             restarted, with its own attempt index"
+        );
+    }
+
     // -----------------------------------------------------------------
     // Service backend hydration controls — the runtime owns hydration
     // end-to-end (ADR-0036). These tests retain the existing Service,

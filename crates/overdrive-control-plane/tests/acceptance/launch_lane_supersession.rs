@@ -21,11 +21,9 @@
 //! No test overlaps two ticks of one target (ADR-0102 admits one lane per target). The seeded schedule
 //! test prints its seeds.
 //!
-//! Status: a test marked PENDING in its own doc is proven RED by `#[should_panic(expected = ...)]`
-//! on the assertion that fails today. The one pending test waits on the count rule (ADR-0355 § 2,
-//! RB-13): a superseded launch ends its `Pending` row abandoned, a restartable current row, so the
-//! next evaluation relaunches, but the relaunch still counts the abandoned launch and charges the
-//! restart budget.
+//! A superseded launch ends its `Pending` row abandoned, a restartable current row, so the next
+//! evaluation relaunches without charging the restart budget: the relaunch reads its count from the
+//! newest row that ran (ADR-0355 § 2, RB-13).
 
 #![allow(
     clippy::expect_used,
@@ -1016,14 +1014,13 @@ async fn a_driver_that_ignores_the_signal_is_unchanged() {
     );
 }
 
-/// PENDING (ADR-0335; boundary 4a (g), edge): a restart whose commit the evaluation already hydrated (the signal
+/// (ADR-0335; boundary 4a (g), edge): a restart whose commit the evaluation already hydrated (the signal
 /// lands after the lane opens and before hydration) may see its own `Start` superseded once; the next
 /// evaluation relaunches, and the generation ends with one Running allocation, uncharged.
 ///
 /// The workload is stopped when the restart lands (the operator resumes it): a Running predecessor
 /// would spend the signalled evaluation on `StopAllocation`, and the `Start` would come in the next
 /// evaluation under a fresh, unraised lane, so the scenario would never reach its own superseded start.
-/// Pending on the count rule (module header).
 #[tokio::test]
 async fn a_restart_the_evaluation_already_hydrated_sees_its_own_start_superseded_once() {
     let mut rig = Rig::new().await;
