@@ -1,0 +1,14 @@
+Diagnostic, run after the capture (not part of runner.sh): the host's own upstream
+resolvers' answer for the nonexistent name, read-only, from the metal host
+(metal run b70707efcf180125a65c3bba, --exclusive, same box and kernel as the capture).
+Command:
+  for s in 151.115.125.3 151.115.125.11; do echo "== $s"; dig +noall +comments +answer @$s no-such-host-7f3a.example.com A | grep -E "status|ANSWER|^no-such"; done; getent ahostsv4 no-such-host-7f3a.example.com; echo "getent rc=$?"
+Verbatim output:
+== 151.115.125.3
+;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 24111
+;; flags: qr rd ra ad; QUERY: 1, ANSWER: 0, AUTHORITY: 1, ADDITIONAL: 1
+== 151.115.125.11
+;; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 8825
+;; flags: qr rd ra ad; QUERY: 1, ANSWER: 0, AUTHORITY: 1, ADDITIONAL: 1
+
+getent rc=2

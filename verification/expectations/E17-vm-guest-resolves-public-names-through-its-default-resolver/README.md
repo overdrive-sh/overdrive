@@ -73,4 +73,54 @@ sets the status.
 
 ## Evidence
 
-Not captured. Status `pending` until the DELIVER capture is reviewed.
+Captured 2026-11-28 on the native-metal host (Linux 7.0.0-38-generic, `systemd-detect-virt`
+reports `none`), SHA `ce8a61cee9e3fbf490f4bd2e66220f60d3ab1eca`, metal run
+`f2c7f64a5ead5ad09d8dea74` (`cargo xtask metal run --exclusive -- env OVERDRIVE_BPF_NATIVE=1
+verification/harness/run-expectation.sh E17`). The runner's source was clean; the harness
+manifest says `working_tree_dirty: true` only because the first attempt's evidence
+(below) was untracked in the checkout. Status stays `pending`: a reviewer who did not
+capture it judges the text below. Files are under `evidence/`.
+
+The guest console, verbatim (`evidence/console-snapshots-20261128T114341Z/alloc-herdr-box-0.stream`):
+
+```
+resolve: nameserver=100.95.0.1
+resolve: api.anthropic.com addr=160.79.104.10 ms=7 connect=ok port=443 connect_ms=1
+resolve: github.com addr=140.82.121.4 ms=5 connect=ok port=443 connect_ms=0
+resolve: crates.io addr=151.101.2.137 ms=36 connect=ok port=443 connect_ms=0
+resolve: herdr.dev addr=104.21.36.201 ms=4 connect=ok port=443 connect_ms=0
+resolve: no-such-host-7f3a.example.com error=EAI_OTHER ms=5
+```
+
+`overdrive workload describe herdr-box`: `Verdict: Succeeded`, attempt 1 `Terminated`, exit 0.
+
+What the text shows, for the reviewer to judge:
+
+- Claim 1: each of the four names resolved in 4 to 36 ms, and a bare TCP connection to the
+  first resolved address on 443 completed in 0 to 1 ms.
+- Claim 2: the nonexistent name failed in 5 ms, promptly and not as `EAI_AGAIN`, but the
+  guest program printed `EAI_OTHER`, not `EAI_NONAME`: the program labels only `EAI_NONAME`,
+  `EAI_AGAIN` and `EAI_FAIL` and prints every other resolver code as `EAI_OTHER`. A read-only
+  query of the host's two upstream resolvers for this name returns `status: NOERROR` with
+  zero answers (`evidence/diagnostic-host-upstream-answer-20261128.txt`), not NXDOMAIN, and
+  musl `getaddrinfo` reports a NOERROR answer with no address as `EAI_NODATA`, which the
+  program prints as `EAI_OTHER` (inferred from the upstream answer; the program does not
+  print the numeric code). So the guest received the upstream's own definite answer
+  promptly; the claim text as written (`EAI_NONAME`) is not what was observed for this
+  name. A name under `.invalid` would give NXDOMAIN; the capture used the claim's name and
+  was not altered.
+- Claim 3: the guest console shows `nameserver=100.95.0.1`, the first nameserver line of
+  the guest's `/etc/resolv.conf`, which the guest's init writes as the single line
+  `nameserver <gateway>` (`crates/overdrive-init/src/main.rs:590`). The guest image carries
+  no `cat`, so the whole file was not printed. `capture.log` holds the host's
+  `nft list ruleset`, `ip rule show`, `ip route show table all` and `/etc/resolv.conf`
+  before and after: the runner wrote none of them.
+- V-4 context receipts: not captured. Both need the host's resolver file or its upstream
+  reachability changed (and a controlled DNS upstream), which claim 3 forbids.
+
+Earlier attempt, kept: run `8bf008b8e7f2ed199c855bf6` (SHA `7c46cb51c`) deployed the job
+but the runner read the Job's `describe` as a Service table and polled until its
+timeout, then lost the console (the VM run directory is removed when the allocation ends).
+Its files are `run-20261128T113621Z.log`, `verification-20261128T113621Z.yaml`,
+`describe-20261128T113621Z.txt` and the console-snapshots-20261128T113621Z directory; the runner
+was fixed (console streamed from byte 0, Job attempt table) in `ce8a61cee`.

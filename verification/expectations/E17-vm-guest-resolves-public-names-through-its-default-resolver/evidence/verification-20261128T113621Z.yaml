@@ -1,0 +1,16 @@
+expectation_id: "E17"
+date_utc: "2026-11-28T11:36:21Z"
+overdrive_sha: "7c46cb51cf0cf8df5e51f8b964f968b592f7bd30"
+working_tree_dirty: false
+dst_seed: 1
+harness_sha: "7c46cb51cf0cf8df5e51f8b964f968b592f7bd30"
+harness_invocation: "verification/harness/run-expectation.sh E17"
+runner_invoked: true
+execution_status: "failed"
+execution_substrate: "native-metal"
+executed_in_lima: false
+runner_exit_code: "1"
+anchors: ["docs/feature/guest-public-dns-resolution/feature-delta.md AC-1, AC-3, AC-4 (DISCUSS US-GPD-1)","docs/feature/guest-public-dns-resolution/feature-delta.md K-GPD-1, K-GPD-2, V-4","docs/product/architecture/adr-0356-the-node-dns-responder-forwards-gateway-addressed-non-mesh-queries-to-the-host-resolvers.md","docs/product/journeys/run-a-vm-workload.yaml step 7"]
+anchor_status: "present"
+# NOTE: 'satisfied' is a HUMAN/auditor verdict written into README.md after
+# adversarial review of the captured evidence below — never auto-stamped here.
