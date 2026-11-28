@@ -951,3 +951,72 @@ metal at DELIVER by a different reviewer; not a test, not a cohort.
 - Mandate-12 (Python-pilot types module, step-reuse ratio) does not apply to Rust tests; the equivalent is one fixture per tier (`World`, `Node`) and no business logic in test bodies beyond the oracle.
 - The one pin DESIGN left to DISTILL (a source scan that each owned-range const appears in `OwnedAddressRanges::platform`) is added as O-4 by user ruling 2026-11-27, with the concurrency test for the permit bound (F-34). The user's third approved test, the permit derivation at boot, is added as P-1 once DESIGN pinned its observable (`dns.forward.permits`, `guest_flow_fd_requirement`, `NODE_FD_RESERVE`); the two pinned items are scaffolded in `guest_network.rs` (`guest_flow_fd_requirement` is a `todo!` scaffold, `NODE_FD_RESERVE` is final).
 - Open proposals (not added): `ForwardFailure::as_str` and `AttemptFailure::as_str` are pinned but no test reads the label, so they are DELIVER's with no pending test.
+
+## Wave: DELIVER / [REF] Implementation summary
+
+GH #382. A VM guest's default resolver (the guest gateway `100.95.0.1`) now resolves public names. The node's DNS responder classifies each query name once by labels. A mesh name is answered as before. An unknown platform-zone name is answered NXDOMAIN at the gateway. A gateway-addressed public name is forwarded to the host resolvers over UDP, off the receive thread, under a permit bound derived from the descriptor limit. The same forwarding is served on TCP/53 bound to the gateway. Upstreams are read from the host resolver file on every call. A forwarded reply that carries an Overdrive-owned address is emptied whole and marked blocked. An unanswered query gets a definite SERVFAIL, and failure and recovery episodes warn once each. `overdrive serve` raises its soft descriptor limit once at the binary entry and injects the read-back value.
+
+Sixteen steps in six groups, all `DONE`, and `des-verify-integrity docs/feature/guest-public-dns-resolution/deliver/` passes ("All 16 steps have complete DES traces"):
+
+| Group | Steps | Landed |
+|---|---|---|
+| 01 Pure forwarding pieces | 01-01..01-07 | Owned ranges, upstream selection and permit arithmetic, relay, failover, owned-range guard, episode warns, permits and shedding |
+| 02 Host adapters | 02-01, 02-02 | Resolver file re-read per call, upstream exchange over UDP and TCP |
+| 03 Descriptor limit | 03-01, 03-02 | Raise at the binary and inject, derive the permit bound at boot and report it |
+| 04 Responder | 04-01..04-03 | One name classifier and gateway gate, UDP forwarding, TCP/53 |
+| 05 Walking skeleton | 05-01 | A VM guest resolves public names through `serve` and `deploy` |
+| 06 Defect fix | 06-01 | The gateway TCP listener serves pipelined queries until the client closes (ADR-0360 amendment 2026-11-28) |
+
+DES log honesty. RED is logged `SKIPPED` for 01-07, 02-02, 03-01, 03-02 and 05-01. Step 04-03 logged RED `EXECUTED`, but the crafter ran the tests only after implementing, so that RED was not observed before the code existed.
+
+Reviews. An adversarial and a subtractive review ran after each roadmap phase. Review fixes landed in `5377b4c64`, `f53fad102`, `f8e2ab424`, `636ab2236`, and the bench fix `6cd1e3865`.
+
+## Wave: DELIVER / [REF] Files modified
+
+Base `d03a6c7f7`: 226 files changed, 15162 insertions and 500 deletions, of which 42 are under `crates/`. Production code:
+
+- `crates/overdrive-control-plane/src/dns_responder/{forwarder,owned_ranges,upstream,upstream_host,responder,wire,mod}.rs`
+- `crates/overdrive-control-plane/src/{guest_network.rs,lib.rs,node_adapters.rs}` and `guest_network/flow_io/`
+- `crates/overdrive-cli/src/{main.rs,commands/serve.rs}`
+- `crates/overdrive-core/src/id.rs` (`MeshServiceName::PLATFORM_ZONE`)
+
+Test and test support: `crates/overdrive-cli/tests/integration/guest_public_dns.rs`, `crates/overdrive-control-plane/tests/{acceptance,integration}/dns_*`, `crates/overdrive-testing/bin/guest_peer.rs`, `crates/overdrive-testing/src/guest_app.rs`, and the guest-kit `resolve-tcp-connect` mode.
+
+Decisions: ADR-0356 to ADR-0363 in `docs/product/architecture/` (ADR-0360 amended 2026-11-28). Verification: `verification/expectations/E17-vm-guest-resolves-public-names-through-its-default-resolver/`. Spike probes: `spike-scratch/guest-public-dns-*`. Docs: `website/content/docs/concepts/{guest-networking,service-names,architecture}.mdx` and `website/content/blog/vm-guests-resolve-public-names.mdx`.
+
+## Wave: DELIVER / [REF] Scenarios green count
+
+DISTILL authored 65 tests (61 pending, 4 active). Every pending marker was removed as its step landed. The 2026-11-28 amendment revised W-11 and added W-16, an extra regression for pipelined queries on one connection. The full workspace suite on metal passed 5381 of 5384 (details under Quality gates). The three failures are accounted for there.
+
+## Wave: DELIVER / [REF] DoD check
+
+- US-GPD-1, 2 and 3 pass their scenarios through `overdrive serve` + `overdrive deploy`, with nothing hand-installed (G-1..G-4 and E17).
+- AC-1, AC-2 and AC-3 each have a guest-level test.
+- The owned-range set has one SSOT, pinned by the O-4 source scan.
+- Operator docs state the behaviour and each scope limitation with its tracking issue.
+- E17 was captured on metal and reviewed by a different agent.
+
+## Wave: DELIVER / [REF] Demo evidence
+
+- **E17 satisfied** (review 2026-11-28, metal run `074305492af4443a79355bd7` at `d83f7d571`). The first capture's claim 2 failed: `example.com` answers NOERROR with no data at the upstream, not NXDOMAIN. By user ruling it was re-captured with a `.invalid` name (`no-such-host-7f3a.invalid`).
+- Guest tests G-1..G-4 in `crates/overdrive-cli/tests/integration/guest_public_dns.rs` run through `serve` and `deploy` in a `cgroup-default` guest.
+- The user-requested `ip`/`nft` descriptor check, with soft = hard = 1,048,576 on kernel 7.0.0-38: `ip link show` makes 12 close calls, `nft list tables` makes 15, and neither calls `close_range` (`spike-scratch/guest-public-dns-nofile/check.sh`).
+
+## Wave: DELIVER / [REF] Quality gates
+
+- Full workspace suite on metal: 5381 of 5384.
+  - The bench DNS smoke failure was caused by this feature (the gateway was assigned after the responder started) and is fixed in `6cd1e3865`.
+  - `cloexec_lint_workspace` (the `dup2` in `launch_clone.rs`) and the `vm_lifecycle_completion` conformance test fail identically on base `d03a6c7f7`. They predate the feature.
+- `des-verify-integrity` passes for all 16 steps.
+- Website: `typecheck`, `lint`, `build` and `assert:one-index` pass. `test:blog` fails on a docs-search top-hit assertion that reproduces at HEAD without these changes.
+- Mutation testing is disabled for this repository (CLAUDE.md), so no mutation gate ran.
+
+## Wave: DELIVER / [WHY] Upstream Issues
+
+**ADR-0360 defect, found during finalization.** The responder served one query per TCP connection. glibc pipelines the A and AAAA queries over one TCP connection, so the second reply was missing and `getaddrinfo` failed outright. Spike `spike/findings-tcp-one-query-per-connection.md` confirmed it (musl is unaffected, and a v4-only guest sends no AAAA). ADR-0360 was amended on 2026-11-28 (D1 to D5, user-approved). W-11 was revised and W-16 added as the regression. The fix is `73aa25657`, and the probe re-run shows it FIXED (`0eb71362e`). The accept-time permit and its hold time are unchanged. Fairness is tracked by #385.
+
+**Follow-ups for the user (no issue created or changed by this wave):**
+
+- #385's body is stale: it describes a 256 cap, which the design replaced with a bound derived from the descriptor limit.
+- #259 does not record the resolver-file image requirement that the design attributes to it.
+- K-GPD-1 names `example.com`, but E17 used `herdr.dev`. K-GPD-1's wording should be reconciled with the capture.
