@@ -2,6 +2,12 @@
 
 This project follows the **object-oriented** paradigm. Use @nw-software-crafter for implementation.
 
+## Trunk-based development
+
+We push straight to `main`. There are no pull requests and no long-lived
+feature branches. Commits on `main` that belong to an unfinished feature are
+normal and are not a problem to report.
+
 ## Implement to the design — never invent API surface
 
 When implementing against an accepted design (an ADR, `brief.md`, a
