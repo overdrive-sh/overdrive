@@ -147,15 +147,18 @@ by name:
   relays the reply.
 
 The node forwards only queries addressed to the gateway. The responder's UDP
-socket is bound to every node address, so it also receives datagrams sent to the
-node's other addresses. It drops a non-mesh query that arrives that way, which
+socket binds the wildcard address, so it also receives datagrams sent to the
+node's other addresses. If another process holds the wildcard on port 53, the
+responder falls back to one socket on the gateway address alone. It drops a non-mesh query that arrives that way, which
 keeps the node from acting as an open resolver. The TCP listener binds the
 gateway address alone.
 
 ### Which upstreams the node asks
 
 The node reads the `nameserver` lines of the host's `/etc/resolv.conf` on every
-forwarded query. A change to the file, including one made by DHCP after boot,
+forwarded query. The file is the only upstream source. Issue
+[#384: configure the DNS forwarder's upstream resolvers in the worker node configuration](https://github.com/overdrive-sh/overdrive/issues/384)
+tracks replacing it. A change to the file, including one made by DHCP after boot,
 takes effect on the next query with no restart. Entries that name the gateway are
 skipped, because forwarding to the gateway would loop. The node does not cache
 answers.
@@ -189,9 +192,9 @@ addresses. Private addresses outside those ranges, such as a corporate
 
 The check does not cover AAAA records or addresses in the authority and
 additional sections. Guests have no global IPv6 transport, and stub resolvers
-ignore those sections. A public name that legitimately resolves into
-`100.64.0.0/10` shared address space, as some carrier-grade NAT and overlay
-networks return, falls inside the guest prefix and is blocked.
+ignore those sections. A public answer inside the guest prefix `100.95.0.0/16` is blocked. The rest of
+the `100.64.0.0/10` shared address space, which some carrier-grade NAT and
+overlay networks return, is relayed.
 
 ### TCP
 
@@ -199,7 +202,8 @@ A guest retries over TCP when a reply is truncated, and some clients use TCP
 from the start. The node accepts one query per connection on `100.95.0.1:53`,
 reads it under a five-second deadline, answers or forwards it exactly as it does
 over UDP, writes the reply under a five-second deadline, and closes the
-connection. A forwarded TCP query goes to the upstream over TCP.
+connection. One query per connection means a connection holds its permit for
+exactly one exchange. A forwarded TCP query goes to the upstream over TCP.
 
 ### Concurrent forwards are bounded
 
@@ -211,8 +215,9 @@ startup in the `dns.forward.permits` event.
 
 A query that finds no permit is shed at once. A UDP query gets SERVFAIL, and a
 TCP connection is closed unread. Under shedding, a TCP connection of any kind is
-closed, mesh names included, because the node does not know the query's class
-before it reads it.
+closed, mesh names included. This follows from the mechanism: the node does not
+know the query's class before it reads it, and it does not read a connection that
+has no permit.
 
 ### What the node logs
 
@@ -235,7 +240,7 @@ nameserver `100.95.0.1` resolved `api.anthropic.com`, `github.com`, `crates.io`
 and `herdr.dev` in 4 to 28 ms each, and a bare TCP connection to the first
 address on port 443 completed in 0 to 1 ms. A nonexistent name under `.invalid`
 failed with `EAI_NONAME` in 5 ms. The guest used musl. We did not measure glibc
-guests, lookups during an upstream outage, a blocked reply seen from a guest, or
+guests end to end through a deployment, lookups during an upstream outage, a blocked reply seen from a guest, or
 behavior under saturation. Tests with scripted upstreams cover those paths on the
 node side.
 

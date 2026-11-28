@@ -3,13 +3,13 @@ title: Letting VM guests resolve public names without making the node an open re
 description: "A VM guest's only nameserver answered mesh names and dropped everything else, so public lookups waited out a five-second timeout. This is how we made the node forward them, and what we refused to build."
 date: 2026-11-28
 author: The Overdrive team
-summary: The node's DNS responder now forwards a guest's public lookups to the host's resolvers. This post covers the failure that motivated it, the designs we rejected (a resolver library, a shared upstream socket, REFUSED replies, a fixed concurrency cap, a boot-time resolver check), the guard that keeps an upstream from pointing a guest into the mesh, and what one run on real hardware does and does not show.
+summary: The node's DNS responder forwards a guest's public lookups to the host's resolvers. This post covers the failure that motivated it, the designs we rejected (a resolver library, a shared upstream socket, REFUSED replies, a fixed concurrency cap, a boot-time resolver check), the guard that keeps an upstream from pointing a guest into the mesh, and what one run on real hardware does and does not show.
 ---
 
 A VM guest in Overdrive has one nameserver, the guest gateway at `100.95.0.1`.
-The node answers there. Until now it answered one kind of question: names of the
-form `payments.svc.overdrive.local`, which resolve to a service in the mesh. It
-silently dropped every other query.
+The node answers there. A guest's resolver could resolve only mesh names, the
+names of the form `payments.svc.overdrive.local` that resolve to a service in the
+mesh. The node silently dropped every other query.
 
 That left a gap you hit within minutes of deploying a real workload. The VM
 reached Running and outbound TCP worked. A `git clone https://github.com/...`
@@ -40,7 +40,9 @@ node.
    name, or forwardable. Comparing labels instead of text means
    `evil-overdrive.local` and mixed-case spellings land in the right bucket.
 2. **Only gateway-addressed queries are forwarded.** The responder binds its UDP
-   socket to every node address. A forwarder that answered anything it received
+   socket to the wildcard address, so it receives datagrams for every node
+   address. If another process already holds the wildcard on port 53, it falls
+   back to a socket on the gateway address alone. A forwarder that answered anything it received
    would turn any node with a reachable address into an open recursive resolver,
    with no foreign software involved. The kernel reports the destination address
    of each datagram. We read the Linux 7.0 source to confirm that for a locally
@@ -125,10 +127,11 @@ The guard has two gaps we state plainly. It does not check AAAA records or
 addresses in the authority and additional sections. That is safe today because
 guests have no global IPv6 transport and stub resolvers ignore those sections. It
 stops being safe when guests get IPv6, which
-[issue #308](https://github.com/overdrive-sh/overdrive/issues/308) tracks. And a
-public name that legitimately resolves into `100.64.0.0/10` shared address space
-falls inside the guest prefix and is blocked. Some carrier-grade NAT and overlay
-networks return such addresses. We accepted that cost.
+[issue #308, IPv6 over the guest transport](https://github.com/overdrive-sh/overdrive/issues/308),
+tracks. And a public answer that falls inside the guest prefix `100.95.0.0/16` is
+blocked even when the upstream returned it legitimately. The rest of the
+`100.64.0.0/10` shared address space, which some carrier-grade NAT and overlay
+networks return, is relayed.
 
 ### A fixed cap on forwards in flight
 
@@ -141,16 +144,16 @@ low, and sheds healthy load, or unrelated to the real limit, which is descriptor
 And a dropped query leaves the guest waiting out its timeout, the symptom we are
 removing.
 
-`overdrive serve` now raises its soft limit on open file descriptors to the hard
+`overdrive serve` raises its soft limit on open file descriptors to the hard
 limit at startup. The number of permits is the soft limit minus a reserve for the
 node's other needs, divided by two, because a TCP forward holds two descriptors.
 A query that finds no permit is shed immediately. A UDP query gets SERVFAIL. A
 TCP connection takes its permit when it is accepted, so a flood of connections
 cannot hold descriptors outside the bound, and a shed connection is closed
 unread. Reading and answering it would cost more on a connection we already
-refused. The cost is that under saturation, TCP connections for mesh names close
-too, because the node does not know a connection's class before it reads the
-query. The node logs the permit count once at startup in the `dns.forward.permits`
+refused. Under saturation, TCP connections for mesh names close too. This follows from
+the mechanism: the node does not know a connection's class before it reads the
+query, and it refuses to read a connection that has no permit. The node logs the permit count once at startup in the `dns.forward.permits`
 event.
 
 ### A boot-time check of the resolver file
@@ -160,37 +163,38 @@ The obvious safeguard is to read it at boot and refuse to start if it is empty o
 unreadable. We read it on every forwarded query instead. A file filled by a DHCP
 lease that arrives after boot would leave a boot-time check stale, and the node
 would forward nowhere until a restart. It would also refuse a node whose only
-fault is a file that is fixed a moment later. A read per query costs
-microseconds, and an absent, empty or unusable file gives SERVFAIL with a named
-cause, and a recovery with no restart.
+fault is a file that is fixed a moment later. We did not measure the cost of
+the per-query read. An absent, empty or unusable file gives SERVFAIL with a named
+cause, and the node recovers with no restart.
 
 The node logs a warning only at the start and end of a failure episode
 (`dns.forward.failed` and `dns.forward.recovered`) and of a shed episode
 (`dns.forward.shed_started` and `dns.forward.shed_cleared`). It does not log per
 query. A blocked reply logs at debug level. The cost is that no CLI command
-reports a degraded upstream. [Issue #386](https://github.com/overdrive-sh/overdrive/issues/386)
+reports a degraded upstream. [Issue #386, node health conditions readable through the operator CLI](https://github.com/overdrive-sh/overdrive/issues/386),
 tracks a node health status, and
-[issue #376](https://github.com/overdrive-sh/overdrive/issues/376) asks whether
-`serve` needs its startup checks on the appliance OS at all.
+[issue #376, whether `serve` needs its startup checks on the appliance OS](https://github.com/overdrive-sh/overdrive/issues/376),
+asks whether those checks are needed at all.
 
 ### In the kernel
 
 We did not evaluate a kernel path for this. DNS in Overdrive already runs in
 userspace in the node's responder, forwarding happens once per lookup rather than
 per packet, and nothing in the failure we set out to fix points at the kernel.
-The change stays in userspace.
+The forwarder stays in userspace.
 
 ## TCP
 
 A guest falls back to TCP when a reply is truncated, and some clients use TCP from
-the start. Before this change the gateway had no TCP listener at all. We tested
-the guest's side first: with no listener, a TCP connect to `100.95.0.1:53` was
+the start. The gateway needs a TCP listener for that. We tested the guest's side first:
+with no listener, a TCP connect to `100.95.0.1:53` was
 reset on the first read in under 4 ms, a fast failure and not a hang. With a
 listener bound to the gateway, a length-framed query got a framed reply.
 
-The responder now binds a TCP listener to the gateway address alone, never the
+The responder binds a TCP listener to the gateway address alone, never the
 wildcard. It takes one query per connection, with five-second read and write
-deadlines, and forwards over TCP.
+deadlines, and forwards over TCP. One query per connection keeps the permit
+accounting simple, because a connection holds its permit for exactly one exchange.
 
 ## What the work shows
 
@@ -230,16 +234,16 @@ forward of every record type. We have not measured these things:
 - behavior under real load, with every permit held.
 - fairness between guests. All guest queries reach the responder from the gateway
   address, so one guest that floods lookups can use every permit and starve
-  others. [Issue #385](https://github.com/overdrive-sh/overdrive/issues/385)
-  tracks per-guest fairness.
+  others. [Issue #385, per-guest fairness for forwarded non-mesh DNS queries](https://github.com/overdrive-sh/overdrive/issues/385),
+  tracks it.
 
 ## What it leaves out
 
-Two limits remain beyond those above. Upstreams come only from the host's resolver
-file. [Issue #384](https://github.com/overdrive-sh/overdrive/issues/384) tracks
-setting them in the node configuration. And the node forwards every non-mesh name
-a guest asks for. [Issue #383](https://github.com/overdrive-sh/overdrive/issues/383)
-tracks a per-workload allowlist.
+Two limits apply beyond those above. Upstreams come only from the host's resolver
+file. [Issue #384, configuring the forwarder's upstream resolvers in the worker node configuration](https://github.com/overdrive-sh/overdrive/issues/384),
+tracks replacing that source. And the node forwards every non-mesh name a guest
+asks for. [Issue #383, a per-workload allowlist for non-mesh DNS lookups](https://github.com/overdrive-sh/overdrive/issues/383),
+tracks an allowlist.
 
 The [guest networking page](/docs/concepts/guest-networking#a-guest-resolves-public-names-through-the-same-gateway-address)
 describes the behavior as it stands.
