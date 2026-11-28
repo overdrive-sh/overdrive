@@ -104,7 +104,6 @@ async fn run_job(node: &Node, id: &str, args: &[&str]) -> (AllocStateWire, Strin
 #[overdrive_test(guest = "cgroup-default", profile = "nested")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
-#[should_panic(expected = "the guest must resolve the public name and connect")]
 async fn a_vm_guest_resolves_a_public_name_through_its_default_resolver_and_connects() {
     let _bound = TeardownBound::arm();
     let peer = RemotePeer::start("gpd-ws", 0).expect("precondition: the remote peer starts");
@@ -143,7 +142,6 @@ async fn a_vm_guest_resolves_a_public_name_through_its_default_resolver_and_conn
 #[overdrive_test(guest = "cgroup-default", profile = "nested")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
-#[should_panic(expected = "every lookup must complete promptly with a definite answer")]
 async fn the_dev_boxs_usual_names_resolve_and_a_nonexistent_name_fails_definitely_and_promptly() {
     let _bound = TeardownBound::arm();
     let node = Node::boot("gpd-names").await;
@@ -181,7 +179,6 @@ async fn the_dev_boxs_usual_names_resolve_and_a_nonexistent_name_fails_definitel
 #[overdrive_test(guest = "cgroup-default", profile = "nested")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[serial(cgroup)]
-#[should_panic(expected = "the guest must get a prompt definite result for an owned-range answer")]
 async fn an_upstream_answer_in_the_mesh_frontend_range_never_reaches_the_guest() {
     let _bound = TeardownBound::arm();
     let node = Node::boot("gpd-owned").await;
