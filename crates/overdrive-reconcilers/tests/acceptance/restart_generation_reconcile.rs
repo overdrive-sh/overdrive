@@ -35,9 +35,11 @@
 //!   (`a_relaunched_crash_restart_is_charged_once_not_twice`);
 //! - a finished Job is never given a new allocation, an operator-stopped Job
 //!   included (`a_restart_never_gives_a_completed_or_failed_job_a_new_allocation`,
-//!   `a_restart_never_gives_an_operator_stopped_job_a_new_allocation`); a Job row
-//!   with only a reason is replaced as on `main`
-//!   (`a_job_row_with_only_a_reason_is_replaced_as_on_main`);
+//!   `a_restart_never_gives_an_operator_stopped_job_a_new_allocation`), whichever
+//!   writer recorded the stop, so the exit observer's terminal-less row too (H3,
+//!   `a_restart_never_gives_an_exit_observer_stopped_job_a_new_allocation`); the same
+//!   row for a Service is replaced
+//!   (`an_exit_observer_stopped_service_is_replaced_by_a_restart`);
 //! - a first placement records the committed generation
 //!   (`a_first_placement_records_the_committed_generation`).
 //!
@@ -105,7 +107,11 @@ enum Class {
     Crashed,
     /// `Terminated`, `Stopped { Operator }` reason and terminal.
     OperatorStopped,
-    /// `Terminated`, `Stopped { Operator }` reason only (no terminal).
+    /// `Terminated`, `Stopped { Operator }` reason only (no terminal): the exit observer's
+    /// row, which stands when both of the stop path's write proposals are rejected under
+    /// contention (the action shim's double rejection in the `StopAllocation` arm of
+    /// `action_shim/mod.rs`, then the exit observer's `terminal: None` write in
+    /// `worker/exit_observer.rs`).
     OperatorStoppedReasonOnly,
     /// `Terminated`, terminal `Completed`.
     Completed,
@@ -632,19 +638,49 @@ proptest! {
         );
     }
 
-    /// A Job row with only a `reason`
-    /// and no terminal is not finished: it is replaced exactly as on `main`, one
+    /// H3: a Job whose newest row that ran is the exit observer's operator-stop row
+    /// (`Terminated`, reason `Stopped { Operator }`, no terminal) is a finished Job. The
+    /// production path that produces the shape: the action shim's `StopAllocation` arm
+    /// proposes the terminal row twice and both proposals are rejected under contention
+    /// (`action_shim/mod.rs`), so the exit observer's row (`terminal: None`,
+    /// `worker/exit_observer.rs`) stands. Driven the way `overdrive workload restart` does:
+    /// the generation is bumped and the stop sentinel is cleared (the reconciler's desired
+    /// state has `desired_to_stop: false`). No `StartAllocation` / `RestartAllocation`, no id
+    /// issued, no View entry gained.
+    #[test]
+    #[should_panic(expected = "an operator-stopped Job row recorded by the exit observer")]
+    fn a_restart_never_gives_an_exit_observer_stopped_job_a_new_allocation(
+        attempts in 0_u32..=RESTART_BACKOFF_CEILING,
+        previous_generation in 0_u64..=2,
+        bumps in 1_u64..=3,
+        ticks in 1_u64..=8,
+    ) {
+        prop_assert_eq!(
+            job_trajectory(
+                Class::OperatorStoppedReasonOnly,
+                attempts,
+                previous_generation,
+                bumps,
+                ticks,
+            ),
+            NO_NEW_ALLOCATION,
+            "an operator-stopped Job row recorded by the exit observer (no terminal) must never \
+             be given a new allocation by a restart"
+        );
+    }
+
+    /// H3 applies to Jobs only: the same row for a Service is replaced by a restart, one
     /// uncharged replacement serving the generation.
     #[test]
-    fn a_job_row_with_only_a_reason_is_replaced_as_on_main(
+    fn an_exit_observer_stopped_service_is_replaced_by_a_restart(
         attempts in 0_u32..=RESTART_BACKOFF_CEILING,
         previous_generation in 0_u64..=2,
         bumps in 1_u64..=3,
     ) {
         let generation = previous_generation + bumps;
-        let rows = [row(0, WorkloadKind::Job, Class::OperatorStoppedReasonOnly)];
+        let rows = [row(0, WorkloadKind::Service, Class::OperatorStoppedReasonOnly)];
         let initial = predecessor_view(attempts, previous_generation, false);
-        let evaluation = evaluate(WorkloadKind::Job, &rows, &initial, generation, 100);
+        let evaluation = evaluate(WorkloadKind::Service, &rows, &initial, generation, 100);
         prop_assert_eq!(
             (
                 evaluation.issued(),
@@ -652,7 +688,8 @@ proptest! {
                 evaluation.view.restart_counts.get(&aid(1)).copied(),
             ),
             (vec![aid(1)], Some(generation), Some(attempts)),
-            "a Job row with only a reason must be replaced once, uncharged, for the generation"
+            "an operator-stopped Service row with no terminal must be replaced once, uncharged, \
+             for the generation"
         );
     }
 }

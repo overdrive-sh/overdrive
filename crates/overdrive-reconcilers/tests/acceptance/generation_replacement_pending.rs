@@ -10,7 +10,9 @@
 //! generation, so a generation whose successor was abandoned is still pending, and with no row
 //! that ran nothing is pending. Oracle: the function's boolean result against an independent
 //! restatement of the contract ("true iff the newest row that ran exists, is not a finished Job
-//! row, and `view.issued_generation[row]` (absent reads 0) is below the generation"), and
+//! row (a Job row with a terminal, or an operator-stopped Job row: `Terminated` with
+//! `Stopped { by: Operator }` as its terminal or its reason, H3), and
+//! `view.issued_generation[row]` (absent reads 0) is below the generation"), and
 //! against the action shim's own fence, `allocation_attempt_transition(..) == Apply`, over the
 //! same generated rows (abandoned rows included). Tier: Tier 1, default lane (pure, no I/O).
 //!
@@ -45,8 +47,8 @@ const WORKLOAD: &str = "payments";
 
 /// The assertion the properties name when the function does not return the contract's answer.
 const CONTRACT: &str = "generation_replacement_pending must be true iff the newest row that ran exists, \
-     is not a finished Job row, and its issued_generation entry (absent reads 0) is below the \
-     desired generation";
+     is not a finished Job row (a terminal, or an operator stop recorded by either writer), and \
+     its issued_generation entry (absent reads 0) is below the desired generation";
 
 fn aid(suffix: &str) -> AllocationId {
     AllocationId::new(&format!("alloc-{WORKLOAD}-{suffix}")).expect("valid allocation id")
@@ -229,13 +231,50 @@ fn an_operator_stopped_job_with_a_terminal_is_never_pending() {
     assert!(!pending(&rows, &view_with(&[("0", 0)]), 4), "an operator-stopped Job: not pending");
 }
 
-/// A Job row that carries only a `reason` and no terminal is replaced exactly
-/// as on `main`: pending below the generation.
+/// A Job row that carries a crash `reason` and no terminal is not finished: it is
+/// pending below the generation.
 #[test]
-fn a_job_row_without_a_terminal_is_pending_below_the_generation() {
-    let mut job = row("0", WorkloadKind::Job, AllocState::Terminated, None);
-    job.reason = Some(TransitionReason::Stopped { by: StoppedBy::Operator });
-    assert!(pending(&[job], &view_with(&[("0", 0)]), 4), "a Job row with no terminal is replaced");
+fn a_job_row_with_a_crash_reason_and_no_terminal_is_pending_below_the_generation() {
+    let job = row("0", WorkloadKind::Job, AllocState::Terminated, None);
+    assert!(
+        pending(&[job], &view_with(&[("0", 0)]), 4),
+        "a Job row with a crash reason and no terminal is replaced"
+    );
+}
+
+/// The exit observer's operator-stop row shape: `Terminated`, reason `Stopped { by: Operator }`,
+/// `terminal: None` (`exit_observer.rs` writes `terminal: None` outside a reconciler tick). It
+/// stands when both of the stop path's write proposals are rejected under contention (the shim's
+/// double rejection in `action_shim/mod.rs`'s `StopAllocation` arm, then the exit observer's
+/// row wins).
+fn exit_observer_operator_stopped(suffix: &str, kind: WorkloadKind) -> AllocStatusRow {
+    let mut stopped = row(suffix, kind, AllocState::Terminated, None);
+    stopped.reason = Some(TransitionReason::Stopped { by: StoppedBy::Operator });
+    stopped
+}
+
+/// H3: an operator-stopped Job row is finished whichever writer recorded the stop. The
+/// exit-observer shape (no terminal) is not pending below the generation: a later
+/// `overdrive workload restart` gives that Job no new allocation.
+#[test]
+#[should_panic(expected = "an operator-stopped Job row with no terminal is finished: not pending")]
+fn an_operator_stopped_job_row_without_a_terminal_is_not_pending_below_the_generation() {
+    let job = exit_observer_operator_stopped("0", WorkloadKind::Job);
+    assert!(
+        !pending(&[job], &view_with(&[("0", 0)]), 4),
+        "an operator-stopped Job row with no terminal is finished: not pending"
+    );
+}
+
+/// H3 applies to Jobs only: the same exit-observer row for a Service is still pending below the
+/// generation, so a restart replaces it.
+#[test]
+fn an_operator_stopped_service_row_without_a_terminal_is_pending_below_the_generation() {
+    let service = exit_observer_operator_stopped("0", WorkloadKind::Service);
+    assert!(
+        pending(&[service], &view_with(&[("0", 0)]), 4),
+        "an operator-stopped Service row with no terminal is replaced by a restart"
+    );
 }
 
 /// The exception is the Job kind only: a Service row carrying a terminal
@@ -326,6 +365,9 @@ struct GeneratedRow {
     /// `Some` is a launch that ended before it ran (ADR-0355): the row is `Terminated` with the
     /// given abandon reason and no terminal, whatever `state` and `terminal` say.
     abandon: Option<TransitionReason>,
+    /// The row's `reason` is `Stopped { by: Operator }` (the exit-observer writer's stop shape
+    /// when `terminal` is `None`). Ignored for an abandoned row.
+    operator_reason: bool,
 }
 
 fn kind_strategy() -> impl Strategy<Value = WorkloadKind> {
@@ -360,6 +402,17 @@ fn terminal_strategy() -> impl Strategy<Value = Option<TerminalCondition>> {
     ]
 }
 
+/// A row's `(state, terminal, operator_reason)`: half the rows are drawn freely, half are the
+/// exit observer's operator-stop shape (`Terminated`, no terminal, reason `Stopped { Operator }`,
+/// H3), so a chain whose newest row that ran is that shape is generated in practice, not by luck.
+fn state_terminal_reason_strategy()
+-> impl Strategy<Value = (AllocState, Option<TerminalCondition>, bool)> {
+    prop_oneof![
+        1 => (state_strategy(), terminal_strategy(), prop::bool::weighted(0.2)),
+        1 => Just((AllocState::Terminated, None, true)),
+    ]
+}
+
 /// Entries and the desired generation share the range `0..=4`, so equality,
 /// below and above are all generated. About two rows in five are abandoned launches of either
 /// reason, so chains whose newest row ran nothing, and chains of none that ran, are generated.
@@ -368,8 +421,7 @@ fn rows_strategy() -> impl Strategy<Value = Vec<GeneratedRow>> {
         0_u32..=12,
         (
             kind_strategy(),
-            state_strategy(),
-            terminal_strategy(),
+            state_terminal_reason_strategy(),
             prop::option::of(0_u64..=4),
             abandon_strategy(),
         ),
@@ -377,13 +429,8 @@ fn rows_strategy() -> impl Strategy<Value = Vec<GeneratedRow>> {
     )
     .prop_map(|rows| {
         rows.into_iter()
-            .map(|(suffix, (kind, state, terminal, entry, abandon))| GeneratedRow {
-                suffix,
-                kind,
-                state,
-                terminal,
-                entry,
-                abandon,
+            .map(|(suffix, (kind, (state, terminal, operator_reason), entry, abandon))| {
+                GeneratedRow { suffix, kind, state, terminal, entry, abandon, operator_reason }
             })
             .collect()
     })
@@ -398,29 +445,50 @@ fn materialise(generated: &[GeneratedRow]) -> (Vec<AllocStatusRow>, WorkloadLife
             view.issued_generation.insert(aid(&suffix), entry);
         }
         rows.push(g.abandon.as_ref().map_or_else(
-            || row(&suffix, g.kind, g.state, g.terminal.clone()),
+            || {
+                let mut ran = row(&suffix, g.kind, g.state, g.terminal.clone());
+                if g.operator_reason {
+                    ran.reason = Some(TransitionReason::Stopped { by: StoppedBy::Operator });
+                }
+                ran
+            },
             |reason| abandoned_row(&suffix, g.kind, reason.clone()),
         ));
     }
     (rows, view)
 }
 
-/// The contract restated independently: the highest numeric suffix among the launches that ran
-/// (an abandoned launch is skipped) is the row the generation is read from.
+/// The row the generation is read from, restated independently: the highest numeric suffix among
+/// the launches that ran (an abandoned launch is skipped).
+fn ran_generated(generated: &[GeneratedRow]) -> Option<&GeneratedRow> {
+    generated.iter().filter(|g| g.abandon.is_none()).max_by_key(|g| g.suffix)
+}
+
+/// A finished Job row, restated independently (H3): a Job with a terminal, or an operator-stopped
+/// Job (`Terminated` with `Stopped { by: Operator }` as its reason, the exit-observer shape that
+/// carries no terminal).
+fn finished_job(g: &GeneratedRow) -> bool {
+    g.kind == WorkloadKind::Job
+        && (g.terminal.is_some() || (g.state == AllocState::Terminated && g.operator_reason))
+}
+
+/// The contract restated independently.
 fn expected(generated: &[GeneratedRow], generation: u64) -> bool {
-    let Some(ran) = generated.iter().filter(|g| g.abandon.is_none()).max_by_key(|g| g.suffix)
-    else {
+    let Some(ran) = ran_generated(generated) else {
         return false;
     };
-    let finished_job = ran.kind == WorkloadKind::Job && ran.terminal.is_some();
-    !finished_job && ran.entry.unwrap_or(0) < generation
+    !finished_job(ran) && ran.entry.unwrap_or(0) < generation
 }
 
 proptest! {
+    #![proptest_config(ProptestConfig::with_cases(1024))]
+
     /// For every generated `(rows, view, generation)` the function equals the
-    /// contract. Kills: the `<`, the finished-Job exception, the absent-reads-0
+    /// contract. Kills: the `<`, the finished-Job exception (both its terminal and its
+    /// operator-stop arm, H3), the absent-reads-0
     /// default, the selection of the newest row that ran (abandoned launches skipped).
     #[test]
+    #[should_panic(expected = "an operator stop recorded by either writer")]
     fn pending_is_true_iff_the_newest_row_that_ran_is_below_the_generation_and_not_a_finished_job(
         generated in rows_strategy(),
         generation in 0_u64..=4,
@@ -435,8 +503,11 @@ proptest! {
     /// generation is pending exactly when the newest row that ran has an entry below it
     /// AND `allocation_attempt_transition` would `Apply` (not `NoChange`). A
     /// finished-Job row is never pending, and the shim's late-event fence and the
-    /// reconciler's predicate cannot disagree on it.
+    /// reconciler's predicate cannot disagree on it. The shim's verdict is also checked against the
+    /// independent restatement of a finished Job row, so a terminal-less operator-stopped Job row
+    /// (H3) must be `NoChange` at the shim, not only agree with the predicate.
     #[test]
+    #[should_panic(expected = "the shim's fence must report NoChange for a finished Job row")]
     fn pending_agrees_with_the_shims_finished_job_fence(
         generated in rows_strategy(),
         generation in 0_u64..=4,
@@ -445,6 +516,23 @@ proptest! {
         let refs: Vec<&AllocStatusRow> = rows.iter().collect();
         let ran = last_ran_alloc(&refs);
         let got = pending(&rows, &view, generation);
+        if let (Some(row), Some(generated_ran)) = (ran, ran_generated(&generated)) {
+            let verdicts_no_change = [
+                AllocationAttemptEvent::Ready,
+                AllocationAttemptEvent::Dispatch,
+                AllocationAttemptEvent::Finalize,
+            ]
+            .into_iter()
+            .all(|event| {
+                allocation_attempt_transition(row, event) == AllocationAttemptTransition::NoChange
+            });
+            prop_assert_eq!(
+                verdicts_no_change,
+                finished_job(generated_ran),
+                "the shim's fence must report NoChange for a finished Job row (a terminal, or an \
+                 operator stop recorded by either writer) and Apply otherwise"
+            );
+        }
         let want = ran.is_some_and(|row| {
             let below = view.issued_generation.get(&row.alloc_id).copied().unwrap_or(0) < generation;
             let applies = [
