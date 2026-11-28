@@ -20,8 +20,10 @@
 //! Classification. The count scenarios, the generation-replacement relaunch, the Job scenario,
 //! the `last_ran_alloc` units, the backend-membership guard and the deletion-equivalence
 //! property pass against the reconciler. The pending-generation agreement clause is a separate
-//! property still PENDING (proven RED, `#[should_panic]` on the assertion in its own body): its
-//! function is a scaffold that panics until the generation rule is implemented.
+//! property and its stamp-on-emit example (an operator-stopped basis followed by an abandoned
+//! replacement issued under the committed generation) still PENDING (proven RED,
+//! `#[should_panic]` on the assertion in their own bodies): the function is a scaffold that
+//! panics until the generation rule is implemented.
 //!
 //! Mutation targets (`workload_lifecycle.rs`): the `!is_launch_abandoned` filter of
 //! `last_ran_alloc` (`last_ran_skips_abandoned_rows...`), every read of the count basis at the
@@ -892,6 +894,37 @@ fn arb_agreement_chain() -> impl Strategy<Value = Vec<AgreementLaunch>> {
         ),
         1..=6,
     )
+}
+
+/// The stamp-on-emit case the main deletion-equivalence property keeps out of its chains: an
+/// operator-stopped basis followed by an abandoned replacement issued under the committed
+/// generation itself. The old rule stamps the abandoned launch's entry on emit and reads the
+/// generation as handled; the abandoned row ran nothing, so the stopped basis (issued under an
+/// earlier generation) is still the row the generation is read from and it is pending. The same
+/// holds when the chain has the abandoned row deleted.
+#[test]
+#[should_panic(
+    expected = "generation_replacement_pending must read the generation from the newest row that ran"
+)]
+fn an_abandoned_replacement_issued_under_the_committed_generation_leaves_a_stopped_basis_pending() {
+    for why in Abandon::BOTH {
+        let full = [
+            ran(0, WorkloadKind::Service, Class::OperatorStopped),
+            abandoned(1, WorkloadKind::Service, why),
+        ];
+        let deleted = [full[0].clone()];
+        let mut view = WorkloadLifecycleView::default();
+        view.issued_generation.insert(aid(0), 1);
+        view.issued_generation.insert(aid(1), 2);
+        let over_full = pending_verdict(&view, 2, last_ran_alloc(&refs(&full)));
+        let over_deleted = pending_verdict(&view, 2, current_alloc(&refs(&deleted)));
+        assert!(
+            over_full && over_deleted,
+            "{AGREEMENT}: the stopped basis (entry 1) is below generation 2 although the abandoned \
+             replacement carries entry 2 ({why:?}); over the full chain {over_full}, over the chain \
+             without the abandoned row {over_deleted}"
+        );
+    }
 }
 
 proptest! {
