@@ -1,6 +1,6 @@
 # E17 — a VM guest resolves the herdr dev box's public names through its default resolver, and a nonexistent name fails promptly and definitely
 
-**Surface:** E (end-to-end through a real deployment) · **KPI:** K-GPD-1, K-GPD-2 (feature delta) · **Status:** `pending` (claim authored in DISTILL; not captured)
+**Surface:** E (end-to-end through a real deployment) · **KPI:** K-GPD-1, K-GPD-2 (feature delta) · **Status:** `pending` (captured 2026-11-28; review by a different agent due)
 
 <!-- Status rationale: authored 2026-11-27 before any implementation evidence exists. Do not set `satisfied` from the authoring or implementing agent; a different reviewer judges the captured evidence. -->
 
