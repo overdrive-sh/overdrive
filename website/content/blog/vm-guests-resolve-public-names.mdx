@@ -109,13 +109,13 @@ not block all private addresses, which would break split-horizon DNS.
 
 We considered four replies for a hit:
 
-- **REFUSED** says "policy," but no resolver we surveyed does it, and a stub
+- **REFUSED** says "policy," but neither dnsmasq nor Unbound returns it, and a stub
   resolver treats REFUSED as a server fault. It may try another nameserver or
   fail with a different error.
 - **NXDOMAIN** lies about whether the name exists.
 - **SERVFAIL** looks the same as an outage.
 - **Dropping only the offending records**, as Unbound does, mutates the reply and
-  breaks DNSSEC signatures. It also leaves an upstream that just returned an
+  breaks DNSSEC signatures. It also leaves an upstream that returned an
   owned address partly trusted.
 
 We chose the shape dnsmasq uses. The node empties the answer, authority and
@@ -126,7 +126,7 @@ blocked whole. The guest sees a name with no addresses and a reason it can read.
 The guard has two gaps we state plainly. It does not check AAAA records or
 addresses in the authority and additional sections. That is safe today because
 guests have no global IPv6 transport and stub resolvers ignore those sections. It
-stops being safe when guests get IPv6, which
+is not safe once guests have IPv6, which
 [issue #308, IPv6 over the guest transport](https://github.com/overdrive-sh/overdrive/issues/308),
 tracks. And a public answer that falls inside the guest prefix `100.95.0.0/16` is
 blocked even when the upstream returned it legitimately. The rest of the
@@ -218,8 +218,8 @@ the result did not match our claim. The guest printed `EAI_OTHER` instead of
 answer NOERROR with no records for a nonexistent `example.com` subdomain, the
 forwarder relays that unchanged, and the guest's resolver reports it as no data.
 The forwarder was correct. Our claim named the wrong name. We re-ran with a name
-under `.invalid`, which the upstreams answer with NXDOMAIN, and kept both runs
-on record.
+under `.invalid`, which the upstreams answer with NXDOMAIN, and report both runs
+here.
 
 That is one run on one server, with a musl guest. It shows that the path works end
 to end with default guest configuration. It does not show a latency distribution.
@@ -246,4 +246,4 @@ asks for. [Issue #383, a per-workload allowlist for non-mesh DNS lookups](https:
 tracks an allowlist.
 
 The [guest networking page](/docs/concepts/guest-networking#a-guest-resolves-public-names-through-the-same-gateway-address)
-describes the behavior as it stands.
+describes the behavior and its limits.
