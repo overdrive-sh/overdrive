@@ -148,12 +148,13 @@ removing.
 limit at startup. The number of permits is the soft limit minus a reserve for the
 node's other needs, divided by two, because a TCP forward holds two descriptors.
 A query that finds no permit is shed immediately. A UDP query gets SERVFAIL. A
-TCP connection takes its permit when it is accepted, so a flood of connections
-cannot hold descriptors outside the bound, and a shed connection is closed
-unread. Reading and answering it would cost more on a connection we already
-refused. Under saturation, TCP connections for mesh names close too. This follows from
-the mechanism: the node does not know a connection's class before it reads the
-query, and it refuses to read a connection that has no permit. The node logs the permit count once at startup in the `dns.forward.permits`
+TCP connection takes its permit when it is accepted and holds it until the
+connection closes, so a flood of connections cannot hold descriptors outside the
+bound, and a shed connection is closed unread. Reading and answering it would
+cost more on a connection we already refused. Under saturation, TCP connections
+for mesh names close too. This follows from the mechanism: the node does not know
+the class of a connection's queries at accept, and it refuses to read a
+connection that has no permit. The node logs the permit count once at startup in the `dns.forward.permits`
 event.
 
 ### A boot-time check of the resolver file
@@ -192,9 +193,39 @@ reset on the first read in under 4 ms, a fast failure and not a hang. With a
 listener bound to the gateway, a length-framed query got a framed reply.
 
 The responder binds a TCP listener to the gateway address alone, never the
-wildcard. It takes one query per connection, with five-second read and write
-deadlines, and forwards over TCP. One query per connection keeps the permit
-accounting simple, because a connection holds its permit for exactly one exchange.
+wildcard. It serves framed queries on a connection one after another, replies in
+order, and closes when the client closes. One forward permit is taken when the
+connection is accepted and held for the connection's life. A five-second read
+deadline bounds each wait for the next query and a five-second write deadline
+bounds each reply. A malformed frame, a short read or an expired deadline closes
+the connection. A forwarded query goes to the upstream over TCP.
+
+### Why one query per connection failed
+
+We first chose one query per connection. It kept the permit accounting simple,
+because a connection held its permit for exactly one exchange, and we expected
+stub resolvers to need nothing more. We had not measured a glibc client over TCP.
+
+When we did, the choice failed. On a physical x86_64 server under Linux 7.0.0-38,
+glibc 2.43 wrote its A and AAAA queries back to back in one `writev` on one
+connection and waited for two replies. This happens when TCP is configured with
+`options use-vc`, and after a truncated UDP reply. The listener answered the A
+query and closed. `getent ahosts` then exited with status 2 and printed nothing.
+The whole name failed to resolve in 16 to 25 ms. A client with no global IPv6
+address sends only the A query, because glibc skips AAAA when the host has no
+address to use it on, and that case worked. musl opens one connection per query
+and worked against both designs.
+
+We changed the listener to the loop described above. The cost is that an idle
+client holds its permit for up to the five-second read deadline after each reply.
+We set no per-connection query cap, because the permit count and the deadlines
+already bound a connection. We re-ran the same probe against the fix. glibc's
+`use-vc` lookup, `options use-vc` in the resolver file, `use-vc single-request`
+and the truncation fallback all exited 0, 21 of 21 timed cases on a guest with a
+global IPv6 address. The wire showed one connection carrying both queries and
+both replies, with the client closing first. The musl client still resolved.
+In the IPv4-only run, three `getent ahostsv6` cases exited 2 because the guest has
+no IPv6 address, as they did before the change.
 
 ## What the work shows
 
@@ -232,6 +263,9 @@ forward of every record type. We have not measured these things:
 - the guest-observed time of a lookup during an upstream outage or after a
   blocked reply, under either glibc or musl.
 - behavior under real load, with every permit held.
+- the behavior of Go's pure-Go resolver and systemd-resolved-style stubs over
+  TCP, more than two queries on one connection, and replies that arrive out of
+  order. Our re-run used glibc, musl and a scripted upstream.
 - fairness between guests. All guest queries reach the responder from the gateway
   address, so one guest that floods lookups can use every permit and starve
   others. [Issue #385, per-guest fairness for forwarded non-mesh DNS queries](https://github.com/overdrive-sh/overdrive/issues/385),

@@ -199,11 +199,20 @@ overlay networks return, is relayed.
 ### TCP
 
 A guest retries over TCP when a reply is truncated, and some clients use TCP
-from the start. The node accepts one query per connection on `100.95.0.1:53`,
-reads it under a five-second deadline, answers or forwards it exactly as it does
-over UDP, writes the reply under a five-second deadline, and closes the
-connection. One query per connection means a connection holds its permit for
-exactly one exchange. A forwarded TCP query goes to the upstream over TCP.
+from the start. glibc, for example, writes its A and AAAA queries back to back
+on one connection and waits for two replies. The node serves every framed query
+on a connection in order on `100.95.0.1:53`, answers or forwards each one exactly
+as it does over UDP, and writes the replies in query order. It closes the
+connection when the client closes it.
+
+A connection takes one forward permit when the node accepts it and holds that
+permit until the connection closes. A five-second read deadline bounds each wait
+for the next query, and a five-second write deadline bounds each reply. A
+malformed frame, a short read or an expired deadline closes the connection. An
+idle client therefore holds its permit for up to five seconds after its last
+reply. The node sets no cap on the number of queries per connection. The permit
+count and the deadlines bound a connection. A forwarded TCP query goes to the
+upstream over TCP.
 
 ### Concurrent forwards are bounded
 
@@ -213,10 +222,11 @@ the soft limit minus a reserve for the node's other needs, divided by two, since
 a TCP forward uses two descriptors. The node reports the permit count once at
 startup in the `dns.forward.permits` event.
 
-A query that finds no permit is shed at once. A UDP query gets SERVFAIL, and a
-TCP connection is closed unread. Under shedding, a TCP connection of any kind is
-closed, mesh names included. This follows from the mechanism: the node does not
-know the query's class before it reads it, and it does not read a connection that
+A query that finds no permit is shed at once. A UDP query gets SERVFAIL. A TCP
+connection takes its permit when the node accepts it, and a connection that finds
+none is closed unread. Under shedding, a TCP connection of any kind is closed,
+mesh names included. This follows from the mechanism: the node does not know the
+class of a connection's queries at accept, and it does not read a connection that
 has no permit.
 
 ### What the node logs
