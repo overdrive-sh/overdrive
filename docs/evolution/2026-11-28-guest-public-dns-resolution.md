@@ -17,16 +17,16 @@ The herdr dev box, an ordinary VM workload, could not resolve any public name th
 
 Decisions GPD-1 to GPD-8 were approved by the user on 2026-11-25 and are recorded in ADR-0356 to ADR-0363 in `docs/product/architecture/`. The architecture brief carries the addendum.
 
-| Decision | Outcome | ADR |
-|---|---|---|
-| GPD-1 | The responder forwards gateway-addressed non-mesh queries to the host resolvers | 0356 |
-| GPD-2 | Upstreams are read from the host resolver file on each forwarded query | 0358 |
-| GPD-3 | A forwarded reply carrying an Overdrive-owned address is emptied whole and marked blocked | 0359 |
-| GPD-4 | The responder also serves TCP/53 bound to the guest gateway | 0360 |
-| GPD-5 | Every non-mesh record type, EDNS option and DNSSEC bit passes through the forwarder unchanged | 0361 |
-| GPD-6 | In-flight forwards are bounded by the descriptor limit and the excess is shed at once | 0362 |
-| GPD-7 | `overdrive serve` raises its soft descriptor limit once at the binary entry and injects the read-back value | 0363 |
-| GPD-8 | Remaining decisions as recorded in the feature delta; ADR-0357 holds the neighbouring decision | 0357 |
+| ADR | Decision | 
+|---|---|
+| 0356 | The responder forwards gateway-addressed non-mesh queries to the host resolvers |
+| 0357 | `overdrive.local` is a platform zone answered by the node and never forwarded |
+| 0358 | Upstreams are read from the host resolver file on each forwarded query |
+| 0359 | A forwarded reply carrying an Overdrive-owned address is emptied whole and marked blocked |
+| 0360 | The responder also serves TCP/53 bound to the guest gateway |
+| 0361 | Every non-mesh record type, EDNS option and DNSSEC bit passes through unchanged |
+| 0362 | In-flight forwards are bounded by the descriptor limit and the excess is shed at once |
+| 0363 | `overdrive serve` raises its soft descriptor limit once at the binary entry and injects the read-back value |
 
 The ADR-0360 amendment of 2026-11-28 (D1 to D5, user-approved) is described under "Defect found during finalization".
 
