@@ -291,7 +291,9 @@ A workload reaches another service by hostname through
 [service names](/docs/concepts/service-names). A node-local DNS responder answers
 `<name>.svc.overdrive.local` with a stable frontend address while the service has
 a healthy backend. Names do not use the Service VIP and XDP path. The node
-agent's mTLS enforcement handles the connection to that frontend address.
+agent's mTLS enforcement handles the connection to that frontend address. The
+same responder forwards a VM guest's queries for other names to the host's
+resolvers, as [guest networking](/docs/concepts/guest-networking) describes.
 
 The [public ingress gateway](/docs/concepts/public-ingress-gateway) serves
 external HTTP/1.1 traffic and reads certificates from files you supply. Issue

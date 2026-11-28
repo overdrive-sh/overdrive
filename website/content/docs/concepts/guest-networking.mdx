@@ -131,13 +131,145 @@ Node listeners support fixed or kernel-assigned ports through `ServerConfig`.
 [TOML loading for those ports](https://github.com/overdrive-sh/overdrive/issues/327)
 is unbuilt; there is no documented operator TOML key for them.
 
+## A guest resolves public names through the same gateway address
+
+A guest keeps one nameserver, the guest gateway `100.95.0.1`. The node's DNS
+responder listens on that address over UDP and TCP port 53 and sorts every query
+by name:
+
+- **Mesh names.** A name of the form `<workload>.svc.overdrive.local` is answered
+  by the node from its list of healthy services, as described in
+  [service names](/docs/concepts/service-names). It never goes to an upstream
+  resolver.
+- **Other names under `overdrive.local`.** The node owns the whole zone. An
+  unknown name in it gets NXDOMAIN and is never forwarded.
+- **Every other name.** The node forwards the query to the host's resolvers and
+  relays the reply.
+
+The node forwards only queries addressed to the gateway. The responder's UDP
+socket is bound to every node address, so it also receives datagrams sent to the
+node's other addresses. It drops a non-mesh query that arrives that way, which
+keeps the node from acting as an open resolver. The TCP listener binds the
+gateway address alone.
+
+### Which upstreams the node asks
+
+The node reads the `nameserver` lines of the host's `/etc/resolv.conf` on every
+forwarded query. A change to the file, including one made by DHCP after boot,
+takes effect on the next query with no restart. Entries that name the gateway are
+skipped, because forwarding to the gateway would loop. The node does not cache
+answers.
+
+It asks the upstreams in file order. Each attempt waits at most 1500 ms, and the
+whole forward stops at 4000 ms. The first reply the node can decode is final,
+whatever its response code, so an upstream that answers NXDOMAIN does not trigger
+a second attempt. An undecodable reply counts as a failed attempt. When no upstream answers, or the file is absent, unreadable or
+lists no usable nameserver, the guest receives SERVFAIL. That reply arrives well
+inside the guest resolver's five-second timeout, and the guest sees a failed
+lookup instead of a silent wait. Mesh answers over UDP do not depend on the
+upstreams.
+
+### The reply is relayed unchanged
+
+The node sends the guest's query bytes upstream as they are and returns the
+upstream's reply byte for byte. Every record type passes through, including AAAA,
+HTTPS and SVCB. So do EDNS options and the DNSSEC bits, which means a guest that
+validates DNSSEC itself still can.
+
+One check applies to the answer section. If an A record, or the `ipv4hint` of an
+HTTPS or SVCB record, falls inside an address range Overdrive owns, the node
+does not relay the reply. A guest that connected to such an address would reach
+the mesh instead of the name it asked for. The owned ranges are the mesh frontend
+range `10.98.0.0/16`, the service VIP pool, and the guest prefix `100.95.0.0/16`.
+The node returns the reply with its answer, authority and additional sections
+emptied, keeps the upstream's response code, and adds an Extended DNS Error with
+code 15, "Blocked", when the query carried EDNS. The guest sees a name with no
+addresses. Private addresses outside those ranges, such as a corporate
+`10.20.4.7`, pass through, so split-horizon DNS works.
+
+The check does not cover AAAA records or addresses in the authority and
+additional sections. Guests have no global IPv6 transport, and stub resolvers
+ignore those sections. A public name that legitimately resolves into
+`100.64.0.0/10` shared address space, as some carrier-grade NAT and overlay
+networks return, falls inside the guest prefix and is blocked.
+
+### TCP
+
+A guest retries over TCP when a reply is truncated, and some clients use TCP
+from the start. The node accepts one query per connection on `100.95.0.1:53`,
+reads it under a five-second deadline, answers or forwards it exactly as it does
+over UDP, writes the reply under a five-second deadline, and closes the
+connection. A forwarded TCP query goes to the upstream over TCP.
+
+### Concurrent forwards are bounded
+
+Each forward in flight holds a permit. `overdrive serve` raises its soft limit on
+open file descriptors to the hard limit at startup, and the number of permits is
+the soft limit minus a reserve for the node's other needs, divided by two, since
+a TCP forward uses two descriptors. The node reports the permit count once at
+startup in the `dns.forward.permits` event.
+
+A query that finds no permit is shed at once. A UDP query gets SERVFAIL, and a
+TCP connection is closed unread. Under shedding, a TCP connection of any kind is
+closed, mesh names included, because the node does not know the query's class
+before it reads it.
+
+### What the node logs
+
+The node logs a warning only at the edges of an episode, so a long outage does not
+write a line per query:
+
+| Event | Level | Meaning |
+|---|---|---|
+| `dns.forward.failed` | warn | A forward failed and no failure episode was open. The event names the cause, such as an absent resolver file or silent upstreams. Later failures in the same episode log nothing. |
+| `dns.forward.recovered` | warn | An upstream answered at least 4000 ms after the last failure, which ends the episode. |
+| `dns.forward.shed_started` | warn | The permits ran out and the node began shedding queries. |
+| `dns.forward.shed_cleared` | warn | Load drained to half the permits. |
+| `dns.forward.owned_range_blocked` | debug | A reply was blocked. The event names the query, address, range and upstream. |
+
+### What we measured
+
+We ran one deployment on a physical x86_64 server (Linux 7.0.0-38) with
+`overdrive serve` and `overdrive deploy`. A VM guest with its default single
+nameserver `100.95.0.1` resolved `api.anthropic.com`, `github.com`, `crates.io`
+and `herdr.dev` in 4 to 28 ms each, and a bare TCP connection to the first
+address on port 443 completed in 0 to 1 ms. A nonexistent name under `.invalid`
+failed with `EAI_NONAME` in 5 ms. The guest used musl. We did not measure glibc
+guests, lookups during an upstream outage, a blocked reply seen from a guest, or
+behavior under saturation. Tests with scripted upstreams cover those paths on the
+node side.
+
+### Limits of guest DNS
+
+- **Upstreams come only from the host's resolver file.** The node configuration
+  has no setting for them. Issue
+  [#384: configure the DNS forwarder's upstream resolvers in the worker node configuration](https://github.com/overdrive-sh/overdrive/issues/384)
+  tracks lifting this.
+- **No per-guest fairness.** Every guest query reaches the responder from the
+  gateway address, so one guest that floods lookups can use all the permits and
+  starve other guests' public lookups. Mesh answers over UDP are unaffected.
+  Issue [#385: per-guest fairness for forwarded non-mesh DNS queries](https://github.com/overdrive-sh/overdrive/issues/385)
+  tracks this.
+- **No allowlist.** The node forwards every non-mesh name a guest asks for. Issue
+  [#383: a per-workload allowlist for non-mesh DNS lookups](https://github.com/overdrive-sh/overdrive/issues/383)
+  tracks this.
+- **No health status for upstream failure.** A failing upstream appears in the
+  node's log and as SERVFAIL in guests. No CLI command reports it. Issue
+  [#386: node health conditions readable through the operator CLI](https://github.com/overdrive-sh/overdrive/issues/386)
+  tracks this.
+- **AAAA answers are not checked against owned ranges.** Guests have no IPv6
+  transport. Issue
+  [#308: IPv6 over the guest transport](https://github.com/overdrive-sh/overdrive/issues/308)
+  tracks it, and the check has to extend to AAAA when it lands.
+
 ## Supported traffic and current limits
 
 - **TCP and mesh identity.** Guest flows reach host resolution and mTLS
   enforcement; incoming mesh streams can be delivered to guest applications.
   VM services declare listeners and use the service health lifecycle.
-- **DNS and remote UDP.** Guest DNS and connected or unconnected remote UDP
-  preserve datagram boundaries, including empty datagrams.
+- **DNS and remote UDP.** Guest DNS resolves mesh and public names through the
+  gateway, as described above. Connected and unconnected remote UDP preserve
+  datagram boundaries, including empty datagrams.
 - **Service-VIP UDP to a VM backend is unbuilt.** The guest-flow owner refuses a
   datagram addressed to a Service VIP with a policy error before it creates a host
   socket, so the datagram never reaches the host network. Issue

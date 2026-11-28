@@ -76,7 +76,13 @@ call do underneath. Each workload is handed a DNS setting that points its name
 lookups at the node agent. The agent runs a small **responder** that answers those
 lookups for mesh names ending in `.svc.overdrive.local`. Without it, the lookup
 goes nowhere and the connection fails before it starts. The responder is the thing
-that answers. It answers with IPv4 addresses only.
+that answers. It answers mesh names with IPv4 addresses only.
+
+The responder owns the whole `overdrive.local` zone. An unknown name in it gets
+"no such name" and is never sent to an upstream resolver. A VM guest's lookups for
+names outside the zone, such as `github.com`, are forwarded to the host's
+resolvers. [Guest networking](/docs/concepts/guest-networking) describes that
+path and its limits.
 
 The responder and the [encryption layer](/docs/concepts/transparent-mtls) read the
 same live list of running services. So a name resolves to a service that is
@@ -148,8 +154,8 @@ connections they set up:
   per call. The address is reserved through outages. It is released when the
   service is deleted, and because Overdrive has no service deletion, a deployed
   service keeps its address for as long as the node runs.
-- **IPv4 answers only.** Names resolve to IPv4 addresses. There are no IPv6 mesh
-  answers.
+- **IPv4 answers only.** Mesh names resolve to IPv4 addresses. There are no IPv6
+  mesh answers.
 - **No virtual-IP load balancer.** The name resolves to a stable address that the
   encryption layer steers to a running copy per connection. The separate
   virtual-IP path with kernel-side load balancing does not serve names.
