@@ -265,6 +265,31 @@ fn tcp_raw(frame: &[u8], within: Duration) -> std::io::Result<bool> {
     Ok(replied)
 }
 
+/// A copy of `wire` carrying DNS message id `id`.
+fn with_id(wire: &[u8], id: u16) -> Vec<u8> {
+    let mut out = wire.to_vec();
+    out[0..2].copy_from_slice(&id.to_be_bytes());
+    out
+}
+
+/// `wire` with its RFC 1035 two-byte length prefix.
+fn framed(wire: &[u8]) -> Vec<u8> {
+    let mut out = u16::try_from(wire.len()).expect("small").to_be_bytes().to_vec();
+    out.extend_from_slice(wire);
+    out
+}
+
+/// Reads one framed reply from an open connection: `None` when the node closed
+/// or reset the connection (or sent nothing within the stream's read timeout)
+/// before a whole reply arrived.
+fn read_framed(stream: &mut TcpStream) -> Option<Message> {
+    let mut prefix = [0u8; 2];
+    stream.read_exact(&mut prefix).ok()?;
+    let mut body = vec![0u8; usize::from(u16::from_be_bytes(prefix))];
+    stream.read_exact(&mut body).ok()?;
+    Some(Message::from_vec(&body).expect("a decodable reply"))
+}
+
 fn a_records(m: &Message) -> Vec<Ipv4Addr> {
     m.answers
         .iter()
@@ -537,16 +562,85 @@ guest_test! {
 // ===========================================================================
 
 guest_test! {
-    async fn a_query_over_tcp_is_forwarded_over_tcp_and_answered_once_per_connection() {
+    #[should_panic(expected = "a second query on the same connection must be answered")]
+    /// A query over TCP is forwarded over TCP and answered, and the node does
+    /// not close the connection after the reply: a second query on the same
+    /// connection is answered too, and the connection ends when the client
+    /// closes (ADR-0360 amendment 2026-11-28).
+    async fn a_query_over_tcp_is_forwarded_over_tcp_and_answered_until_the_client_closes() {
         let node = Node::boot(64).await;
         node.upstream().script("github.com", Behaviour::Answer(vec![Ipv4Addr::new(140, 82, 121, 4)]));
-        let reply = tcp_lookup(&query("github.com.", RecordType::A, false))
-            .expect("the responder must serve TCP on the gateway")
-            .expect("a framed reply");
-        assert_eq!(a_records(&reply), vec![Ipv4Addr::new(140, 82, 121, 4)]);
+        node.upstream().script("crates.io", Behaviour::Answer(vec![Ipv4Addr::new(52, 85, 1, 1)]));
+        let mut stream = TcpStream::connect(SocketAddrV4::new(GATEWAY, 53))
+            .expect("the responder must serve TCP on the gateway");
+        stream.set_read_timeout(Some(Duration::from_secs(6))).expect("timeout");
+
+        stream
+            .write_all(&framed(&with_id(&query("github.com.", RecordType::A, false), 0x2001)))
+            .expect("write the first query");
+        let first = read_framed(&mut stream).expect("a framed reply to the first query");
+        assert_eq!(first.metadata.id, 0x2001);
+        assert_eq!(a_records(&first), vec![Ipv4Addr::new(140, 82, 121, 4)]);
         let seen = node.upstream().seen();
         assert_eq!(seen.len(), 1);
         assert_eq!(seen[0].transport, Transport::Tcp, "a TCP guest query is forwarded over TCP");
+
+        // The node must still be serving this connection after the first reply.
+        let _ = stream
+            .write_all(&framed(&with_id(&query("crates.io.", RecordType::A, false), 0x2002)));
+        let second = read_framed(&mut stream).expect(
+            "a second query on the same connection must be answered: the node must not close after one reply",
+        );
+        assert_eq!(second.metadata.id, 0x2002);
+        assert_eq!(a_records(&second), vec![Ipv4Addr::new(52, 85, 1, 1)]);
+        assert_eq!(node.upstream().seen_count("crates.io"), 1, "one upstream exchange for the second query");
+
+        drop(stream); // the client closes; the connection ends cleanly
+        node.stop();
+    }
+}
+
+guest_test! {
+    #[should_panic(expected = "both pipelined queries must be answered on the one connection")]
+    /// A client that writes two framed queries in ONE write (one A and one AAAA
+    /// for the same name, as glibc's dual-family lookup does) and then closes its
+    /// write side still receives both framed replies on the one connection, ids
+    /// and questions matching, in order.
+    async fn two_pipelined_queries_in_one_write_are_both_answered_in_order_on_one_connection() {
+        let node = Node::boot(64).await;
+        node.upstream().script("github.com", Behaviour::Answer(vec![Ipv4Addr::new(140, 82, 121, 4)]));
+        let a = with_id(&query("github.com.", RecordType::A, false), 0x3001);
+        let aaaa = with_id(&query("github.com.", RecordType::AAAA, false), 0x3002);
+        let mut stream = TcpStream::connect(SocketAddrV4::new(GATEWAY, 53))
+            .expect("the responder must serve TCP on the gateway");
+        stream.set_read_timeout(Some(Duration::from_secs(6))).expect("timeout");
+
+        let mut both = framed(&a);
+        both.extend_from_slice(&framed(&aaaa));
+        stream.write_all(&both).expect("write both queries in one write");
+        stream.shutdown(std::net::Shutdown::Write).expect("half-close the write side");
+
+        let mut replies = Vec::new();
+        while replies.len() < 2 {
+            let Some(reply) = read_framed(&mut stream) else { break };
+            replies.push(reply);
+        }
+        assert_eq!(
+            replies.len(),
+            2,
+            "both pipelined queries must be answered on the one connection, got {} replies",
+            replies.len()
+        );
+        assert_eq!(replies[0].metadata.id, 0x3001, "the first reply answers the A query");
+        assert_eq!(replies[0].queries[0].query_type(), RecordType::A);
+        assert_eq!(replies[0].queries[0].name(), &Name::from_ascii("github.com.").expect("name"));
+        assert_eq!(a_records(&replies[0]), vec![Ipv4Addr::new(140, 82, 121, 4)]);
+        assert_eq!(replies[1].metadata.id, 0x3002, "the second reply answers the AAAA query");
+        assert_eq!(replies[1].queries[0].query_type(), RecordType::AAAA);
+        assert_eq!(replies[1].queries[0].name(), &Name::from_ascii("github.com.").expect("name"));
+        let seen = node.upstream().seen();
+        assert_eq!(seen.len(), 2, "one upstream exchange per query");
+        assert!(seen.iter().all(|q| q.transport == Transport::Tcp));
         node.stop();
     }
 }

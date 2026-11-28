@@ -18,12 +18,12 @@ code. Four scenarios characterise behaviour this feature keeps and are active (W
 | Tier 1, default lane: owned-range list (`dns_owned_ranges.rs`) | 4 | 4 | 0 | `placement!(host_pure)` |
 | Tier 3, real wire: resolver file adapter (`dns_upstream_host.rs`) | 4 | 4 | 0 | `#[overdrive_test(host_pure)]` (tempdir file, no node-global effect) |
 | Tier 3, real wire: upstream exchange (`dns_upstream_host.rs`) | 4 | 4 | 0 | `guest = "cgroup-default"` |
-| Tier 3, real wire: responder on UDP/TCP 53 (`dns_forwarding_real_wire.rs`) | 15 | 12 | 3 | `guest = "cgroup-default"` |
+| Tier 3, real wire: responder on UDP/TCP 53 (`dns_forwarding_real_wire.rs`) | 16 | 13 | 3 | `guest = "cgroup-default"` |
 | Tier 3, guest through `serve` + `deploy` (`guest_public_dns.rs`) | 4 | 3 | 1 | `guest = "cgroup-default", profile = "nested"` |
 | Tier 3, `serve` boot: forward permit derivation (`dns_forward_permit_derivation.rs`) | 1 | 1 | 0 | `guest = "cgroup-default"` (boots `run_server` in-process) |
-| **New total** | **65** | **61** | **4** | |
+| **New total** | **66** | **62** | **4** | |
 
-Error, fault, edge and guard scenarios: **49 of 65 (75%)**; happy path and pure
+Error, fault, edge and guard scenarios: **50 of 66 (76%)**; happy path and pure
 arithmetic/containment: 16. Existing `dns_responder_bind.rs` tests are
 re-run as the regression set for the responder; one fixture line changed
 (`GuestDnsDeps` gained two fields), no behaviour.
@@ -85,11 +85,14 @@ named by the host resolver file. All in `CP-I/dns_forwarding_real_wire.rs`.
 | W-8 | With the upstream down the guest gets SERVFAIL before its timeout, mesh keeps answering, then it recovers with no restart | upstream gone (its address lands on the node, which drops it), then back | three SERVFAILs each under the guest timeout with one `dns.forward.failed` for the three; mesh frontend returned during the outage; next lookup answered | AC-10, AC-11, AC-12; boundary 3 | pending | `with_the_upstream_down_the_guest_gets_a_servfail_before_its_timeout_and_recovers` |
 | W-9 | An absent resolver file is SERVFAIL, not a boot refusal; recovers when restored | resolver file removed, restored | boot proceeds; SERVFAIL; later answered | ruling B; boundary 3 | pending | `an_absent_resolver_file_is_a_servfail_not_a_boot_refusal_and_recovers_when_restored` |
 | W-10 | A resolver file naming only the gateway never loops the forward to the node | file lists `100.95.0.1` only | SERVFAIL; no datagram looped | ADR-0358 loop exclusion | pending | `a_resolver_file_naming_only_the_gateway_never_loops_the_forward_to_the_node` |
-| W-11 | A query over TCP is forwarded over TCP, one answer per connection | none | framed reply, connection closed | GPD-5, ADR-0360 | pending | `a_query_over_tcp_is_forwarded_over_tcp_and_answered_once_per_connection` |
+| W-11 | A query over TCP is forwarded over TCP and answered, and the node keeps serving the connection until the client closes (revised 2026-11-28) | none | framed reply to the first query; the upstream saw one TCP exchange; a second query on the same connection is answered; the client then closes | GPD-5, ADR-0360 and its 2026-11-28 amendment | pending | `a_query_over_tcp_is_forwarded_over_tcp_and_answered_until_the_client_closes` |
 | W-12 | The probe refuses when the gateway TCP port is held | TCP port 53 on the gateway already bound | typed `Bind` refusal | boundary 2, gate G-1 | pending | `the_probe_refuses_when_the_gateway_tcp_port_is_held` |
 | W-13 | With every permit held a further UDP query is shed at once, a TCP connection is closed unread, mesh over UDP still answers; one `shed_started` | permits held by silent-upstream lookups | SERVFAIL under 500 ms; TCP EOF; mesh frontend returned; one warn | AC-11; boundary 4 | pending | `with_every_permit_held_a_further_query_is_shed_at_once_and_mesh_still_answers` |
 | W-14 | A gateway-addressed datagram that is not one IN-class query is dropped and never forwarded | QR set, two questions, opcode STATUS, class CH | no reply to any; upstream sees nothing | DESIGN `WireReject`; open-resolver/reflection guard | **active** | `a_gateway_addressed_datagram_that_is_not_one_in_class_query_is_dropped_and_never_forwarded` |
 | W-15 | A TCP connection with malformed framing is closed without a reply | zero length frame; frame over 1500 bytes | closed promptly with no bytes; upstream sees nothing | DESIGN TCP lifecycle (zero length closes without reply; frame over the 1500 byte limit closes) | pending | `a_tcp_connection_with_malformed_framing_is_closed_without_a_reply` |
+| W-16 | Two pipelined queries in one write are both answered in order on one connection (added 2026-11-28) | one A and one AAAA query for the same name, framed and written in ONE write as glibc's dual-family lookup does, then the client half-closes its write side | two framed replies, ids and questions matching, in order, on the one connection, received after the half-close; two upstream TCP exchanges | ADR-0360 2026-11-28 amendment; spike `findings-tcp-one-query-per-connection.md` | pending | `two_pipelined_queries_in_one_write_are_both_answered_in_order_on_one_connection` |
+
+W-11 and W-16 are the two test changes the user approved on 2026-11-28 with the ADR-0360 TCP amendment (queries are served until the client closes): W-11 was revised from "one answer, then the connection closes", W-16 is the added regression. Both are pending with `#[should_panic(expected = ...)]` naming the assertion that fails today (W-11: "a second query on the same connection must be answered"; W-16: "both pipelined queries must be answered on the one connection"); the half-close invariant is folded into W-16. The other amendment invariants are assertable through them and add no test. Metal run `d168584d675b01e1f7726e8c`: all 16 tests of the file pass (the two pending ones for the asserted reason). W-15 is unchanged.
 
 The third TCP clause of the DESIGN lifecycle contract (an expired `TCP_READ_DEADLINE` of 5 s closes without a reply) is not given its own scenario: it costs 5 s of wall time per run and shares the same close path as the two framing cases. W-14 is active because today's responder drops every non-mesh datagram; it becomes the guard that the forwarder never answers or relays what is not a query.
 
