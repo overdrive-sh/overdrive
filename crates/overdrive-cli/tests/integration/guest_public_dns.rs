@@ -19,10 +19,8 @@
 //! One walking skeleton (the first test) and three more guest-level scenarios;
 //! the rest of the matrix runs on the wire in
 //! `overdrive-control-plane/tests/integration/dns_forwarding_real_wire.rs`.
-//! The first three tests are pending: a complete body that fails today (the
-//! node drops the guest's public lookups, so each lookup waits out the guest
-//! resolver's 5 s timeout) with its semantic RED in `should_panic(expected =
-//! ...)`. The last characterises behaviour the feature keeps and is active.
+//! The first three pin forwarding; the last pins the guest-side outcome when
+//! no upstream answers.
 //!
 //! Lane: `integration-tests,kvm-tests`, `cargo xtask metal run --`.
 
@@ -217,7 +215,7 @@ async fn an_upstream_answer_in_the_mesh_frontend_range_never_reaches_the_guest()
 /// `dns_forwarding_real_wire.rs` and F-8 in `dns_forwarder.rs`, and V-4
 /// measures the guest-observed time under glibc and musl at DELIVER. Because
 /// the guest sees the same error with and without this feature, this scenario
-/// characterises behaviour the feature keeps: it is active, not pending.
+/// characterises behaviour the feature keeps.
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default", profile = "nested")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

@@ -18,10 +18,8 @@
 //! Contract shapes: replies and upstream observations are `bounded-change`
 //! (the only effects are the reply to the guest, one upstream exchange and the
 //! episode warns); the guest-visible oracle is the reply, never an internal
-//! counter. The pending scenarios (`should_panic(expected = ...)`) fail today
-//! because the responder drops every non-mesh query; DELIVER removes the
-//! marker one scenario at a time. Scenarios that characterise behaviour this
-//! feature keeps (mesh answers, the gateway gate) are not pending.
+//! counter. Some scenarios characterise behaviour that predates forwarding
+//! (mesh answers, the gateway gate); the rest pin the forwarding path.
 //!
 //! Lane: `integration-tests`, guest group `cgroup-default` (the responder binds
 //! `:53` and the test rewrites the guest's own `/etc/resolv.conf`, so the body
@@ -318,7 +316,7 @@ guest_test! {
 guest_test! {
     /// A query addressed to a node address that is not the gateway is never
     /// forwarded (open-resolver gate, V-2): the node stays silent and the
-    /// upstream sees nothing. Behaviour kept from today: not pending.
+    /// upstream sees nothing. Behaviour that predates forwarding.
     async fn a_query_not_addressed_to_the_gateway_is_dropped_and_never_forwarded() {
         let node = Node::boot(64).await;
         node.upstream().script("github.com", Behaviour::Answer(vec![Ipv4Addr::new(140, 82, 121, 4)]));
@@ -333,7 +331,7 @@ guest_test! {
     /// A gateway-addressed datagram that is not one IN-class QUERY with one
     /// question is dropped without a reply and never forwarded (DESIGN `WireReject`):
     /// a response (QR set), two questions, opcode STATUS, class other than IN.
-    /// Behaviour kept from today: not pending; it guards the forwarder from
+    /// Behaviour that predates forwarding; it guards the forwarder from
     /// answering or relaying what is not a query.
     async fn a_gateway_addressed_datagram_that_is_not_one_in_class_query_is_dropped_and_never_forwarded() {
         let node = Node::boot(64).await;
@@ -424,7 +422,7 @@ guest_test! {
 
 guest_test! {
     /// Mesh names stay authoritative and local, and are never sent upstream
-    /// (D-6). Behaviour kept from today: not pending.
+    /// (D-6). Behaviour that predates forwarding.
     async fn mesh_names_still_resolve_locally_and_never_reach_the_upstream() {
         let node = Node::boot(64).await;
         let frontend = node.mesh_service("payments", true).await;

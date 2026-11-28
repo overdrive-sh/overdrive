@@ -8,8 +8,6 @@
 //! `meta.name()`. The soft limit is the one the bundle injects, not the process's:
 //! DELIVER's fourth `NodeAdapters::host` argument is passed
 //! [`INJECTED_NOFILE_SOFT`] at the common helper.
-//!
-//! Pending: the event is not emitted today (`forward_permits` is the scaffold `0`).
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
