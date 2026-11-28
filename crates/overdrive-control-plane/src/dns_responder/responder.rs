@@ -506,61 +506,110 @@ impl DnsResponder {
             let responder = Arc::clone(&self);
             let token = self.cancel.child_token();
             tokio::spawn(async move {
-                responder.serve_connection(stream, permit, token, received_at).await;
+                responder.serve_connection(stream, permit, token).await;
             });
         }
     }
 
-    /// One query per connection: read, answer or forward, write, close. The
-    /// permit is held until the connection closes; shutdown ends the
-    /// connection at its next await.
+    /// Serve one connection's framed queries in arrival order until the client
+    /// closes. The permit is held for the connection's whole life; shutdown
+    /// ends the connection at its next await.
     async fn serve_connection(
         &self,
         mut stream: TcpStream,
         permit: ForwardPermit,
         token: CancellationToken,
-        received_at: Instant,
     ) {
         tokio::select! {
             biased;
             () = token.cancelled() => {}
-            () = self.answer_connection(&mut stream, &permit, received_at) => {}
+            () = self.answer_connection(&mut stream, &permit) => {}
         }
     }
 
-    async fn answer_connection(
-        &self,
-        stream: &mut TcpStream,
-        permit: &ForwardPermit,
-        received_at: Instant,
-    ) {
-        let answered = match read_framed_query(stream).await {
-            Some(query) => self.answer_query(&query, permit).await,
-            None => None,
-        };
-        let Some((reply, outcome)) = answered else {
-            self.observer
-                .observe(QueryOutcome::Dropped, self.clock.now().duration_since(received_at));
-            return;
-        };
-        match tokio::time::timeout(TCP_WRITE_DEADLINE, write_framed_reply(stream, &reply)).await {
-            Ok(Ok(())) => {}
-            Ok(Err(error)) => {
-                tracing::debug!(
-                    name: "dns.responder.tcp_write_failed",
-                    %error,
-                    "DNS responder TCP reply write failed"
-                );
-            }
-            Err(elapsed) => {
-                tracing::debug!(
-                    name: "dns.responder.tcp_write_failed",
-                    error = %elapsed,
-                    "DNS responder TCP reply write timed out"
-                );
+    /// Read a frame, answer or forward it, write the reply, and wait for the
+    /// next frame: one at a time, so replies leave in the order frames arrived
+    /// and at most one upstream exchange runs on the connection. Ends on a clean
+    /// close, a deadline, a malformed or unanswered frame, or a failed write.
+    async fn answer_connection(&self, stream: &mut TcpStream, permit: &ForwardPermit) {
+        loop {
+            let (frame, received_at) = self.read_frame(stream).await;
+            let query = match frame {
+                Frame::Query(query) => query,
+                Frame::Ended => return,
+                Frame::Malformed => {
+                    self.observe_dropped(received_at);
+                    return;
+                }
+            };
+            let Some((reply, outcome)) = self.answer_query(&query, permit).await else {
+                self.observe_dropped(received_at);
+                return;
+            };
+            let written =
+                tokio::time::timeout(TCP_WRITE_DEADLINE, write_framed_reply(stream, &reply)).await;
+            self.observer.observe(outcome, self.clock.now().duration_since(received_at));
+            match written {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => {
+                    tracing::debug!(
+                        name: "dns.responder.tcp_write_failed",
+                        %error,
+                        "DNS responder TCP reply write failed"
+                    );
+                    return;
+                }
+                Err(elapsed) => {
+                    tracing::debug!(
+                        name: "dns.responder.tcp_write_failed",
+                        error = %elapsed,
+                        "DNS responder TCP reply write timed out"
+                    );
+                    return;
+                }
             }
         }
-        self.observer.observe(outcome, self.clock.now().duration_since(received_at));
+    }
+
+    fn observe_dropped(&self, received_at: Instant) {
+        self.observer.observe(QueryOutcome::Dropped, self.clock.now().duration_since(received_at));
+    }
+
+    /// Read the next two-byte-framed query under [`TCP_READ_DEADLINE`], with the
+    /// instant its first byte arrived (the read's start when none did). A close
+    /// or an expired deadline before any byte of the frame is [`Frame::Ended`];
+    /// a zero or oversize length, a short read, or a deadline inside the frame
+    /// is [`Frame::Malformed`].
+    async fn read_frame(&self, stream: &mut TcpStream) -> (Frame, Instant) {
+        let started = self.clock.now();
+        let mut arrived: Option<Instant> = None;
+        let read = async {
+            let mut prefix = [0u8; 2];
+            match stream.read(&mut prefix[..1]).await {
+                Ok(1) => {}
+                Ok(_) | Err(_) => return Frame::Ended,
+            }
+            arrived = Some(self.clock.now());
+            if stream.read_exact(&mut prefix[1..]).await.is_err() {
+                return Frame::Malformed;
+            }
+            let length = usize::from(u16::from_be_bytes(prefix));
+            if length == 0 || length > RECV_BUF_LEN {
+                return Frame::Malformed;
+            }
+            let mut query = vec![0u8; length];
+            match stream.read_exact(&mut query).await {
+                Ok(_) => Frame::Query(query),
+                Err(_) => Frame::Malformed,
+            }
+        };
+        let result = tokio::time::timeout(TCP_READ_DEADLINE, read).await;
+        let frame = match result {
+            Ok(frame) => frame,
+            Err(_) if arrived.is_none() => Frame::Ended,
+            Err(_) => Frame::Malformed,
+        };
+        (frame, arrived.unwrap_or(started))
     }
 
     /// The reply and outcome for one TCP query; `None` sends nothing. The
@@ -797,26 +846,16 @@ fn bind_tcp_listener(gateway: Ipv4Addr) -> Result<TcpListener> {
     TcpListener::from_std(listener).map_err(|source| DnsResponderError::Socket { source })
 }
 
-/// Read one two-byte-framed query under [`TCP_READ_DEADLINE`]. `None` for a
-/// zero length, a frame over [`RECV_BUF_LEN`], a short read or an expired
-/// deadline: the connection closes without a reply.
-async fn read_framed_query(stream: &mut TcpStream) -> Option<Vec<u8>> {
-    let read = async {
-        let mut prefix = [0u8; 2];
-        stream.read_exact(&mut prefix).await.ok()?;
-        let length = usize::from(u16::from_be_bytes(prefix));
-        if length == 0 || length > RECV_BUF_LEN {
-            return None;
-        }
-        let mut query = vec![0u8; length];
-        stream.read_exact(&mut query).await.ok()?;
-        Some(query)
-    };
-    tokio::time::timeout(TCP_READ_DEADLINE, read).await.ok().flatten()
+/// One read of a TCP connection's next frame.
+enum Frame {
+    Query(Vec<u8>),
+    /// The client closed, or the deadline expired, at a frame boundary.
+    Ended,
+    Malformed,
 }
 
-/// Write `reply` with its two-byte length prefix in one write, then close the
-/// write side.
+/// Write `reply` with its two-byte length prefix in one write; the connection
+/// stays open for the next frame.
 async fn write_framed_reply(stream: &mut TcpStream, reply: &[u8]) -> std::io::Result<()> {
     let length = u16::try_from(reply.len()).map_err(|_| {
         std::io::Error::new(std::io::ErrorKind::InvalidInput, "DNS reply exceeds the TCP frame")
@@ -824,8 +863,7 @@ async fn write_framed_reply(stream: &mut TcpStream, reply: &[u8]) -> std::io::Re
     let mut framed = Vec::with_capacity(2 + reply.len());
     framed.extend_from_slice(&length.to_be_bytes());
     framed.extend_from_slice(reply);
-    stream.write_all(&framed).await?;
-    stream.shutdown().await
+    stream.write_all(&framed).await
 }
 
 fn socket_identity(fd: &OwnedFd) -> std::io::Result<DnsSocketIdentity> {

@@ -562,7 +562,6 @@ guest_test! {
 // ===========================================================================
 
 guest_test! {
-    #[should_panic(expected = "a second query on the same connection must be answered")]
     /// A query over TCP is forwarded over TCP and answered, and the node does
     /// not close the connection after the reply: a second query on the same
     /// connection is answered too, and the connection ends when the client
@@ -601,7 +600,6 @@ guest_test! {
 }
 
 guest_test! {
-    #[should_panic(expected = "both pipelined queries must be answered on the one connection")]
     /// A client that writes two framed queries in ONE write (one A and one AAAA
     /// for the same name, as glibc's dual-family lookup does) and then closes its
     /// write side still receives both framed replies on the one connection, ids
