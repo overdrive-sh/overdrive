@@ -157,9 +157,6 @@ fn pending(rows: &[AllocStatusRow], view: &WorkloadLifecycleView, generation: u6
 /// With no observed row nothing is pending: an issued id with no row is
 /// invisible, so a first placement is never "a replacement".
 #[test]
-#[should_panic(
-    expected = "generation_replacement_pending must be true iff the newest row that ran exists, is not a finished Job row, and its issued_generation entry (absent reads 0) is below the desired generation"
-)]
 fn no_row_means_no_generation_is_pending() {
     let view = view_with(&[("0", 0)]);
     assert!(
@@ -170,9 +167,6 @@ fn no_row_means_no_generation_is_pending() {
 
 /// The current row's entry is below the committed generation: pending.
 #[test]
-#[should_panic(
-    expected = "generation_replacement_pending must be true iff the newest row that ran exists, is not a finished Job row, and its issued_generation entry (absent reads 0) is below the desired generation"
-)]
 fn a_current_row_issued_for_an_older_generation_is_pending() {
     let view = view_with(&[("0", 1)]);
     assert!(pending(&[failed_service("0")], &view, 2), "entry 1 < generation 2 is pending");
@@ -180,9 +174,6 @@ fn a_current_row_issued_for_an_older_generation_is_pending() {
 
 /// Mutation target: the `<`. An entry equal to the generation is handled.
 #[test]
-#[should_panic(
-    expected = "generation_replacement_pending must be true iff the newest row that ran exists, is not a finished Job row, and its issued_generation entry (absent reads 0) is below the desired generation"
-)]
 fn a_current_row_issued_for_the_committed_generation_is_handled() {
     let view = view_with(&[("0", 2)]);
     assert!(!pending(&[failed_service("0")], &view, 2), "entry 2 == generation 2 is not pending");
@@ -191,9 +182,6 @@ fn a_current_row_issued_for_the_committed_generation_is_handled() {
 /// An entry above the generation (the generation never moves backwards, but the
 /// comparison must not read as "not equal") is not pending.
 #[test]
-#[should_panic(
-    expected = "generation_replacement_pending must be true iff the newest row that ran exists, is not a finished Job row, and its issued_generation entry (absent reads 0) is below the desired generation"
-)]
 fn a_current_row_issued_for_a_newer_generation_is_not_pending() {
     let view = view_with(&[("0", 5)]);
     assert!(!pending(&[failed_service("0")], &view, 2), "entry 5 > generation 2 is not pending");
@@ -201,9 +189,6 @@ fn a_current_row_issued_for_a_newer_generation_is_not_pending() {
 
 /// An absent entry reads 0: pending once the generation is above 0, not before.
 #[test]
-#[should_panic(
-    expected = "generation_replacement_pending must be true iff the newest row that ran exists, is not a finished Job row, and its issued_generation entry (absent reads 0) is below the desired generation"
-)]
 fn an_absent_entry_reads_zero() {
     let view = WorkloadLifecycleView::default();
     assert!(pending(&[failed_service("0")], &view, 1), "absent entry (0) < generation 1");
@@ -214,9 +199,6 @@ fn an_absent_entry_reads_zero() {
 /// not show, `current_alloc` is still the older row, so the generation is still
 /// pending (the relaunch after an abandoned launch).
 #[test]
-#[should_panic(
-    expected = "generation_replacement_pending must be true iff the newest row that ran exists, is not a finished Job row, and its issued_generation entry (absent reads 0) is below the desired generation"
-)]
 fn an_issued_id_without_a_row_leaves_the_generation_pending() {
     let view = view_with(&[("0", 1), ("1", 2)]);
     assert!(
@@ -228,9 +210,6 @@ fn an_issued_id_without_a_row_leaves_the_generation_pending() {
 /// Once the issued id has a row, that row is current and its entry equals the
 /// generation: handled.
 #[test]
-#[should_panic(
-    expected = "generation_replacement_pending must be true iff the newest row that ran exists, is not a finished Job row, and its issued_generation entry (absent reads 0) is below the desired generation"
-)]
 fn the_successors_row_ends_the_pending_generation() {
     let view = view_with(&[("0", 1), ("1", 2)]);
     let rows = [failed_service("0"), row("1", WorkloadKind::Service, AllocState::Running, None)];
@@ -240,9 +219,6 @@ fn the_successors_row_ends_the_pending_generation() {
 /// The current row is the numerically highest suffix (`-10` over `-2`, which a
 /// lexical maximum would get wrong).
 #[test]
-#[should_panic(
-    expected = "generation_replacement_pending must be true iff the newest row that ran exists, is not a finished Job row, and its issued_generation entry (absent reads 0) is below the desired generation"
-)]
 fn the_numeric_maximum_suffix_selects_the_current_row() {
     let rows = [failed_service("2"), failed_service("10")];
     // `-10` serves the generation, `-2` does not: numeric current => handled.
@@ -255,9 +231,6 @@ fn the_numeric_maximum_suffix_selects_the_current_row() {
 
 /// A row whose id has no parseable attempt suffix is never the current row.
 #[test]
-#[should_panic(
-    expected = "generation_replacement_pending must be true iff the newest row that ran exists, is not a finished Job row, and its issued_generation entry (absent reads 0) is below the desired generation"
-)]
 fn a_row_without_an_attempt_suffix_is_never_current() {
     let rows = [failed_service("0"), failed_service("orphan")];
     let view = view_with(&[("0", 3), ("orphan", 0)]);
@@ -271,9 +244,6 @@ fn a_row_without_an_attempt_suffix_is_never_current() {
 /// completed is never given a replacement by a restart, even below the
 /// generation.
 #[test]
-#[should_panic(
-    expected = "generation_replacement_pending must be true iff the newest row that ran exists, is not a finished Job row, and its issued_generation entry (absent reads 0) is below the desired generation"
-)]
 fn a_completed_job_is_never_pending() {
     let rows = [row(
         "0",
@@ -286,9 +256,6 @@ fn a_completed_job_is_never_pending() {
 
 /// H1: a failed Job.
 #[test]
-#[should_panic(
-    expected = "generation_replacement_pending must be true iff the newest row that ran exists, is not a finished Job row, and its issued_generation entry (absent reads 0) is below the desired generation"
-)]
 fn a_failed_job_is_never_pending() {
     let rows = [row(
         "0",
@@ -302,9 +269,6 @@ fn a_failed_job_is_never_pending() {
 /// H1: an operator-stopped Job whose row carries `Stopped { by: Operator }` as
 /// its terminal (the stop's `StopAllocation` carries it).
 #[test]
-#[should_panic(
-    expected = "generation_replacement_pending must be true iff the newest row that ran exists, is not a finished Job row, and its issued_generation entry (absent reads 0) is below the desired generation"
-)]
 fn an_operator_stopped_job_with_a_terminal_is_never_pending() {
     let rows = [row(
         "0",
@@ -318,9 +282,6 @@ fn an_operator_stopped_job_with_a_terminal_is_never_pending() {
 /// A Job row that carries only a `reason` and no terminal is replaced exactly
 /// as on `main`: pending below the generation.
 #[test]
-#[should_panic(
-    expected = "generation_replacement_pending must be true iff the newest row that ran exists, is not a finished Job row, and its issued_generation entry (absent reads 0) is below the desired generation"
-)]
 fn a_job_row_without_a_terminal_is_pending_below_the_generation() {
     let mut job = row("0", WorkloadKind::Job, AllocState::Terminated, None);
     job.reason = Some(TransitionReason::Stopped { by: StoppedBy::Operator });
@@ -330,9 +291,6 @@ fn a_job_row_without_a_terminal_is_pending_below_the_generation() {
 /// The exception is the Job kind only: a Service row carrying a terminal
 /// (`BackoffExhausted`, an operator stop) is still replaced by a restart.
 #[test]
-#[should_panic(
-    expected = "generation_replacement_pending must be true iff the newest row that ran exists, is not a finished Job row, and its issued_generation entry (absent reads 0) is below the desired generation"
-)]
 fn a_service_row_with_a_terminal_is_pending_below_the_generation() {
     for terminal in [
         TerminalCondition::BackoffExhausted { attempts: 5 },
@@ -355,9 +313,6 @@ fn a_service_row_with_a_terminal_is_pending_below_the_generation() {
 /// committed generation's entry, but it handled nothing, so the generation is still pending
 /// against the newest row that ran.
 #[test]
-#[should_panic(
-    expected = "generation_replacement_pending must be true iff the newest row that ran exists, is not a finished Job row, and its issued_generation entry (absent reads 0) is below the desired generation"
-)]
 fn an_abandoned_successor_handles_nothing() {
     let view = view_with(&[("0", 1), ("1", 2)]);
     for abandoned in [superseded("1"), lost_with_control_plane("1")] {
@@ -373,9 +328,6 @@ fn an_abandoned_successor_handles_nothing() {
 /// An abandoned launch of either reason, then another of the other reason: the newest row that
 /// ran is still the one before them all, and the verdict follows its entry in both directions.
 #[test]
-#[should_panic(
-    expected = "generation_replacement_pending must be true iff the newest row that ran exists, is not a finished Job row, and its issued_generation entry (absent reads 0) is below the desired generation"
-)]
 fn consecutive_abandoned_rows_of_both_reasons_handle_nothing() {
     let rows = [failed_service("0"), superseded("1"), lost_with_control_plane("2")];
     let below = view_with(&[("0", 1), ("1", 2), ("2", 2)]);
@@ -387,9 +339,6 @@ fn consecutive_abandoned_rows_of_both_reasons_handle_nothing() {
 /// The abandoned rows sit between launches that ran: the newest of the launches that ran is
 /// selected by its numeric suffix, not by position, and not by being newer.
 #[test]
-#[should_panic(
-    expected = "generation_replacement_pending must be true iff the newest row that ran exists, is not a finished Job row, and its issued_generation entry (absent reads 0) is below the desired generation"
-)]
 fn the_newest_row_that_ran_is_selected_past_an_abandoned_row_with_a_higher_suffix() {
     let rows = [failed_service("2"), lost_with_control_plane("10"), superseded("11")];
     let view = view_with(&[("2", 3), ("10", 0), ("11", 0)]);
@@ -403,9 +352,6 @@ fn the_newest_row_that_ran_is_selected_past_an_abandoned_row_with_a_higher_suffi
 /// No row ran (every row is an abandoned launch): nothing is pending, a first placement is not a
 /// replacement, whatever the View holds and however far the generation has moved.
 #[test]
-#[should_panic(
-    expected = "generation_replacement_pending must be true iff the newest row that ran exists, is not a finished Job row, and its issued_generation entry (absent reads 0) is below the desired generation"
-)]
 fn when_no_row_ran_no_generation_is_pending() {
     let view = view_with(&[("0", 0), ("1", 0)]);
     for rows in [
@@ -424,9 +370,6 @@ fn when_no_row_ran_no_generation_is_pending() {
 /// A finished Job stays finished behind an abandoned row: a restart never gives it a new
 /// allocation, and an abandoned launch after it does not reopen it.
 #[test]
-#[should_panic(
-    expected = "generation_replacement_pending must be true iff the newest row that ran exists, is not a finished Job row, and its issued_generation entry (absent reads 0) is below the desired generation"
-)]
 fn an_abandoned_row_after_a_finished_job_does_not_reopen_it() {
     let finished = row(
         "0",
@@ -556,7 +499,6 @@ proptest! {
     /// contract. Kills: the `<`, the finished-Job exception, the absent-reads-0
     /// default, the selection of the newest row that ran (abandoned launches skipped).
     #[test]
-    #[should_panic(expected = "generation_replacement_pending must be true iff the newest row that ran exists, is not a finished Job row, and its issued_generation entry (absent reads 0) is below the desired generation")]
     fn pending_is_true_iff_the_current_row_is_below_the_generation_and_not_a_finished_job(
         generated in rows_strategy(),
         generation in 0_u64..=4,
@@ -573,7 +515,6 @@ proptest! {
     /// finished-Job row is never pending, and the shim's late-event fence and the
     /// reconciler's predicate cannot disagree on it.
     #[test]
-    #[should_panic(expected = "generation_replacement_pending must be true iff the newest row that ran exists, is not a finished Job row, and its issued_generation entry (absent reads 0) is below the desired generation")]
     fn pending_agrees_with_the_shims_finished_job_fence(
         generated in rows_strategy(),
         generation in 0_u64..=4,

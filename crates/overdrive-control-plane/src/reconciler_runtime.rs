@@ -603,11 +603,11 @@ impl ReconcilerRuntime {
                 failed,
                 ran,
                 attempts,
-                // Compat copy of the stamp-on-emit rule (the body of
-                // `overdrive_reconcilers::workload_lifecycle::restart_pending_until_successor_observed`):
-                // delete with that helper in DELIVER step 9, when every call site switches to
-                // `generation_replacement_pending`.
-                view.issued_generation.values().copied().max().unwrap_or(0) < desired_generation,
+                overdrive_reconcilers::workload_lifecycle::generation_replacement_pending(
+                    &view,
+                    desired_generation,
+                    ran,
+                ),
             ),
         )
     }

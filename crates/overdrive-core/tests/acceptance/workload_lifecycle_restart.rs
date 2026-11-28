@@ -265,11 +265,17 @@ fn issued_max(view: &WorkloadLifecycleView) -> u64 {
 }
 
 /// A `WorkloadLifecycleView` whose `restart_counts` for `alloc_id` is
-/// pre-set to `n` (issued_generation seeded to `desired` in the
-/// tests below so `restart_pending` is false and the crash-restart
-/// branch is reached).
+/// pre-set to `n`, with `issued_generation[alloc_id] = observed` so the
+/// generation is not pending and the crash-restart branch is reached.
+/// The stamp is keyed by the allocation's own id, as the reconciler writes
+/// it (`WorkloadLifecycle` stamps `issued_generation[successor_alloc_id]` on
+/// every restart and `issued_generation[alloc_id]` on every placement), and
+/// the pending-generation rule reads the stamp of the newest row that ran.
 fn view_with_restart_counts(observed: u64, alloc_id: &str, n: u32) -> WorkloadLifecycleView {
-    let mut view = view_seeded(observed);
+    let mut view = WorkloadLifecycleView::default();
+    if observed > 0 {
+        view.issued_generation.insert(aid(alloc_id), observed);
+    }
     view.restart_counts.insert(aid(alloc_id), n);
     view
 }

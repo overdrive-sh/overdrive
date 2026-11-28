@@ -903,9 +903,6 @@ fn arb_agreement_chain() -> impl Strategy<Value = Vec<AgreementLaunch>> {
 /// earlier generation) is still the row the generation is read from and it is pending. The same
 /// holds when the chain has the abandoned row deleted.
 #[test]
-#[should_panic(
-    expected = "generation_replacement_pending must read the generation from the newest row that ran"
-)]
 fn an_abandoned_replacement_issued_under_the_committed_generation_leaves_a_stopped_basis_pending() {
     for why in Abandon::BOTH {
         let full = [
@@ -939,9 +936,6 @@ proptest! {
     /// row that ran exists, is not a finished Job row, and its `issued_generation` entry
     /// (absent reads 0) is below the generation. PENDING: the function is a scaffold today.
     #[test]
-    #[should_panic(
-        expected = "generation_replacement_pending must read the generation from the newest row that ran"
-    )]
     fn the_pending_generation_verdict_agrees_over_a_chain_and_the_chain_without_abandoned_rows(
         chain in arb_agreement_chain(),
         generation in 0_u64..=4,

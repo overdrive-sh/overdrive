@@ -58,16 +58,6 @@ fn basis_attempts(view: &WorkloadLifecycleView, basis: Option<&AllocStatusRow>) 
     basis.and_then(|row| view.restart_counts.get(&row.alloc_id)).copied().unwrap_or(0)
 }
 
-/// Whether the next launch is a generation replacement: the committed generation is pending, or
-/// the count basis is an operator stop, which is never crash-restarted.
-///
-/// Temporary stand-in: the second clause stands in for `generation_replacement_pending` reading
-/// the count basis, and is replaced when that helper's count-basis read lands. Do not extend it
-/// to other sites.
-fn replaces_generation(restart_pending: bool, basis: Option<&AllocStatusRow>) -> bool {
-    restart_pending || basis.is_some_and(is_operator_stopped)
-}
-
 /// Backoff window between successive `RestartAllocation` emissions
 /// for the same alloc.
 ///
@@ -380,12 +370,15 @@ impl Reconciler for WorkloadLifecycle {
             }
             let _job = desired.job.as_ref()?;
             let allocs: Vec<&AllocStatusRow> = actual.allocations.values().collect();
-            let restart_pending =
-                restart_pending_until_successor_observed(view, desired.generation);
+            let restart_pending = generation_replacement_pending(
+                view,
+                desired.generation,
+                last_ran_alloc(&allocs),
+            );
 
             if desired.workload_kind == WorkloadKind::Job
                 && !restart_pending
-                && current_alloc(&allocs).is_some_and(|row| {
+                && last_ran_alloc(&allocs).is_some_and(|row| {
                     matches!(
                         row.terminal,
                         Some(
@@ -406,7 +399,7 @@ impl Reconciler for WorkloadLifecycle {
             if current.is_some_and(|row| row.state == AllocState::Draining) {
                 return None;
             }
-            if !restart_pending && current.is_some_and(is_operator_stopped) {
+            if !restart_pending && last_ran_alloc(&allocs).is_some_and(is_operator_stopped) {
                 return None;
             }
 
@@ -425,7 +418,7 @@ impl Reconciler for WorkloadLifecycle {
             current.filter(|row| is_restartable(row))?;
             let basis = last_ran_alloc(&allocs);
             let attempts = basis_attempts(view, basis);
-            let replacement = replaces_generation(restart_pending, basis);
+            let replacement = restart_pending;
             if !restart_decision(attempts, basis.is_some_and(is_platform_reclaimed), replacement) {
                 return None;
             }
@@ -468,7 +461,9 @@ fn pending_restart_owner<'a>(
 
     let allocations: Vec<&AllocStatusRow> = actual.allocations.values().collect();
     let current = current_alloc(&allocations)?;
-    let generation_replacement = restart_pending_until_successor_observed(view, desired.generation);
+    let basis = last_ran_alloc(&allocations);
+    let generation_replacement =
+        generation_replacement_pending(view, desired.generation, basis);
     if desired.workload_kind == WorkloadKind::Job
         && !generation_replacement
         && matches!(
@@ -482,9 +477,8 @@ fn pending_restart_owner<'a>(
         return None;
     }
 
-    let basis = last_ran_alloc(&allocations);
     let attempts = basis_attempts(view, basis);
-    let replacement = replaces_generation(generation_replacement, basis);
+    let replacement = generation_replacement;
     if !restart_decision(attempts, basis.is_some_and(is_platform_reclaimed), replacement) {
         return None;
     }
@@ -943,8 +937,11 @@ impl WorkloadLifecycle {
                 // terminal-attempt fence or the running-origin replacement
                 // branch consumes it. A newer desired generation starts a new
                 // attempt; equal generations keep every current-attempt veto.
-                let restart_pending =
-                    restart_pending_until_successor_observed(view, desired.generation);
+                let restart_pending = generation_replacement_pending(
+                    view,
+                    desired.generation,
+                    last_ran_alloc(&allocs_vec),
+                );
 
                 // P-GTI-ILLEGAL-07: a Job's durable terminal claim fences the
                 // attempt identity even if a late READY/DISPATCH-shaped row tries
@@ -959,7 +956,7 @@ impl WorkloadLifecycle {
                 // class by construction: its row carries `terminal: None`.
                 if desired.workload_kind == WorkloadKind::Job
                     && !restart_pending
-                    && current_alloc(&allocs_vec).is_some_and(|row| {
+                    && last_ran_alloc(&allocs_vec).is_some_and(|row| {
                         matches!(
                             row.terminal,
                             Some(
@@ -1088,7 +1085,7 @@ impl WorkloadLifecycle {
                 // the fresh instance forever (the post-iteration-2 bug
                 // this scoping fixes). `restart_pending` was computed above
                 // the running check (shared with the R2 stop).
-                if !restart_pending && current_alloc(&allocs_vec).is_some_and(is_operator_stopped) {
+                if !restart_pending && last_ran_alloc(&allocs_vec).is_some_and(is_operator_stopped) {
                     return (Vec::new(), view.clone());
                 }
 
@@ -1193,7 +1190,7 @@ impl WorkloadLifecycle {
                     // however high `attempts` has climbed from prior
                     // reclamations.
                     let platform_reclaimed = basis.is_some_and(is_platform_reclaimed);
-                    let generation_replacement = replaces_generation(restart_pending, basis);
+                    let generation_replacement = restart_pending;
                     if !restart_decision(attempts, platform_reclaimed, generation_replacement) {
                         // The spent budget is the count basis's: the finalisation names it,
                         // never an abandoned row (RB-13).
@@ -1751,19 +1748,19 @@ fn restart_allocation_action(
 /// (`row.kind == WorkloadKind::Job && row.terminal.is_some()`, H1), and
 /// `view.issued_generation[row.alloc_id]` (absent reads `0`) is less than
 /// `desired_generation`. With no row it is false. It is the only definition of
-/// `restart_pending`.
-///
-/// SCAFFOLD: true — DISTILL RED scaffold. The reconciler still decides with
-/// [`restart_pending_until_successor_observed`] until DELIVER replaces that
-/// stamp-on-emit rule with this function.
+/// `restart_pending`. Callers pass the count basis ([`last_ran_alloc`]): an
+/// abandoned row ran nothing and handles no generation.
 #[must_use]
 pub fn generation_replacement_pending(
     view: &WorkloadLifecycleView,
     desired_generation: u64,
     current: Option<&AllocStatusRow>,
 ) -> bool {
-    let _ = (view, desired_generation, current);
-    panic!("RED scaffold: generation_replacement_pending is not implemented (ADR-0335)")
+    current.is_some_and(|row| {
+        let finished_job = row.kind == WorkloadKind::Job && row.terminal.is_some();
+        let issued = view.issued_generation.get(&row.alloc_id).copied().unwrap_or(0);
+        !finished_job && issued < desired_generation
+    })
 }
 
 /// Whether this workload's start is blocked only by guest-network capacity
@@ -1788,20 +1785,6 @@ pub fn start_blocked_only_by_capacity(
 ) -> bool {
     let _ = (kind, run_desired, rows, view, desired_generation, observation);
     panic!("RED scaffold: start_blocked_only_by_capacity is not implemented (ADR-0336)")
-}
-
-/// The stamp-on-emit restart rule the reconciler decides with today: a
-/// generation is pending until some issued allocation serves it.
-///
-/// SCAFFOLD: true — DISTILL keeps the pre-ADR-0335 decision (the largest
-/// `issued_generation` entry equals the old `issued_generation` stamp) so the
-/// existing reconciler behaviour is unchanged until DELIVER switches every call
-/// site to [`generation_replacement_pending`].
-fn restart_pending_until_successor_observed(
-    view: &WorkloadLifecycleView,
-    desired_generation: u64,
-) -> bool {
-    view.issued_generation.values().copied().max().unwrap_or(0) < desired_generation
 }
 
 /// Whether `WorkloadLifecycle` places a successor (`RestartAllocation`) for
@@ -4317,10 +4300,17 @@ mod restart_ssot_agreement {
             // The launch placed after `ran_row` may have ended before it ran: an abandoned row,
             // the workload's current allocation, carrying a count of its own (a crash restart's
             // `attempts + 1`) that no decision may read. The decision reads the count basis.
-            let abandoned_successor =
-                abandoned_successor.filter(|_| class.can_precede_an_abandoned_launch(kind));
-            let generation_replacement =
-                generation_replacement || (abandoned_successor.is_some() && class.is_intentional_stop());
+            //
+            // A finished Job (a Job row carrying a terminal claim, an operator stop included) is
+            // never replaced (ADR-0335 item 3, H1): `generation_replacement_pending` reads false
+            // for it, so no launch is issued after it and no generation is pending against it.
+            // Both inputs below are unreachable for it and are left out.
+            let finished_job = kind == WorkloadKind::Job && ran_row.terminal.is_some();
+            let abandoned_successor = abandoned_successor
+                .filter(|_| class.can_precede_an_abandoned_launch(kind) && !finished_job);
+            let generation_replacement = !finished_job
+                && (generation_replacement
+                    || (abandoned_successor.is_some() && class.is_intentional_stop()));
             if let Some(lost) = abandoned_successor {
                 let successor = abandoned_row(earlier + 1, lost, kind);
                 lifecycle_view

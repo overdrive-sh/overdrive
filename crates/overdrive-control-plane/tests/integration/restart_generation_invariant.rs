@@ -1636,9 +1636,6 @@ async fn running_job(seed: u64, label: &str) -> World {
 /// an id for it that the shim fences.
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[should_panic(
-    expected = "a restart of a running Job must end it and issue nothing after: no id, no issued_generation or restart_counts entry, no launch (H1)"
-)]
 async fn a_restart_of_a_running_job_ends_it_and_issues_nothing_after() {
     for seed in SEEDS {
         let mut w = running_job(seed, "job/restart-of-running").await;

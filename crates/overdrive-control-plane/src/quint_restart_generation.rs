@@ -1752,7 +1752,6 @@ fn quint_rg_restart_of_completed_job_does_nothing_and_issues_no_id() -> impl Qui
     test = "resume_of_stopped_job_does_nothing_and_issues_no_id",
     max_samples = 1
 )]
-#[should_panic(expected = "the Job issued allocation id")]
 fn quint_rg_resume_of_stopped_job_does_nothing_and_issues_no_id() -> impl QuintDriver {
     RgJobDriver::new()
 }

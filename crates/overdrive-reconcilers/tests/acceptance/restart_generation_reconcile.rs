@@ -346,9 +346,6 @@ proptest! {
     /// generation as handled, so the second issues nothing (operator-stopped
     /// predecessor) or charges the restart (crashed predecessor).
     #[test]
-    #[should_panic(
-        expected = "a second evaluation with the issued id's row absent must issue exactly one new id for the pending generation, record desired.generation for it, and carry the predecessor's restart count and failure time unchanged"
-    )]
     fn a_lost_launch_is_relaunched_once_for_the_pending_generation(
         class in prop_oneof![Just(Class::Crashed), Just(Class::OperatorStopped)],
         attempts in 0_u32..=RESTART_BACKOFF_CEILING,
@@ -379,9 +376,6 @@ proptest! {
     /// the count (the ceiling does not apply to a generation replacement).
     /// PENDING: today the relaunch is charged as a crash restart (`count + 1`).
     #[test]
-    #[should_panic(
-        expected = "an abandoned generation replacement must be relaunched with the predecessor's restart count and failure time"
-    )]
     fn an_abandoned_replacement_relaunch_charges_nothing(
         attempts in 1_u32..=RESTART_BACKOFF_CEILING,
         previous_generation in 0_u64..=2,
@@ -661,9 +655,6 @@ proptest! {
     /// is emitted (the shim then returns at its fence with no successor, and the
     /// stamp on emit hides that the generation is never handled).
     #[test]
-    #[should_panic(
-        expected = "an operator-stopped Job whose row carries a terminal must never be given a new allocation by a restart"
-    )]
     fn a_restart_never_gives_an_operator_stopped_job_a_new_allocation(
         attempts in 0_u32..=RESTART_BACKOFF_CEILING,
         previous_generation in 0_u64..=2,
