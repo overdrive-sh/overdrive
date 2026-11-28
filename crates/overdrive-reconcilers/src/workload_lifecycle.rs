@@ -130,7 +130,7 @@ pub enum AllocationAttemptTransition {
 
 /// Decide whether an event may mutate an existing allocation attempt.
 ///
-/// A typed terminal claim is immutable for a Job allocation. Late READY,
+/// A finished Job row (`is_finished_job`) is immutable. Late READY,
 /// dispatch, and finalization events therefore all become exact no-ops. A
 /// platform-reclaimed row intentionally has no terminal claim, so it remains
 /// eligible for the ordinary policy-driven replacement path.
@@ -139,7 +139,7 @@ pub fn allocation_attempt_transition(
     prior: &AllocStatusRow,
     _event: AllocationAttemptEvent,
 ) -> AllocationAttemptTransition {
-    if prior.kind == WorkloadKind::Job && prior.terminal.is_some() {
+    if is_finished_job(prior) {
         AllocationAttemptTransition::NoChange
     } else {
         AllocationAttemptTransition::Apply
@@ -1647,6 +1647,16 @@ fn is_operator_stopped(row: &AllocStatusRow) -> bool {
         ))
 }
 
+/// True iff the row is a finished Job row (ADR-0335 item 3, H1, H3): kind
+/// `Job` and either a terminal claim or an operator stop, whichever writer
+/// recorded it (the stop path writes `terminal`, the exit observer only the
+/// `reason`). The one definition shared by [`allocation_attempt_transition`]
+/// and [`generation_replacement_pending`], so the shim's fence and the
+/// restart rule agree on every row.
+fn is_finished_job(row: &AllocStatusRow) -> bool {
+    row.kind == WorkloadKind::Job && (row.terminal.is_some() || is_operator_stopped(row))
+}
+
 /// True iff the alloc row carries a terminal *intentional-stop class*
 /// record — `state == Terminated` AND its `terminal` OR `reason`
 /// carries `Stopped { by: ∈ {Operator, SystemGc} }`.
@@ -1737,7 +1747,7 @@ fn restart_allocation_action(
 /// Whether the committed generation still has no observed successor (ADR-0335).
 ///
 /// True iff `ran` is `Some(row)`, `row` is not a finished Job row
-/// (`row.kind == WorkloadKind::Job && row.terminal.is_some()`, H1), and
+/// (`is_finished_job`, H1, H3), and
 /// `view.issued_generation[row.alloc_id]` (absent reads `0`) is less than
 /// `desired_generation`. With no row it is false. It is the only definition of
 /// `restart_pending`. Callers pass `ran`, the count basis ([`last_ran_alloc`]):
@@ -1749,9 +1759,8 @@ pub fn generation_replacement_pending(
     ran: Option<&AllocStatusRow>,
 ) -> bool {
     ran.is_some_and(|row| {
-        let finished_job = row.kind == WorkloadKind::Job && row.terminal.is_some();
         let issued = view.issued_generation.get(&row.alloc_id).copied().unwrap_or(0);
-        !finished_job && issued < desired_generation
+        !is_finished_job(row) && issued < desired_generation
     })
 }
 

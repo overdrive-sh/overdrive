@@ -648,7 +648,6 @@ proptest! {
     /// state has `desired_to_stop: false`). No `StartAllocation` / `RestartAllocation`, no id
     /// issued, no View entry gained.
     #[test]
-    #[should_panic(expected = "an operator-stopped Job row recorded by the exit observer")]
     fn a_restart_never_gives_an_exit_observer_stopped_job_a_new_allocation(
         attempts in 0_u32..=RESTART_BACKOFF_CEILING,
         previous_generation in 0_u64..=2,

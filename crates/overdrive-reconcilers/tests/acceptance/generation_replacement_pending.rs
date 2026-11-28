@@ -257,7 +257,6 @@ fn exit_observer_operator_stopped(suffix: &str, kind: WorkloadKind) -> AllocStat
 /// exit-observer shape (no terminal) is not pending below the generation: a later
 /// `overdrive workload restart` gives that Job no new allocation.
 #[test]
-#[should_panic(expected = "an operator-stopped Job row with no terminal is finished: not pending")]
 fn an_operator_stopped_job_row_without_a_terminal_is_not_pending_below_the_generation() {
     let job = exit_observer_operator_stopped("0", WorkloadKind::Job);
     assert!(
@@ -488,7 +487,6 @@ proptest! {
     /// operator-stop arm, H3), the absent-reads-0
     /// default, the selection of the newest row that ran (abandoned launches skipped).
     #[test]
-    #[should_panic(expected = "an operator stop recorded by either writer")]
     fn pending_is_true_iff_the_newest_row_that_ran_is_below_the_generation_and_not_a_finished_job(
         generated in rows_strategy(),
         generation in 0_u64..=4,
@@ -507,7 +505,6 @@ proptest! {
     /// independent restatement of a finished Job row, so a terminal-less operator-stopped Job row
     /// (H3) must be `NoChange` at the shim, not only agree with the predicate.
     #[test]
-    #[should_panic(expected = "the shim's fence must report NoChange for a finished Job row")]
     fn pending_agrees_with_the_shims_finished_job_fence(
         generated in rows_strategy(),
         generation in 0_u64..=4,
