@@ -102,6 +102,11 @@ fn dns_query_latency(rep: &mut Replicate) -> Result<(), ReplicateFailure> {
     // Declared first, so it drops last: the responder and the clients are gone by then.
     let netns = NetNs::create(&format!("ovbdns-{}-{sequence}", std::process::id()))
         .map_err(|error| fail(&format!("creating the network namespace: {error}")))?;
+    // The responder binds its TCP listener to the gateway address, which a node
+    // has assigned before the responder starts; the namespace needs it too.
+    netns
+        .assign_ip_and_up("lo", "100.95.0.1/32")
+        .map_err(|error| fail(&format!("assigning the gateway address: {error}")))?;
     let recorder = Arc::new(Recorder::default());
     let responder = Responder::start(&netns.name, shape.names, &recorder)?;
     let templates = shape.query_templates()?;
