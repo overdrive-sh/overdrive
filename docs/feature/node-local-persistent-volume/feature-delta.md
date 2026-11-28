@@ -1725,7 +1725,10 @@ It is true iff all hold, in the order of the reconciler's own rules (`workload_l
 4. `current = current_alloc(rows)`. With no row (a first placement) the predicate is true. Otherwise `current` holds no lease in
    `observation.leases`: a leased predecessor at the cap is the reconciler's row-neutral reclaim pass (`:1295-1297`), already shown as
    `network_cleanup_pending`; that is progress, not a wait.
-5. `pending = generation_replacement_pending(view, desired_generation, Some(current))` (ADR-0335, with the finished-Job exception).
+5. `ran = last_ran_alloc(rows)` (the count basis, ADR-0355, RB-13) and `pending = generation_replacement_pending(view, desired_generation,
+   ran)` (ADR-0335, with the finished-Job exception). Only the pending read and the restart count use `ran`; every other read in this list
+   (items 2 to 4 and the class of item 6) stays on `current`, the newest row, abandoned or not. When `current` is not abandoned, `ran` is
+   `current`.
 6. By the class of `current`, mirroring the reconciler's order:
    - a Job and **any** row `is_natural_exit` (the Job natural-exit branch scans every active row, `:1091-1104`; it finalises or idles and never
      starts): false;
@@ -1733,8 +1736,8 @@ It is true iff all hold, in the order of the reconciler's own rules (`workload_l
    - `is_intentionally_stopped(current)` otherwise (a `Stopped { SystemGc }` row: not vetoed, not restartable, so it falls through to a fresh
      placement, `:1146-1148`, `:1348`): true;
    - `is_restartable(current)` (a crashed row, `Stopped { LivenessProbe | StartupProbe }`, a platform-reclaimed row, a `BackoffExhausted` or
-     `ServiceFailed` row): `restart_after_failure(kind, run_desired, current, attempts, pending)` with `attempts` read from
-     `view.restart_counts` (the decision `:1175-1260` takes: a row at the ceiling with no generation pending is blocked for good; a pending
+     `ServiceFailed` row): `restart_after_failure(kind, run_desired, current, ran, attempts, pending)` with `attempts` read from
+     `view.restart_counts[ran]` (0 with no `ran`) (the decision `:1175-1260` takes: a row at the ceiling with no generation pending is blocked for good; a pending
      generation reopens it);
    - anything else (including a `Pending` row): false.
 
