@@ -1355,9 +1355,6 @@ async fn resume_of_a_stopped_workload_lost_with_the_control_plane_is_relaunched_
 /// it is interrupted by each of the four interruptions; its relaunch re-assigns the same count.
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[should_panic(
-    expected = "transient failures must present as Failed rows MtlsInterceptInstallFailed"
-)]
 async fn a_transient_identity_fault_then_an_interrupted_launch_places_once() {
     for (origin, label) in [
         (Origin::RunningRestart, "running-restart/transient"),
@@ -1535,9 +1532,6 @@ async fn check_transient(run: &PreRun) {
 /// every origin.
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[should_panic(
-    expected = "a persistent identity_issue failure must write a charged Failed row naming MtlsInterceptInstallFailed"
-)]
 async fn a_persistent_identity_failure_ends_backoff_exhausted() {
     for (start, label) in [
         (Start::RunningRestart, "persistent/restart"),
@@ -1554,9 +1548,6 @@ async fn a_persistent_identity_failure_ends_backoff_exhausted() {
 /// the rest. The schedule does not enter this path, so one seed serves every origin.
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[should_panic(
-    expected = "a persistent identity_issue failure must write a charged Failed row naming MtlsInterceptInstallFailed"
-)]
 async fn a_persistent_identity_failure_launches_a_bounded_number_of_times_within_one_backoff_window()
  {
     for start in [Start::RunningRestart, Start::StoppedResume, Start::FirstPlacement] {
@@ -1595,9 +1586,6 @@ async fn a_persistent_identity_failure_launches_a_bounded_number_of_times_within
 /// launches fail, so every seed runs for every origin.
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[should_panic(
-    expected = "transient failures must present as Failed rows MtlsInterceptInstallFailed"
-)]
 async fn a_transient_identity_failure_recovers_to_running() {
     for (start, label) in [
         (Start::RunningRestart, "transient/restart"),
@@ -1702,9 +1690,6 @@ async fn job_identity_failure(seed: u64, label: &str) {
 /// PENDING (ADR-0337, J-1): persistent identity failure of a Job.
 /// Contract shape: bounded-change.
 #[tokio::test(flavor = "current_thread")]
-#[should_panic(
-    expected = "a Job whose SVID issuance fails must write one Failed row MtlsInterceptInstallFailed"
-)]
 async fn a_job_whose_identity_issuance_persistently_fails_is_finalised_failed_and_never_relaunched()
 {
     for seed in SEEDS {

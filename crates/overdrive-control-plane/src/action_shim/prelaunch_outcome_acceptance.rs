@@ -1751,9 +1751,6 @@ async fn the_lease_stays_held_across_several_reclaim_attempts_while_the_scope_is
 /// emits the lifecycle event and returns `Ok(())`. Today it returns the
 /// error and writes no row.
 #[tokio::test]
-#[should_panic(
-    expected = "an identity issuance failure is recorded as a row: the start dispatch returns Ok(()), got Err("
-)]
 async fn start_arm_identity_issue_failure_writes_a_failed_row_naming_the_cause() {
     let driver = Arc::new(SimDriver::new(DriverType::Vm));
     let rig = Rig::build(Arc::clone(&driver) as Arc<dyn Driver>).await;
@@ -1797,9 +1794,6 @@ async fn start_arm_identity_issue_failure_writes_a_failed_row_naming_the_cause()
 /// same `Failed` successor row, unwinds the successor, and runs the exact-old
 /// predecessor cleanup once.
 #[tokio::test]
-#[should_panic(
-    expected = "an identity issuance failure is recorded as a row: the restart dispatch returns Ok(()), got Err("
-)]
 async fn restart_arm_identity_issue_failure_writes_a_failed_successor_row_then_cleans_the_predecessor()
  {
     let driver = Arc::new(SimDriver::new(DriverType::Vm));
@@ -1843,9 +1837,6 @@ async fn restart_arm_identity_issue_failure_writes_a_failed_successor_row_then_c
 /// PENDING (S5-J). A Job's launch whose identity issuance fails writes the
 /// same row, with the Job kind.
 #[tokio::test]
-#[should_panic(
-    expected = "an identity issuance failure is recorded as a row: the Job start dispatch returns Ok(()), got Err("
-)]
 async fn a_job_identity_issue_failure_writes_the_same_failed_row() {
     let driver = Arc::new(SimDriver::new(DriverType::Vm));
     let rig = Rig::build(Arc::clone(&driver) as Arc<dyn Driver>).await;
@@ -1876,7 +1867,6 @@ async fn a_job_identity_issue_failure_writes_the_same_failed_row() {
 /// PENDING (S5, teardown fault). A guest-network teardown failure does not
 /// suppress the row, and is returned after it.
 #[tokio::test]
-#[should_panic(expected = "expected MtlsInterceptInstallFailed identity_issue, got None")]
 async fn start_arm_teardown_failure_does_not_suppress_the_identity_issue_row() {
     let driver = Arc::new(SimDriver::new(DriverType::Vm));
     let rig = Rig::build(Arc::clone(&driver) as Arc<dyn Driver>).await;
@@ -1911,9 +1901,6 @@ async fn start_arm_teardown_failure_does_not_suppress_the_identity_issue_row() {
 /// workload's intent persists: the restart's successor is a `Failed` row
 /// `DriverInternalError`, not `HandleMissing` with no row.
 #[tokio::test]
-#[should_panic(
-    expected = "R3: an empty driver registry in a restart writes a Failed successor row, not HandleMissing: Err(HandleMissing"
-)]
 async fn restart_with_no_driver_composed_writes_a_failed_successor_row_not_handle_missing() {
     let driver = Arc::new(SimDriver::new(DriverType::Vm));
     let mut rig = Rig::build(Arc::clone(&driver) as Arc<dyn Driver>).await;
@@ -2285,9 +2272,6 @@ fn backoff_exhausted(row: &AllocStatusRow) -> bool {
 /// which the next tick finalises `BackoffExhausted`. The launches are the
 /// ceiling plus the first, never one per tick.
 #[tokio::test]
-#[should_panic(
-    expected = "the first launch's identity failure is recorded as a row so the tick succeeds: Err("
-)]
 async fn a_persistent_identity_failure_is_charged_until_the_restart_ceiling_then_exhausted() {
     let driver = Arc::new(SimDriver::new(DriverType::Vm));
     let rig = Rig::build(Arc::clone(&driver) as Arc<dyn Driver>).await;
@@ -2362,6 +2346,19 @@ impl Rig {
             .put(IntentKey::for_workload(&id).as_bytes(), archived.as_ref())
             .await
             .expect("put the job intent");
+        // The production submit path writes the kind sentinel once, beside the
+        // intent (`handlers.rs`, `submit_workload`: `IntentKey::for_workload_kind`
+        // put of `workload_kind.discriminator_byte()` after `put_if_absent`
+        // returns `Inserted`). A workload with no sentinel is not a Job to
+        // production, so the fixture writes it exactly as submit does.
+        self.state
+            .store
+            .put(
+                IntentKey::for_workload_kind(&id).as_bytes(),
+                &[WorkloadKind::Job.discriminator_byte()],
+            )
+            .await
+            .expect("put the workload kind");
     }
 }
 
@@ -2371,9 +2368,6 @@ impl Rig {
 /// pinned here by ruling J-1); and no further `StartAllocation` is emitted
 /// however many ticks run, however far the clock advances.
 #[tokio::test]
-#[should_panic(
-    expected = "the Job's identity failure is recorded as a row so the first tick succeeds: Err("
-)]
 async fn a_job_identity_failure_is_final_and_never_relaunched() {
     let driver = Arc::new(SimDriver::new(DriverType::Vm));
     let rig = Rig::build(Arc::clone(&driver) as Arc<dyn Driver>).await;

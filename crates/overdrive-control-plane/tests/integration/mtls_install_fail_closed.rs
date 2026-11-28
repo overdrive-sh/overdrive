@@ -579,6 +579,9 @@ struct JournalOwner {
     refuse_activation: bool,
     refusals: parking_lot::Mutex<Vec<ActivationRefusal>>,
     teardown_probe: parking_lot::Mutex<Option<TeardownProbe>>,
+    /// The guest address each provisioned allocation's lease carried, as the
+    /// plan handed to `provision` named it.
+    leased_addresses: parking_lot::Mutex<BTreeMap<AllocationId, Ipv4Addr>>,
 }
 
 /// Watches one allocation's `teardown`: whether the worker had already
@@ -621,7 +624,14 @@ impl JournalOwner {
             refuse_activation,
             refusals: parking_lot::Mutex::new(Vec::new()),
             teardown_probe: parking_lot::Mutex::new(None),
+            leased_addresses: parking_lot::Mutex::new(BTreeMap::new()),
         }
+    }
+
+    /// The guest address `alloc`'s lease carried at provision, when it was
+    /// provisioned.
+    fn leased_address(&self, alloc: &AllocationId) -> Option<Ipv4Addr> {
+        self.leased_addresses.lock().get(alloc).copied()
     }
 
     /// Every activation refusal, in call order.
@@ -647,6 +657,9 @@ impl GuestNetworkProvisioner for JournalOwner {
         plan: &GuestNetworkPlan,
     ) -> overdrive_control_plane::guest_network::Result<()> {
         record(&self.journal, Step::Provision, Some(plan.alloc()));
+        self.leased_addresses
+            .lock()
+            .insert(plan.alloc().clone(), plan.assignment().workload_addr());
         self.inner.provision(plan).await
     }
 
@@ -1700,6 +1713,8 @@ struct RestartAbortOutcome {
     stop_alloc_calls: u64,
     predecessor_lease_released: bool,
     successor_lease_released: bool,
+    /// The guest address the successor's lease carried at provision.
+    successor_leased_address: Option<Ipv4Addr>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1822,6 +1837,7 @@ async fn drive_restart_abort(scenario: RestartAbortScenario) -> RestartAbortOutc
         stop_alloc_calls: worker.stop_alloc_calls_for_test(),
         predecessor_lease_released: predecessor_steps.contains(&Step::LeaseReleased),
         successor_lease_released: successor_steps.contains(&Step::LeaseReleased),
+        successor_leased_address: owner.leased_address(&successor),
     };
     worker.stop_alloc(&successor).await.expect("successor fixture cleanup converges");
     worker.stop_alloc(&predecessor).await.expect("predecessor fixture cleanup converges");
@@ -1861,15 +1877,22 @@ async fn restart_provision_failure_tears_down_old_and_replacement_networks_and_r
     ));
 }
 
-/// Identity issuance failure preserves its primary typed error after fresh
-/// successor unwind, then completes exact-old predecessor cleanup.
+/// Identity issuance failure is recorded as a `Failed` successor row naming
+/// the cause (`MtlsInterceptInstallFailed`, stage `identity_issue`, carrying the
+/// lease's address) and the dispatch returns `Ok`; the fresh successor is
+/// unwound, then the exact-old predecessor cleanup stops the prior intercept
+/// before the network release.
 /// CONTRACT_SHAPE: bounded-change.
 #[overdrive_test(guest = "cgroup-default")]
 #[tokio::test]
 async fn restart_identity_failure_stops_prior_intercept_before_network_release() {
     let outcome = drive_restart_abort(RestartAbortScenario::Identity).await;
     assert_restart_abort_identities(&outcome);
-    assert!(matches!(outcome.result, Err(ShimError::IssueSvid(_))));
+    assert!(
+        outcome.result.is_ok(),
+        "the identity failure is recorded as a row, so the dispatch returns Ok: {:?}",
+        outcome.result
+    );
     assert!(outcome.starts.is_empty());
     assert_eq!(outcome.stops, vec![outcome.predecessor.clone()]);
     assert_eq!(outcome.provisions, 1);
@@ -1879,10 +1902,19 @@ async fn restart_identity_failure_stops_prior_intercept_before_network_release()
     assert_eq!(outcome.stop_alloc_calls, 1);
     assert!(outcome.predecessor_lease_released);
     assert!(outcome.successor_lease_released);
-    // ADR-0353: the launch record stays on record as `Pending`; the `Failed` row for an
-    // identity failure is written by a later step (carry table).
-    let row = outcome.row.expect("the successor's Pending launch row stays on record");
-    assert_eq!(row.state, AllocState::Pending);
+    let leased = outcome.successor_leased_address.expect("the successor's lease was provisioned");
+    let row = outcome.row.expect("the successor's Failed row is on record");
+    assert_eq!(row.state, AllocState::Failed);
+    assert!(
+        matches!(
+            &row.reason,
+            Some(TransitionReason::MtlsInterceptInstallFailed { stage, .. })
+                if stage == "identity_issue"
+        ),
+        "the row names the identity issuance cause: {:?}",
+        row.reason
+    );
+    assert_eq!(row.workload_addr, Some(leased), "the Failed row carries the lease's address");
 }
 
 /// Driver-start rejection records a fresh Failed successor after its unwind,

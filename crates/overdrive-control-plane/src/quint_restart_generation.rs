@@ -175,9 +175,9 @@ placement!(host_pure);
 const MAIN_SERVICE: &str = "rg_conf";
 const MAIN_JOB: &str = "rg_conf_job";
 const MODULE: &str = "restart_generation";
-/// The instance's allocation ids (`NA`) and its failure limit (`LIMIT`).
-const NA: i64 = 4;
-const LIMIT: i64 = 3;
+/// The instance's allocation ids (`NA`) and its failure limit (`LIMIT`): the `rg_conf` mains' 8 and 6, production's `RESTART_BACKOFF_CEILING = 5` in the spec's counting.
+const NA: i64 = 8;
+const LIMIT: i64 = 6;
 /// The one workload of the model.
 const WORKLOAD: &str = "rg-w";
 /// The Phase 1 node id: the reconciler places every allocation on `local`, and boot reclamation
@@ -1523,13 +1523,18 @@ impl RgState {
                 },
             );
         }
+        // The spec's `exhausted` is `charged >= LIMIT && !nonTerminal`: a launch that holds the lane
+        // (pending, running, or issued with no row yet) ends it, though the predecessor's row keeps its
+        // `BackoffExhausted` terminal until the launch writes its own row.
+        let non_terminal = allocs.values().any(|facts| matches!(facts.state, 1 | 2 | 6));
         Ok(Self {
             dg: i64::try_from(dg).map_err(|_| fail("generation out of range".into()))?,
             stopped,
             allocs,
-            exhausted: current.is_some_and(|row| {
-                matches!(row.terminal, Some(TerminalCondition::BackoffExhausted { .. }))
-            }),
+            exhausted: !non_terminal
+                && current.is_some_and(|row| {
+                    matches!(row.terminal, Some(TerminalCondition::BackoffExhausted { .. }))
+                }),
         })
     }
 }
@@ -1670,7 +1675,6 @@ fn quint_rg_resume_while_running_stops_and_replaces() -> impl QuintDriver {
     test = "restart_of_exhausted_workload_relaunches_uncharged",
     max_samples = 1
 )]
-#[should_panic(expected = "allocation 1 state: spec failed (PreFail), production pending")]
 fn quint_rg_restart_of_exhausted_workload_relaunches_uncharged() -> impl QuintDriver {
     RgDriver::new()
 }
@@ -1684,7 +1688,6 @@ fn quint_rg_restart_of_exhausted_workload_relaunches_uncharged() -> impl QuintDr
     test = "generation_replacement_forgives_predecessor_failure",
     max_samples = 1
 )]
-#[should_panic(expected = "allocation 1 state: spec failed (PreFail), production pending")]
 fn quint_rg_generation_replacement_forgives_predecessor_failure() -> impl QuintDriver {
     RgDriver::new()
 }
@@ -1698,7 +1701,6 @@ fn quint_rg_generation_replacement_forgives_predecessor_failure() -> impl QuintD
     test = "persistent_prelaunch_failure_ends_in_backoff_exhausted",
     max_samples = 1
 )]
-#[should_panic(expected = "allocation 1 state: spec failed (PreFail), production pending")]
 fn quint_rg_persistent_prelaunch_failure_ends_in_backoff_exhausted() -> impl QuintDriver {
     RgDriver::new()
 }
@@ -1712,7 +1714,6 @@ fn quint_rg_persistent_prelaunch_failure_ends_in_backoff_exhausted() -> impl Qui
     test = "transient_prelaunch_failure_recovers",
     max_samples = 1
 )]
-#[should_panic(expected = "allocation 1 state: spec failed (PreFail), production pending")]
 fn quint_rg_transient_prelaunch_failure_recovers() -> impl QuintDriver {
     RgDriver::new()
 }
@@ -1762,7 +1763,6 @@ fn quint_rg_resume_of_stopped_job_does_nothing_and_issues_no_id() -> impl QuintD
 /// Randomized `rg_conf` traces (seed printed on failure).
 /// CONTRACT_SHAPE: bounded-change.
 #[quint_run(spec = "../../specs/quint/restart-generation/restart_generation.qnt", main = "rg_conf")]
-#[should_panic(expected = "state: spec failed (PreFail), production pending")]
 fn quint_rg_randomized() -> impl QuintDriver {
     RgDriver::new()
 }

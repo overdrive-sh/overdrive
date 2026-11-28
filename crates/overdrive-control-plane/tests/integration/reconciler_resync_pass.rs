@@ -759,13 +759,15 @@ async fn a_node_restarted_over_a_deployed_intent_with_no_allocation_row_evaluate
     let dir = TempDir::new().expect("tempdir");
     let first = Node::boot(&dir, Ports::with_observation()).await;
     first.wedge_with_failed_first_hydrate("payments").await;
+    // The precondition is read from the state the restart starts from, before the second boot: the
+    // second node's boot pass can already have written a row by the time `Node::boot` returns.
+    assert!(
+        first.allocs("payments").await.rows.is_empty(),
+        "precondition: the restarted node starts with no allocation row for payments"
+    );
     first.shutdown_frozen().await;
 
     let second = Node::boot(&dir, Ports::new()).await;
-    assert!(
-        second.allocs("payments").await.rows.is_empty(),
-        "precondition: the restarted node starts with no allocation row for payments"
-    );
 
     // The first periodic pass is one period away: only the boot pass can explain Running here.
     let running = second.step_until_running("payments", Duration::from_secs(10)).await;

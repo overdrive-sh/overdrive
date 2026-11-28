@@ -295,6 +295,55 @@ async fn end_abandoned_launch(
     Ok(())
 }
 
+/// A launch whose identity could not be issued never reaches the driver: end
+/// its `Pending` row as a `Failed` row `MtlsInterceptInstallFailed { stage:
+/// "identity_issue" }` carrying the issuance cause, with the `Pending` row's
+/// address carried. `terminal` stays `None`: the reconciler owns the terminal
+/// claim, and the row is charged as any other failed launch.
+#[allow(clippy::too_many_arguments)]
+async fn record_identity_issue_failure(
+    obs: &dyn ObservationStore,
+    bus: &broadcast::Sender<LifecycleEvent>,
+    tick: &TickContext,
+    alloc_id: &AllocationId,
+    workload_id: &WorkloadId,
+    node_id: &NodeId,
+    kind: overdrive_core::aggregate::WorkloadKind,
+    address: Option<std::net::Ipv4Addr>,
+    launch_row: Option<&AllocStatusRow>,
+    issue_error: &ShimError,
+) -> Result<(), ShimError> {
+    let detail = std::error::Error::source(issue_error)
+        .map_or_else(|| issue_error.to_string(), ToString::to_string);
+    let reason = TransitionReason::MtlsInterceptInstallFailed {
+        stage: "identity_issue".to_owned(),
+        detail: detail.clone(),
+    };
+    let updated_at = LogicalTimestamp::dominating(
+        tick.tick,
+        node_id.clone(),
+        launch_row.map(|row| &row.updated_at),
+    );
+    let row = build_alloc_status_row(
+        alloc_id.clone(),
+        workload_id.clone(),
+        node_id.clone(),
+        AllocState::Failed,
+        updated_at,
+        Some(reason),
+        Some(detail),
+        None,
+        None,
+        kind,
+        None,
+        address,
+        launch_row,
+    );
+    let occurrence = obs.write_alloc_lifecycle(row, TransitionSource::Reconciler).await?;
+    emit_lifecycle_occurrence(bus, occurrence.as_ref());
+    Ok(())
+}
+
 /// A failed `Pending` write creates no VMM: retire the lease and tear it down
 /// for the dispatch. A failed teardown is logged beside the write error, which
 /// stays the dispatch's outcome.
@@ -2087,9 +2136,34 @@ async fn dispatch_single(
             )
             .await
             {
+                // ADR-0337, ADR-0355 W3: the failure is a recorded, charged
+                // launch outcome. The lease is released first; a teardown
+                // failure never suppresses the row and is returned after it.
                 retire_guest_network_lease(&alloc_id, guest_network);
-                teardown_for_dispatch(&alloc_id, guest_network, host).await?;
-                return Err(issue_error);
+                let teardown = teardown_for_dispatch(&alloc_id, guest_network, host).await;
+                let record = record_identity_issue_failure(
+                    obs,
+                    bus,
+                    tick,
+                    &alloc_id,
+                    &workload_id,
+                    &node_id,
+                    kind,
+                    lease_address,
+                    pending_row.as_ref().or(prior_row.as_ref()),
+                    &issue_error,
+                )
+                .await;
+                if let (Err(record_error), Err(cleanup_error)) = (&record, &teardown) {
+                    tracing::error!(
+                        name: "launch.identity_issue.cleanup.failed",
+                        alloc = %alloc_id,
+                        primary = %record_error,
+                        cleanup = %cleanup_error,
+                        "the identity failure row write failed and the lease teardown also failed"
+                    );
+                }
+                return record.and(teardown);
             }
             // The newest stamp this launch wrote: later rows dominate it.
             let launch_updated_at: Option<LogicalTimestamp> =
@@ -2492,9 +2566,6 @@ async fn dispatch_single(
             // successor work. Cleanup is later pinned to these exact values.
             let predecessor_handle = AllocationHandle { alloc: alloc_id.clone(), pid: None };
             let prior_drivers = resolve_drivers_for_alloc(drivers, alloc_drivers, &alloc_id);
-            if prior_drivers.is_empty() {
-                return Err(ShimError::HandleMissing { alloc_id });
-            }
             let successor_alloc_id = spec.alloc.clone();
             let prior_state: AllocStateWire = prior_row.state.into();
             let driver_kind = spec.driver.driver_type();
@@ -2630,25 +2701,42 @@ async fn dispatch_single(
                     )
                     .await
                     {
-                        if let Err(cleanup_error) = cleanup_restart_successor(
+                        // ADR-0337, ADR-0355 W3: the successor's identity failure is
+                        // a recorded, charged outcome. A cleanup failure never
+                        // suppresses the row and is returned after it; the exact-old
+                        // predecessor cleanup still runs.
+                        let unwind = cleanup_restart_successor(
                             None,
                             mtls_lifecycle,
                             &successor_alloc_id,
                             guest_network,
                             host,
                         )
-                        .await
-                        {
+                        .await;
+                        let record = record_identity_issue_failure(
+                            obs,
+                            bus,
+                            tick,
+                            &successor_alloc_id,
+                            &prior_row.workload_id,
+                            &prior_row.node_id,
+                            kind,
+                            lease_address,
+                            pending_row.as_ref(),
+                            &issue_error,
+                        )
+                        .await;
+                        if let (Err(record_error), Err(cleanup_error)) = (&record, &unwind) {
                             tracing::error!(
                                 name: "restart.abort.cleanup.failed",
                                 alloc = %successor_alloc_id,
-                                primary = %issue_error,
+                                primary = %record_error,
                                 cleanup = ?cleanup_error,
-                                "successor identity failure retained as primary after successor unwind failed"
+                                "the identity failure row write failed and the successor unwind also failed"
                             );
                         }
                         return finish_restart(
-                            Err(issue_error),
+                            record.and(unwind),
                             &prior_drivers,
                             &predecessor_handle,
                             alloc_drivers,
