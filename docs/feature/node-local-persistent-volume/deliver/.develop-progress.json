@@ -1,9 +1,10 @@
 {
   "project_id": "",
   "total_steps": 28,
-  "completed_steps": 21,
+  "completed_steps": 22,
   "completed_step_ids": [
     "01-01",
+    "01-02",
     "02-01",
     "02-02",
     "02-03",
@@ -26,7 +27,6 @@
     "09-08"
   ],
   "pending_step_ids": [
-    "01-02",
     "06-02",
     "07-01",
     "07-02",
