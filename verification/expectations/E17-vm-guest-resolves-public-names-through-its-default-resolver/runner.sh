@@ -54,8 +54,9 @@ record() {
   return "$rc"
 }
 
+# The state of the first attempt row of a Job's `workload describe`.
 alloc_state() {
-  awk '/^Alloc[[:space:]]+State[[:space:]]+/ { t = 1; next } t && $1 ~ /^alloc-/ { print $2; exit }'
+  awk '/^Attempt[[:space:]]+State[[:space:]]+/ { t = 1; next } t && $1 ~ /^[0-9]+$/ { print $2; exit }'
 }
 
 start_serve() {
@@ -143,6 +144,16 @@ GUEST_CAT="$(cat "$OUTPUT_ROOT/guest-cat-path" 2>/dev/null || true)"
 log "guest image cat=${GUEST_CAT:-none}"
 start_serve
 
+# The VM run directory (and with it console.log) is removed when the allocation
+# ends, so follow each allocation's console from byte 0 into a file of its own
+# before deploying. `tail -F` keeps its descriptor on the file after the unlink.
+TAIL_PIDS=()
+for alloc in alloc-herdr-box-0 alloc-herdr-resolv-0; do
+  tail -n +1 -s 0.05 -F "$VM_RUN_ROOT/$alloc/console.log" >"$SNAP_DIR/$alloc.stream" 2>"$SNAP_DIR/$alloc.stream.err" &
+  TAIL_PIDS+=("$!")
+done
+log "console streams started pids=${TAIL_PIDS[*]}"
+
 # --- deploy and observe -------------------------------------------------------
 record deploy cli deploy --detach "$SPEC" || die "deploy failed"
 deadline=$((SECONDS + 150))
@@ -194,5 +205,8 @@ record host-nft-after nft list ruleset
 record host-ip-rule-after ip rule show
 record host-ip-route-after ip route show table all
 record host-resolv-conf-after cat /etc/resolv.conf
+sleep 1
+kill "${TAIL_PIDS[@]}" 2>/dev/null || true
+log "console streams stopped"
 log "=== capture ends; consoles in $SNAP_DIR ==="
 [[ "$state" == "Terminated" ]]
