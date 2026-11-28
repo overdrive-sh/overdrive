@@ -99,7 +99,7 @@ No issue was created or changed by this finalization. Tracked limitations carry 
 
 ## Finalization
 
-- **Issues closed:** GH #382: closed <pending>.
-- **Metal cleanup:** <pending>.
+- **Issues closed:** GH #382: closed 2026-11-28 after `gh issue view 382 --comments` confirmed the delivered feature covers its scope; the closing comment links this record.
+- **Metal cleanup:** removed this feature's remote checkout (`~/overdrive-worktrees/7b8ff0c7…`, 119 GB with its build output) and the base-comparison checkout (`~/overdrive-worktrees/a9db6197…`, 21 GB), metal run 01f8f21a859ef18e2e7da2b0; the box's root went from 95% to 77% used.
 - **Website validation and documentation review:** as under "Documentation changed" and "Reviews".
 - **Session files removed:** `.nwave/des/deliver-session.json` and `.nwave/des/des-task-active`, neither of which was tracked.
