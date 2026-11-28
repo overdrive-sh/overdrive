@@ -264,9 +264,10 @@ mod linux {
         }
 
         /// One IPv4 lookup through the guest's own resolver (`getaddrinfo`);
-        /// the error is the resolver's `EAI_*` code name.
-        fn lookup_v4(name: &str) -> Result<Ipv4Addr, &'static str> {
-            let host = std::ffi::CString::new(name).map_err(|_| "EAI_BADNAME")?;
+        /// the error is the resolver's `EAI_*` code name, or `EAI_OTHER(<code>)`
+        /// carrying the numeric code when the code is not one of those named here.
+        fn lookup_v4(name: &str) -> Result<Ipv4Addr, String> {
+            let host = std::ffi::CString::new(name).map_err(|_| "EAI_BADNAME".to_owned())?;
             // SAFETY: an all-zero `addrinfo` is a valid "no hints" value; the
             // fields set below are plain integers.
             let mut hints: libc::addrinfo = unsafe { std::mem::zeroed() };
@@ -280,10 +281,11 @@ mod linux {
             };
             if rc != 0 {
                 return Err(match rc {
-                    libc::EAI_NONAME => "EAI_NONAME",
-                    libc::EAI_AGAIN => "EAI_AGAIN",
-                    libc::EAI_FAIL => "EAI_FAIL",
-                    _ => "EAI_OTHER",
+                    libc::EAI_NONAME => "EAI_NONAME".to_owned(),
+                    libc::EAI_NODATA => "EAI_NODATA".to_owned(),
+                    libc::EAI_AGAIN => "EAI_AGAIN".to_owned(),
+                    libc::EAI_FAIL => "EAI_FAIL".to_owned(),
+                    other => format!("EAI_OTHER({other})"),
                 });
             }
             let mut found = None;
@@ -306,7 +308,7 @@ mod linux {
             }
             // SAFETY: `res` came from a successful `getaddrinfo`.
             unsafe { libc::freeaddrinfo(res) };
-            found.ok_or("EAI_NODATA")
+            found.ok_or_else(|| "EAI_NODATA".to_owned())
         }
 
         /// `resolve <name>...`.

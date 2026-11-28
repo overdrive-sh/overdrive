@@ -27,7 +27,8 @@ the captured text:
    with the guest kit's `resolve-tcp-connect` program (user ruling, 2026-11-28);
    it speaks no protocol and closes the connection at once.
 2. **A nonexistent public name gets a definite, prompt "Name does not resolve".**
-   `no-such-host-7f3a.example.com` fails with `EAI_NONAME`, not `EAI_AGAIN`,
+   `no-such-host-7f3a.invalid` (a name under `.invalid`, RFC 6761, which the
+   host's upstream resolvers answer NXDOMAIN) fails with `EAI_NONAME`, not `EAI_AGAIN`,
    in well under the guest resolver's 5 second timeout.
 3. **Nothing was hand-installed.** The guest's `/etc/resolv.conf` still names only
    `100.95.0.1`; no resolver, route or rule was added to the guest or the host by
@@ -44,7 +45,7 @@ not carry. Their correctness is held by the test tiers
 
 What would refute it: any of the four names failing to resolve or taking about
 5 s, a TCP connection to a resolved address on 443 failing or timing out, the
-nonexistent name failing with `EAI_AGAIN`, a changed guest `resolv.conf`, or
+nonexistent name failing with `EAI_AGAIN` or any code other than `EAI_NONAME`, a changed guest `resolv.conf`, or
 evidence that the capture installed a resolver, route or rule.
 
 - Anchor: docs/feature/guest-public-dns-resolution/feature-delta.md AC-1, AC-3, AC-4 (DISCUSS US-GPD-1)

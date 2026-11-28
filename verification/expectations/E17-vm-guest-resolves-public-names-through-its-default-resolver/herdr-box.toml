@@ -10,7 +10,7 @@ command = "/opt/overdrive/examples/svm/overdrive-guest-peer"
 args = [
   "resolve-tcp-connect", "443",
   "api.anthropic.com", "github.com", "crates.io", "herdr.dev",
-  "no-such-host-7f3a.example.com",
+  "no-such-host-7f3a.invalid",
 ]
 kernel = "/srv/vm/overdrive-testing/svm-e08/kernel"
 rootfs = "/srv/vm/overdrive-testing/svm-e08/rootfs.ext4"
