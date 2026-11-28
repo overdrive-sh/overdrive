@@ -6,6 +6,12 @@ include exactly `Co-Authored-By: Codex <codex@openai.com>`; never add or retain
 Claude Code, Claude, or Anthropic attribution (including generated-by text or
 co-author trailers) on a Codex-created commit.
 
+## Trunk-based development
+
+We push straight to `main`. There are no pull requests and no long-lived
+feature branches. Commits on `main` that belong to an unfinished feature are
+normal and are not a problem to report.
+
 nwave skills can be found at $HOME/.claude/skills/nw-*/SKILL.md
 nwave agents can be found at $HOME/.claude/agents/nw/
 
