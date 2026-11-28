@@ -580,7 +580,7 @@ impl ReconcilerRuntime {
     /// held) and `attempts = view.restart_counts[ran.alloc_id]` (0 with `ran`
     /// `None`): `.0 = attempts.saturating_add(1)`; `.1 =
     /// restart_after_failure(kind, run_desired, failed, ran, attempts,
-    /// max(view.issued_generation) < desired_generation)` — the reconciler's
+    /// generation_replacement_pending(&view, desired_generation, ran))` — the reconciler's
     /// own decision.
     #[must_use]
     pub fn restart_status_for_alloc(
@@ -2073,8 +2073,8 @@ mod tests {
     }
 
     /// RESTART-SSOT regression obligation 3, accessor half: a pending
-    /// desired generation (`max issued_generation < desired_generation`)
-    /// places a successor past the ceiling; with no pending generation the
+    /// desired generation (the count basis's `issued_generation` entry
+    /// below `desired_generation`) places a successor past the ceiling; with no pending generation the
     /// same row is finalized.
     ///
     /// CONTRACT_SHAPE: pure-function.
