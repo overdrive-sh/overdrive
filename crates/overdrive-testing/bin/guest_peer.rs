@@ -230,6 +230,14 @@ mod linux {
                 [cmd, names @ ..] if *cmd == subcommand::RESOLVE && !names.is_empty() => {
                     resolve_names(names)
                 }
+                [cmd, port, names @ ..]
+                    if *cmd == subcommand::RESOLVE_TCP_CONNECT && !names.is_empty() =>
+                {
+                    port.parse::<u16>().map_or_else(
+                        |_| usage("resolve-tcp-connect <tcp-port> <name>..."),
+                        |port| resolve_tcp_connect(port, names),
+                    )
+                }
                 [cmd, name, port, tag] if *cmd == subcommand::RESOLVE_CONNECT => {
                     match (port.parse::<u16>(), tag_is_valid(tag)) {
                         (Ok(port), true) => resolve_connect(name, port, tag),
@@ -241,7 +249,7 @@ mod linux {
                     forwarding_bench_command(rest)
                 }
                 _ => usage(
-                    "<round-trip|hold|flood|udp-churn|idle|resolve|resolve-connect|bind|listen|listen-ignoring-stop|run-with-modules|forwarding-bench> …",
+                    "<round-trip|hold|flood|udp-churn|idle|resolve|resolve-connect|resolve-tcp-connect|bind|listen|listen-ignoring-stop|run-with-modules|forwarding-bench> …",
                 ),
             }
         }
@@ -315,6 +323,48 @@ mod linux {
             }
             exit::OK
         }
+
+        /// `resolve-tcp-connect <tcp-port> <name>...`: per name, the lookup and
+        /// then a bare TCP connect to the first resolved IPv4 address, bounded
+        /// by [`TCP_CONNECT_BOUND`]; no byte is written or read.
+        fn resolve_tcp_connect(port: u16, names: &[&str]) -> i32 {
+            print_nameserver();
+            for name in names {
+                let started = Instant::now();
+                let outcome = lookup_v4(name);
+                let lookup_ms = started.elapsed().as_millis();
+                let addr = match outcome {
+                    Ok(addr) => addr,
+                    Err(code) => {
+                        println!("{RESOLVE_LINE_PREFIX}{name} error={code} ms={lookup_ms}");
+                        continue;
+                    }
+                };
+                let connect_started = Instant::now();
+                let connected = TcpStream::connect_timeout(
+                    &std::net::SocketAddr::V4(SocketAddrV4::new(addr, port)),
+                    TCP_CONNECT_BOUND,
+                );
+                let connect_ms = connect_started.elapsed().as_millis();
+                match connected {
+                    Ok(stream) => {
+                        drop(stream);
+                        println!(
+                            "{RESOLVE_LINE_PREFIX}{name} addr={addr} ms={lookup_ms} \
+                             connect=ok port={port} connect_ms={connect_ms}"
+                        );
+                    }
+                    Err(e) => println!(
+                        "{RESOLVE_LINE_PREFIX}{name} addr={addr} ms={lookup_ms} \
+                         connect=error({e}) port={port} connect_ms={connect_ms}"
+                    ),
+                }
+            }
+            exit::OK
+        }
+
+        /// How long `resolve-tcp-connect` waits for one connect.
+        const TCP_CONNECT_BOUND: Duration = Duration::from_secs(5);
 
         /// `resolve-connect <name> <tcp-port> <tag>`.
         fn resolve_connect(name: &str, port: u16, tag: &str) -> i32 {

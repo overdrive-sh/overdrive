@@ -86,6 +86,16 @@ pub mod subcommand {
     /// reply came back byte-exact, [`super::exit::RESOLVE`] when the name did
     /// not resolve.
     pub const RESOLVE_CONNECT: &str = "resolve-connect";
+    /// `resolve-tcp-connect <tcp-port> <name>...`: prints the guest's
+    /// nameserver, then per name resolves it through `getaddrinfo` and opens
+    /// a bare TCP connection (no byte written or read, 5 s bound) to the
+    /// first resolved IPv4 address on `tcp-port`, and closes it. Prints one
+    /// [`super::RESOLVE_LINE_PREFIX`] line per name: the lookup outcome and
+    /// elapsed milliseconds as `resolve` does, then, when a name resolved,
+    /// `connect=ok` or `connect=error(<io error>)` with `connect_ms=<n>`.
+    /// Exits [`super::exit::OK`] once every name was tried (the lines are the
+    /// observation).
+    pub const RESOLVE_TCP_CONNECT: &str = "resolve-tcp-connect";
     /// `listen <port> <tag>`: the server side of a Service VM (U-D17-DIAL).
     /// Listens on TCP `0.0.0.0:<port>` and accepts connections until killed.
     /// Each connection is served on its own thread: when its first line is a
@@ -165,7 +175,7 @@ pub mod exit {
     pub const EXEC: i32 = 66;
 }
 
-/// Prefix of the lines `resolve` and `resolve-connect` print, followed by
+/// Prefix of the lines `resolve`, `resolve-connect` and `resolve-tcp-connect` print, followed by
 /// `nameserver=<ip>` once, then `<name> addr=<ip> ms=<n>` or
 /// `<name> error=<EAI_*> ms=<n>` per lookup.
 pub const RESOLVE_LINE_PREFIX: &str = "resolve: ";
