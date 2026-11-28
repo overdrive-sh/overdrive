@@ -1,6 +1,6 @@
 # E17 — a VM guest resolves the herdr dev box's public names through its default resolver, and a nonexistent name fails promptly and definitely
 
-**Surface:** E (end-to-end through a real deployment) · **KPI:** K-GPD-1, K-GPD-2 (feature delta) · **Status:** `pending` (re-captured 2026-11-28; review by a different agent due)
+**Surface:** E (end-to-end through a real deployment) · **KPI:** K-GPD-1, K-GPD-2 (feature delta) · **Status:** `satisfied` (2026-11-28, SHA d83f7d571995b670838664ecc6da9ebfa14719d7, metal run 074305492af4443a79355bd7)
 
 <!-- Status rationale: authored 2026-11-27 before any implementation evidence exists. Do not set `satisfied` from the authoring or implementing agent; a different reviewer judges the captured evidence. -->
 
@@ -96,8 +96,7 @@ reports `none`), SHA `d83f7d571995b670838664ecc6da9ebfa14719d7`, metal run
 verification/harness/run-expectation.sh E17`). The source was clean
 (`source sha=... dirty=false` in `capture.log`); the harness manifest says
 `working_tree_dirty: true` only because the previous capture's renamed evidence files were
-untracked in the checkout (`evidence/dirty-status.txt`; `dirty-diff.patch` is empty). Status
-stays `pending`: a reviewer who did not capture it judges the text. Files are under
+untracked in the checkout (`evidence/dirty-status.txt`; `dirty-diff.patch` is empty). Files are under
 `evidence/` with the `20261128T123057Z` suffix (`capture.log` is append-only and holds all
 captures; `run.log` and `verification.yaml` are this capture's, the earlier ones are kept
 under their own timestamp suffixes).
@@ -136,8 +135,7 @@ reports `none`), SHA `ce8a61cee9e3fbf490f4bd2e66220f60d3ab1eca`, metal run
 `f2c7f64a5ead5ad09d8dea74` (`cargo xtask metal run --exclusive -- env OVERDRIVE_BPF_NATIVE=1
 verification/harness/run-expectation.sh E17`). The runner's source was clean; the harness
 manifest says `working_tree_dirty: true` only because the first attempt's evidence
-(below) was untracked in the checkout. Status stays `pending`: a reviewer who did not
-capture it judges the text below. Files are under `evidence/`.
+(below) was untracked in the checkout. A reviewer found claim 2 unsatisfied as originally worded for this capture. Files are under `evidence/`.
 
 The guest console, verbatim (`evidence/console-snapshots-20261128T114341Z/alloc-herdr-box-0.stream`):
 
@@ -182,3 +180,25 @@ timeout, then lost the console (the VM run directory is removed when the allocat
 Its files are `run-20261128T113621Z.log`, `verification-20261128T113621Z.yaml`,
 `describe-20261128T113621Z.txt` and the console-snapshots-20261128T113621Z directory; the runner
 was fixed (console streamed from byte 0, Job attempt table) in `ce8a61cee`.
+
+### Review, 2026-11-28
+
+Reviewer: an independent agent that did not write the implementation or the capture.
+Judged evidence: the second capture, metal run `074305492af4443a79355bd7`, SHA
+`d83f7d571995b670838664ecc6da9ebfa14719d7`, Linux 7.0.0-38-generic, `systemd-detect-virt`
+`none`.
+
+Verdict: satisfied, for that SHA and environment only. The first capture (`ce8a61cee`, run
+`f2c7f64a5ead5ad09d8dea74`) stays on record with claim 2 unsatisfied as originally worded.
+
+- Claim 1: the four names resolved in 4–28 ms and `connect=ok` on 443 (console lines 423–426).
+- Claim 2: `EAI_NONAME` in 5 ms (line 427); both host upstreams answer NXDOMAIN
+  (`diagnostic-host-upstream-answer-invalid-20261128.txt`).
+- Claim 3: the guest console shows its nameserver as `100.95.0.1`. That it is the file's only
+  line is read from `crates/overdrive-init/src/main.rs:590` and the kernel command line
+  `dns=100.95.0.1`, because the guest image has no `cat`. Host nft, `ip rule`, `ip route` and
+  `/etc/resolv.conf` are unchanged apart from the product's own TPROXY port (42399 to 42861).
+  The host began with product state left by earlier runs (an `overdrive-mtls` nft table,
+  `ovd-veth-*` links and the `local 100.95.0.1` route, `capture.log` lines 138–163).
+- Noted: K-GPD-1 names `example.com` where E17 uses `herdr.dev`. The metal run id is recorded
+  in this README and the diagnostic file, not in the captured logs.
