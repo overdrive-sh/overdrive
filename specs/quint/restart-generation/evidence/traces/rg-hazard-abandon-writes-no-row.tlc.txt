@@ -54,7 +54,21 @@ State 4: <rg_bugAbandonWritesNoRow_restart_generation_LaunchPending line 613, co
   capFull |-> FALSE ]
 /\ rg_bugAbandonWritesNoRow_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
 
-State 5: <rg_bugAbandonWritesNoRow_restart_generation_CpCrash line 815, col 3 to line 821, col 44 of module rg_bugAbandonWritesNoRow>
+State 5: <rg_bugAbandonWritesNoRow_restart_generation_LaunchLost line 357, col 3 to line 382, col 61 of module rg_bugAbandonWritesNoRow>
+/\ rg_bugAbandonWritesNoRow_restart_generation_st = [ declared |-> TRUE,
+  stopped |-> FALSE,
+  as |-> <<1, 0>>,
+  why |-> <<7, 0>>,
+  faults |-> 1,
+  dg |-> 0,
+  ig |-> <<0, 0>>,
+  cnt |-> <<0, 0>>,
+  og |-> 0,
+  idFault |-> FALSE,
+  capFull |-> FALSE ]
+/\ rg_bugAbandonWritesNoRow_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
+
+State 6: <rg_bugAbandonWritesNoRow_restart_generation_CpCrash line 815, col 3 to line 821, col 44 of module rg_bugAbandonWritesNoRow>
 /\ rg_bugAbandonWritesNoRow_restart_generation_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   as |-> <<1, 0>>,
@@ -68,4 +82,4 @@ State 5: <rg_bugAbandonWritesNoRow_restart_generation_CpCrash line 815, col 3 to
   capFull |-> FALSE ]
 /\ rg_bugAbandonWritesNoRow_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
 
-State 6: Stuttering
+State 7: Stuttering

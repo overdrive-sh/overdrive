@@ -40,11 +40,11 @@ State 3: <rg_bugRefusalCharged_restart_generation_WlStart line 1034, col 3 to li
   idFault |-> FALSE,
   capFull |-> FALSE ]
 
-State 4: <rg_bugRefusalCharged_restart_generation_LaunchPending line 618, col 3 to line 632, col 57 of module rg_bugRefusalCharged>
+State 4: <rg_bugRefusalCharged_restart_generation_CapFill line 417, col 3 to line 422, col 44 of module rg_bugRefusalCharged>
 /\ rg_bugRefusalCharged_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ rg_bugRefusalCharged_restart_generation_st = [ declared |-> TRUE,
   stopped |-> FALSE,
-  as |-> <<1, 0, 0, 0>>,
+  as |-> <<6, 0, 0, 0>>,
   why |-> <<0, 0, 0, 0>>,
   faults |-> 0,
   dg |-> 0,
@@ -52,14 +52,28 @@ State 4: <rg_bugRefusalCharged_restart_generation_LaunchPending line 618, col 3 
   cnt |-> <<0, 0, 0, 0>>,
   og |-> 0,
   idFault |-> FALSE,
-  capFull |-> FALSE ]
+  capFull |-> TRUE ]
 
-State 5: <rg_bugRefusalCharged_restart_generation_LaunchStartFail line 690, col 3 to line 714, col 57 of module rg_bugRefusalCharged>
+State 5: <rg_bugRefusalCharged_restart_generation_LaunchRefused line 590, col 3 to line 612, col 57 of module rg_bugRefusalCharged>
 /\ rg_bugRefusalCharged_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ rg_bugRefusalCharged_restart_generation_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   as |-> <<3, 0, 0, 0>>,
-  why |-> <<11, 0, 0, 0>>,
+  why |-> <<10, 0, 0, 0>>,
+  faults |-> 0,
+  dg |-> 0,
+  ig |-> <<0, 0, 0, 0>>,
+  cnt |-> <<0, 0, 0, 0>>,
+  og |-> 0,
+  idFault |-> FALSE,
+  capFull |-> TRUE ]
+
+State 6: <rg_bugRefusalCharged_restart_generation_CapDrain line 428, col 3 to line 433, col 45 of module rg_bugRefusalCharged>
+/\ rg_bugRefusalCharged_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
+/\ rg_bugRefusalCharged_restart_generation_st = [ declared |-> TRUE,
+  stopped |-> FALSE,
+  as |-> <<3, 0, 0, 0>>,
+  why |-> <<10, 0, 0, 0>>,
   faults |-> 0,
   dg |-> 0,
   ig |-> <<0, 0, 0, 0>>,
@@ -68,12 +82,12 @@ State 5: <rg_bugRefusalCharged_restart_generation_LaunchStartFail line 690, col 
   idFault |-> FALSE,
   capFull |-> FALSE ]
 
-State 6: <rg_bugRefusalCharged_restart_generation_WlStart line 1034, col 3 to line 1066, col 82 of module rg_bugRefusalCharged>
+State 7: <rg_bugRefusalCharged_restart_generation_WlStart line 1034, col 3 to line 1066, col 82 of module rg_bugRefusalCharged>
 /\ rg_bugRefusalCharged_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ rg_bugRefusalCharged_restart_generation_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   as |-> <<3, 6, 0, 0>>,
-  why |-> <<11, 0, 0, 0>>,
+  why |-> <<10, 0, 0, 0>>,
   faults |-> 0,
   dg |-> 0,
   ig |-> <<0, 0, 0, 0>>,
@@ -82,12 +96,12 @@ State 6: <rg_bugRefusalCharged_restart_generation_WlStart line 1034, col 3 to li
   idFault |-> FALSE,
   capFull |-> FALSE ]
 
-State 7: <rg_bugRefusalCharged_restart_generation_LaunchPending line 618, col 3 to line 632, col 57 of module rg_bugRefusalCharged>
+State 8: <rg_bugRefusalCharged_restart_generation_LaunchPending line 618, col 3 to line 632, col 57 of module rg_bugRefusalCharged>
 /\ rg_bugRefusalCharged_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ rg_bugRefusalCharged_restart_generation_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   as |-> <<3, 1, 0, 0>>,
-  why |-> <<11, 0, 0, 0>>,
+  why |-> <<10, 0, 0, 0>>,
   faults |-> 0,
   dg |-> 0,
   ig |-> <<0, 0, 0, 0>>,
@@ -96,12 +110,12 @@ State 7: <rg_bugRefusalCharged_restart_generation_LaunchPending line 618, col 3 
   idFault |-> FALSE,
   capFull |-> FALSE ]
 
-State 8: <rg_bugRefusalCharged_restart_generation_LaunchStartFail line 690, col 3 to line 714, col 57 of module rg_bugRefusalCharged>
+State 9: <rg_bugRefusalCharged_restart_generation_LaunchStartFail line 690, col 3 to line 714, col 57 of module rg_bugRefusalCharged>
 /\ rg_bugRefusalCharged_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ rg_bugRefusalCharged_restart_generation_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   as |-> <<3, 3, 0, 0>>,
-  why |-> <<11, 11, 0, 0>>,
+  why |-> <<10, 11, 0, 0>>,
   faults |-> 0,
   dg |-> 0,
   ig |-> <<0, 0, 0, 0>>,
@@ -110,12 +124,12 @@ State 8: <rg_bugRefusalCharged_restart_generation_LaunchStartFail line 690, col 
   idFault |-> FALSE,
   capFull |-> FALSE ]
 
-State 9: <rg_bugRefusalCharged_restart_generation_WlStart line 1034, col 3 to line 1066, col 82 of module rg_bugRefusalCharged>
+State 10: <rg_bugRefusalCharged_restart_generation_WlStart line 1034, col 3 to line 1066, col 82 of module rg_bugRefusalCharged>
 /\ rg_bugRefusalCharged_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ rg_bugRefusalCharged_restart_generation_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   as |-> <<3, 3, 6, 0>>,
-  why |-> <<11, 11, 0, 0>>,
+  why |-> <<10, 11, 0, 0>>,
   faults |-> 0,
   dg |-> 0,
   ig |-> <<0, 0, 0, 0>>,
@@ -124,12 +138,12 @@ State 9: <rg_bugRefusalCharged_restart_generation_WlStart line 1034, col 3 to li
   idFault |-> FALSE,
   capFull |-> FALSE ]
 
-State 10: <rg_bugRefusalCharged_restart_generation_CapFill line 417, col 3 to line 422, col 44 of module rg_bugRefusalCharged>
+State 11: <rg_bugRefusalCharged_restart_generation_CapFill line 417, col 3 to line 422, col 44 of module rg_bugRefusalCharged>
 /\ rg_bugRefusalCharged_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ rg_bugRefusalCharged_restart_generation_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   as |-> <<3, 3, 6, 0>>,
-  why |-> <<11, 11, 0, 0>>,
+  why |-> <<10, 11, 0, 0>>,
   faults |-> 0,
   dg |-> 0,
   ig |-> <<0, 0, 0, 0>>,
@@ -138,12 +152,12 @@ State 10: <rg_bugRefusalCharged_restart_generation_CapFill line 417, col 3 to li
   idFault |-> FALSE,
   capFull |-> TRUE ]
 
-State 11: <rg_bugRefusalCharged_restart_generation_LaunchRefused line 590, col 3 to line 612, col 57 of module rg_bugRefusalCharged>
+State 12: <rg_bugRefusalCharged_restart_generation_LaunchRefused line 590, col 3 to line 612, col 57 of module rg_bugRefusalCharged>
 /\ rg_bugRefusalCharged_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ rg_bugRefusalCharged_restart_generation_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   as |-> <<3, 3, 3, 0>>,
-  why |-> <<11, 11, 10, 0>>,
+  why |-> <<10, 11, 10, 0>>,
   faults |-> 0,
   dg |-> 0,
   ig |-> <<0, 0, 0, 0>>,

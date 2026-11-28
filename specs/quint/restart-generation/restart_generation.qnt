@@ -489,14 +489,17 @@ module restart_generation {
     .then(WlStart(1)).then(LaunchPending(1)).then(LaunchPreFail(1))
     .then(WlStart(2)).then(LaunchPending(2)).then(LaunchPreFail(2))
     .then(WlStart(3)).then(LaunchPending(3)).then(LaunchPreFail(3))
+    .then(WlStart(4)).then(LaunchPending(4)).then(LaunchPreFail(4))
+    .then(WlStart(5)).then(LaunchPending(5)).then(LaunchPreFail(5))
+    .then(WlStart(6)).then(LaunchPending(6)).then(LaunchPreFail(6))
     .expect(exhausted(st) and charged(st) == LIMIT and AL.forall(a => not(canStart(st, a))) and Safety)
-    .then(IdFaultOff).then(WorkloadRestart(3))
-    .expect(st.dg == 1 and pendingGen(st) and st.as.get(3) == FAILED and st.why.get(3) == W_PREFAIL and curA(st) == 3
-            and charged(st) == LIMIT and canStart(st, 4) and Safety)
-    .then(WlStart(4))
-    .expect(st.ig.get(4) == 1 and st.cnt.get(4) == st.cnt.get(3) and Safety)
-    .then(LaunchPending(4)).then(LaunchRunning(4))
-    .expect(st.as.get(4) == RUNNING and curA(st) == 4 and not(pendingGen(st)) and charged(st) == LIMIT - 1 and Safety)
+    .then(IdFaultOff).then(WorkloadRestart(6))
+    .expect(st.dg == 1 and pendingGen(st) and st.as.get(6) == FAILED and st.why.get(6) == W_PREFAIL and curA(st) == 6
+            and charged(st) == LIMIT and canStart(st, 7) and Safety)
+    .then(WlStart(7))
+    .expect(st.ig.get(7) == 1 and st.cnt.get(7) == st.cnt.get(6) and Safety)
+    .then(LaunchPending(7)).then(LaunchRunning(7))
+    .expect(st.as.get(7) == RUNNING and curA(st) == 7 and not(pendingGen(st)) and charged(st) == LIMIT - 1 and Safety)
 
   // R-1 = A, the divergence of the earlier running count: two pre-launch failures, `workload restart`, the replacement runs,
   // its VMM is killed. The replacement carried count 1, the crash is its second failure, and production's restart decision
@@ -515,7 +518,11 @@ module restart_generation {
     .then(WlStart(4))
     .expect(st.cnt.get(4) == 2 and Safety)
     .then(LaunchPending(4)).then(LaunchStartFail(4))
-    .expect(st.why.get(4) == W_STARTFAIL and exhausted(st) and charged(st) == LIMIT and mintedIds(st) == 4
+    .expect(st.why.get(4) == W_STARTFAIL and charged(st) == 3 and not(exhausted(st)) and canStart(st, 5) and Safety)
+    .then(WlStart(5)).then(LaunchPending(5)).then(LaunchStartFail(5))
+    .then(WlStart(6)).then(LaunchPending(6)).then(LaunchStartFail(6))
+    .then(WlStart(7)).then(LaunchPending(7)).then(LaunchStartFail(7))
+    .expect(st.why.get(7) == W_STARTFAIL and exhausted(st) and charged(st) == LIMIT and mintedIds(st) == 7
             and AL.forall(a => not(canStart(st, a))) and Safety)
 
   // SD-6 ruling B: a persistent pre-launch failure (identity issuance): every launch writes a charged Failed row with a reason,
@@ -529,6 +536,9 @@ module restart_generation {
     .expect(st.as.get(1) == FAILED and st.why.get(1) == W_PREFAIL and hasRow(st, 1) and charged(st) == 1 and Safety)
     .then(WlStart(2)).then(LaunchPending(2)).then(LaunchPreFail(2))
     .then(WlStart(3)).then(LaunchPending(3)).then(LaunchPreFail(3))
+    .then(WlStart(4)).then(LaunchPending(4)).then(LaunchPreFail(4))
+    .then(WlStart(5)).then(LaunchPending(5)).then(LaunchPreFail(5))
+    .then(WlStart(6)).then(LaunchPending(6)).then(LaunchPreFail(6))
     .expect(charged(st) == LIMIT and exhausted(st) and AL.forall(a => not(canWlStart(st, a))) and mintedIds(st) == LIMIT
             and Safety)
 
@@ -576,10 +586,15 @@ module rg_ok {
     OPS = Set("stop", "restart", "lost", "idFault", "capFull"), NA = 4, FB = 2, LIMIT = 3, DGMAX = 2, JOB = false).*
     from "./restart_generation"
 }
-// the named runs; the #[quint_test] pins
+// the named runs; the #[quint_test] pins and the #[quint_run] randomized traces.
+// CONFORMANCE MAIN: LIMIT = 6 matches production's restart ceiling, `RESTART_BACKOFF_CEILING = 5`
+// (crates/overdrive-reconcilers/src/workload_lifecycle.rs:35) + 1, because LIMIT = CEILING + 1 in this model's terms (header).
+// NA = 8 = LIMIT + 2: the longest run mints LIMIT ids and one generation replacement (7), with a spare. Every other constant
+// is rg_ok's. The model-check mains (rg_ok, rg_live_*) keep the small LIMIT = 3 so state-space cost does not grow; the rule is
+// independent of the ceiling's value (the comparison `charged >= LIMIT`).
 module rg_conf {
   import restart_generation(OFF = Set(), REC = true,
-    OPS = Set("stop", "restart", "lost", "idFault", "capFull"), NA = 4, FB = 2, LIMIT = 3, DGMAX = 2, JOB = false).*
+    OPS = Set("stop", "restart", "lost", "idFault", "capFull"), NA = 8, FB = 2, LIMIT = 6, DGMAX = 2, JOB = false).*
     from "./restart_generation"
 }
 // liveness: intent says run, a launch is eventually issued (stop, restart and lost enabled; faults finite)
@@ -594,9 +609,9 @@ module rg_live_prefail {
   import restart_generation(OFF = Set(), REC = false, OPS = Set("restart", "idFaultHeld"), NA = 4, FB = 0, LIMIT = 3,
     DGMAX = 1, JOB = false).* from "./restart_generation"
 }
-// H1: the finished Job runs (REC = true), the constants of rg_ok with the workload kind a Job
+// H1: the finished Job runs (REC = true), the constants of rg_conf (production's ceiling, LIMIT = 6) with the workload kind a Job
 module rg_conf_job {
   import restart_generation(OFF = Set(), REC = true,
-    OPS = Set("stop", "restart", "lost", "idFault", "capFull"), NA = 4, FB = 2, LIMIT = 3, DGMAX = 2, JOB = true).*
+    OPS = Set("stop", "restart", "lost", "idFault", "capFull"), NA = 8, FB = 2, LIMIT = 6, DGMAX = 2, JOB = true).*
     from "./restart_generation"
 }

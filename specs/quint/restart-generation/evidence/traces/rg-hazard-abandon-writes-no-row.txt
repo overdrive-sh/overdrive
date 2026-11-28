@@ -1,4 +1,4 @@
-# rg-hazard-abandon-writes-no-row: counterexample, 5 state(s) (from the TLC trace)
+# rg-hazard-abandon-writes-no-row: counterexample, 6 state(s) (from the TLC trace)
 
 State 1
   st = [ declared |-> FALSE, stopped |-> FALSE, as |-> <<0, 0>>, why |-> <<0, 0>>, faults |-> 1, dg |-> 0, ig |-> <<0, 0>>, cnt |-> <<0, 0>>, og |-> 0, idFault |-> FALSE, capFull |-> FALSE ]
@@ -13,7 +13,10 @@ State 3 [WlStart]
 State 4 [LaunchPending]
   st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<1, 0>>, why |-> <<0, 0>>, faults |-> 1, dg |-> 0, ig |-> <<0, 0>>, cnt |-> <<0, 0>>, og |-> 0, idFault |-> FALSE, capFull |-> FALSE ]
 
-State 5 [CpCrash]
+State 5 [LaunchLost]
+  st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<1, 0>>, why |-> <<7, 0>>, faults |-> 1, dg |-> 0, ig |-> <<0, 0>>, cnt |-> <<0, 0>>, og |-> 0, idFault |-> FALSE, capFull |-> FALSE ]
+
+State 6 [CpCrash]
   st = [ declared |-> TRUE, stopped |-> FALSE, as |-> <<1, 0>>, why |-> <<7, 0>>, faults |-> 0, dg |-> 0, ig |-> <<0, 0>>, cnt |-> <<0, 0>>, og |-> 0, idFault |-> FALSE, capFull |-> FALSE ]
 
--> stutters forever in State 5
+-> stutters forever in State 6
