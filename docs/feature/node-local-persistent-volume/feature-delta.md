@@ -1,7 +1,7 @@
 # Feature delta: node-local persistent volume for VM workloads (GH #348)
 
 **Status:** the design is approved by the user; rulings run through 2026-11-23. The decision table (VD-1 to VD-10, SD-1 to SD-6, J-1, DE-1, D-1,
-H1, H2, W-1 to W-4, R-1, VB-1 to VB-3, RB-1 to RB-12, B-1 to B-3, P-1 to P-6) and the scope-limitation table (L1 to L9) are owned by
+H1, H2, H3, W-1 to W-4, R-1, VB-1 to VB-3, RB-1 to RB-12, B-1 to B-3, P-1 to P-6) and the scope-limitation table (L1 to L9) are owned by
 [`design/wave-decisions.md`](design/wave-decisions.md); each ADR (0310 to 0320, 0334 to 0338, 0348 to 0355) holds one decision. This file owns the interface
 contracts, the boundary scenarios and the model's boundary. Executable test obligations, mutation targets and test re-sync lists are DISTILL's
 input in [`distill/upstream-issues.md`](distill/upstream-issues.md). The model is two Quint specs, `specs/quint/node-local-volume/` and
@@ -1246,7 +1246,7 @@ returns the newest row; the derivation of a new launch's count, of whether a gen
 - State `Terminated`; `terminal: None`; `started_at: None`; `workload_addr`, `kind` and `listeners` carried from the `Pending` row; `detail` and
   `stderr_tail` `None`. Never `Failed`: an abandoned launch is not a start failure (ADR-0337). `terminal` is `None` for the reason the
   platform-reclaimed row has none: the workload's intent still stands, and the `allocation_attempt_transition` fence and the finished-Job rule of
-  ADR-0335 key on `terminal.is_some()`.
+  ADR-0335 key on `terminal.is_some()` or an operator stop (H3), which an abandoned row is not.
 - Two fieldless `TransitionReason` variants, appended after `VmVolumeUnavailable`: `LaunchSuperseded` ("launch abandoned: superseded by a stop, a
   restart or node shutdown") and `LaunchLostWithControlPlane` ("launch abandoned: lost with the control plane"). Both `is_failure() == false`;
   `human_readable` carries the wordings. `From<&DriverStartFailure>` is untouched.
@@ -1487,10 +1487,13 @@ workload down beside the old operator-stopped or replaced row (veto `:1069`, res
   (RB-13): `current_alloc` over the rows for which `overdrive_core::transition_reason::is_launch_abandoned` is false. It is the **count basis**,
   the one definition of "the newest row that ran". It names no reason itself; `current_alloc` is unchanged.
 - `pub fn generation_replacement_pending(view: &WorkloadLifecycleView, desired_generation: u64, ran: Option<&AllocStatusRow>) -> bool` in
-  `overdrive-reconcilers`: true iff `ran` is `Some(row)`, **`row` is not a finished Job row (`row.kind == WorkloadKind::Job &&
-  row.terminal.is_some()`, H1)**, and `view.issued_generation.get(&row.alloc_id)` (absent reads `0`) is less than `desired_generation`. The
-  finished-Job test is the action shim's own (`allocation_attempt_transition` returns `NoChange` for a Job row with a terminal;
-  `workload_lifecycle.rs:131-139`). Every caller passes `last_ran_alloc(..)` over the **observed** rows (the row whose id has the numerically
+  `overdrive-reconcilers`: true iff `ran` is `Some(row)`, **`row` is not a finished Job row (`row.kind == WorkloadKind::Job && (row.terminal.is_some() ||
+  is_operator_stopped(row))`, H1, H3)**, and `view.issued_generation.get(&row.alloc_id)` (absent reads `0`) is less than `desired_generation`.
+  `is_operator_stopped` (`workload_lifecycle.rs:1635`) is the existing classifier: `Terminated` with `terminal: Some(Stopped { by: Operator })`
+  (the stop path's write) or reason `Stopped { by: Operator }` with `terminal: None` (the exit observer's write, `exit_observer.rs:~546-556`).
+  The finished-Job test is one definition shared with the action shim's `allocation_attempt_transition`, which returns `NoChange` for a
+  finished Job row (`workload_lifecycle.rs:131-139` reads `terminal` only; H3 extends it to the same definition, so the shim's fence and this
+  predicate agree on every row, RA10). Every caller passes `last_ran_alloc(..)` over the **observed** rows (the row whose id has the numerically
   highest `-<N>` suffix among rows whose suffix parses and that are not abandoned, `workload_lifecycle.rs:1506`), so an issued id with no row, and
   an issued id whose row is abandoned, are invisible to it. With no such row it is false. It is the only definition of `restart_pending`: it
   replaces the three expressions in `workload_lifecycle.rs` (`:366`, `:451`, `:925`) and the one in
@@ -1520,12 +1523,18 @@ workload down beside the old operator-stopped or replaced row (veto `:1069`, res
   no tick stamps anything: R3 and R4 issue the successor id with its `issued_generation` entry, and the generation stops being pending on the
   first evaluation that observes that id's row.
 
-**A finished Job (H1; scope limitation L9, #301).** `workload restart` of a Job whose current allocation carries a terminal claim is a no-op, as
+**A finished Job (H1, H3; scope limitation L9, #301).** A Job row is finished when it carries a terminal claim or the operator stopped it,
+whichever writer recorded the stop (H3, approved by the user 2026-11-28). The stop path writes `terminal: Some(Stopped { by: Operator })`; the
+exit observer writes `Terminated`, reason `Stopped { by: Operator }`, `terminal: None`. If both of the stop path's write proposals lose under
+contention (`action_shim/mod.rs` ~3090-3100: a second rejection leaves the competing terminal row authoritative), the exit observer's
+terminal-less row stands, and the reconciler emits a stop only for a `Running` row. Keying "finished" on `terminal.is_some()` alone would then
+let `workload restart` (`handlers.rs` ~960-1015, which bumps the generation and clears the stop sentinel) give the stopped Job a new
+allocation. `workload restart` of a Job whose current allocation is finished is a no-op, as
 on `main`: the handler still bumps the generation and clears the stop sentinel (`restart_workload`, `handlers.rs:940-989`, unchanged), and the
 reconciler issues nothing because the generation is not pending against that row. The rows this covers: a Job that completed or failed (the
 natural-exit idempotency guard at `workload_lifecycle.rs:1091-1104` already emits nothing for them), and an operator-stopped Job, whose row
 carries `Stopped { by: Operator }` as its terminal (the stop's `StopAllocation` carries it, `:850-860`, and the shim threads an action's terminal
-onto the row, ADR-0037 § 4; a Job row that carries only the `reason` has no terminal and is replaced exactly as on `main`). The second is the one
+onto the row, ADR-0037 § 4; a Job row that carries only the `reason`, the exit observer's, is also finished, H3). The second is the one
 that mattered: on `main` the restartable filter selects an operator-stopped row while a generation is pending, so a `RestartAllocation` is
 emitted; the shim returns at its `NoChange` fence (R2) with no successor, and the stamp on emit hid that the generation is never handled. A
 `workload restart` of a **running** Job is unchanged: the stop of R2 ends it and writes the terminal, and the Job stays down. The handler adds no
@@ -1593,7 +1602,7 @@ supersession arm of § Superseding a launch is added).
 | S11 | Start (SD-3) | `StartSuperseded` | **abandoned row** (N-4): `Terminated`, `LaunchSuperseded`, never counted, relaunched from the count basis (the newest row that ran) |
 | R0 | Restart `:2200` | `find_prior_alloc_row(..).await?` fails: `Err`, no row, no effect taken yet | **N-REC (read side)** |
 | R1 | Restart `:2200-2202` | predecessor row absent: `HandleMissing`, no row | **N-UNR**: the arm is emitted only for the current allocation of the observed rows, under the lane, and no code deletes an allocation row |
-| R2 | Restart `:2203-2210` | predecessor `NoChange` (a Job row with a terminal), or not `Failed`/`Terminated`: `Ok(())`, no successor | **N-STALE**: not reached through the reconciler for a finished Job (H1: a reconciler-side no-emit); the fence fires only when the row changed between hydration and dispatch |
+| R2 | Restart `:2203-2210` | predecessor `NoChange` (a finished Job row: a terminal, or operator-stopped, H3), or not `Failed`/`Terminated`: `Ok(())`, no successor | **N-STALE**: not reached through the reconciler for a finished Job (H1: a reconciler-side no-emit); the fence fires only when the row changed between hydration and dispatch |
 | R3 | Restart `:2216-2218` | empty driver set: `HandleMissing`, no row (a node that booted without the VM driver while a VM workload's intent persists) | the guard is removed; the arm follows the missing-driver path (R8): `Failed` successor row; charged for a Service, final for a Job |
 | R4 | Restart `:2229-2239` | admission refusal: `finish_restart(Err)`, predecessor's cleanup runs, no successor row | **N-ADM** (ADR-0338) |
 | R5 | Restart `:2240-2262` | provision error that is not `GuestNetwork` | **N-UNR**, as S4 |
@@ -1741,7 +1750,7 @@ It is true iff all hold, in the order of the reconciler's own rules (`workload_l
      generation reopens it);
    - anything else (including a `Pending` row): false.
 
-Blocked for good (false): a Job with a terminal claim and no generation pending (never pending, H1), `BackoffExhausted` with no generation
+Blocked for good (false): a finished Job (a terminal claim, or operator-stopped; never pending, H1, H3), `BackoffExhausted` with no generation
 pending, and an operator-stopped row with no generation pending. Waiting at the cap (true): a restarted workload, `Stopped{LivenessProbe}`,
 `Stopped{SystemGc}` and a crashed row under budget. A backoff window still open does not make the predicate false.
 
@@ -1921,7 +1930,7 @@ methods; the payload it submits is `Vm::to_payload` output.
 | `why[a] == W_NOROW` (`as[a] == FAILED`; D-1; an id issued and no row written, nothing charged) | `issued_generation_for_alloc` is `Some`, `alloc_status_rows()` holds no row for `a`, `Driver::live_allocations()` does not list `a`, the held future has completed or is gone, and the launch ended by exactly one of: **(a) an admission refusal**: the dispatch's own returned value is `Err(ShimError::GuestNetwork(AdmissionCapReached { .. }))` and `GuestAddressPool` occupancy is unchanged by `a`; **(b) a control-plane crash while `ISSUED`**: the dispatch future is dropped with its `serve` process (the driver's stimulus is dropping the runtime; the owner's behaviour is that nothing writes a row for `a`), and after the rebuild and boot `converge` still no row exists for `a`, because boot closes only `Pending` rows. The return value in (a) is read from the dispatch the production tick returned, never from a map the driver fills on its own; (b) has no return value, its observable is the absence of any row after boot, paired with the `ISSUED` row above (an `ISSUED` expectation after a rebuild fails). Neither case is model-only: no arbiter is used |
 | `why[a] == W_LOST`, now `as[a] == ABANDONED` (a launch that ended before running without a failure: superseded, or lost with the control plane; N-4) | `alloc_status_rows()` holds a `Terminated` row for `a` with `terminal == None` and `reason` `LaunchSuperseded` (the held tick completed with dispatch `Ok(())`) or `LaunchLostWithControlPlane` (after a rebuild, `CpCrash` or `NodeReboot`, and the boot `converge`, whose first step ends every `Pending` row this way whether or not its VM left a scope); `Driver::live_allocations()` does not list `a` |
 | `as[a] == PENDING` | the id is issued (`issued_generation_for_alloc` is `Some`), `alloc_status_rows()` holds the `Pending` row of `a` (N-2) and the `run_convergence_tick` future the driver holds at its seam has **not** completed (the production tick is awaiting the dispatch, holding the lane). The driver reads the future's completion, the owner's own behaviour, not a map it maintains; after a rebuild and boot `converge` no row is `Pending`, so a `PENDING` expectation after a rebuild fails |
-| `JOB` and `jobTerm(a)` | `JOB` is model-only (it selects the workload kind the driver submits). `jobTerm(a)` is `alloc_status_rows()` row `a` with `kind == WorkloadKind::Job` and `terminal.is_some()`, the test `generation_replacement_pending` and the shim's `allocation_attempt_transition` use |
+| `JOB` and `jobTerm(a)` | `JOB` is model-only (it selects the workload kind the driver submits). `jobTerm(a)` is `alloc_status_rows()` row `a` with `kind == WorkloadKind::Job` and (`terminal.is_some()` or the row is operator-stopped, H3), the test `generation_replacement_pending` and the shim's `allocation_attempt_transition` use |
 | `faults`, `declared`, `idFault`, `capFull`, `conf_step`, `og`, `gl` | model-only: `idFault` is armed on the sim CA, `capFull` by filling the sim pool, `declared` is the effect of `submit_workload`, `conf_step` records the action taken for the driver and is never compared, `og` has no production counterpart, `gl` is checked through the carry relation of `cnt` |
 
 Driving ports of the restart-generation actions (every `switch!` arm calls one): `Declare` -> `submit_workload`; `OpStop` -> `stop_workload`;
@@ -2170,7 +2179,7 @@ Assumptions of the restart-generation spec (ids are stable; RA3 is not an assump
 | RA7 | `LaunchPreFail` and `LaunchRefused` have the production order and effects of the table | shim tests of the pre-driver paths and of the refusal; `guest_network.rs:541-591` |
 | RA8 | after `CpCrash` or `NodeReboot` the View, the intent and the observation rows survive and the runtime is rebuilt with a new lane table | ADR-0035 (View persistence), `vm_reclamation_boot::converge` before the loop |
 | RA9 | the budget abstraction (R-1, RB-13): the model carries production's per-allocation count and derives `charged` and `exhausted` from the newest allocation that ran, with `LIMIT` = the production ceiling + 1 (`workload_lifecycle.rs:51`, `:408`, `:465`, `:1311-1318`); an abandoned allocation is never that allocation | the conformance driver compares `cnt` through `attempt_index_for_alloc` and `exhausted` through the rows; the run `generation_replacement_forgives_predecessor_failure`; the invariant `I_ABANDONED_ROWS_DO_NOT_COUNT` and its hazard `abandonedRowCounts`; the Tier-1 deletion-equivalence proptest (§ "Launches that end before running", item 6) |
-| RA10 | a Job row with a terminal claim is never replaced: the generation is not pending against it, matching the action shim's `allocation_attempt_transition` | the pure property asserting the two predicates equal over generated rows; the Job dimension of the seeded invariant; the two `rg_conf_job` runs |
+| RA10 | a finished Job row (a terminal claim, or operator-stopped, H3) is never replaced: the generation is not pending against it, matching the action shim's `allocation_attempt_transition` | the pure property asserting the two predicates equal over generated rows; the Job dimension of the seeded invariant; the two `rg_conf_job` runs |
 | RA11 | a Job's failure before the driver is final: production finalises any ended Job row (`workload_lifecycle.rs:1091-1113`; natural exit through `is_natural_exit` `:1757-1775` and `classify_natural_exit_terminal` `:1781-1794`) and places a Job only while it has no row. The one production path that re-drives a Job row is a platform-reclaimed row (`is_natural_exit` excludes it, `:1775`), which the spec does not model; a pre-driver failure of that re-drive's successor is final in the same way | the `JOB` conjunct of `canStart` (`curA == 0`) and `I_FINISHED_JOB_ISSUES_NO_ID` model it; the Job pre-driver case of the seeded invariant and the shim tests |
 
 Conformance drivers: two, both in `crates/overdrive-control-plane/src/`, each a `#[cfg(all(test, feature = "integration-tests"))]` module.

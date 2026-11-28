@@ -3,7 +3,8 @@
 ## Status
 
 **Accepted** 2026-11-18 (decision SD-6 of the node-local persistent volume feature, GH #348; user ruling of 2026-11-18, option A; item 4 by the user ruling of 2026-11-24, RB-13). The
-finished-Job rule (Decision, item 3) is **Accepted** 2026-11-19 by user ruling (H1, option A). ADR-0073 is implemented, so its amendment
+finished-Job rule (Decision, item 3) is **Accepted** 2026-11-19 by user ruling (H1, option A); its definition of a finished Job row, which
+includes an operator-stopped row whichever writer recorded the stop, is **Accepted** 2026-11-28 by user ruling (H3). ADR-0073 is implemented, so its amendment
 section links here; this ADR is not implemented and is stated in the present tense. Two neighbouring rules are their own decisions: the
 recording of a failure before the driver runs ([ADR-0337](adr-0337-a-launch-failure-before-the-driver-runs-is-a-recorded-charged-failed-row.md))
 and the handling of an admission refusal ([ADR-0338](adr-0338-an-admission-refusal-by-the-guest-network-pool-writes-no-row-and-charges-nothing.md)).
@@ -33,11 +34,16 @@ has an allocation row that ran, and a generation that the shim cannot honour is 
    stamped when the placement is emitted.
 2. **"Restart pending" is derived from observation.** A generation is pending while the newest allocation that ran (the highest id that has a
    row that is not an abandoned launch, ADR-0355) serves a generation below the desired one. With no such row there is nothing to replace.
-3. **A finished Job is never replaced.** When the current allocation of a Job carries a terminal claim (it completed, failed, or was stopped by
-   the operator), the generation is not pending. `workload restart` of it advances the generation and nothing is
+3. **A finished Job is never replaced.** A Job row is finished when it carries a terminal claim (it completed or failed), or when the
+   operator stopped it, whichever writer recorded the stop. An operator stop is recorded two ways: the stop path writes
+   `terminal: Some(Stopped { by: Operator })`, and the exit observer writes a `Terminated` row of reason `Stopped { by: Operator }` with
+   `terminal: None`. When both of the stop path's write proposals lose under contention, the exit observer's row stands as the authoritative
+   row, and the reconciler emits a stop only for a `Running` row, so nothing would ever add the terminal. The existing classifier
+   `is_operator_stopped` recognises both shapes. When the newest row that ran is a finished Job row, the generation is not pending. `workload restart` of it advances the generation and nothing is
    issued: the same outcome as today, now decided by the reconciler, which emits nothing, rather than by a shim fence that returns after the
-   id was issued. The rule matches the action shim's immutability rule for a Job row, so the two cannot disagree. An operator-stopped Job is
-   a finished Job for this rule; `workload restart` of a running Job therefore ends it and leaves it down (the stop writes the terminal),
+   id was issued. The rule matches the action shim's immutability rule for a Job row, so the two cannot disagree: both use the one definition
+   above. Without the operator-stopped clause, `workload restart` (which bumps the generation and clears the stop sentinel) of a Job whose
+   stop left only the exit observer's terminal-less row would give the stopped Job a new allocation. `workload restart` of a running Job therefore ends it and leaves it down (the stop writes the terminal),
    as on `main`. This is a scope limitation tracked by **#301** ("`overdrive workload restart` on a stopped Job is silently ignored"): this
    decision keeps today's behaviour, and #301 changes it so that an operator restart of a stopped Job starts a new attempt while a Job that
    finished on its own is not re-run by crash replacement. The handler adds no answer for the no-op; the `restarted` answer it gives is #301's
@@ -76,6 +82,8 @@ successor is observed". The test obligations: `distill/upstream-issues.md` of th
   reconciler would issue an id on every evaluation and nothing would show it.
 - **Make `workload restart` re-run a finished Job (replace the Job row).** Rejected for this decision by the user's ruling (H1, option A):
   re-running a Job is a change to the Job's run-once contract (ADR-0037, ADR-0047) that is not part of this feature.
+- **Make the stop path always leave a terminal row, and keep the finished-Job test as `terminal.is_some()`.** Rejected by the user (H3): it
+  changes the two-writer arbitration of the stop to fix what the existing classifier `is_operator_stopped` already handles.
 
 ## Consequences
 
