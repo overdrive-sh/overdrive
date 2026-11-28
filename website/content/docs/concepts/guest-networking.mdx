@@ -199,8 +199,8 @@ overlay networks return, is relayed.
 ### TCP
 
 A guest retries over TCP when a reply is truncated, and some clients use TCP
-from the start. glibc, for example, writes its A and AAAA queries back to back
-on one connection and waits for two replies. The node serves every framed query
+from the start. glibc, when it asks for both address families, writes its A and
+AAAA queries back to back on one connection and waits for two replies. The node serves every framed query
 on a connection in order on `100.95.0.1:53`, answers or forwards each one exactly
 as it does over UDP, and writes the replies in query order. It closes the
 connection when the client closes it.
@@ -216,7 +216,7 @@ upstream over TCP.
 
 ### Concurrent forwards are bounded
 
-Each forward in flight holds a permit. `overdrive serve` raises its soft limit on
+Each forward in flight and each open TCP connection holds a permit. `overdrive serve` raises its soft limit on
 open file descriptors to the hard limit at startup, and the number of permits is
 the soft limit minus a reserve for the node's other needs, divided by two, since
 a TCP forward uses two descriptors. The node reports the permit count once at

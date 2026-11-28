@@ -202,27 +202,27 @@ the connection. A forwarded query goes to the upstream over TCP.
 
 ### Why one query per connection failed
 
-We first chose one query per connection. It kept the permit accounting simple,
-because a connection held its permit for exactly one exchange, and we expected
-stub resolvers to need nothing more. We had not measured a glibc client over TCP.
+We first chose one query per connection. We expected stub resolvers to open one
+connection per query, and serving several queries per connection meant keeping
+idle connections open. We had not measured a glibc client over TCP.
 
 When we did, the choice failed. On a physical x86_64 server under Linux 7.0.0-38,
 glibc 2.43 wrote its A and AAAA queries back to back in one `writev` on one
 connection and waited for two replies. This happens when TCP is configured with
 `options use-vc`, and after a truncated UDP reply. The listener answered the A
 query and closed. `getent ahosts` then exited with status 2 and printed nothing.
-The whole name failed to resolve in 16 to 25 ms. A client with no global IPv6
+The lookup failed in 10 to 34 ms across those cases. A client with no global IPv6
 address sends only the A query, because glibc skips AAAA when the host has no
 address to use it on, and that case worked. musl opens one connection per query
 and worked against both designs.
 
 We changed the listener to the loop described above. The cost is that an idle
 client holds its permit for up to the five-second read deadline after each reply.
-We set no per-connection query cap, because the permit count and the deadlines
-already bound a connection. We re-ran the same probe against the fix. glibc's
+The permit and the read deadline already bound an idle connection, so we added
+no new bound and set no per-connection query cap. We re-ran the same probe against the fix. glibc's
 `use-vc` lookup, `options use-vc` in the resolver file, `use-vc single-request`
-and the truncation fallback all exited 0, 21 of 21 timed cases on a guest with a
-global IPv6 address. The wire showed one connection carrying both queries and
+and the truncation fallback all exited 0. All 21 lookups in the run on a guest
+with a global IPv6 address exited 0, counting the musl client and the UDP control. The wire showed one connection carrying both queries and
 both replies, with the client closing first. The musl client still resolved.
 In the IPv4-only run, three `getent ahostsv6` cases exited 2 because the guest has
 no IPv6 address, as they did before the change.
@@ -264,8 +264,8 @@ forward of every record type. We have not measured these things:
   blocked reply, under either glibc or musl.
 - behavior under real load, with every permit held.
 - the behavior of Go's pure-Go resolver and systemd-resolved-style stubs over
-  TCP, more than two queries on one connection, and replies that arrive out of
-  order. Our re-run used glibc, musl and a scripted upstream.
+  TCP, more than two queries on one connection, and a client that expects replies in
+  an order other than query order. Our re-run used glibc, musl and a scripted upstream.
 - fairness between guests. All guest queries reach the responder from the gateway
   address, so one guest that floods lookups can use every permit and starve
   others. [Issue #385, per-guest fairness for forwarded non-mesh DNS queries](https://github.com/overdrive-sh/overdrive/issues/385),
