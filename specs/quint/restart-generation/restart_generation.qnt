@@ -27,14 +27,14 @@
  *                                                  identical. CpCrash and NodeReboot take every PENDING allocation to ABANDONED
  *                                                  at the boot step (`converge`'s first step, RB-11). A control-plane loss before the
  *                                                  row is written (an ISSUED launch) ends the launch with NO row and no charge
- *                                                  (W_UNWRITTEN): there is no `Pending` row for boot to close.
+ *                                                  (W_NOROW): there is no `Pending` row for boot to close.
  * ABANDONED is a terminal, restartable, uncharged class that is not a natural exit. The row is the newest row (`curA`), but a
  * launch that never ran does not count (RB-13): the count, the pending generation and the ceiling are derived from the newest row
  * that ran (`basisA`), so the relaunch carries what it would carry if the abandoned rows were deleted; after a stop nothing is
  * relaunched (`canStart` needs no stop intent).
  * `hasRow` is the model of "an allocation row exists": a PENDING allocation has its `Pending` row (ADR-0353) and an abandoned
  * launch its terminal row; an ISSUED launch, a refused launch (the guest-network pool refused admission before any row is
- * written) and a launch lost before its row was written (W_UNWRITTEN) have NONE.
+ * written) and a launch lost before its row was written (both W_NOROW) have NONE.
  * `ig` is the View's issued-generation map, `dg` the
  * `workloads/<id>/generation` key, `og` a marker no production rule reads (the hazard's stamp on emit).
  *
@@ -98,10 +98,9 @@ module restart_generation {
   val W_RESTART = 6
   val W_LOST = 7        // launch superseded or lost (control-plane crash, node reboot): an ABANDONED row, no charge
   val W_PREFAIL = 9     // a pre-driver failure (SVID issuance, non-start driver error): a Failed row
-  val W_REFUSED = 10    // the guest-network pool refused admission: no row, no charge
+  val W_NOROW = 10      // an id was minted and no row was written, nothing charged: admission refused by the guest-network pool, or an ISSUED launch lost with the control plane
   val W_STARTFAIL = 11  // one typed start failure (volume unavailable, held, driver rejection): a Failed row
   val W_DONE = 12       // a Job ran to completion (its natural exit): a Terminated row (JOB only)
-  val W_UNWRITTEN = 13  // an ISSUED launch lost with the control plane before its Pending row was written: no row, no charge
 
   type S = {
     declared: bool, stopped: bool,
@@ -148,14 +147,13 @@ module restart_generation {
   def mintedIds(s: S): int = AL.filter(a => s.as.get(a) != UNMINTED).size()
   // "an allocation row exists for a": a PENDING allocation has its `Pending` row (ADR-0353), an abandoned launch its terminal
   // row (ADR-0355) and a pre-launch failure (W_PREFAIL) its Failed row; an ISSUED launch (no admission yet), an admission
-  // refusal (W_REFUSED) and a launch lost before its row (W_UNWRITTEN) have none.
+  // refusal and a launch lost before its row (both W_NOROW) have none.
   // Hazard "prefailNoRow" (ADR-0337): a pre-driver failure writes no row. Hazard "refusalCharged" (ADR-0338): an admission
   // refusal writes a (charged) row.
   def hasRow(s: S, a: int): bool = and {
     s.as.get(a) == PENDING or s.as.get(a) == RUNNING or s.as.get(a) == FAILED or s.as.get(a) == TERMINATED
       or s.as.get(a) == ABANDONED,
-    OFF.contains("refusalCharged") or s.why.get(a) != W_REFUSED,
-    s.why.get(a) != W_UNWRITTEN,
+    OFF.contains("refusalCharged") or s.why.get(a) != W_NOROW,
     not(OFF.contains("prefailNoRow")) or s.why.get(a) != W_PREFAIL,
   }
   // production `current_alloc` over the observed rows: the highest id with a row, 0 when none
@@ -228,18 +226,17 @@ module restart_generation {
   }
   // the loss a control-plane death inflicts on in-flight launches: boot's first step ends every PENDING row ABANDONED (reason
   // `LaunchLostWithControlPlane`, no charge, the count unchanged); an ISSUED launch has no row, so boot has none to close: it
-  // ends with no row and no charge (W_UNWRITTEN); a RUNNING allocation stays RUNNING (the VMM survives the crash).
+  // ends with no row and no charge (W_NOROW); a RUNNING allocation stays RUNNING (the VMM survives the crash).
   // abandonWritesNoRow: the PENDING row is left PENDING (and nothing resolves it)
   def abandonedAs: int = if (OFF.contains("abandonWritesNoRow")) PENDING else ABANDONED
   def crashLoss(s: S): S =
     { ...s, as: AL.mapBy(a => if (s.as.get(a) == PENDING) abandonedAs else if (s.as.get(a) == ISSUED) FAILED else s.as.get(a)),
-      why: AL.mapBy(a => if (s.as.get(a) == PENDING) W_LOST else if (s.as.get(a) == ISSUED) W_UNWRITTEN else s.why.get(a)) }
+      why: AL.mapBy(a => if (s.as.get(a) == PENDING) W_LOST else if (s.as.get(a) == ISSUED) W_NOROW else s.why.get(a)) }
 
   // ---------------------------------------------------------------- workload-lifecycle
   def canStart(s: S, a: int): bool = and {
     s.declared, not(s.stopped), not(nonTerminal(s)), not(vetoed(s)),
-    // a `workload restart` is a generation replacement, admitted whatever the attempt count (restart_decision(.., true)); so
-    // is a relaunch after an abandoned launch (platform_reclaimed)
+    // a `workload restart` is a generation replacement, admitted whatever the attempt count (restart_decision(.., true))
     mayRestart(s),
     // H1, RA11: a Job is placed once; any row ends it (its natural exit is finalised, never restarted, a pre-driver failure
     // included), so no crash or failure restarts it. A launch that never ran is not a finished Job: its abandoned row
@@ -291,7 +288,7 @@ module restart_generation {
   // admission (`provision_and_inject_netns`): the pool refuses before the lease is taken and before any row is written (ADR-0338)
   action LaunchRefused(a: int): bool = all {
     cur.as.get(a) == ISSUED, cur.capFull,
-    commit({ ...cur, as: cur.as.set(a, FAILED), why: cur.why.set(a, W_REFUSED) },
+    commit({ ...cur, as: cur.as.set(a, FAILED), why: cur.why.set(a, W_NOROW) },
       variant("LaunchRefused", { a: a })),
   }
   // admission passed: the lease is handed out and the `Pending` row is written with its address (ADR-0353). Provision failures
@@ -309,7 +306,7 @@ module restart_generation {
   // environment event (OPS "lost"): the launch is superseded by a stop, a restart or shutdown, or lost with the control plane:
   // its `Pending` row ends ABANDONED (ADR-0355), no charge. Only a PENDING launch (the row is written; supersession is observed
   // at the driver). Guarded in the shim's order (identity issuance, then the driver observes the signal), so it needs no
-  // admission flag; CpCrash / NodeReboot lose a launch at any moment, an ISSUED one included (no row, W_UNWRITTEN). No fairness;
+  // admission flag; CpCrash / NodeReboot lose a launch at any moment, an ISSUED one included (no row, W_NOROW). No fairness;
   // not part of `Progress`. abandonWritesNoRow: the row is left PENDING
   action LaunchLost(a: int): bool = all {
     OPS.contains("lost"), cur.as.get(a) == PENDING, not(dead(cur, a)), not(cur.idFault),
@@ -375,7 +372,7 @@ module restart_generation {
   val I_FINISHED_JOB_ISSUES_NO_ID = not(JOB) or and {
     AL.filter(a => hasRow(st, a) and st.as.get(a) != ABANDONED).size() <= 1,
     jobTerm(st, basisA(st)) implies
-      not(AL.exists(a => a > basisA(st) and (st.as.get(a) == ISSUED or st.as.get(a) == PENDING or hasRow(st, a)))),
+      not(AL.exists(a => a > basisA(st) and (st.as.get(a) == ISSUED or hasRow(st, a)))),
   }
   // RB-13 (ADR-0355 item 2, deletion-equivalence): deleting the abandoned rows from the chain changes no later launch's count.
   // Every allocation's count at issue equals the count derived over the chain of the lower ids with the abandoned rows DELETED
@@ -549,7 +546,7 @@ module restart_generation {
     .expect(st.as.get(1) == ISSUED and not(hasRow(st, 1)) and curA(st) == 0 and Safety)
     .then(CapFill)
     .then(LaunchRefused(1))
-    .expect(st.as.get(1) == FAILED and st.why.get(1) == W_REFUSED and not(hasRow(st, 1)) and curA(st) == 0 and charged(st) == 0
+    .expect(st.as.get(1) == FAILED and st.why.get(1) == W_NOROW and not(hasRow(st, 1)) and curA(st) == 0 and charged(st) == 0
             and canStart(st, 2) and not(canWlStart(st, 2)) and Safety)
     .then(CapDrain)
     .expect(canWlStart(st, 2))

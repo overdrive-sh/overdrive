@@ -1,7 +1,7 @@
 # Checks for specs/quint/restart-generation/: ADR-0335 (a restart generation is handled when its successor is observed),
 # ADR-0337 (a pre-driver failure writes a charged Failed row) and ADR-0338 (an admission refusal writes no row and charges
 # nothing); budget abstraction R-1 = A: the per-allocation restart count. One decision, one hazard.
-# ci = true iff the check takes under two minutes: every check here. Runs on rg_conf and rg_conf_job (REC = true) are the
+# ci = true on each check that takes under two minutes (set per check). Runs on rg_conf and rg_conf_job (REC = true) are the
 # #[quint_test] pins.
 
 [[check]]
@@ -11,7 +11,7 @@ main = "rg_ok"
 invariant = "Safety"
 backend = "tlc"
 expect = "holds"
-ci = false  # 130 s with the ISSUED state (was 88 s): over the two-minute rule
+ci = true
 timeout_secs = 900
 
 [[check]]

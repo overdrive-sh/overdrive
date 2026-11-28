@@ -1,9 +1,9 @@
 {
   "schema": 1,
   "subsystem": "restart-generation",
-  "run_id": "3142302-1795813334.329",
-  "started": "2026-11-27T21:02:14.328569856Z",
-  "finished": "2026-11-27T21:04:25.01058304Z",
+  "run_id": "223431-1795824850.493",
+  "started": "2026-11-28T00:14:10.49334016Z",
+  "finished": "2026-11-28T00:15:42.046986496Z",
   "jobs": 16,
   "tools": {
     "quint": "0.32.0",
@@ -12,14 +12,14 @@
     "kernel": "7.0.0-38-generic"
   },
   "git": {
-    "head": "109def5b55497ac2ef9036fbcd53dccfcc4d4876",
+    "head": "4a4e64a17e26f30337a1f8f1b4b10cad109f5b71",
     "dirty": true
   },
   "inputs": {
-    "checks.toml": "b399b19d575f5ce5fc4788297b213f8bdb0f93d9e3b4fbfee31bf926cf904461",
+    "checks.toml": "ad6cfcf76c63d7afe1ee7a0f565f5d07329608a6a98f9a06ac9c52da02c3a119",
     "hazard/restart_generation_hazards.qnt": "3eca02f4a2597fcc1e66ac2b65344770223aeb4e2792efd161106727abdb7a94",
     "restart_budget.qnt": "1dd686c4e07b3c3509848f98be20023aca4d66eb684fe53a654cf58199302f07",
-    "restart_generation.qnt": "6e0456a3c294bba81dc56be940374f583b2c65248bf802f507c5a85c1f970960"
+    "restart_generation.qnt": "0e543c565f22be9229c254385de8d918298b8e74ac039728f02de771a0ce1781"
   },
   "checks": [
     {
@@ -34,16 +34,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 130.338,
+      "seconds": 91.208,
       "retry_seconds": 0.0,
-      "wall_seconds": 130.339,
+      "wall_seconds": 91.208,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
       "failure_log": null,
-      "input_key": "0e934b44ca50eee149337fb2d5adf8e6c2264bcb32841f4e226312e9902481e8",
-      "run_id": "3142302-1795813334.329"
+      "input_key": "1383882b755210698023d1d0a1071ba4257bac8fc57d409ebc0cd7e925ebe53f",
+      "run_id": "223431-1795824850.493"
     },
     {
       "name": "rg-live-replacement",
@@ -57,16 +57,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 51.361,
+      "seconds": 51.165,
       "retry_seconds": 0.0,
-      "wall_seconds": 51.362,
+      "wall_seconds": 51.165,
       "timeout_secs": 600,
       "cause": null,
       "trace": null,
       "condensed": null,
       "failure_log": null,
-      "input_key": "d9d596bcdc0a4b8911387e3dba09f144a797ca4a680227cc7718e8099cb8f37e",
-      "run_id": "3142302-1795813334.329"
+      "input_key": "659b2e23dd7eb02bac05ddd0e56eb76150f66c37968074eb73be62211cab96ce",
+      "run_id": "223431-1795824850.493"
     },
     {
       "name": "rg-live-prefail",
@@ -80,16 +80,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 11.626,
+      "seconds": 12.152,
       "retry_seconds": 0.0,
-      "wall_seconds": 11.626,
+      "wall_seconds": 12.153,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
       "failure_log": null,
-      "input_key": "cbf210eef5fa62bd36e469949612517ce8e9a8e483dcc1dd14d7edb639b3d49f",
-      "run_id": "3142302-1795813334.329"
+      "input_key": "0ac0cea698f4b0b8f060b9eeb7129c4cef35425502ae60cab3ed0f543849abbf",
+      "run_id": "223431-1795824850.493"
     },
     {
       "name": "rg-hazard-stamp-on-emit",
@@ -103,16 +103,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 14.407,
+      "seconds": 14.443,
       "retry_seconds": 0.0,
-      "wall_seconds": 14.407,
+      "wall_seconds": 14.443,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/rg-hazard-stamp-on-emit.tlc.txt",
       "condensed": "traces/rg-hazard-stamp-on-emit.txt",
       "failure_log": null,
-      "input_key": "5aa25d9eca870c0bb8f959a6be3952593f062b4bf2816a8918ac5789b98044e5",
-      "run_id": "3142302-1795813334.329"
+      "input_key": "91a6350baf55ff5bd9e84780b358b9c2be79fd8c667d48cb541574c6cc81ea1e",
+      "run_id": "223431-1795824850.493"
     },
     {
       "name": "rg-hazard-prefail-no-row",
@@ -126,16 +126,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 16.449,
+      "seconds": 16.465,
       "retry_seconds": 0.0,
-      "wall_seconds": 16.449,
+      "wall_seconds": 16.465,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/rg-hazard-prefail-no-row.tlc.txt",
       "condensed": "traces/rg-hazard-prefail-no-row.txt",
       "failure_log": null,
-      "input_key": "732974bf86b9317bf7a98a2cb96073cc68ccd271e802ce213c00582015986a78",
-      "run_id": "3142302-1795813334.329"
+      "input_key": "5ff907900aa83d31ce4d8d31b7234fcd75babcfd3ca1a979e433837c4c420a7e",
+      "run_id": "223431-1795824850.493"
     },
     {
       "name": "rg-hazard-refusal-charged",
@@ -149,16 +149,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 13.649,
+      "seconds": 12.656,
       "retry_seconds": 0.0,
-      "wall_seconds": 13.649,
+      "wall_seconds": 12.656,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/rg-hazard-refusal-charged.tlc.txt",
       "condensed": "traces/rg-hazard-refusal-charged.txt",
       "failure_log": null,
-      "input_key": "5bae628715b18dd9f1c89e1ca938070bb328626109dea5284c3702d0aac48f79",
-      "run_id": "3142302-1795813334.329"
+      "input_key": "11cc9f92f3e63e70c42cd3665f2110ca28e04f39a303f31b01089b571cb3fa98",
+      "run_id": "223431-1795824850.493"
     },
     {
       "name": "rg-hazard-abandon-writes-no-row",
@@ -172,16 +172,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 13.138,
+      "seconds": 12.911,
       "retry_seconds": 0.0,
-      "wall_seconds": 13.138,
+      "wall_seconds": 12.911,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/rg-hazard-abandon-writes-no-row.tlc.txt",
       "condensed": "traces/rg-hazard-abandon-writes-no-row.txt",
       "failure_log": null,
-      "input_key": "a031f3381eab2f7e8ad4fb1af3a12e992370443fb379305bbf972247599a9c9c",
-      "run_id": "3142302-1795813334.329"
+      "input_key": "32b1d81cd4bfb22fb476cdd228ddae9d650c2be054f0d3fdb5f569b888bf7892",
+      "run_id": "223431-1795824850.493"
     },
     {
       "name": "rg-hazard-abandoned-row-counts",
@@ -195,16 +195,16 @@
       "outcome": "violation",
       "pass": true,
       "attempts": 1,
-      "seconds": 14.188,
+      "seconds": 12.911,
       "retry_seconds": 0.0,
-      "wall_seconds": 14.188,
+      "wall_seconds": 12.911,
       "timeout_secs": 900,
       "cause": null,
       "trace": "traces/rg-hazard-abandoned-row-counts.tlc.txt",
       "condensed": "traces/rg-hazard-abandoned-row-counts.txt",
       "failure_log": null,
-      "input_key": "a732594bed56ebb02581861ef4254439f05d558aea508283aa6106cbdaec5d2d",
-      "run_id": "3142302-1795813334.329"
+      "input_key": "87a8a035c27ddd2b52fa46c074b883989847cfbad14656be604b79725f3a15c3",
+      "run_id": "223431-1795824850.493"
     },
     {
       "name": "rg-run-control-plane-crash-during-restart-launch-relaunches-once",
@@ -218,16 +218,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 15.201,
+      "seconds": 15.961,
       "retry_seconds": 0.0,
-      "wall_seconds": 15.201,
+      "wall_seconds": 15.962,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
       "failure_log": null,
-      "input_key": "ac64ab7b3cba02e110d0aafbe268f6531f2d4bfb410674099b88e0e798c899a2",
-      "run_id": "3142302-1795813334.329"
+      "input_key": "8a2eae306839fa1f48ee3d9bfe966d41f0f1bf744c2ecbf640ac27ee225746c7",
+      "run_id": "223431-1795824850.493"
     },
     {
       "name": "rg-run-second-restart-loses-launch-then-one-placement",
@@ -241,16 +241,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 13.674,
+      "seconds": 13.678,
       "retry_seconds": 0.0,
-      "wall_seconds": 13.674,
+      "wall_seconds": 13.678,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
       "failure_log": null,
-      "input_key": "bc8e0f909e60284c3c2e15183d72bb64064db79266c10bb55a19df3021851fec",
-      "run_id": "3142302-1795813334.329"
+      "input_key": "4dffd407acd7dc2670793dcfdf860be8be77dba0a601f95cb55b650b25fc9a58",
+      "run_id": "223431-1795824850.493"
     },
     {
       "name": "rg-run-resume-while-running-stops-and-replaces",
@@ -264,16 +264,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 2.795,
+      "seconds": 2.794,
       "retry_seconds": 0.0,
-      "wall_seconds": 2.795,
+      "wall_seconds": 2.794,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
       "failure_log": null,
-      "input_key": "d4c896fdb1cc5941847c39ac56a07d0ede0d91965d2642896f5928776331f83a",
-      "run_id": "3142302-1795813334.329"
+      "input_key": "75d76d14c103ed0b7801425f8a692e7d6f773822c555eef70ba5938576ef665d",
+      "run_id": "223431-1795824850.493"
     },
     {
       "name": "rg-run-restart-of-exhausted-workload-relaunches-uncharged",
@@ -287,16 +287,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 24.304,
+      "seconds": 21.776,
       "retry_seconds": 0.0,
-      "wall_seconds": 24.304,
+      "wall_seconds": 21.776,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
       "failure_log": null,
-      "input_key": "27416b13eac976953ad505ef936e427d5e86b548589ed78a746382b7b51e348a",
-      "run_id": "3142302-1795813334.329"
+      "input_key": "43c52ad227f2b0cf5d11694bc9d38389b6f201eaccf74fb0401848816430d1ca",
+      "run_id": "223431-1795824850.493"
     },
     {
       "name": "rg-run-generation-replacement-forgives-predecessor-failure",
@@ -310,16 +310,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 25.316,
+      "seconds": 25.071,
       "retry_seconds": 0.0,
-      "wall_seconds": 25.316,
+      "wall_seconds": 25.071,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
       "failure_log": null,
-      "input_key": "b7f31a5cb56a5f30251142db5937e3249c046fe21bc0b2acb437a4857a9a6b98",
-      "run_id": "3142302-1795813334.329"
+      "input_key": "43739466cf700770407271051707f72999c9bb66821a6311a12d6df39e43e894",
+      "run_id": "223431-1795824850.493"
     },
     {
       "name": "rg-run-persistent-prelaunch-failure-ends-in-backoff-exhausted",
@@ -333,16 +333,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 2.279,
+      "seconds": 2.793,
       "retry_seconds": 0.0,
-      "wall_seconds": 2.279,
+      "wall_seconds": 2.793,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
       "failure_log": null,
-      "input_key": "8f4ba8bc42ce3d9c654fb65388af1b650bd8f15dfc478cacb493cd21e4e5823c",
-      "run_id": "3142302-1795813334.329"
+      "input_key": "55bb8a61a1d7b5b09b9e57c33c0262bdd15feaa8658693438ebd8215181cfeec",
+      "run_id": "223431-1795824850.493"
     },
     {
       "name": "rg-run-transient-prelaunch-failure-recovers",
@@ -356,16 +356,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 2.797,
+      "seconds": 2.79,
       "retry_seconds": 0.0,
-      "wall_seconds": 2.797,
+      "wall_seconds": 2.79,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
       "failure_log": null,
-      "input_key": "29aa2f9479e80f1f0735b23b5457681b54904a5245fecd5a59341de6f6873c82",
-      "run_id": "3142302-1795813334.329"
+      "input_key": "c3e9898ffb0a490f8126599cb5b4c16f79d01e2ed09dbc6632c9a21915aaeb2c",
+      "run_id": "223431-1795824850.493"
     },
     {
       "name": "rg-run-admission-refusal-leaves-no-row-and-waits-for-capacity",
@@ -379,16 +379,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 2.523,
+      "seconds": 2.541,
       "retry_seconds": 0.0,
-      "wall_seconds": 2.524,
+      "wall_seconds": 2.542,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
       "failure_log": null,
-      "input_key": "d3db0a048df767fba7302a8200cc0aef5256564815648667fd2459e77c104da3",
-      "run_id": "3142302-1795813334.329"
+      "input_key": "7981208607707b1f83060a4aacc8157047d04c7aefdb3b5aa5ab586e7fc60003",
+      "run_id": "223431-1795824850.493"
     },
     {
       "name": "rg-run-restart-of-completed-job-does-nothing-and-issues-no-id",
@@ -402,16 +402,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 14.416,
+      "seconds": 14.182,
       "retry_seconds": 0.0,
-      "wall_seconds": 14.417,
+      "wall_seconds": 14.183,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
       "failure_log": null,
-      "input_key": "f996ca91b0aa526948d62f8e300871804c81cfdb35baf71fea3c6d4d6cef19f6",
-      "run_id": "3142302-1795813334.329"
+      "input_key": "959d8e4465408ce7c53eb8e8248ebb222f0aee181584120d2e5f855566b6b8e2",
+      "run_id": "223431-1795824850.493"
     },
     {
       "name": "rg-run-resume-of-stopped-job-does-nothing-and-issues-no-id",
@@ -425,16 +425,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 2.778,
+      "seconds": 2.53,
       "retry_seconds": 0.0,
-      "wall_seconds": 2.778,
+      "wall_seconds": 2.53,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
       "failure_log": null,
-      "input_key": "b7bfec6b535936fed874c756acaaeb70755b379f9076169015380775ee856f99",
-      "run_id": "3142302-1795813334.329"
+      "input_key": "ef1fd02031929761976a67cfd92b91e0a8c76981652c6cfa90756ee6d177c860",
+      "run_id": "223431-1795824850.493"
     },
     {
       "name": "rg-run-crash-restart-abandoned-by-operator-restart-forgives-the-crash",
@@ -448,16 +448,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 15.691,
+      "seconds": 13.427,
       "retry_seconds": 0.0,
-      "wall_seconds": 15.691,
+      "wall_seconds": 13.427,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
       "failure_log": null,
-      "input_key": "be62924e2675bcc8abb4237b3bd9af087c6f44705ed812312bc439055b9186c3",
-      "run_id": "3142302-1795813334.329"
+      "input_key": "2175fe1deed392ebdad063253e72d1b3d7090a93750d35c4a49d9f0ab3e4cd72",
+      "run_id": "223431-1795824850.493"
     },
     {
       "name": "rg-run-consecutive-abandoned-launches-charge-the-crash-once",
@@ -471,16 +471,16 @@
       "outcome": "holds",
       "pass": true,
       "attempts": 1,
-      "seconds": 2.798,
+      "seconds": 2.792,
       "retry_seconds": 0.0,
-      "wall_seconds": 2.798,
+      "wall_seconds": 2.792,
       "timeout_secs": 900,
       "cause": null,
       "trace": null,
       "condensed": null,
       "failure_log": null,
-      "input_key": "055eb05d29288283cfdbde1740ca32c83f1b43f9e07332a8ece4bbcf714762d4",
-      "run_id": "3142302-1795813334.329"
+      "input_key": "fd0369ff04c3bf76c375e574b0e30b53c9bb8c8b50118b82b7c110ec29f5b87d",
+      "run_id": "223431-1795824850.493"
     }
   ]
 }

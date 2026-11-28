@@ -12,7 +12,7 @@ State 1: <Initial predicate>
   idFault |-> FALSE,
   capFull |-> FALSE ]
 
-State 2: <rg_bugAbandonedRowCounts_restart_generation_Declare line 321, col 3 to line 325, col 44 of module rg_bugAbandonedRowCounts>
+State 2: <rg_bugAbandonedRowCounts_restart_generation_Declare line 312, col 3 to line 316, col 44 of module rg_bugAbandonedRowCounts>
 /\ rg_bugAbandonedRowCounts_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ rg_bugAbandonedRowCounts_restart_generation_st = [ declared |-> TRUE,
   stopped |-> FALSE,
@@ -26,13 +26,27 @@ State 2: <rg_bugAbandonedRowCounts_restart_generation_Declare line 321, col 3 to
   idFault |-> FALSE,
   capFull |-> FALSE ]
 
-State 3: <rg_bugAbandonedRowCounts_restart_generation_WlStart line 1088, col 3 to line 1121, col 61 of module rg_bugAbandonedRowCounts>
+State 3: <rg_bugAbandonedRowCounts_restart_generation_CpCrash line 805, col 3 to line 811, col 44 of module rg_bugAbandonedRowCounts>
+/\ rg_bugAbandonedRowCounts_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
+/\ rg_bugAbandonedRowCounts_restart_generation_st = [ declared |-> TRUE,
+  stopped |-> FALSE,
+  as |-> <<0, 0, 0, 0>>,
+  why |-> <<0, 0, 0, 0>>,
+  faults |-> 0,
+  dg |-> 0,
+  ig |-> <<0, 0, 0, 0>>,
+  cnt |-> <<0, 0, 0, 0>>,
+  og |-> 0,
+  idFault |-> FALSE,
+  capFull |-> FALSE ]
+
+State 4: <rg_bugAbandonedRowCounts_restart_generation_WlStart line 1079, col 3 to line 1112, col 61 of module rg_bugAbandonedRowCounts>
 /\ rg_bugAbandonedRowCounts_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ rg_bugAbandonedRowCounts_restart_generation_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   as |-> <<6, 0, 0, 0>>,
   why |-> <<0, 0, 0, 0>>,
-  faults |-> 1,
+  faults |-> 0,
   dg |-> 0,
   ig |-> <<0, 0, 0, 0>>,
   cnt |-> <<0, 0, 0, 0>>,
@@ -40,13 +54,13 @@ State 3: <rg_bugAbandonedRowCounts_restart_generation_WlStart line 1088, col 3 t
   idFault |-> FALSE,
   capFull |-> FALSE ]
 
-State 4: <rg_bugAbandonedRowCounts_restart_generation_LaunchPending line 632, col 3 to line 646, col 61 of module rg_bugAbandonedRowCounts>
+State 5: <rg_bugAbandonedRowCounts_restart_generation_LaunchPending line 623, col 3 to line 637, col 61 of module rg_bugAbandonedRowCounts>
 /\ rg_bugAbandonedRowCounts_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ rg_bugAbandonedRowCounts_restart_generation_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   as |-> <<1, 0, 0, 0>>,
   why |-> <<0, 0, 0, 0>>,
-  faults |-> 1,
+  faults |-> 0,
   dg |-> 0,
   ig |-> <<0, 0, 0, 0>>,
   cnt |-> <<0, 0, 0, 0>>,
@@ -54,13 +68,13 @@ State 4: <rg_bugAbandonedRowCounts_restart_generation_LaunchPending line 632, co
   idFault |-> FALSE,
   capFull |-> FALSE ]
 
-State 5: <rg_bugAbandonedRowCounts_restart_generation_LaunchLost line 376, col 3 to line 401, col 61 of module rg_bugAbandonedRowCounts>
+State 6: <rg_bugAbandonedRowCounts_restart_generation_LaunchLost line 367, col 3 to line 392, col 61 of module rg_bugAbandonedRowCounts>
 /\ rg_bugAbandonedRowCounts_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ rg_bugAbandonedRowCounts_restart_generation_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   as |-> <<5, 0, 0, 0>>,
   why |-> <<7, 0, 0, 0>>,
-  faults |-> 1,
+  faults |-> 0,
   dg |-> 0,
   ig |-> <<0, 0, 0, 0>>,
   cnt |-> <<0, 0, 0, 0>>,
@@ -68,13 +82,13 @@ State 5: <rg_bugAbandonedRowCounts_restart_generation_LaunchLost line 376, col 3
   idFault |-> FALSE,
   capFull |-> FALSE ]
 
-State 6: <rg_bugAbandonedRowCounts_restart_generation_WlStart line 1088, col 3 to line 1121, col 61 of module rg_bugAbandonedRowCounts>
+State 7: <rg_bugAbandonedRowCounts_restart_generation_WlStart line 1079, col 3 to line 1112, col 61 of module rg_bugAbandonedRowCounts>
 /\ rg_bugAbandonedRowCounts_restart_generation_conf_step = [Init |-> [tag |-> "UNIT"]]
 /\ rg_bugAbandonedRowCounts_restart_generation_st = [ declared |-> TRUE,
   stopped |-> FALSE,
   as |-> <<5, 6, 0, 0>>,
   why |-> <<7, 0, 0, 0>>,
-  faults |-> 1,
+  faults |-> 0,
   dg |-> 0,
   ig |-> <<0, 0, 0, 0>>,
   cnt |-> <<0, 1, 0, 0>>,
