@@ -356,6 +356,10 @@ struct FaultObs {
     /// The next lifecycle write of a row in this state fails once, as an
     /// unreachable observation store.
     fail_next_write_of: Mutex<Option<AllocState>>,
+    /// Every lifecycle row written through this store, in order. A launch's
+    /// `Pending` row is overwritten by its ending row, so this is how a test
+    /// reads the address the `Pending` row carried.
+    written: Mutex<Vec<AllocStatusRow>>,
     point_read_hook: Mutex<Option<Box<dyn FnOnce() + Send>>>,
 }
 
@@ -365,6 +369,7 @@ impl FaultObs {
             inner,
             fail_point_reads: AtomicBool::new(false),
             fail_next_write_of: Mutex::new(None),
+            written: Mutex::new(Vec::new()),
             point_read_hook: Mutex::new(None),
         })
     }
@@ -418,6 +423,7 @@ impl ObservationStore for FaultObs {
         if armed.is_some() {
             return Err(ObservationStoreError::Unreachable { peer: WRITE_CAUSE.to_owned() });
         }
+        self.written.lock().push(current.clone());
         self.inner.write_alloc_lifecycle(current, source).await
     }
 
@@ -736,6 +742,21 @@ impl Rig {
 
     async fn rows(&self) -> Vec<AllocStatusRow> {
         self.state.obs.alloc_status_rows().await.expect("rows readable")
+    }
+
+    /// The address the allocation's `Pending` row carried (ADR-0353): the
+    /// lease's address, read from the rows written through the store because
+    /// the ending row overwrites the `Pending` row. Panics when no `Pending`
+    /// row with an address was written.
+    fn pending_address(&self, name: &str) -> Ipv4Addr {
+        let wanted = alloc(name);
+        self.obs
+            .written
+            .lock()
+            .iter()
+            .find(|row| row.alloc_id == wanted && row.state == AllocState::Pending)
+            .and_then(|row| row.workload_addr)
+            .unwrap_or_else(|| panic!("precondition: {name} wrote a Pending row with an address"))
     }
 
     fn has_lease(&self, name: &str) -> bool {
@@ -1755,7 +1776,11 @@ async fn start_arm_identity_issue_failure_writes_a_failed_row_naming_the_cause()
     );
     assert_eq!(row.terminal, None, "the reconciler owns the terminal claim");
     assert_eq!(row.started_at, None);
-    assert_eq!(row.workload_addr, None);
+    assert_eq!(
+        row.workload_addr,
+        Some(rig.pending_address(id)),
+        "the Failed row carries the Pending row's address (the lease's)"
+    );
     assert_eq!(row.kind, WorkloadKind::Service);
     assert!(!rig.has_lease(id), "the guest lease is released");
     assert!(driver.started_specs().is_empty(), "the driver never ran");
@@ -1795,6 +1820,11 @@ async fn restart_arm_identity_issue_failure_writes_a_failed_successor_row_then_c
     assert_eq!(row.state, AllocState::Failed);
     assert!(identity_issue_detail(&row).contains(CA_CAUSE), "detail carries the cause");
     assert_eq!(row.terminal, None);
+    assert_eq!(
+        row.workload_addr,
+        Some(rig.pending_address(successor)),
+        "the Failed successor row carries the successor's Pending row address"
+    );
     assert!(!rig.has_lease(successor), "the successor's lease is released");
     assert!(driver.started_specs().is_empty(), "the driver never ran");
     assert_eq!(rig.teardowns_of(predecessor), 1, "the predecessor's one teardown ran");
@@ -1836,6 +1866,11 @@ async fn a_job_identity_issue_failure_writes_the_same_failed_row() {
         row.terminal, None,
         "a Job's pre-driver row carries no terminal; the next tick finalises it"
     );
+    assert_eq!(
+        row.workload_addr,
+        Some(rig.pending_address(id)),
+        "the Job's Failed row carries the Pending row's address"
+    );
 }
 
 /// PENDING (S5, teardown fault). A guest-network teardown failure does not
@@ -1856,6 +1891,11 @@ async fn start_arm_teardown_failure_does_not_suppress_the_identity_issue_row() {
         .await
         .expect("the identity_issue row is written even when the lease teardown fails");
     assert!(identity_issue_detail(&row).contains(CA_CAUSE), "detail carries the cause");
+    assert_eq!(
+        row.workload_addr,
+        Some(rig.pending_address(id)),
+        "the row carries the Pending row's address even when the teardown fails"
+    );
     assert!(
         matches!(result, Err(ShimError::GuestNetwork(_))),
         "the teardown failure is returned after the row: {result:?}"
@@ -1897,6 +1937,11 @@ async fn restart_with_no_driver_composed_writes_a_failed_successor_row_not_handl
         row.reason
     );
     assert_eq!(row.terminal, None);
+    assert_eq!(
+        row.workload_addr,
+        Some(rig.pending_address(successor)),
+        "the Failed successor row carries the Pending row's address"
+    );
     assert!(!rig.has_lease(successor), "the successor's lease is released");
 }
 
