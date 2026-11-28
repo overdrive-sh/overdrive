@@ -1,0 +1,2 @@
+harness: responder up on 100.95.0.1:53, upstream mode=tc
+harness: upstream saw 22 queries

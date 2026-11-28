@@ -1,0 +1,58 @@
+3234047 1795882818.174444 close(3)      = 0
+3234047 1795882818.174548 read(3, "\177ELF\2\1\1\3\0\0\0\0\0\0\0\0\3\0>\0\1\0\0\0 \250\2\0\0\0\0\0"..., 832) = 832
+3234047 1795882818.174796 close(3)      = 0
+3234047 1795882818.175281 close(3)      = 0
+3234047 1795882818.175429 close(3)      = 0
+3234047 1795882818.175521 close(3)      = 0
+3234047 1795882818.175652 close(3)      = 0
+3234047 1795882818.175764 close(3)      = 0
+3234047 1795882818.175877 close(3)      = 0
+3234047 1795882818.175988 close(3)      = 0
+3234047 1795882818.176097 close(3)      = 0
+3234047 1795882818.176188 close(3)      = 0
+3234047 1795882818.176275 close(3)      = 0
+3234047 1795882818.176389 close(3)      = 0
+3234047 1795882818.176511 close(3)      = 0
+3234047 1795882818.176621 close(3)      = 0
+3234047 1795882818.176731 close(3)      = 0
+3234047 1795882818.176839 close(3)      = 0
+3234047 1795882818.176882 socket(AF_NETLINK, SOCK_RAW|SOCK_CLOEXEC, NETLINK_ROUTE) = 3
+3234047 1795882818.176920 bind(3, {sa_family=AF_NETLINK, nl_pid=0, nl_groups=00000000}, 12) = 0
+3234047 1795882818.176960 getsockname(3, {sa_family=AF_NETLINK, nl_pid=3234047, nl_groups=00000000}, [12]) = 0
+3234047 1795882818.177003 sendto(3, [{nlmsg_len=20, nlmsg_type=RTM_GETADDR, nlmsg_flags=NLM_F_REQUEST|NLM_F_DUMP, nlmsg_seq=1795882818, nlmsg_pid=0}, {ifa_family=AF_UNSPEC, ...}], 20, 0, {sa_family=AF_NETLINK, nl_pid=0, nl_groups=00000000}, 12) = 20
+3234047 1795882818.177188 recvmsg(3, {msg_name={sa_family=AF_NETLINK, nl_pid=0, nl_groups=00000000}, msg_namelen=12, msg_iov=[{iov_base=[[{nlmsg_len=76, nlmsg_type=RTM_NEWADDR, nlmsg_flags=NLM_F_MULTI, nlmsg_seq=1795882818, nlmsg_pid=3234047}, {ifa_family=AF_INET, ifa_prefixlen=8, ifa_flags=IFA_F_PERMANENT, ifa_scope=RT_SCOPE_HOST, ifa_index=if_nametoindex("lo")}, [[{nla_len=8, nla_type=IFA_ADDRESS}, inet_addr("127.0.0.1")], [{nla_len=8, nla_type=IFA_LOCAL}, inet_addr("127.0.0.1")], [{nla_len=7, nla_type=IFA_LABEL}, "lo"], [{nla_len=8, nla_type=IFA_FLAGS}, IFA_F_PERMANENT], [{nla_len=20, nla_type=IFA_CACHEINFO}, {ifa_prefered=4294967295, ifa_valid=4294967295, cstamp=371770385, tstamp=371770385}]]], [{nlmsg_len=76, nlmsg_type=RTM_NEWADDR, nlmsg_flags=NLM_F_MULTI, nlmsg_seq=1795882818, nlmsg_pid=3234047}, {ifa_family=AF_INET, ifa_prefixlen=32, ifa_flags=IFA_F_PERMANENT, ifa_scope=RT_SCOPE_UNIVERSE, ifa_index=if_nametoindex("lo")}, [[{nla_len=8, nla_type=IFA_ADDRESS}, inet_addr("100.95.0.1")], [{nla_len=8, nla_type=IFA_LOCAL}, inet_addr("100.95.0.1")], [{nla_len=7, nla_type=IFA_LABEL}, "lo"], [{nla_len=8, nla_type=IFA_FLAGS}, IFA_F_PERMANENT], [{nla_len=20, nla_type=IFA_CACHEINFO}, {ifa_prefered=4294967295, ifa_valid=4294967295, cstamp=371770385, tstamp=371770385}]]], [{nlmsg_len=76, nlmsg_type=RTM_NEWADDR, nlmsg_flags=NLM_F_MULTI, nlmsg_seq=1795882818, nlmsg_pid=3234047}, {ifa_family=AF_INET, ifa_prefixlen=24, ifa_flags=IFA_F_PERMANENT, ifa_scope=RT_SCOPE_UNIVERSE, ifa_index=if_nametoindex("d0")}, [[{nla_len=8, nla_type=IFA_ADDRESS}, inet_addr("10.255.0.1")], [{nla_len=8, nla_type=IFA_LOCAL}, inet_addr("10.255.0.1")], [{nla_len=7, nla_type=IFA_LABEL}, "d0"], [{nla_len=8, nla_type=IFA_FLAGS}, IFA_F_PERMANENT], [{nla_len=20, nla_type=IFA_CACHEINFO}, {ifa_prefered=4294967295, ifa_valid=4294967295, cstamp=371770386, tstamp=371770386}]]], [{nlmsg_len=80, nlmsg_type=RTM_NEWADDR, nlmsg_flags=NLM_F_MULTI, nlmsg_seq=1795882818, nlmsg_pid=3234047}, {ifa_family=AF_INET6, ifa_prefixlen=128, ifa_flags=IFA_F_PERMANENT, ifa_scope=RT_SCOPE_HOST, ifa_index=if_nametoindex("lo")}, [[{nla_len=20, nla_type=IFA_ADDRESS}, inet_pton(AF_INET6, "::1")], [{nla_len=20, nla_type=IFA_CACHEINFO}, {ifa_prefered=4294967295, ifa_valid=4294967295, cstamp=371770385, tstamp=371770385}], [{nla_len=8, nla_type=IFA_FLAGS}, IFA_F_PERMANENT], [{nla_len=5, nla_type=IFA_PROTO}, "\x01"]]], [{nlmsg_len=72, nlmsg_type=RTM_NEWADDR, nlmsg_flags=NLM_F_MULTI, nlmsg_seq=1795882818, nlmsg_pid=3234047}, {ifa_family=AF_INET6, ifa_prefixlen=64, ifa_flags=IFA_F_NODAD|IFA_F_PERMANENT, ifa_scope=RT_SCOPE_UNIVERSE, ifa_index=if_nametoindex("d0")}, [[{nla_len=20, nla_type=IFA_ADDRESS}, inet_pton(AF_INET6, "2001:db8:1::2")], [{nla_len=20, nla_type=IFA_CACHEINFO}, {ifa_prefered=4294967295, ifa_valid=4294967295, cstamp=371770386, tstamp=371770386}], [{nla_len=8, nla_type=IFA_FLAGS}, IFA_F_NODAD|IFA_F_PERMANENT]]], [{nlmsg_len=80, nlmsg_type=RTM_NEWADDR, nlmsg_flags=NLM_F_MULTI, nlmsg_seq=1795882818, nlmsg_pid=3234047}, {ifa_family=AF_INET6, ifa_prefixlen=64, ifa_flags=IFA_F_PERMANENT, ifa_scope=RT_SCOPE_LINK, ifa_index=if_nametoindex("d0")}, [[{nla_len=20, nla_type=IFA_ADDRESS}, inet_pton(AF_INET6, "fe80::f084:7cff:febc:9b1")], [{nla_len=20, nla_type=IFA_CACHEINFO}, {ifa_prefered=4294967295, ifa_valid=4294967295, cstamp=371770385, tstamp=371770385}], [{nla_len=8, nla_type=IFA_FLAGS}, IFA_F_PERMANENT], [{nla_len=5, nla_type=IFA_PROTO}, "\x03"]]]], iov_len=4096}], msg_iovlen=1, msg_controllen=0, msg_flags=0}, 0) = 460
+3234047 1795882818.177321 recvmsg(3, {msg_name={sa_family=AF_NETLINK, nl_pid=0, nl_groups=00000000}, msg_namelen=12, msg_iov=[{iov_base=[{nlmsg_len=20, nlmsg_type=NLMSG_DONE, nlmsg_flags=NLM_F_MULTI, nlmsg_seq=1795882818, nlmsg_pid=3234047}, 0], iov_len=4096}], msg_iovlen=1, msg_controllen=0, msg_flags=0}, 0) = 20
+3234047 1795882818.177375 socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC|SOCK_NONBLOCK, 0) = 4
+3234047 1795882818.177411 connect(4, {sa_family=AF_UNIX, sun_path="/var/run/nscd/socket"}, 110) = -1 ENOENT (No such file or directory)
+3234047 1795882818.177453 close(4)      = 0
+3234047 1795882818.177485 close(3)      = 0
+3234047 1795882818.177523 socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC|SOCK_NONBLOCK, 0) = 3
+3234047 1795882818.177553 connect(3, {sa_family=AF_UNIX, sun_path="/var/run/nscd/socket"}, 110) = -1 ENOENT (No such file or directory)
+3234047 1795882818.177589 close(3)      = 0
+3234047 1795882818.177708 read(3, "# /etc/nsswitch.conf\n#\n# Example"..., 4096) = 526
+3234047 1795882818.177750 read(3, "", 4096) = 0
+3234047 1795882818.177799 close(3)      = 0
+3234047 1795882818.177893 read(3, "# The \"order\" line is only used "..., 4096) = 92
+3234047 1795882818.177926 read(3, "", 4096) = 0
+3234047 1795882818.177955 close(3)      = 0
+3234047 1795882818.178039 read(3, "nameserver 100.95.0.1\n", 4096) = 22
+3234047 1795882818.178074 read(3, "", 4096) = 0
+3234047 1795882818.178139 close(3)      = 0
+3234047 1795882818.178230 read(3, "# Your system has configured 'ma"..., 4096) = 571
+3234047 1795882818.178265 read(3, "", 4096) = 0
+3234047 1795882818.178292 close(3)      = 0
+3234047 1795882818.178323 socket(AF_INET, SOCK_STREAM|SOCK_CLOEXEC, IPPROTO_IP) = 3
+3234047 1795882818.178362 connect(3, {sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr("100.95.0.1")}, 16) = 0
+3234047 1795882818.178532 writev(3, [{iov_base="\0'", iov_len=2}, {iov_base="\307\0\1\0\0\1\0\0\0\0\0\0\tpipe-test\7example\3c"..., iov_len=39}, {iov_base="\0'", iov_len=2}, {iov_base="\350\2\1\0\0\1\0\0\0\0\0\0\tpipe-test\7example\3c"..., iov_len=39}], 4) = 82
+3234047 1795882818.178628 read(3, "\0007", 2) = 2
+3234047 1795882818.193252 read(3, "\307\0\201\200\0\1\0\1\0\0\0\0\tpipe-test\7example\3c"..., 55) = 55
+3234047 1795882818.193330 read(3, "\0'", 2) = 2
+3234047 1795882818.213239 read(3, "\350\2\201\200\0\1\0\0\0\0\0\0\tpipe-test\7example\3c"..., 39) = 39
+3234047 1795882818.213316 close(3)      = 0
+3234047 1795882818.213556 close(3)      = 0
+3234047 1795882818.213664 read(3, "\177ELF\2\1\1\0\0\0\0\0\0\0\0\0\3\0>\0\1\0\0\0\0\0\0\0\0\0\0\0"..., 832) = 832
+3234047 1795882818.213977 close(3)      = 0
+3234047 1795882818.214078 read(3, "\177ELF\2\1\1\0\0\0\0\0\0\0\0\0\3\0>\0\1\0\0\0\0\0\0\0\0\0\0\0"..., 832) = 832
+3234047 1795882818.214367 close(3)      = 0
+3234047 1795882818.214704 write(1, "93.184.216.34   STREAM pipe-test"..., 93) = 93
+3234047 1795882818.215010 +++ exited with 0 +++
