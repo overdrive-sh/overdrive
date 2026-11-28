@@ -1,0 +1,10 @@
+Job 'herdr-box' (kind: Job)
+Spec digest: b0f5506e10b0171b37ce4ff83720e012eea24d809f422393658a2ddfbf82a4b3
+Verdict: Succeeded
+
+Attempt  State        Exit   Started              Duration  
+1        Terminated   0      (c=8,w=local)        —         
+Memory:        128MiB
+CPU:           500m
+Addresses:
+  alloc-herdr-box-0: 100.95.0.2

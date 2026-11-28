@@ -1,1 +1,8 @@
-?? verification/expectations/E17-vm-guest-resolves-public-names-through-its-default-resolver/evidence/
+ D verification/expectations/E17-vm-guest-resolves-public-names-through-its-default-resolver/evidence/dirty-diff.patch
+ M verification/expectations/E17-vm-guest-resolves-public-names-through-its-default-resolver/evidence/dirty-status.txt
+ D verification/expectations/E17-vm-guest-resolves-public-names-through-its-default-resolver/evidence/run.log
+ D verification/expectations/E17-vm-guest-resolves-public-names-through-its-default-resolver/evidence/verification.yaml
+?? verification/expectations/E17-vm-guest-resolves-public-names-through-its-default-resolver/evidence/dirty-diff-20261128T114341Z.patch
+?? verification/expectations/E17-vm-guest-resolves-public-names-through-its-default-resolver/evidence/dirty-status-20261128T114341Z.txt
+?? verification/expectations/E17-vm-guest-resolves-public-names-through-its-default-resolver/evidence/run-20261128T114341Z.log
+?? verification/expectations/E17-vm-guest-resolves-public-names-through-its-default-resolver/evidence/verification-20261128T114341Z.yaml

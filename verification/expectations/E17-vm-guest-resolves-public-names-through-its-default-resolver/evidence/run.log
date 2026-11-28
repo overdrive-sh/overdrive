@@ -1,5 +1,5 @@
-=== E17 capture 20261128T114341Z ===
-source sha=ce8a61cee9e3fbf490f4bd2e66220f60d3ab1eca dirty=false
+=== E17 capture 20261128T123057Z ===
+source sha=d83f7d571995b670838664ecc6da9ebfa14719d7 dirty=false
 [host-uname] $ uname -a
 Linux em-determined-roentgen 7.0.0-38-generic #38-Ubuntu SMP PREEMPT_DYNAMIC Fri Sep  4 09:10:14 UTC 2026 x86_64 GNU/Linux
 [host-uname] exit=0
@@ -111,7 +111,7 @@ Link 217702 (ovd-veth-cli)
      Default Route: no
 [host-resolvectl] exit=0
 [guest-peer-sha256] $ sha256sum /home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/target/x86_64-unknown-linux-musl/release/overdrive-guest-peer
-19783b97037531af85705ebf7f27f08ae93bd4262f856eb99668a277822fccd0  /home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/target/x86_64-unknown-linux-musl/release/overdrive-guest-peer
+8d1e09c76ddd7ea63fbdf8e2f3740c157ec8eba1c343a1c42900bb21eb342c26  /home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/target/x86_64-unknown-linux-musl/release/overdrive-guest-peer
 [guest-peer-sha256] exit=0
 [spec] $ cat /home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/verification/expectations/E17-vm-guest-resolves-public-names-through-its-default-resolver/herdr-box.toml
 # The herdr dev box's lookup targets, resolved from a VM guest through its
@@ -126,7 +126,7 @@ command = "/opt/overdrive/examples/svm/overdrive-guest-peer"
 args = [
   "resolve-tcp-connect", "443",
   "api.anthropic.com", "github.com", "crates.io", "herdr.dev",
-  "no-such-host-7f3a.example.com",
+  "no-such-host-7f3a.invalid",
 ]
 kernel = "/srv/vm/overdrive-testing/svm-e08/kernel"
 rootfs = "/srv/vm/overdrive-testing/svm-e08/rootfs.ext4"
@@ -144,7 +144,7 @@ table ip overdrive-mtls {
 	chain prerouting {
 		type filter hook prerouting priority mangle; policy accept;
 		meta mark 0x00000002 accept
-		ip daddr . tcp dport @inbound_destinations meta mark set 0x00000001 tproxy to 127.0.0.1:33219 accept
+		ip daddr . tcp dport @inbound_destinations meta mark set 0x00000001 tproxy to 127.0.0.1:42399 accept
 		ip daddr 100.95.0.0/16 ip daddr != 100.95.0.1 drop
 	}
 
@@ -238,7 +238,21 @@ multicast ff00::/8 dev ovd-veth-bk table local proto kernel metric 256 pref medi
 multicast ff00::/8 dev ovd-veth-cli table local proto kernel metric 256 pref medium
 [host-ip-route-before] exit=0
 [product-build] $ bounded 900s cargo build -p overdrive-cli --bin overdrive
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.21s
+   Compiling ring v0.17.14
+   Compiling rustls-webpki v0.103.13
+   Compiling rcgen v0.14.8
+   Compiling overdrive-host v0.0.0 (/home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/crates/overdrive-host)
+   Compiling rustls v0.23.39
+   Compiling tokio-rustls v0.26.4
+   Compiling overdrive-gateway v0.0.0 (/home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/crates/overdrive-gateway)
+   Compiling hyper-rustls v0.27.9
+   Compiling axum-server v0.7.3
+   Compiling overdrive-dataplane v0.0.0 (/home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/crates/overdrive-dataplane)
+   Compiling reqwest v0.12.28
+   Compiling overdrive-worker v0.0.0 (/home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/crates/overdrive-worker)
+   Compiling overdrive-control-plane v0.0.0 (/home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/crates/overdrive-control-plane)
+   Compiling overdrive-cli v0.0.0 (/home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/crates/overdrive-cli)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 10.83s
 [product-build] exit=0
 [binary-sha256] $ sha256sum /home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/target/debug/overdrive
 bd49216fdcdcb9d724939a5606f3a2568dc9b8fb81d2569153aee9f23f7b53e0  /home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/target/debug/overdrive
@@ -251,19 +265,19 @@ prepared SVM E08 runtime materialization at /srv/vm/overdrive-testing/svm-e08
 prepared E17 materialization at /srv/vm/overdrive-testing/svm-e08
 [prepare] exit=0
 guest image cat=none
-serve started pid=2311740 bind=127.0.0.1:7644
-console streams started pids=2311884 2311885
+serve started pid=2564245 bind=127.0.0.1:7644
+console streams started pids=2564304 2564305
 [deploy] $ cli deploy --detach /home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/verification/expectations/E17-vm-guest-resolves-public-names-through-its-default-resolver/herdr-box.toml
 Accepted.
 Workload ID:   herdr-box
 Intent key:    workloads/herdr-box
-Spec digest:   8a9eb4f4694b4def87df8a7dc4d6c3493b2239807abc1b2c3ab8ae12ee09c620
+Spec digest:   b0f5506e10b0171b37ce4ff83720e012eea24d809f422393658a2ddfbf82a4b3
 Outcome:       created
 Endpoint:      https://127.0.0.1:7644/
 Next: overdrive workload describe herdr-box
 [deploy] exit=0
 poll describe state=Pending
-console snapshot alloc=alloc-herdr-box-0 bytes=24966
+console snapshot alloc=alloc-herdr-box-0 bytes=24220
 poll describe state=Pending
 poll describe state=Terminated
 final alloc state=Terminated
@@ -276,7 +290,7 @@ table ip overdrive-mtls {
 	chain prerouting {
 		type filter hook prerouting priority mangle; policy accept;
 		meta mark 0x00000002 accept
-		ip daddr . tcp dport @inbound_destinations meta mark set 0x00000001 tproxy to 127.0.0.1:42399 accept
+		ip daddr . tcp dport @inbound_destinations meta mark set 0x00000001 tproxy to 127.0.0.1:42861 accept
 		ip daddr 100.95.0.0/16 ip daddr != 100.95.0.1 drop
 	}
 
@@ -319,7 +333,7 @@ local 127.0.0.1 dev lo table local proto kernel scope host src 127.0.0.1
 broadcast 127.255.255.255 dev lo table local proto kernel scope link src 127.0.0.1 
 local 151.115.99.251 dev eno12399np0 table local proto kernel scope host src 151.115.99.251 
 broadcast 151.115.99.255 dev eno12399np0 table local proto kernel scope link src 151.115.99.251 
-2001:bc8:1f90:1f::/64 dev eno12399np0 proto ra metric 100 expires 2591996sec pref medium
+2001:bc8:1f90:1f::/64 dev eno12399np0 proto ra metric 100 expires 2591999sec pref medium
 fe80::/64 dev eno12399np0 proto kernel metric 256 pref medium
 fe80::/64 dev qp74224x1195 proto kernel metric 256 pref medium
 fe80::/64 dev qh74224x1195 proto kernel metric 256 pref medium
@@ -335,7 +349,7 @@ fe80::/64 dev qp33290x1321 proto kernel metric 256 pref medium
 fe80::/64 dev qh33290x1321 proto kernel metric 256 pref medium
 fe80::/64 dev ovd-veth-bk proto kernel metric 256 pref medium
 fe80::/64 dev ovd-veth-cli proto kernel metric 256 pref medium
-default nhid 2725555664 via fe80::2e4f:52ff:fefc:65d3 dev eno12399np0 proto ra metric 100 expires 11sec pref medium
+default nhid 2725555664 via fe80::2e4f:52ff:fefc:65d3 dev eno12399np0 proto ra metric 100 expires 14sec pref medium
 local ::1 dev lo table local proto kernel metric 0 pref medium
 local 2001:bc8:1f90:1f:1623:f2ff:fef4:50e0 dev eno12399np0 table local proto kernel metric 0 pref medium
 local fe80::bc:70ff:fec4:819b dev qp74224x1195 table local proto kernel metric 0 pref medium
@@ -377,7 +391,7 @@ nameserver 151.115.125.11
 # /etc/resolv.conf.tail can replace this line
 [host-resolv-conf-after] exit=0
 console streams stopped
-=== capture ends; consoles in /home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/verification/expectations/E17-vm-guest-resolves-public-names-through-its-default-resolver/evidence/console-snapshots-20261128T114341Z ===
+=== capture ends; consoles in /home/ubuntu/overdrive-worktrees/7b8ff0c72f245ec096bece5af30fe7b78dfc85860ccff18379926b83e3c1eac6/verification/expectations/E17-vm-guest-resolves-public-names-through-its-default-resolver/evidence/console-snapshots-20261128T123057Z ===
 serve stopped
 removed SVM E08-owned materialization from /srv/vm/overdrive-testing/svm-e08
 cleanup done failed=0

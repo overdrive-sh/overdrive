@@ -1,0 +1,62 @@
+Joined session keyring: 765651599
+[2m2026-11-28T12:31:11.211447Z[0m [32m INFO[0m no labelled volume partition; volumes are refused at launch
+[2m2026-11-28T12:31:11.270416Z[0m [33m WARN[0m The map SERVICE_MAP is of type BPF_MAP_TYPE_HASH_OF_MAPS which is currently unsupported in Aya, use `allow_unsupported_maps()` to load it anyways
+[2m2026-11-28T12:31:11.298113Z[0m [32m INFO[0m [3mnode_id[0m[2m=[0mlocal [3mphase[0m[2m=[0m"vm_reclamation" [3mtransition[0m[2m=[0m"started"
+[2m2026-11-28T12:31:11.298706Z[0m [32m INFO[0m [3mnode_id[0m[2m=[0mlocal [3mphase[0m[2m=[0m"vm_reclamation" [3mtransition[0m[2m=[0m"completed"
+[2m2026-11-28T12:31:11.298721Z[0m [32m INFO[0m [3mnode_id[0m[2m=[0mlocal [3mphase[0m[2m=[0m"stale_sweep" [3mtransition[0m[2m=[0m"started"
+[2m2026-11-28T12:31:11.298732Z[0m [32m INFO[0m [3mnode_id[0m[2m=[0mlocal [3mphase[0m[2m=[0m"stale_sweep" [3mtransition[0m[2m=[0m"completed"
+[2m2026-11-28T12:31:11.616170Z[0m [32m INFO[0m [3mpermits[0m[2m=[0m333824 [3mnofile_soft[0m[2m=[0m1048576 [3mreserve[0m[2m=[0m380928
+[2m2026-11-28T12:31:11.616940Z[0m [32m INFO[0m control plane listening [3mendpoint[0m[2m=[0mhttps://127.0.0.1:7644/
+[2m2026-11-28T12:31:11.617074Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mvm-reclamation [3mtarget[0m[2m=[0mnode/local [3mtick[0m[2m=[0m0 [3mqueue_ms[0m[2m=[0m0 [3mactive[0m[2m=[0m1 [3mcapacity[0m[2m=[0m8
+[2m2026-11-28T12:31:11.617945Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mvm-reclamation [3mtarget[0m[2m=[0mnode/local [3mtick[0m[2m=[0m0 [3melapsed_ms[0m[2m=[0m0 [3moutcome[0m[2m=[0m"ok" [3merror[0m[2m=[0mNone
+[2m2026-11-28T12:31:11.935640Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mworkload-lifecycle [3mtarget[0m[2m=[0mworkload/herdr-box [3mtick[0m[2m=[0m1 [3mqueue_ms[0m[2m=[0m0 [3mactive[0m[2m=[0m1 [3mcapacity[0m[2m=[0m8
+[2m2026-11-28T12:31:11.938991Z[0m [32m INFO[0m creating VMM [3malloc[0m[2m=[0malloc-herdr-box-0
+[2m2026-11-28T12:31:11.951185Z[0m [32m INFO[0m VMM created [3malloc[0m[2m=[0malloc-herdr-box-0 [3mpid[0m[2m=[0m2564332
+[2m2026-11-28T12:31:13.370591Z[0m [32m INFO[0m VM READY accepted [3malloc[0m[2m=[0malloc-herdr-box-0
+[2m2026-11-28T12:31:13.372263Z[0m [32m INFO[0m installed allocation mTLS intercept [3malloc[0m[2m=[0malloc-herdr-box-0 [3mdriver[0m[2m=[0mVm
+[2m2026-11-28T12:31:13.372615Z[0m [32m INFO[0m released guest EXEC after intercept install [3malloc[0m[2m=[0malloc-herdr-box-0
+[2m2026-11-28T12:31:13.372867Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mworkload-lifecycle [3mtarget[0m[2m=[0mworkload/herdr-box [3mtick[0m[2m=[0m1 [3melapsed_ms[0m[2m=[0m1437 [3moutcome[0m[2m=[0m"ok" [3merror[0m[2m=[0mNone
+[2m2026-11-28T12:31:13.372907Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mservice-lifecycle [3mtarget[0m[2m=[0mworkload/herdr-box [3mtick[0m[2m=[0m2 [3mqueue_ms[0m[2m=[0m1435 [3mactive[0m[2m=[0m1 [3mcapacity[0m[2m=[0m8
+[2m2026-11-28T12:31:13.373287Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mservice-lifecycle [3mtarget[0m[2m=[0mworkload/herdr-box [3mtick[0m[2m=[0m2 [3melapsed_ms[0m[2m=[0m0 [3moutcome[0m[2m=[0m"ok" [3merror[0m[2m=[0mNone
+[2m2026-11-28T12:31:13.373351Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0msvid-lifecycle [3mtarget[0m[2m=[0mworkload/herdr-box [3mtick[0m[2m=[0m3 [3mqueue_ms[0m[2m=[0m1436 [3mactive[0m[2m=[0m1 [3mcapacity[0m[2m=[0m8
+[2m2026-11-28T12:31:13.373883Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0msvid-lifecycle [3mtarget[0m[2m=[0mworkload/herdr-box [3mtick[0m[2m=[0m3 [3melapsed_ms[0m[2m=[0m0 [3moutcome[0m[2m=[0m"ok" [3merror[0m[2m=[0mNone
+[2m2026-11-28T12:31:13.373920Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mworkload-lifecycle [3mtarget[0m[2m=[0mworkload/herdr-box [3mtick[0m[2m=[0m4 [3mqueue_ms[0m[2m=[0m1436 [3mactive[0m[2m=[0m1 [3mcapacity[0m[2m=[0m8
+[2m2026-11-28T12:31:13.374586Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mworkload-lifecycle [3mtarget[0m[2m=[0mworkload/herdr-box [3mtick[0m[2m=[0m4 [3melapsed_ms[0m[2m=[0m0 [3moutcome[0m[2m=[0m"ok" [3merror[0m[2m=[0mNone
+[2m2026-11-28T12:31:13.383600Z[0m [32m INFO[0m [3malloc[0m[2m=[0malloc-herdr-box-0 [3mcid[0m[2m=[0m16777218 [3mkind[0m[2m=[0m"datagram"
+[2m2026-11-28T12:31:13.387371Z[0m [32m INFO[0m [3malloc[0m[2m=[0malloc-herdr-box-0 [3mcid[0m[2m=[0m16777218 [3mkind[0m[2m=[0m"datagram" [3mcause[0m[2m=[0m"peer_reset"
+[2m2026-11-28T12:31:13.391300Z[0m [32m INFO[0m [3malloc[0m[2m=[0malloc-herdr-box-0 [3mcid[0m[2m=[0m16777218 [3mkind[0m[2m=[0m"datagram"
+[2m2026-11-28T12:31:13.392072Z[0m [32m INFO[0m [3malloc[0m[2m=[0malloc-herdr-box-0 [3mcid[0m[2m=[0m16777218 [3mkind[0m[2m=[0m"tcp_connect"
+[2m2026-11-28T12:31:13.393997Z[0m [32m INFO[0m [3malloc[0m[2m=[0malloc-herdr-box-0 [3mcid[0m[2m=[0m16777218 [3mkind[0m[2m=[0m"tcp_connect" [3mcause[0m[2m=[0m"peer_eof"
+[2m2026-11-28T12:31:13.395769Z[0m [32m INFO[0m [3malloc[0m[2m=[0malloc-herdr-box-0 [3mcid[0m[2m=[0m16777218 [3mkind[0m[2m=[0m"datagram" [3mcause[0m[2m=[0m"peer_reset"
+[2m2026-11-28T12:31:13.398617Z[0m [32m INFO[0m [3malloc[0m[2m=[0malloc-herdr-box-0 [3mcid[0m[2m=[0m16777218 [3mkind[0m[2m=[0m"datagram"
+[2m2026-11-28T12:31:13.416604Z[0m [32m INFO[0m [3malloc[0m[2m=[0malloc-herdr-box-0 [3mcid[0m[2m=[0m16777218 [3mkind[0m[2m=[0m"tcp_connect"
+[2m2026-11-28T12:31:13.426681Z[0m [32m INFO[0m [3malloc[0m[2m=[0malloc-herdr-box-0 [3mcid[0m[2m=[0m16777218 [3mkind[0m[2m=[0m"datagram" [3mcause[0m[2m=[0m"peer_reset"
+[2m2026-11-28T12:31:13.429380Z[0m [32m INFO[0m [3malloc[0m[2m=[0malloc-herdr-box-0 [3mcid[0m[2m=[0m16777218 [3mkind[0m[2m=[0m"datagram"
+[2m2026-11-28T12:31:13.435195Z[0m [32m INFO[0m [3malloc[0m[2m=[0malloc-herdr-box-0 [3mcid[0m[2m=[0m16777218 [3mkind[0m[2m=[0m"tcp_connect" [3mcause[0m[2m=[0m"peer_eof"
+[2m2026-11-28T12:31:13.437320Z[0m [32m INFO[0m [3malloc[0m[2m=[0malloc-herdr-box-0 [3mcid[0m[2m=[0m16777218 [3mkind[0m[2m=[0m"datagram" [3mcause[0m[2m=[0m"peer_reset"
+[2m2026-11-28T12:31:13.440613Z[0m [32m INFO[0m [3malloc[0m[2m=[0malloc-herdr-box-0 [3mcid[0m[2m=[0m16777218 [3mkind[0m[2m=[0m"datagram"
+[2m2026-11-28T12:31:13.445167Z[0m [32m INFO[0m [3malloc[0m[2m=[0malloc-herdr-box-0 [3mcid[0m[2m=[0m16777218 [3mkind[0m[2m=[0m"tcp_connect"
+[2m2026-11-28T12:31:13.445209Z[0m [32m INFO[0m [3malloc[0m[2m=[0malloc-herdr-box-0 [3mcid[0m[2m=[0m16777218 [3mkind[0m[2m=[0m"datagram" [3mcause[0m[2m=[0m"peer_reset"
+[2m2026-11-28T12:31:13.447951Z[0m [32m INFO[0m [3malloc[0m[2m=[0malloc-herdr-box-0 [3mcid[0m[2m=[0m16777218 [3mkind[0m[2m=[0m"tcp_connect"
+[2m2026-11-28T12:31:13.450111Z[0m [32m INFO[0m [3malloc[0m[2m=[0malloc-herdr-box-0 [3mcid[0m[2m=[0m16777218 [3mkind[0m[2m=[0m"tcp_connect" [3mcause[0m[2m=[0m"peer_eof"
+[2m2026-11-28T12:31:13.468896Z[0m [32m INFO[0m [3malloc[0m[2m=[0malloc-herdr-box-0 [3mcid[0m[2m=[0m16777218 [3mkind[0m[2m=[0m"tcp_connect" [3mcause[0m[2m=[0m"peer_eof"
+[2m2026-11-28T12:31:13.498582Z[0m [32m INFO[0m VMM process reaped [3mpid[0m[2m=[0m2564332 [3mexit_code[0m[2m=[0mSome(0) [3msignal[0m[2m=[0mNone
+[2m2026-11-28T12:31:13.499226Z[0m [32m INFO[0m VM cleanup calls finished [3malloc[0m[2m=[0malloc-herdr-box-0
+[2m2026-11-28T12:31:13.500288Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mservice-lifecycle [3mtarget[0m[2m=[0mworkload/herdr-box [3mtick[0m[2m=[0m5 [3mqueue_ms[0m[2m=[0m0 [3mactive[0m[2m=[0m1 [3mcapacity[0m[2m=[0m8
+[2m2026-11-28T12:31:13.500533Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mservice-lifecycle [3mtarget[0m[2m=[0mworkload/herdr-box [3mtick[0m[2m=[0m5 [3melapsed_ms[0m[2m=[0m0 [3moutcome[0m[2m=[0m"ok" [3merror[0m[2m=[0mNone
+[2m2026-11-28T12:31:13.500564Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0msvid-lifecycle [3mtarget[0m[2m=[0mworkload/herdr-box [3mtick[0m[2m=[0m6 [3mqueue_ms[0m[2m=[0m0 [3mactive[0m[2m=[0m1 [3mcapacity[0m[2m=[0m8
+[2m2026-11-28T12:31:13.500872Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0msvid-lifecycle [3mtarget[0m[2m=[0mworkload/herdr-box [3mtick[0m[2m=[0m6 [3melapsed_ms[0m[2m=[0m0 [3moutcome[0m[2m=[0m"ok" [3merror[0m[2m=[0mNone
+[2m2026-11-28T12:31:13.500890Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mworkload-lifecycle [3mtarget[0m[2m=[0mworkload/herdr-box [3mtick[0m[2m=[0m7 [3mqueue_ms[0m[2m=[0m0 [3mactive[0m[2m=[0m1 [3mcapacity[0m[2m=[0m8
+[2m2026-11-28T12:31:13.501365Z[0m [32m INFO[0m guest network lease retired [3malloc[0m[2m=[0malloc-herdr-box-0
+[2m2026-11-28T12:31:13.507227Z[0m [32m INFO[0m guest network lease released [3malloc[0m[2m=[0malloc-herdr-box-0
+[2m2026-11-28T12:31:13.507685Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mworkload-lifecycle [3mtarget[0m[2m=[0mworkload/herdr-box [3mtick[0m[2m=[0m7 [3melapsed_ms[0m[2m=[0m6 [3moutcome[0m[2m=[0m"ok" [3merror[0m[2m=[0mNone
+[2m2026-11-28T12:31:13.507706Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0msvid-lifecycle [3mtarget[0m[2m=[0mworkload/herdr-box [3mtick[0m[2m=[0m8 [3mqueue_ms[0m[2m=[0m6 [3mactive[0m[2m=[0m1 [3mcapacity[0m[2m=[0m8
+[2m2026-11-28T12:31:13.507937Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0msvid-lifecycle [3mtarget[0m[2m=[0mworkload/herdr-box [3mtick[0m[2m=[0m8 [3melapsed_ms[0m[2m=[0m0 [3moutcome[0m[2m=[0m"ok" [3merror[0m[2m=[0mNone
+[2m2026-11-28T12:31:13.507954Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mservice-lifecycle [3mtarget[0m[2m=[0mworkload/herdr-box [3mtick[0m[2m=[0m9 [3mqueue_ms[0m[2m=[0m0 [3mactive[0m[2m=[0m1 [3mcapacity[0m[2m=[0m8
+[2m2026-11-28T12:31:13.508065Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mservice-lifecycle [3mtarget[0m[2m=[0mworkload/herdr-box [3mtick[0m[2m=[0m9 [3melapsed_ms[0m[2m=[0m0 [3moutcome[0m[2m=[0m"ok" [3merror[0m[2m=[0mNone
+[2m2026-11-28T12:31:13.508083Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mworkload-lifecycle [3mtarget[0m[2m=[0mworkload/herdr-box [3mtick[0m[2m=[0m10 [3mqueue_ms[0m[2m=[0m0 [3mactive[0m[2m=[0m1 [3mcapacity[0m[2m=[0m8
+[2m2026-11-28T12:31:13.508491Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mworkload-lifecycle [3mtarget[0m[2m=[0mworkload/herdr-box [3mtick[0m[2m=[0m10 [3melapsed_ms[0m[2m=[0m0 [3moutcome[0m[2m=[0m"ok" [3merror[0m[2m=[0mNone
+[2m2026-11-28T12:31:15.259666Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mworkload-lifecycle [3mtarget[0m[2m=[0mworkload/herdr-box [3mtick[0m[2m=[0m11 [3mqueue_ms[0m[2m=[0m0 [3mactive[0m[2m=[0m1 [3mcapacity[0m[2m=[0m8
+[2m2026-11-28T12:31:15.260259Z[0m [32m INFO[0m [3mreconciler[0m[2m=[0mworkload-lifecycle [3mtarget[0m[2m=[0mworkload/herdr-box [3mtick[0m[2m=[0m11 [3melapsed_ms[0m[2m=[0m0 [3moutcome[0m[2m=[0m"ok" [3merror[0m[2m=[0mNone
+[2m2026-11-28T12:31:15.301499Z[0m [32m INFO[0m SIGTERM received; shutting down [3msignal[0m[2m=[0m"SIGTERM"
+[2m2026-11-28T12:31:15.301582Z[0m [32m INFO[0m [3melapsed_ms[0m[2m=[0m0 [3madmitted_at_close[0m[2m=[0m0 [3mcompleted_during_drain[0m[2m=[0m0 [3mpending_at_exit[0m[2m=[0m0
