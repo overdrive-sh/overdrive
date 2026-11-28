@@ -56,7 +56,7 @@ use std::collections::BTreeSet;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::os::fd::{AsRawFd, OwnedFd};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use nix::sys::socket::sockopt::{Ipv4PacketInfo, ReceiveTimeout, ReuseAddr};
 use nix::sys::socket::{
@@ -68,6 +68,8 @@ use overdrive_core::traits::clock::Clock;
 use overdrive_core::traits::observation_store::ObservationStore;
 use parking_lot::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::{TcpListener, TcpStream};
 use tokio_util::sync::CancellationToken;
 
 use overdrive_core::id::NameAnswer;
@@ -87,6 +89,14 @@ const DNS_PORT: u16 = 53;
 /// without EDNS0; a 1500-byte MTU-sized buffer is comfortably large enough for
 /// the v1 A / SOA replies and any EDNS0-padded query).
 const RECV_BUF_LEN: usize = 1500;
+
+/// The read deadline of one TCP connection, covering the two-byte length prefix
+/// and the query body. An expired deadline closes the connection without a
+/// reply.
+const TCP_READ_DEADLINE: Duration = Duration::from_secs(5);
+
+/// The pause after a failed `accept`, so a persistent failure cannot spin.
+const ACCEPT_ERROR_PAUSE: Duration = Duration::from_millis(50);
 
 /// `recvmsg` poll cadence — `SO_RCVTIMEO` so the blocking recv wakes every
 /// 500ms to re-check the serve loop's stop flag, making the loop cancellable
@@ -220,8 +230,12 @@ pub struct DnsResponder {
     /// The forwarder for gateway-addressed public names. `None` is a
     /// mesh-only responder: every non-mesh query is dropped.
     forwarder: Option<Arc<Forwarder>>,
-    /// Cancelled by [`Self::stop`]; every forward task observes it.
+    /// Cancelled by [`Self::stop`]; every forward task and the TCP accept loop
+    /// observe it.
     cancel: CancellationToken,
+    /// The TCP listener bound to `gateway:53` by [`Self::probe`] and taken by
+    /// [`Self::serve`]; dropped when the accept loop ends.
+    tcp_listener: Mutex<Option<TcpListener>>,
 }
 
 /// What the serve loop does with one datagram.
@@ -310,6 +324,7 @@ impl DnsResponder {
             observer,
             forwarder: None,
             cancel: CancellationToken::new(),
+            tcp_listener: Mutex::new(None),
         }
     }
 
@@ -370,6 +385,9 @@ impl DnsResponder {
                 });
             }
         };
+        // The TCP listener binds at the gateway only, never the wildcard, after
+        // the UDP bind. A failure is the same `Bind` refusal.
+        let tcp_listener = bind_tcp_listener(self.gateway)?;
         let identities = bound
             .iter()
             .map(socket_identity)
@@ -377,6 +395,7 @@ impl DnsResponder {
             .map_err(|source| DnsResponderError::Socket { source })?;
         *self.socket_identities.lock() = identities;
         *self.sockets.lock() = bound;
+        *self.tcp_listener.lock() = Some(tcp_listener);
 
         // (2) List-seed the internal NameIndex (the Earned-Trust List-then-Watch
         // leg). An unreadable `service_backends` surface → ListSeed refusal.
@@ -439,11 +458,130 @@ impl DnsResponder {
                 responder.serve_one_socket(&Arc::new(fd), &runtime);
             }));
         }
+        let accept = self
+            .tcp_listener
+            .lock()
+            .take()
+            .map(|listener| runtime.spawn(Arc::clone(&self).accept_loop(listener)));
         for handle in handles {
             // A socket loop only ends on an unrecoverable error; awaiting keeps
             // the serve task alive for the process lifetime (it is aborted on
             // shutdown via the held JoinHandle).
             let _ = handle.await;
+        }
+        // The UDP loops have ended, by `stop` or a terminal failure: end the
+        // accept loop too and wait for it to drop the listener, so the port is
+        // free for a later boot.
+        self.cancel.cancel();
+        if let Some(accept) = accept {
+            let _ = accept.await;
+        }
+    }
+
+    /// Accept TCP connections until cancelled. Every connection takes a forward
+    /// permit at accept, before any read, whatever its query class; with none
+    /// free the accepted connection is closed unread. The permits are the
+    /// connection cap.
+    async fn accept_loop(self: Arc<Self>, listener: TcpListener) {
+        loop {
+            let accepted = tokio::select! {
+                biased;
+                () = self.cancel.cancelled() => return,
+                accepted = listener.accept() => accepted,
+            };
+            let (stream, _peer) = match accepted {
+                Ok(connection) => connection,
+                Err(error) => {
+                    tracing::warn!(
+                        name: "dns.responder.accept_failed",
+                        %error,
+                        "DNS responder TCP accept failed"
+                    );
+                    tokio::select! {
+                        biased;
+                        () = self.cancel.cancelled() => return,
+                        () = tokio::time::sleep(ACCEPT_ERROR_PAUSE) => {}
+                    }
+                    continue;
+                }
+            };
+            let received_at = self.clock.now();
+            let permit = match self.forwarder.as_ref().map(|forwarder| forwarder.try_acquire()) {
+                Some(None) => {
+                    drop(stream);
+                    self.observer
+                        .observe(QueryOutcome::Shed, self.clock.now().duration_since(received_at));
+                    continue;
+                }
+                Some(Some(permit)) => Some(permit),
+                None => None,
+            };
+            let responder = Arc::clone(&self);
+            let token = self.cancel.child_token();
+            tokio::spawn(async move {
+                responder.serve_connection(stream, permit, token, received_at).await;
+            });
+        }
+    }
+
+    /// One query per connection: read, answer or forward, write, close. The
+    /// permit, if any, is held until the connection closes; shutdown ends the
+    /// connection at its next await.
+    async fn serve_connection(
+        &self,
+        mut stream: TcpStream,
+        permit: Option<ForwardPermit>,
+        token: CancellationToken,
+        received_at: Instant,
+    ) {
+        tokio::select! {
+            biased;
+            () = token.cancelled() => {}
+            () = self.answer_connection(&mut stream, permit.as_ref(), received_at) => {}
+        }
+        drop(stream);
+        drop(permit);
+    }
+
+    async fn answer_connection(
+        &self,
+        stream: &mut TcpStream,
+        permit: Option<&ForwardPermit>,
+        received_at: Instant,
+    ) {
+        let answered = match read_framed_query(stream).await {
+            Some(query) => self.answer_query(&query, permit).await,
+            None => None,
+        };
+        let Some((reply, outcome)) = answered else {
+            self.observer
+                .observe(QueryOutcome::Dropped, self.clock.now().duration_since(received_at));
+            return;
+        };
+        if let Err(error) = write_framed_reply(stream, &reply).await {
+            tracing::debug!(
+                name: "dns.responder.tcp_write_failed",
+                %error,
+                "DNS responder TCP reply write failed"
+            );
+        }
+        self.observer.observe(outcome, self.clock.now().duration_since(received_at));
+    }
+
+    /// The reply and outcome for one TCP query; `None` sends nothing. The
+    /// listener is bound to the gateway, so every TCP query is gateway-addressed.
+    async fn answer_query(
+        &self,
+        query: &[u8],
+        permit: Option<&ForwardPermit>,
+    ) -> Option<(Vec<u8>, QueryOutcome)> {
+        match self.dispose(query, true) {
+            Disposition::Drop => None,
+            Disposition::Reply(reply, outcome) => Some((reply, outcome)),
+            Disposition::Forward => {
+                let forwarder = self.forwarder.as_ref()?;
+                Some(Self::forward_outcome(forwarder, query, DnsTransport::Tcp, permit?).await)
+            }
         }
     }
 
@@ -543,22 +681,32 @@ impl DnsResponder {
     /// One forward under `permit`, ended early only by shutdown. The permit is
     /// held until the reply is sent.
     async fn run_forward(&self, forwarder: &Forwarder, job: ForwardJob, permit: ForwardPermit) {
-        let request = ForwardRequest { wire: &job.datagram, transport: DnsTransport::Udp };
-        let outcome = tokio::select! {
+        let (reply, outcome) = tokio::select! {
             biased;
             () = self.cancel.cancelled() => return,
-            outcome = forwarder.forward(&request, &permit) => outcome,
+            relayed = Self::forward_outcome(forwarder, &job.datagram, DnsTransport::Udp, &permit) => relayed,
         };
-        let (reply, outcome) = match outcome {
+        job.reply_path.send(&reply);
+        self.observer.observe(outcome, self.clock.now().duration_since(job.received_at));
+        drop(permit);
+    }
+
+    /// Forward `wire` over `transport` under `permit`, projecting the forwarder's
+    /// outcome to the reply bytes and the observed outcome.
+    async fn forward_outcome(
+        forwarder: &Forwarder,
+        wire: &[u8],
+        transport: DnsTransport,
+        permit: &ForwardPermit,
+    ) -> (Vec<u8>, QueryOutcome) {
+        let request = ForwardRequest { wire, transport };
+        match forwarder.forward(&request, permit).await {
             ForwardOutcome::Relayed(reply) => (reply, QueryOutcome::Forwarded),
             ForwardOutcome::OwnedRangeBlocked { reply, .. } => {
                 (reply, QueryOutcome::OwnedRangeBlocked)
             }
             ForwardOutcome::Failed { reply, .. } => (reply, QueryOutcome::ForwardFailed),
-        };
-        job.reply_path.send(&reply);
-        self.observer.observe(outcome, self.clock.now().duration_since(job.received_at));
-        drop(permit);
+        }
     }
 
     /// Decode → classify → answer → encode one inbound datagram, returning the
@@ -626,6 +774,54 @@ fn bind_one(addr: Ipv4Addr) -> std::io::Result<OwnedFd> {
     bind(fd.as_raw_fd(), &SockaddrIn::from(SocketAddrV4::new(addr, DNS_PORT)))
         .map_err(std::io::Error::from)?;
     Ok(fd)
+}
+
+/// Bind the TCP listener at `gateway:53` only, never the wildcard. The gateway
+/// is a local-table address by the time the responder is probed, so no
+/// `IP_FREEBIND` is needed. The listener is non-blocking and registered with
+/// the runtime.
+///
+/// # Errors
+///
+/// A failed bind is [`DnsResponderError::Bind`]; a failed registration with the
+/// runtime is [`DnsResponderError::Socket`].
+fn bind_tcp_listener(gateway: Ipv4Addr) -> Result<TcpListener> {
+    let addr = SocketAddr::V4(SocketAddrV4::new(gateway, DNS_PORT));
+    let listener = std::net::TcpListener::bind(addr)
+        .map_err(|source| DnsResponderError::Bind { addr, source })?;
+    listener.set_nonblocking(true).map_err(|source| DnsResponderError::Socket { source })?;
+    TcpListener::from_std(listener).map_err(|source| DnsResponderError::Socket { source })
+}
+
+/// Read one two-byte-framed query under [`TCP_READ_DEADLINE`]. `None` for a
+/// zero length, a frame over [`RECV_BUF_LEN`], a short read or an expired
+/// deadline: the connection closes without a reply.
+async fn read_framed_query(stream: &mut TcpStream) -> Option<Vec<u8>> {
+    let read = async {
+        let mut prefix = [0u8; 2];
+        stream.read_exact(&mut prefix).await.ok()?;
+        let length = usize::from(u16::from_be_bytes(prefix));
+        if length == 0 || length > RECV_BUF_LEN {
+            return None;
+        }
+        let mut query = vec![0u8; length];
+        stream.read_exact(&mut query).await.ok()?;
+        Some(query)
+    };
+    tokio::time::timeout(TCP_READ_DEADLINE, read).await.ok().flatten()
+}
+
+/// Write `reply` with its two-byte length prefix in one write, then close the
+/// write side.
+async fn write_framed_reply(stream: &mut TcpStream, reply: &[u8]) -> std::io::Result<()> {
+    let length = u16::try_from(reply.len()).map_err(|_| {
+        std::io::Error::new(std::io::ErrorKind::InvalidInput, "DNS reply exceeds the TCP frame")
+    })?;
+    let mut framed = Vec::with_capacity(2 + reply.len());
+    framed.extend_from_slice(&length.to_be_bytes());
+    framed.extend_from_slice(reply);
+    stream.write_all(&framed).await?;
+    stream.shutdown().await
 }
 
 fn socket_identity(fd: &OwnedFd) -> std::io::Result<DnsSocketIdentity> {

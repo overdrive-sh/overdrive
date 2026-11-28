@@ -364,7 +364,6 @@ guest_test! {
 }
 
 guest_test! {
-    #[should_panic(expected = "the responder must serve TCP on the gateway")]
     async fn a_tcp_connection_with_malformed_framing_is_closed_without_a_reply() {
         let node = Node::boot(64).await;
         node.upstream().script_default(Behaviour::Answer(vec![Ipv4Addr::new(140, 82, 121, 4)]));
@@ -540,7 +539,6 @@ guest_test! {
 // ===========================================================================
 
 guest_test! {
-    #[should_panic(expected = "the responder must serve TCP on the gateway")]
     async fn a_query_over_tcp_is_forwarded_over_tcp_and_answered_once_per_connection() {
         let node = Node::boot(64).await;
         node.upstream().script("github.com", Behaviour::Answer(vec![Ipv4Addr::new(140, 82, 121, 4)]));
@@ -556,7 +554,6 @@ guest_test! {
 }
 
 guest_test! {
-    #[should_panic(expected = "a held gateway TCP port must refuse the probe")]
     async fn the_probe_refuses_when_the_gateway_tcp_port_is_held() {
         let store =
             Arc::new(SimObservationStore::single_peer(NodeId::new("local").expect("node id"), 0));
@@ -575,7 +572,6 @@ guest_test! {
 // ===========================================================================
 
 guest_test! {
-    #[should_panic(expected = "a UDP query beyond the permit bound must be shed with a SERVFAIL")]
     async fn with_every_permit_held_a_further_query_is_shed_at_once_and_mesh_still_answers() {
         let events = install_capture();
         let node = Node::boot(2).await;
